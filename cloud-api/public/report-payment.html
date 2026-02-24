@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Report Payment | CivicFlow</title>
+    <style>
+      body { font-family: Arial, sans-serif; background: #f8fafc; color: #0f172a; margin: 0; padding: 24px; }
+      .card { max-width: 560px; margin: 0 auto; background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; }
+      h1 { margin-top: 0; font-size: 1.4rem; }
+      label { display: block; margin: 12px 0 6px; font-weight: 600; }
+      input, select, textarea, button { width: 100%; box-sizing: border-box; padding: 10px; border-radius: 8px; border: 1px solid #cbd5e1; font-size: 14px; }
+      textarea { min-height: 90px; }
+      button { margin-top: 16px; border: none; background: #16a34a; color: white; font-weight: 600; cursor: pointer; }
+      button:disabled { opacity: 0.7; cursor: not-allowed; }
+      .msg { margin-top: 12px; padding: 10px; border-radius: 8px; display: none; }
+      .ok { background: #dcfce7; color: #14532d; border: 1px solid #86efac; }
+      .err { background: #fee2e2; color: #7f1d1d; border: 1px solid #fca5a5; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Report a Payment</h1>
+      <p>Submit your payment confirmation for admin review.</p>
+      <form id="paymentForm">
+        <label for="member_name">Member Name</label>
+        <input id="member_name" name="member_name" required />
+
+        <label for="invoice_id">Invoice ID</label>
+        <input id="invoice_id" name="invoice_id" type="number" min="1" required />
+
+        <label for="api_key">API Key</label>
+        <input id="api_key" name="api_key" type="password" placeholder="Enter your API key" required />
+
+        <label for="method">Payment Method</label>
+        <select id="method" name="method" required>
+          <option value="">Select method</option>
+          <option value="ZELLE">ZELLE</option>
+          <option value="CASHAPP">CASHAPP</option>
+          <option value="VENMO">VENMO</option>
+          <option value="CASH">CASH</option>
+        </select>
+
+        <label for="amount">Amount</label>
+        <input id="amount" name="amount" type="number" min="0.01" step="0.01" required />
+
+        <label for="paid_date">Date Paid</label>
+        <input id="paid_date" name="paid_date" type="date" required />
+
+        <label for="note">Note</label>
+        <textarea id="note" name="note"></textarea>
+
+        <button type="submit" id="submitBtn">Submit Payment Confirmation</button>
+      </form>
+
+      <div id="ok" class="msg ok"></div>
+      <div id="err" class="msg err"></div>
+    </div>
+
+    <script>
+      const form = document.getElementById('paymentForm');
+      const ok = document.getElementById('ok');
+      const err = document.getElementById('err');
+      const submitBtn = document.getElementById('submitBtn');
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        ok.style.display = 'none';
+        err.style.display = 'none';
+        submitBtn.disabled = true;
+
+        const formData = new FormData(form);
+        const payload = Object.fromEntries(formData.entries());
+        const apiKey = String(payload.api_key || '').trim();
+        delete payload.api_key;
+        payload.amount = Number(payload.amount || 0);
+        payload.invoice_id = payload.invoice_id ? Number(payload.invoice_id) : null;
+
+        try {
+          const response = await fetch('/api/payment-submissions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': apiKey,
+            },
+            body: JSON.stringify(payload),
+          });
+          const data = await response.json();
+          if (!response.ok || data.success === false) {
+            throw new Error(data.error || 'Unable to submit payment confirmation.');
+          }
+          form.reset();
+          ok.textContent = `Confirmation submitted successfully. Reference ID: ${data.id}`;
+          ok.style.display = 'block';
+        } catch (e) {
+          err.textContent = e.message || 'Submission failed.';
+          err.style.display = 'block';
+        } finally {
+          submitBtn.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

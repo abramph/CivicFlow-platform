@@ -1,0 +1,47 @@
+# Node
+node_modules/
+npm-debug.log
+yarn.lock
+pnpm-lock.yaml
+
+# Build
+dist/
+build/
+release-build/
+release-build-*/
+release/
+out12/
+.vite/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Electron
+*.asar
+*.exe
+*.dmg
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Cloud API DB
+cloud-api/db/cloud.db
+
+# IDE
+.vscode/
+.idea/
+
+# Local keys
+.license-keys/

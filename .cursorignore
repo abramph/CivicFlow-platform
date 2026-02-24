@@ -1,0 +1,4 @@
+# Build output - prevent Cursor from locking files during packaging
+out/
+dist/
+.vite/
