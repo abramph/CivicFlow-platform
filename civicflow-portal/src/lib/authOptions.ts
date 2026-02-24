@@ -16,23 +16,13 @@ export const authOptions: NextAuthOptions = {
       credentials: {
         org_id: { label: "Organization ID", type: "text" },
         api_key: { label: "API Key", type: "password" },
+        api_base: { label: "API Base", type: "text" },
       },
       async authorize(credentials) {
         const orgId = String(credentials?.org_id || "").trim();
         const apiKey = String(credentials?.api_key || "").trim();
-        const apiBase = defaultApiBase.replace(/\/+$/, "");
+        const apiBase = String(credentials?.api_base || defaultApiBase).replace(/\/+$/, "");
         if (!orgId || !apiKey) return null;
-
-        const response = await fetch(`${apiBase}/payment-submissions`, {
-          method: "GET",
-          headers: {
-            "x-api-key": apiKey,
-          },
-        }).catch(() => null);
-
-        if (!response || !response.ok) {
-          return null;
-        }
 
         return {
           id: orgId,

@@ -2,32 +2,68 @@
 
 import { FormEvent, useState } from "react";
 import { signIn } from "next-auth/react";
+import { useRouter } from "next/navigation";
 
 export function LoginForm() {
   const [orgId, setOrgId] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSubmitting(true);
     setError(null);
 
-    const result = await signIn("credentials", {
-      redirect: false,
-      org_id: orgId.trim(),
-      api_key: apiKey.trim(),
-      callbackUrl: "/dashboard",
-    });
+    const orgIdInput = orgId.trim();
+    const apiKeyInput = apiKey.trim();
+    const apiBase = process.env.NEXT_PUBLIC_API_BASE || "https://api.civicflowapp.com/api";
 
-    if (!result || result.error) {
-      setError("Invalid organization ID or API key.");
+    console.log("API Base:", apiBase);
+    console.log("Org:", orgIdInput);
+    console.log("Key length:", apiKeyInput.length);
+
+    try {
+      const res = await fetch(`${apiBase}/payment-submissions`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKeyInput,
+        },
+      });
+
+      console.log("Login response status:", res.status);
+
+      if (!res.ok) {
+        setError("Invalid organization ID or API key");
+        setSubmitting(false);
+        return;
+      }
+
+      const result = await signIn("credentials", {
+        redirect: false,
+        org_id: orgIdInput,
+        api_key: apiKeyInput,
+        api_base: apiBase,
+        callbackUrl: "/dashboard",
+      });
+
+      if (!result || result.error) {
+        setError("Invalid organization ID or API key");
+        setSubmitting(false);
+        return;
+      }
+
+      router.push("/dashboard");
+      router.refresh();
+      return;
+    } catch (err) {
+      console.error("Login fetch error:", err);
+      setError("Unable to reach server. Check connection.");
       setSubmitting(false);
       return;
     }
-
-    window.location.href = result.url || "/dashboard";
   };
 
   return (
