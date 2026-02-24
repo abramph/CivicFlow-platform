@@ -47,9 +47,11 @@ function requireApiKey(req, res, next) {
     return res.status(401).json({ success: false, error: 'Unauthorized' });
   }
 
-  const org = db.prepare('SELECT * FROM organizations WHERE api_key = ?').get(apiKey);
+  const org = db
+    .prepare('SELECT * FROM organizations WHERE api_key = ?')
+    .get(apiKey);
   // eslint-disable-next-line no-console
-  console.log('DB lookup result:', org ? { id: org.id, name: org.name } : null);
+  console.log('Org lookup result:', org);
 
   if (!org) {
     return res.status(401).json({ success: false, error: 'Unauthorized' });
