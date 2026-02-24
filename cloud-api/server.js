@@ -6,7 +6,9 @@ const dotenv = require('dotenv');
 require('./db/database');
 
 const createPaymentRoutes = require('./routes/paymentRoutes');
-const { requireApiKey } = require('./middleware/validateRequest');
+const createAdminOrgRoutes = require('./routes/adminOrgRoutes');
+const createPublicOrgRoutes = require('./routes/publicOrgRoutes');
+const { requireAdminKey } = require('./middleware/requireAdminKey');
 const { errorHandler } = require('./middleware/errorHandler');
 
 dotenv.config({ path: path.join(__dirname, '.env') });
@@ -51,7 +53,9 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use('/api', createPaymentRoutes(requireApiKey));
+app.use('/api', require('./middleware/validateRequest'), require('./routes/paymentRoutes')());
+app.use('/admin', requireAdminKey, createAdminOrgRoutes());
+app.use('/public', createPublicOrgRoutes());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 

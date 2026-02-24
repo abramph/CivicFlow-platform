@@ -1,66 +1,29 @@
-const ALLOWED_METHODS = new Set(['ZELLE', 'CASHAPP', 'VENMO', 'CASH']);
 const db = require('../db/database');
+const path = require('path');
 
-function validatePaymentSubmission(req, res, next) {
-  const body = req.body || {};
-  const orgId = String(body.org_id ?? '').trim();
-  const invoiceId = String(body.invoice_id ?? '').trim();
-  const memberName = String(body.member_name ?? '').trim();
-  const method = String(body.method ?? '').trim().toUpperCase();
-  const amount = Number(body.amount);
+module.exports = function validateRequest(req, res, next) {
+const rawKey = req.headers['x-api-key'] || req.get('x-api-key') || '';
+const apiKey = String(rawKey).trim();
+const dbPath = path.join(__dirname, '..', 'db', 'cloud.db');
 
-  if (!invoiceId) {
-    return res.status(400).json({ success: false, error: 'invoice_id is required' });
-  }
-  if (!memberName) {
-    return res.status(400).json({ success: false, error: 'member_name is required' });
-  }
-  if (!ALLOWED_METHODS.has(method)) {
-    return res.status(400).json({ success: false, error: 'method must be one of: ZELLE, CASHAPP, VENMO, CASH' });
-  }
-  if (!Number.isFinite(amount)) {
-    return res.status(400).json({ success: false, error: 'amount must be numeric' });
-  }
+console.log('--- AUTH DEBUG ---');
+console.log('Using DB file:', dbPath);
+console.log('Incoming API key:', apiKey);
 
-  if (!orgId) {
-    return res.status(400).json({ success: false, error: 'Invalid organization' });
-  }
+const org = db.prepare(
+'SELECT * FROM organizations WHERE api_key = ?'
+).get(apiKey);
 
-  const org = db.prepare('SELECT id FROM organizations WHERE id = ? LIMIT 1').get(orgId);
-  if (!org) {
-    return res.status(400).json({ success: false, error: 'Invalid organization' });
-  }
+console.log('Org lookup result:', org);
+console.log('------------------');
 
-  req.body.org_id = orgId;
-  req.body.method = method;
-  req.body.amount = amount;
-  next();
+if (!org) {
+return res.status(401).json({
+success: false,
+error: 'Unauthorized'
+});
 }
 
-function requireApiKey(req, res, next) {
-  const rawKey = req.headers['x-api-key'] || req.get('x-api-key') || '';
-  const apiKey = String(rawKey).trim();
-  // eslint-disable-next-line no-console
-  console.log('Incoming API key:', apiKey);
-
-  if (!apiKey) {
-    return res.status(401).json({ success: false, error: 'Unauthorized' });
-  }
-
-  const org = db
-    .prepare('SELECT * FROM organizations WHERE api_key = ?')
-    .get(apiKey);
-  // eslint-disable-next-line no-console
-  console.log('Org lookup result:', org);
-
-  if (!org) {
-    return res.status(401).json({ success: false, error: 'Unauthorized' });
-  }
-
-  req.org = org;
-  req.org_id = org.id;
-  req.organization = org;
-  return next();
-}
-
-module.exports = { validatePaymentSubmission, requireApiKey };
+req.org = org;
+next();
+};

@@ -4,7 +4,6 @@ const path = require('node:path');
 const { v4: uuidv4 } = require('uuid');
 const multer = require('multer');
 const db = require('../db/database');
-const { validatePaymentSubmission } = require('../middleware/validateRequest');
 const { sendReceiptEmail } = require('../services/emailService');
 
 const uploadsDir = path.join(__dirname, '..', 'uploads');
@@ -22,10 +21,10 @@ const upload = multer({
   limits: { fileSize: 8 * 1024 * 1024 },
 });
 
-function createPaymentRoutes(requireApiKey) {
+function createPaymentRoutes() {
   const router = express.Router();
 
-  router.post('/payment-submissions', validatePaymentSubmission, (req, res) => {
+  router.post('/payment-submissions', (req, res) => {
     const { org_id, invoice_id, member_name, method, amount, paid_date, note, screenshot_url } = req.body;
     const cloudId = uuidv4();
     const createdAt = new Date().toISOString();
@@ -59,7 +58,7 @@ function createPaymentRoutes(requireApiKey) {
     return res.json({ success: true, url, filename: req.file.filename });
   });
 
-  router.get('/payment-submissions', requireApiKey, (req, res) => {
+  router.get('/payment-submissions', (req, res) => {
     const rows = db.prepare(`
     SELECT cloud_id, invoice_id, member_name, method, amount, paid_date, note, screenshot_url, created_at
     FROM payment_submissions
@@ -71,7 +70,7 @@ function createPaymentRoutes(requireApiKey) {
     return res.json(rows);
   });
 
-  router.post('/payment-submissions/mark-synced', requireApiKey, (req, res) => {
+  router.post('/payment-submissions/mark-synced', (req, res) => {
     const ids = Array.isArray(req.body?.ids) ? req.body.ids.map((id) => String(id)).filter(Boolean) : [];
     if (!ids.length) {
       return res.json({ success: true, updated: 0 });
@@ -88,7 +87,7 @@ function createPaymentRoutes(requireApiKey) {
     return res.json({ success: true, updated: result.changes || 0 });
   });
 
-  router.post('/payment-submissions/send-receipt', requireApiKey, async (req, res, next) => {
+  router.post('/payment-submissions/send-receipt', async (req, res, next) => {
     try {
       const payload = req.body || {};
       await sendReceiptEmail(payload);
@@ -104,7 +103,7 @@ function createPaymentRoutes(requireApiKey) {
     }
   });
 
-  router.get('/analytics/summary', requireApiKey, (req, res) => {
+  router.get('/analytics/summary', (req, res) => {
     const totalRow = db.prepare(`
       SELECT COUNT(*) AS total_payments, COALESCE(SUM(amount), 0) AS total_amount
       FROM payment_submissions

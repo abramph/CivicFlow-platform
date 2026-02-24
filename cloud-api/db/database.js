@@ -3,7 +3,9 @@ const Database = require('better-sqlite3');
 
 const dbPath = path.join(__dirname, 'cloud.db');
 
+console.log('==============================');
 console.log('Using DB file:', dbPath);
+console.log('==============================');
 
 const db = new Database(dbPath);
 
