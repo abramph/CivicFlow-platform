@@ -6,6 +6,7 @@ const dotenv = require('dotenv');
 require('./db/database');
 
 const createPaymentRoutes = require('./routes/paymentRoutes');
+const { requireApiKey } = require('./middleware/validateRequest');
 const { errorHandler } = require('./middleware/errorHandler');
 
 dotenv.config({ path: path.join(__dirname, '.env') });
@@ -13,8 +14,6 @@ dotenv.config({ path: path.join(__dirname, '.env') });
 const app = express();
 const PORT = Number(process.env.PORT || 8787);
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'https://civicflow.app';
-const API_KEY = String(process.env.API_KEY || '').trim();
-
 const logsDir = path.join(__dirname, 'logs');
 const accessLogPath = path.join(logsDir, 'access.log');
 if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
@@ -52,19 +51,9 @@ app.use((req, res, next) => {
   next();
 });
 
-function requireApiKey(req, res, next) {
-  if (!API_KEY) {
-    return res.status(500).json({ success: false, error: 'API_KEY is not configured on the server.' });
-  }
-  const provided = String(req.headers['x-api-key'] || '').trim();
-  if (!provided || provided !== API_KEY) {
-    return res.status(401).json({ success: false, error: 'Unauthorized' });
-  }
-  return next();
-}
-
 app.use('/api', createPaymentRoutes(requireApiKey));
 app.use(express.static(path.join(__dirname, 'public')));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.get('/', (_req, res) => {
   res.redirect('/report-payment.html');

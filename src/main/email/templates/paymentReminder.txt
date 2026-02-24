@@ -1,0 +1,19 @@
+Hello {{member_name}},
+
+This is a reminder that your payment of ${{amount_due}} is due on {{due_date}}.
+
+Invoice ID: {{invoice_id}}
+
+Make your payment using:
+{{payment_methods}}
+
+After you complete your payment, please report it using the link below:
+{{report_payment_url}}
+
+If the button does not work, copy and paste this link:
+{{report_payment_url}}
+
+If you have the CivicFlow app installed, you can also use:
+{{deep_link_url}}
+
+{{organization_name}}

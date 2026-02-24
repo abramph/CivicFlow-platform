@@ -23,11 +23,14 @@
       <h1>Report a Payment</h1>
       <p>Submit your payment confirmation for admin review.</p>
       <form id="paymentForm">
+        <input type="hidden" id="org_id" name="org_id" value="default-org" />
+        <input type="hidden" id="member_id" name="member_id" value="" />
+
         <label for="member_name">Member Name</label>
         <input id="member_name" name="member_name" required />
 
         <label for="invoice_id">Invoice ID</label>
-        <input id="invoice_id" name="invoice_id" type="number" min="1" required />
+        <input id="invoice_id" name="invoice_id" type="text" required />
 
         <label for="method">Payment Method</label>
         <select id="method" name="method" required>
@@ -47,6 +50,9 @@
         <label for="note">Note</label>
         <textarea id="note" name="note"></textarea>
 
+        <label for="screenshot">Screenshot</label>
+        <input id="screenshot" name="screenshot" type="file" accept="image/*" />
+
         <button type="submit" id="submitBtn">Submit Payment Confirmation</button>
       </form>
 
@@ -60,6 +66,72 @@
       const err = document.getElementById('err');
       const submitBtn = document.getElementById('submitBtn');
 
+      function firstNonEmpty(...values) {
+        for (const value of values) {
+          const normalized = String(value ?? '').trim();
+          if (normalized) return normalized;
+        }
+        return '';
+      }
+
+      function getAllPrefillParams() {
+        const all = new URLSearchParams(window.location.search || '');
+        const hash = String(window.location.hash || '');
+        if (hash) {
+          const hashValue = hash.startsWith('#') ? hash.slice(1) : hash;
+          const hashQueryIndex = hashValue.indexOf('?');
+          const hashQuery = hashQueryIndex >= 0 ? hashValue.slice(hashQueryIndex + 1) : hashValue;
+          const hashParams = new URLSearchParams(hashQuery);
+          hashParams.forEach((value, key) => {
+            if (!all.has(key)) all.set(key, value);
+          });
+        }
+        return all;
+      }
+
+      function prefillFromQuery() {
+        const params = getAllPrefillParams();
+        const orgId = firstNonEmpty(params.get('org_id'), params.get('orgId'));
+        const memberId = firstNonEmpty(params.get('member_id'), params.get('memberId'));
+        const memberName = firstNonEmpty(params.get('member_name'), params.get('memberName'), params.get('member'), params.get('name'));
+        const invoiceId = firstNonEmpty(params.get('invoice_id'), params.get('invoiceId'), params.get('invoice'), params.get('inv'));
+        const amount = firstNonEmpty(params.get('amount'), params.get('amount_due'), params.get('amountDue'), params.get('amt'));
+        const dueDate = firstNonEmpty(params.get('due_date'), params.get('dueDate'));
+        const method = firstNonEmpty(params.get('method'));
+        const note = firstNonEmpty(params.get('note'));
+
+        if (orgId) document.getElementById('org_id').value = orgId;
+        if (memberId && /^\d+$/.test(memberId)) document.getElementById('member_id').value = memberId;
+        if (memberName) document.getElementById('member_name').value = memberName;
+
+        if (invoiceId) {
+          document.getElementById('invoice_id').value = invoiceId;
+        }
+
+        const amountNumber = Number(amount);
+        if (Number.isFinite(amountNumber) && amountNumber > 0) {
+          document.getElementById('amount').value = amountNumber.toFixed(2);
+        }
+
+        if (/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
+          document.getElementById('paid_date').value = dueDate;
+        }
+
+        if (method) {
+          const methodValue = method.toUpperCase();
+          const allowed = ['ZELLE', 'CASHAPP', 'VENMO', 'CASH'];
+          if (allowed.includes(methodValue)) {
+            document.getElementById('method').value = methodValue;
+          }
+        }
+
+        if (note) {
+          document.getElementById('note').value = note;
+        }
+      }
+
+      prefillFromQuery();
+
       form.addEventListener('submit', async (event) => {
         event.preventDefault();
         ok.style.display = 'none';
@@ -67,16 +139,38 @@
         submitBtn.disabled = true;
 
         const formData = new FormData(form);
+        const memberId = String(formData.get('member_id') || '').trim();
+        const rawNote = String(formData.get('note') || '').trim();
+        const noteWithMember = memberId
+          ? (`[member_id:${memberId}] ${rawNote}`.trim())
+          : rawNote;
         const payload = {
-          invoice_id: Number(formData.get('invoice_id')),
+          org_id: String(formData.get('org_id') || 'default-org').trim(),
+          invoice_id: String(formData.get('invoice_id') || '').trim(),
           member_name: String(formData.get('member_name') || '').trim(),
           method: String(formData.get('method') || '').trim(),
           amount: Number(formData.get('amount')),
           paid_date: String(formData.get('paid_date') || '').trim(),
-          note: String(formData.get('note') || '').trim(),
+          note: noteWithMember,
+          screenshot_url: null,
         };
 
         try {
+          const screenshotFile = formData.get('screenshot');
+          if (screenshotFile && screenshotFile.size > 0) {
+            const uploadForm = new FormData();
+            uploadForm.append('screenshot', screenshotFile);
+            const uploadResponse = await fetch('/api/payment-submissions/upload', {
+              method: 'POST',
+              body: uploadForm,
+            });
+            const uploadData = await uploadResponse.json();
+            if (!uploadResponse.ok || uploadData.success === false || !uploadData.url) {
+              throw new Error('Submission failed');
+            }
+            payload.screenshot_url = uploadData.url;
+          }
+
           const response = await fetch('/api/payment-submissions', {
             method: 'POST',
             headers: {

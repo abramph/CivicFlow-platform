@@ -33,6 +33,16 @@ function resolveMemberIdByName(database, memberName) {
   `).get(normalized)?.id ?? null;
 }
 
+function resolveMemberIdFromNote(database, note) {
+  const raw = String(note || "");
+  const match = raw.match(/\[member_id:(\d+)\]/i);
+  if (!match) return null;
+  const memberId = Number(match[1]);
+  if (!Number.isFinite(memberId) || memberId <= 0) return null;
+  const exists = database.prepare("SELECT id FROM members WHERE id = ? LIMIT 1").get(memberId);
+  return exists?.id ?? null;
+}
+
 async function insertIntoLocalDB(submissions) {
   const database = getDb();
   if (!Array.isArray(submissions) || submissions.length === 0) {
@@ -68,7 +78,7 @@ async function insertIntoLocalDB(submissions) {
       const existing = existingByCloudId.get(cloudId);
       if (existing) continue;
 
-      const memberId = resolveMemberIdByName(database, item.member_name);
+      const memberId = resolveMemberIdFromNote(database, item.note) || resolveMemberIdByName(database, item.member_name);
       const invoiceId = Number.isFinite(Number(item.invoice_id)) ? Number(item.invoice_id) : null;
       const amount = Number(item.amount || 0);
 
@@ -79,7 +89,7 @@ async function insertIntoLocalDB(submissions) {
         Number.isFinite(amount) ? amount : 0,
         String(item.paid_date || "").trim() || null,
         String(item.note || "").trim() || null,
-        null,
+        String(item.screenshot_url || "").trim() || null,
         cloudId,
       );
 

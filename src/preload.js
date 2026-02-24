@@ -44,9 +44,13 @@ contextBridge.exposeInMainWorld('civicflow', {
     createSubscription: (data) => ipcRenderer.invoke('payments:createSubscription', data),
     createExternalPayment: (data) => ipcRenderer.invoke('payments:createExternalPayment', data),
     syncFromCloud: () => ipcRenderer.invoke('payments:syncFromCloud'),
+    sendReceipt: (data) => ipcRenderer.invoke('payments:sendReceipt', data),
     listPendingExternal: () => ipcRenderer.invoke('payments:listPendingExternal'),
     approveExternal: (id) => ipcRenderer.invoke('payments:approveExternal', id),
     rejectExternal: (id) => ipcRenderer.invoke('payments:rejectExternal', id),
+  },
+  analytics: {
+    getSummary: () => ipcRenderer.invoke('analytics:getSummary'),
   },
   autopay: {
     pause: (data) => ipcRenderer.invoke('autopay:pause', data),

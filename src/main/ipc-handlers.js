@@ -9,10 +9,16 @@ const branding = require("./branding");
 const licenseService = require("./licenseService");
 const campaignsService = require("./services/campaigns");
 const orgService = require("./services/organization");
+const { API_BASE, API_KEY } = require("./config/apiConfig");
 const { syncPayments } = require("./services/paymentSyncService");
 const { ImportService, buildFileHash } = require("./services/importService");
 const { buildPeriodReportPDF } = require("./pdf-service");
 const { createCheckoutSession } = require("./stripe-payments");
+const {
+  PRODUCTION_REPORT_PAYMENT_URL,
+  CIVICFLOW_DEEP_LINK_URL,
+  renderPaymentReminder,
+} = require("./email/renderTemplate");
 
 let registerCount = 0;
 
@@ -65,6 +71,7 @@ const ALL_PRELOAD_CHANNELS = [
   "autopay:cancel_now",
   "autopay:pause",
   "autopay:resume",
+  "analytics:getSummary",
   "backup:db",
   "db:attendance:getAllMembersForMeeting",
   "db:attendance:getForMeeting",
@@ -194,6 +201,7 @@ const ALL_PRELOAD_CHANNELS = [
   "payments:createSubscription",
   "payments:listPendingExternal",
   "payments:rejectExternal",
+  "payments:sendReceipt",
   "payments:syncFromCloud",
   "receipt:email-receipt",
   "receipt:is-email-configured",
@@ -456,15 +464,13 @@ function buildPaymentOptionsForReminder(org = {}, { stripeCheckoutUrl, includeSt
 }
 
 function buildReportPaymentDeepLink(memberId) {
-  const id = Number(memberId || 0);
-  if (!id) return "civicflow://report-external-payment";
-  return `civicflow://report-external-payment?memberId=${id}`;
+  void memberId;
+  return CIVICFLOW_DEEP_LINK_URL;
 }
 
 function buildReportPaymentHttpsLink(invoiceId) {
-  const id = Number(invoiceId || 0);
-  if (!id) return "https://civicflow.app/report-payment";
-  return `https://civicflow.app/report-payment?invoice=${id}`;
+  void invoiceId;
+  return PRODUCTION_REPORT_PAYMENT_URL;
 }
 
 function buildReportPaymentBlocks(memberId) {
@@ -473,6 +479,64 @@ function buildReportPaymentBlocks(memberId) {
     text: `\n\nAfter sending Cash App, Zelle, or Venmo, report it in CivicFlow:\n${reportLink}\nIf your email app does not make that clickable, copy/paste it into your browser address bar, or open CivicFlow and go to Report Payment.`,
     html: `<p>After sending Cash App, Zelle, or Venmo, report it in CivicFlow:<br/><a href="${reportLink}">Open Report Payment Form</a><br/><span>${escapeHtml(reportLink)}</span><br/>If your email app does not make that clickable, copy/paste it into your browser address bar, or open CivicFlow and go to <strong>Report Payment</strong>.</p>`,
   };
+}
+
+function buildPaymentMethodsForTemplate(org = {}) {
+  const rawCashApp = String(org.cashapp_handle || "").trim().replace(/^\$/, "");
+  const rawVenmo = String(org.venmo_handle || "").trim().replace(/^@/, "");
+  const rawZelle = String(org.zelle_contact || "").trim();
+
+  const zelleText = rawZelle ? `Zelle: ${rawZelle}` : "Zelle";
+  const cashAppText = rawCashApp ? `CashApp: $${rawCashApp}` : "CashApp";
+  const venmoText = rawVenmo ? `Venmo: @${rawVenmo}` : "Venmo";
+
+  const zelleHtml = rawZelle ? `<strong>Zelle:</strong> ${escapeHtml(rawZelle)}` : "<strong>Zelle</strong>";
+  const cashAppHtml = rawCashApp
+    ? `<strong>CashApp:</strong> <a href="https://cash.app/$${encodeURIComponent(rawCashApp)}">$${escapeHtml(rawCashApp)}</a>`
+    : "<strong>CashApp</strong>";
+  const venmoHtml = rawVenmo
+    ? `<strong>Venmo:</strong> <a href="https://venmo.com/u/${encodeURIComponent(rawVenmo)}">@${escapeHtml(rawVenmo)}</a>`
+    : "<strong>Venmo</strong>";
+
+  return {
+    text: `- ${zelleText}\n- ${cashAppText}\n- ${venmoText}`,
+    html: `<ul style="margin:0 0 0 20px;padding:0;"><li style="margin:0 0 6px 0;">${zelleHtml}</li><li style="margin:0 0 6px 0;">${cashAppHtml}</li><li style="margin:0 0 6px 0;">${venmoHtml}</li></ul>`,
+  };
+}
+
+function buildPrefilledReportPaymentUrl({ memberName, memberId, invoiceId, amountDue, dueDate, orgId = "default-org" } = {}) {
+  const params = new URLSearchParams();
+  if (orgId) params.set("org_id", String(orgId));
+  if (memberName) params.set("member_name", String(memberName));
+  if (memberName) params.set("member", String(memberName));
+  if (memberName) params.set("name", String(memberName));
+  if (memberId && Number.isFinite(Number(memberId)) && Number(memberId) > 0) params.set("member_id", String(memberId));
+  if (invoiceId && String(invoiceId).trim() && String(invoiceId).trim().toUpperCase() !== "N/A") {
+    params.set("invoice_id", String(invoiceId));
+    params.set("invoice", String(invoiceId));
+    params.set("inv", String(invoiceId));
+  }
+  if (amountDue && String(amountDue).trim()) {
+    params.set("amount", String(amountDue));
+    params.set("amount_due", String(amountDue));
+    params.set("amt", String(amountDue));
+  }
+  if (dueDate && String(dueDate).trim() && String(dueDate).trim().toUpperCase() !== "N/A") {
+    params.set("due_date", String(dueDate));
+  }
+  const query = params.toString();
+  return query ? `${PRODUCTION_REPORT_PAYMENT_URL}?${query}` : PRODUCTION_REPORT_PAYMENT_URL;
+}
+
+function buildReminderInvoiceReference(memberId, dueDate) {
+  const id = Number(memberId || 0);
+  const safeId = Number.isFinite(id) && id > 0 ? String(id) : "0";
+  const normalizedDue = String(dueDate || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalizedDue)) {
+    return `DUES-${safeId}-${normalizedDue.replace(/-/g, "")}`;
+  }
+  const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  return `DUES-${safeId}-${today}`;
 }
 
 function tableHasColumn(database, tableName, columnName) {
@@ -1076,10 +1140,9 @@ function registerIpcHandlers() {
 
   register(registry, "email:queue", async (payload = {}) => {
     let toEmails = String(payload.to_emails || payload.toEmails || "").trim();
-    const subject = String(payload.subject || "").trim();
-    if (!subject) return { success: false, error: "Subject is required." };
-
     const emailType = String(payload.email_type || payload.emailType || "NOTICE").trim().toUpperCase();
+    const subject = String(payload.subject || "").trim();
+    if (emailType !== "DUES_REMINDER" && !subject) return { success: false, error: "Subject is required." };
     let bodyText = payload.body_text ?? payload.bodyText ?? null;
     let bodyHtml = payload.body_html ?? payload.bodyHtml ?? null;
 
@@ -1126,6 +1189,7 @@ function registerIpcHandlers() {
       const org = database.prepare(`
         SELECT
           id,
+          name,
           payments_enabled,
           stripe_account_id,
           cashapp_handle,
@@ -1136,9 +1200,6 @@ function registerIpcHandlers() {
       `).get(orgId) || {};
 
       const stripeEnabled = Number(org.payments_enabled || 0) === 1 && !!String(org.stripe_account_id || "").trim();
-
-      const baseText = String(bodyText || "").trim();
-      const baseHtml = String(bodyHtml || "").trim();
       const insertEmail = database.prepare(`
         INSERT INTO email_outbox (
           email_type, to_emails, subject, body_html, body_text, attachments_json, status
@@ -1163,36 +1224,33 @@ function registerIpcHandlers() {
           }
         }
 
-        const paymentOptions = buildPaymentOptionsForReminder(org, {
-          stripeCheckoutUrl,
-          includeStripeAchNote: stripeEnabled,
+        const paymentMethods = buildPaymentMethodsForTemplate(org);
+        const dueDate = String(payload.due_date || payload.dueDate || "N/A").trim() || "N/A";
+        const invoiceId = String(payload.invoice_id || payload.invoiceId || "").trim() || buildReminderInvoiceReference(member.id, dueDate);
+        const reportPaymentUrl = buildPrefilledReportPaymentUrl({
+          memberName: member.name,
+          memberId: member.id,
+          invoiceId,
+          amountDue,
+          dueDate,
         });
-        const reportBlocks = buildReportPaymentBlocks(member.id);
-        const paymentTextBlock = paymentOptions.length
-          ? `\n\nPayment options:\n${paymentOptions.map((option) => `- ${option.text}`).join("\n")}`
-          : "";
-        const paymentHtmlBlock = paymentOptions.length
-          ? `<p><strong>Payment options:</strong></p><ul>${paymentOptions.map((option) => `<li>${option.html}</li>`).join("")}</ul>`
-          : "";
-
-        const achText = stripeEnabled
-          ? "\n\nYou can pay online using Stripe with a card or ACH bank transfer."
-          : "";
-        const achHtml = stripeEnabled
-          ? "<p>You can pay online using Stripe with a card or ACH bank transfer.</p>"
-          : "";
-        const reportText = reportBlocks.text;
-        const reportHtml = reportBlocks.html;
-
-        const finalBodyText = `${baseText}${achText}${paymentTextBlock}${reportText}`.trim();
-        const finalBodyHtml = `${baseHtml}${achHtml}${paymentHtmlBlock}${reportHtml}`.trim();
+        const rendered = renderPaymentReminder({
+          member_name: member.name,
+          invoice_id: invoiceId,
+          amount_due: amountDue,
+          due_date: dueDate,
+          organization_name: String(org.name || "CivicFlow").trim() || "CivicFlow",
+          payment_methods: paymentMethods,
+          report_payment_url: reportPaymentUrl,
+          deep_link_url: CIVICFLOW_DEEP_LINK_URL,
+        });
 
         const out = insertEmail.run(
           emailType,
           member.email,
-          subject,
-          finalBodyHtml || null,
-          finalBodyText || null,
+          rendered.subject,
+          rendered.html || null,
+          rendered.text || null,
           payload.attachments_json ?? payload.attachmentsJson ?? null,
         );
         ids.push(Number(out.lastInsertRowid));
@@ -1395,35 +1453,34 @@ function registerIpcHandlers() {
         }
       }
 
-      const paymentOptions = buildPaymentOptionsForReminder(org, { stripeCheckoutUrl });
-      const reportBlocks = buildReportPaymentBlocks(memberId);
-      const paymentTextBlock = paymentOptions.length
-        ? `\n\nPayment options:\n${paymentOptions.map((option) => `- ${option.text}`).join("\n")}`
-        : "";
-      const paymentHtmlBlock = paymentOptions.length
-        ? `<p><strong>Payment options:</strong></p><ul>${paymentOptions.map((option) => `<li>${option.html}</li>`).join("")}</ul>`
-        : "";
-
-      const achText = stripeCheckoutUrl
-        ? "\n\nYou can pay online using Stripe with a card or ACH bank transfer."
-        : "";
-      const achHtml = stripeCheckoutUrl
-        ? "<p>You can pay online using Stripe with a card or ACH bank transfer.</p>"
-        : "";
-      const reportText = reportBlocks.text;
-      const reportHtml = reportBlocks.html;
-
-      const subject = stripeCheckoutUrl ? "Dues Reminder - ACH/Card Payment Options Included" : "Dues Reminder";
-      const text = `Hello ${memberName},\n\nThis is a reminder that your dues balance is $${amountDue}. Please submit payment at your earliest convenience.${achText}${paymentTextBlock}${reportText}\n\nThank you.`;
-      const html = `<p>Hello ${escapeHtml(memberName)},</p><p>This is a reminder that your dues balance is <strong>$${escapeHtml(amountDue)}</strong>. Please submit payment at your earliest convenience.</p>${achHtml}${paymentHtmlBlock}${reportHtml}<p>Thank you.</p>`;
+      const paymentMethods = buildPaymentMethodsForTemplate(org);
+      const dueDate = String(member.due_date || member.dueDate || "N/A").trim() || "N/A";
+      const invoiceId = String(member.invoice_id || member.invoiceId || "").trim() || buildReminderInvoiceReference(memberId, dueDate);
+      const reportPaymentUrl = buildPrefilledReportPaymentUrl({
+        memberName,
+        memberId,
+        invoiceId,
+        amountDue,
+        dueDate,
+      });
+      const rendered = renderPaymentReminder({
+        member_name: memberName,
+        invoice_id: invoiceId,
+        amount_due: amountDue,
+        due_date: dueDate,
+        organization_name: String(org.name || "CivicFlow").trim() || "CivicFlow",
+        payment_methods: paymentMethods,
+        report_payment_url: reportPaymentUrl,
+        deep_link_url: CIVICFLOW_DEEP_LINK_URL,
+      });
 
       const { transport, from } = buildEmailTransport(database);
       await transport.sendMail({
         from,
         to,
-        subject,
-        text,
-        html,
+        subject: rendered.subject,
+        text: rendered.text,
+        html: rendered.html,
       });
 
       return { success: true, skipped: false };
@@ -1473,12 +1530,14 @@ function registerIpcHandlers() {
       try {
         let finalText = email.body_text || undefined;
         let finalHtml = email.body_html || undefined;
+        let finalSubject = String(email.subject || "").trim();
 
         if (String(email.email_type || "").trim().toUpperCase() === "DUES_REMINDER") {
           const firstRecipient = String(to.split(",")[0] || "").trim().toLowerCase();
           const recipientMember = firstRecipient
             ? database.prepare(`
                 SELECT id,
+                invoice_id,
                        COALESCE(NULLIF(TRIM(COALESCE(first_name, '') || ' ' || COALESCE(last_name, '')), ''), 'Member') AS member_name
                 FROM members
                 WHERE LOWER(TRIM(COALESCE(email, ''))) = ?
@@ -1488,7 +1547,7 @@ function registerIpcHandlers() {
             : null;
 
           const org = database.prepare(`
-            SELECT id, payments_enabled, stripe_account_id, cashapp_handle, zelle_contact, venmo_handle
+            SELECT id, name, payments_enabled, stripe_account_id, cashapp_handle, zelle_contact, venmo_handle
             FROM organization
             WHERE id = 1
           `).get() || {};
@@ -1514,47 +1573,40 @@ function registerIpcHandlers() {
             }
           }
 
-          const paymentOptions = buildPaymentOptionsForReminder(org, {
-            stripeCheckoutUrl,
-            includeStripeAchNote: stripeEnabled,
+          const paymentMethods = buildPaymentMethodsForTemplate(org);
+          const balanceCents = recipientMember?.id
+            ? Number(calculateMemberDuesStatus(Number(recipientMember.id))?.balanceCents || 0)
+            : 0;
+          const amountDue = balanceCents < 0 ? (Math.abs(balanceCents) / 100).toFixed(2) : "0.00";
+          const dueDate = "N/A";
+          const invoiceId = String(recipientMember?.invoice_id || "").trim() || buildReminderInvoiceReference(recipientMember?.id, dueDate);
+          const reportPaymentUrl = buildPrefilledReportPaymentUrl({
+            memberName: String(recipientMember?.member_name || "Member").trim() || "Member",
+            memberId: recipientMember?.id,
+            invoiceId,
+            amountDue,
+            dueDate,
           });
-          const reportBlocks = buildReportPaymentBlocks(recipientMember?.id);
-          const paymentTextBlock = paymentOptions.length
-            ? `\n\nPayment options:\n${paymentOptions.map((option) => `- ${option.text}`).join("\n")}`
-            : "";
-          const paymentHtmlBlock = paymentOptions.length
-            ? `<p><strong>Payment options:</strong></p><ul>${paymentOptions.map((option) => `<li>${option.html}</li>`).join("")}</ul>`
-            : "";
-          const achText = stripeEnabled
-            ? "\n\nYou can pay online using Stripe with a card or ACH bank transfer."
-            : "";
-          const achHtml = stripeEnabled
-            ? "<p>You can pay online using Stripe with a card or ACH bank transfer.</p>"
-            : "";
-          const reportText = reportBlocks.text;
-          const reportHtml = reportBlocks.html;
+          const rendered = renderPaymentReminder({
+            member_name: String(recipientMember?.member_name || "Member").trim() || "Member",
+            invoice_id: invoiceId,
+            amount_due: amountDue,
+            due_date: dueDate,
+            organization_name: String(org.name || "CivicFlow").trim() || "CivicFlow",
+            payment_methods: paymentMethods,
+            report_payment_url: reportPaymentUrl,
+            deep_link_url: CIVICFLOW_DEEP_LINK_URL,
+          });
 
-          const textBase = String(finalText || "").trim();
-          const htmlBase = String(finalHtml || "").trim();
-          const hasTextBlock = /payment options:/i.test(textBase);
-          const hasHtmlBlock = /payment options:/i.test(htmlBase);
-          const hasReportText = /report it in civicflow:/i.test(textBase);
-          const hasReportHtml = /report it in civicflow:/i.test(htmlBase);
-
-          if (!hasTextBlock || !hasHtmlBlock) {
-            finalText = `${textBase}${achText}${paymentTextBlock}`.trim() || finalText;
-            finalHtml = `${htmlBase}${achHtml}${paymentHtmlBlock}`.trim() || finalHtml;
-          }
-          if (!hasReportText || !hasReportHtml) {
-            finalText = `${String(finalText || "").trim()}${reportText}`.trim() || finalText;
-            finalHtml = `${String(finalHtml || "").trim()}${reportHtml}`.trim() || finalHtml;
-          }
+          finalSubject = rendered.subject;
+          finalText = rendered.text;
+          finalHtml = rendered.html;
         }
 
         await transport.sendMail({
           from,
           to,
-          subject: email.subject,
+          subject: finalSubject || email.subject,
           text: finalText,
           html: finalHtml,
         });
@@ -2354,7 +2406,8 @@ function registerIpcHandlers() {
         t.proof_url,
         t.status,
         m.first_name AS member_first_name,
-        m.last_name AS member_last_name
+        m.last_name AS member_last_name,
+        m.email AS member_email
       FROM transactions t
       LEFT JOIN members m ON m.id = t.member_id
       WHERE COALESCE(t.is_deleted, 0) = 0
@@ -2378,7 +2431,8 @@ function registerIpcHandlers() {
         ps.screenshot_path AS proof_url,
         ps.status,
         m.first_name AS member_first_name,
-        m.last_name AS member_last_name
+        m.last_name AS member_last_name,
+        m.email AS member_email
       FROM payment_submissions ps
       LEFT JOIN members m ON m.id = ps.member_id
       WHERE UPPER(COALESCE(ps.status, '')) = 'PENDING_VERIFICATION'
@@ -2484,6 +2538,43 @@ function registerIpcHandlers() {
     } catch (err) {
       console.error("Sync error:", err);
       return { success: false, error: err?.message || "Failed to sync cloud submissions.", count: 0 };
+    }
+  });
+
+  register(registry, "payments:sendReceipt", async (paymentData = {}) => {
+    try {
+      const response = await fetch(`${API_BASE}/payment-submissions/send-receipt`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": API_KEY,
+        },
+        body: JSON.stringify(paymentData || {}),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.success === false) {
+        return { success: false, error: payload?.error || `Receipt API failed (${response.status})` };
+      }
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err?.message || "Failed to send receipt." };
+    }
+  });
+
+  register(registry, "analytics:getSummary", async () => {
+    try {
+      const response = await fetch(`${API_BASE}/analytics/summary`, {
+        headers: {
+          "x-api-key": API_KEY,
+        },
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        return { success: false, error: payload?.error || `Analytics API failed (${response.status})` };
+      }
+      return { success: true, data: payload };
+    } catch (err) {
+      return { success: false, error: err?.message || "Failed to load analytics." };
     }
   });
 

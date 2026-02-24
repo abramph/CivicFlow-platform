@@ -111,6 +111,7 @@ export function Sidebar({ activeView, onNavigate }) {
     { id: 'report-external-payment', label: 'Report Payment', icon: ClipboardCheck },
     ...(isAdmin ? [{ id: 'import-transactions', label: 'Import Transactions', icon: Upload }] : []),
     ...(isAdmin ? [{ id: 'pending-payments', label: 'Pending Payments', icon: ClipboardCheck }] : []),
+    ...(isAdmin ? [{ id: 'analytics', label: 'Analytics', icon: FileText }] : []),
     ...(isAdmin ? [{ id: 'data-cleanup', label: 'Data Cleanup', icon: ClipboardList }] : []),
     { id: 'communications', label: 'Communications', icon: Mail },
     { id: 'reports-dashboard', label: 'Reports Dashboard', icon: FileText },

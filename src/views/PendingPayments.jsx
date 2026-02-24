@@ -58,6 +58,24 @@ export function PendingPayments() {
       };
       const result = await api?.payments?.approveExternal?.(payload);
       if (result?.error) throw new Error(result.error);
+
+      const memberName = [payment?.member_first_name, payment?.member_last_name].filter(Boolean).join(' ').trim() || 'Member';
+      const memberEmail = String(payment?.member_email || '').trim();
+      if (memberEmail) {
+        const receiptResult = await api?.payments?.sendReceipt?.({
+          member_name: memberName,
+          email: memberEmail,
+          amount: Number((Number(payment?.amount_cents || 0) / 100).toFixed(2)),
+          method: payment?.payment_method || 'PAYMENT',
+          invoice_id: payment?.invoice_id || payment?.id,
+        });
+        if (receiptResult?.success === false) {
+          setError(`Payment approved, but receipt email failed: ${receiptResult.error || 'Unknown error.'}`);
+        }
+      } else {
+        setError('Payment approved, but receipt email was skipped because the member has no email address.');
+      }
+
       emitInvalidation(['transactions', 'dashboard', 'dues', 'reports']);
       loadData();
     } catch (err) {

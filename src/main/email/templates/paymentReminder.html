@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Payment Reminder</title>
+  </head>
+  <body style="margin:0;padding:0;background:#f8fafc;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f8fafc;padding:24px 12px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="640" cellspacing="0" cellpadding="0" style="max-width:640px;width:100%;background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">
+            <tr>
+              <td style="padding:24px;">
+                <h2 style="margin:0 0 16px 0;font-size:24px;line-height:1.2;color:#0f172a;">Payment Reminder</h2>
+
+                <p style="margin:0 0 14px 0;font-size:16px;line-height:1.5;">Hello {{member_name}},</p>
+
+                <p style="margin:0 0 14px 0;font-size:16px;line-height:1.5;">
+                  This is a reminder that your payment of <strong>${{amount_due}}</strong> is due on <strong>{{due_date}}</strong>.
+                </p>
+
+                <p style="margin:0 0 8px 0;font-size:16px;line-height:1.5;">Invoice ID: <strong>{{invoice_id}}</strong></p>
+
+                <p style="margin:20px 0 8px 0;font-size:16px;line-height:1.5;">Make your payment using:</p>
+                {{payment_methods}}
+
+                <p style="margin:20px 0 12px 0;font-size:16px;line-height:1.5;">
+                  After you complete your payment, please report it using the link below:
+                </p>
+
+                <p style="margin:0 0 14px 0;">
+                  <a href="{{report_payment_url}}" style="display:inline-block;background:#16a34a;color:#ffffff;text-decoration:none;font-weight:700;padding:12px 18px;border-radius:8px;">
+                    Report Your Payment
+                  </a>
+                </p>
+
+                <p style="margin:0 0 8px 0;font-size:14px;line-height:1.5;">
+                  If the button does not work, copy and paste this link:
+                </p>
+                <p style="margin:0 0 12px 0;font-size:14px;line-height:1.5;word-break:break-all;">
+                  <a href="{{report_payment_url}}">{{report_payment_url}}</a>
+                </p>
+
+                <p style="margin:0 0 6px 0;font-size:14px;line-height:1.5;">
+                  If you have the CivicFlow app installed, you can also use:
+                </p>
+                <p style="margin:0 0 18px 0;font-size:14px;line-height:1.5;word-break:break-all;">{{deep_link_url}}</p>
+
+                <p style="margin:0;font-size:14px;line-height:1.5;color:#334155;">{{organization_name}}</p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

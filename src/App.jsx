@@ -24,6 +24,7 @@ import { PendingPayments } from './views/PendingPayments.jsx';
 import { ImportTransactions } from './views/ImportTransactions.jsx';
 import { DataCleanup } from './views/DataCleanup.jsx';
 import { ExternalPaymentReport } from './views/ExternalPaymentReport.jsx';
+import { Analytics } from './views/Analytics.jsx';
 
 class ErrorBoundary extends Component {
   constructor(props) {
@@ -61,6 +62,7 @@ const VIEWS = {
   reports: Reports,
   'reports-dashboard': ReportsDashboard,
   'pending-payments': PendingPayments,
+  analytics: Analytics,
   'report-external-payment': ExternalPaymentReport,
   'import-transactions': ImportTransactions,
   'data-cleanup': DataCleanup,
