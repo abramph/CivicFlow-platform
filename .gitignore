@@ -35,6 +35,8 @@ Thumbs.db
 *.db
 *.sqlite
 *.sqlite3
+*.db-wal
+*.db-shm
 
 # Cloud API DB
 cloud-api/db/cloud.db
@@ -45,3 +47,5 @@ cloud-api/db/cloud.db
 
 # Local keys
 .license-keys/
+tools/private.pem
+scripts/private/
