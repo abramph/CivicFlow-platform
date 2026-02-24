@@ -5,7 +5,7 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 require('./db/database');
 
-const paymentRoutes = require('./routes/paymentRoutes');
+const createPaymentRoutes = require('./routes/paymentRoutes');
 const { errorHandler } = require('./middleware/errorHandler');
 
 dotenv.config({ path: path.join(__dirname, '.env') });
@@ -63,7 +63,7 @@ function requireApiKey(req, res, next) {
   return next();
 }
 
-app.use('/api', requireApiKey, paymentRoutes);
+app.use('/api', createPaymentRoutes(requireApiKey));
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/', (_req, res) => {

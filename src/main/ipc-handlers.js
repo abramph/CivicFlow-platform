@@ -2343,6 +2343,7 @@ function registerIpcHandlers() {
       SELECT
         t.id,
         'TRANSACTION' AS review_type,
+        COALESCE(NULLIF(TRIM(t.source), ''), 'LOCAL') AS source,
         t.member_id,
         t.id AS invoice_id,
         t.amount_cents,
@@ -2366,6 +2367,7 @@ function registerIpcHandlers() {
       SELECT
         ps.id,
         'SUBMISSION' AS review_type,
+        COALESCE(NULLIF(TRIM(ps.source), ''), 'CLOUD') AS source,
         ps.member_id,
         ps.invoice_id,
         CAST(ROUND(COALESCE(ps.amount, 0) * 100) AS INTEGER) AS amount_cents,
@@ -2480,6 +2482,7 @@ function registerIpcHandlers() {
       const count = await syncPayments();
       return { success: true, count };
     } catch (err) {
+      console.error("Sync error:", err);
       return { success: false, error: err?.message || "Failed to sync cloud submissions.", count: 0 };
     }
   });

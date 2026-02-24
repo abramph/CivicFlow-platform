@@ -29,9 +29,6 @@
         <label for="invoice_id">Invoice ID</label>
         <input id="invoice_id" name="invoice_id" type="number" min="1" required />
 
-        <label for="api_key">API Key</label>
-        <input id="api_key" name="api_key" type="password" placeholder="Enter your API key" required />
-
         <label for="method">Payment Method</label>
         <select id="method" name="method" required>
           <option value="">Select method</option>
@@ -70,30 +67,30 @@
         submitBtn.disabled = true;
 
         const formData = new FormData(form);
-        const payload = Object.fromEntries(formData.entries());
-        const apiKey = String(payload.api_key || '').trim();
-        delete payload.api_key;
-        payload.amount = Number(payload.amount || 0);
-        payload.invoice_id = payload.invoice_id ? Number(payload.invoice_id) : null;
+        const payload = {
+          invoice_id: Number(formData.get('invoice_id')),
+          member_name: String(formData.get('member_name') || '').trim(),
+          method: String(formData.get('method') || '').trim(),
+          amount: Number(formData.get('amount')),
+          paid_date: String(formData.get('paid_date') || '').trim(),
+          note: String(formData.get('note') || '').trim(),
+        };
 
         try {
           const response = await fetch('/api/payment-submissions', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'x-api-key': apiKey,
             },
             body: JSON.stringify(payload),
           });
-          const data = await response.json();
-          if (!response.ok || data.success === false) {
-            throw new Error(data.error || 'Unable to submit payment confirmation.');
-          }
+          if (!response.ok) throw new Error('Submission failed');
+
           form.reset();
-          ok.textContent = `Confirmation submitted successfully. Reference ID: ${data.id}`;
+          ok.textContent = 'Payment confirmation submitted successfully';
           ok.style.display = 'block';
-        } catch (e) {
-          err.textContent = e.message || 'Submission failed.';
+        } catch (_e) {
+          err.textContent = 'Submission failed';
           err.style.display = 'block';
         } finally {
           submitBtn.disabled = false;

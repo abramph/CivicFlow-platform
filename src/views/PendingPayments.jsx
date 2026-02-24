@@ -156,6 +156,8 @@ export function PendingPayments() {
                   <th className="px-6 py-3 text-left font-medium">Member</th>
                   <th className="px-6 py-3 text-right font-medium">Amount</th>
                   <th className="px-6 py-3 text-left font-medium">Method</th>
+                  <th className="px-6 py-3 text-left font-medium">Source</th>
+                  <th className="px-6 py-3 text-left font-medium">Status</th>
                   <th className="px-6 py-3 text-left font-medium">Date</th>
                   <th className="px-6 py-3 text-left font-medium">Proof</th>
                   <th className="px-6 py-3 text-right font-medium">Actions</th>
@@ -166,11 +168,15 @@ export function PendingPayments() {
                   const memberName = [t.member_first_name, t.member_last_name].filter(Boolean).join(' ') || '—';
                   const proofUrl = toAppUrl(t.proof_url);
                   const method = (t.payment_method || '').toString().toUpperCase() || '—';
+                  const source = (t.source || (t.review_type === 'SUBMISSION' ? 'CLOUD' : 'LOCAL') || 'LOCAL').toString().toUpperCase();
+                  const status = (t.status || 'PENDING_VERIFICATION').toString().toUpperCase();
                   return (
                     <tr key={`${t.review_type || 'TRANSACTION'}-${t.id}`} className="hover:bg-slate-50">
                       <td className="px-6 py-4 text-slate-800">{memberName}</td>
                       <td className="px-6 py-4 text-right font-medium text-slate-800">{formatCurrency(t.amount_cents)}</td>
                       <td className="px-6 py-4 text-slate-600">{method}</td>
+                      <td className="px-6 py-4 text-slate-600">{source}</td>
+                      <td className="px-6 py-4 text-slate-600">{status}</td>
                       <td className="px-6 py-4 text-slate-600">{t.occurred_on}</td>
                       <td className="px-6 py-4">
                         {proofUrl ? (

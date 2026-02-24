@@ -1,18 +1,23 @@
 const { getDatabase, initializeDatabase } = require("../db");
-
-const CLOUD_API_BASE = process.env.CIVICFLOW_CLOUD_API_BASE || "http://localhost:8787";
+const { API_BASE, API_KEY } = require("../config/apiConfig");
 
 function getDb() {
   return getDatabase() || initializeDatabase();
 }
 
 async function fetchCloudSubmissions() {
-  const response = await fetch(`${CLOUD_API_BASE}/api/payment-submissions?status=NEW`);
+  console.log("Fetching cloud submissions...");
+  const response = await fetch(`${API_BASE}/payment-submissions?status=NEW`, {
+    headers: {
+      "x-api-key": API_KEY,
+    },
+  });
   if (!response.ok) {
     throw new Error(`Cloud fetch failed with status ${response.status}`);
   }
   const payload = await response.json();
   const items = Array.isArray(payload) ? payload : (Array.isArray(payload?.submissions) ? payload.submissions : []);
+  console.log(`Fetched ${items.length} records`);
   return items;
 }
 
@@ -83,6 +88,7 @@ async function insertIntoLocalDB(submissions) {
   });
 
   run(submissions);
+  console.log(`Inserted ${insertedCount} records`);
   return { insertedCount, cloudIdsToMark };
 }
 
@@ -90,9 +96,12 @@ async function markCloudAsSynced(ids) {
   const payload = { ids: Array.isArray(ids) ? ids : [] };
   if (!payload.ids.length) return { success: true, updated: 0 };
 
-  const response = await fetch(`${CLOUD_API_BASE}/api/payment-submissions/mark-synced`, {
+  const response = await fetch(`${API_BASE}/payment-submissions/mark-synced`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": API_KEY,
+    },
     body: JSON.stringify(payload),
   });
 
@@ -100,13 +109,19 @@ async function markCloudAsSynced(ids) {
     throw new Error(`Cloud mark-synced failed with status ${response.status}`);
   }
 
-  return response.json();
+  const result = await response.json();
+  const updated = Number(result?.updated || payload.ids.length || 0);
+  console.log(`Marked ${updated} records as synced`);
+  return result;
 }
 
 async function syncPayments() {
   const submissions = await fetchCloudSubmissions();
+  if (!submissions.length) return 0;
   const { insertedCount, cloudIdsToMark } = await insertIntoLocalDB(submissions);
-  await markCloudAsSynced(cloudIdsToMark);
+  if (cloudIdsToMark.length) {
+    await markCloudAsSynced(cloudIdsToMark);
+  }
   return insertedCount;
 }
 
