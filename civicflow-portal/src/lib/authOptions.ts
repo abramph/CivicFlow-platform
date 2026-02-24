@@ -23,10 +23,10 @@ export const authOptions: NextAuthOptions = {
         const apiBase = defaultApiBase.replace(/\/+$/, "");
         if (!orgId || !apiKey) return null;
 
-        const response = await fetch(`${apiBase}/analytics/summary`, {
+        const response = await fetch(`${apiBase}/payment-submissions`, {
+          method: "GET",
           headers: {
             "x-api-key": apiKey,
-            "x-org-id": orgId,
           },
         }).catch(() => null);
 

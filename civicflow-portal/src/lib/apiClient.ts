@@ -25,7 +25,6 @@ async function request<T>(session: PortalSession, path: string, init: RequestIni
     headers: {
       "Content-Type": "application/json",
       "x-api-key": session.api_key,
-      "x-org-id": session.org_id,
       ...(init.headers || {}),
     },
     cache: "no-store",
