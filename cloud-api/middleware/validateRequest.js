@@ -40,15 +40,16 @@ function validatePaymentSubmission(req, res, next) {
 function requireApiKey(req, res, next) {
   const rawKey = req.headers['x-api-key'] || req.get('x-api-key') || '';
   const apiKey = String(rawKey).trim();
+  // eslint-disable-next-line no-console
+  console.log('Incoming API key:', apiKey);
+
   if (!apiKey) {
     return res.status(401).json({ success: false, error: 'Unauthorized' });
   }
 
-  const org = db.prepare("SELECT * FROM organizations WHERE TRIM(COALESCE(api_key, '')) = ?").get(apiKey);
+  const org = db.prepare('SELECT * FROM organizations WHERE api_key = ?').get(apiKey);
   // eslint-disable-next-line no-console
-  console.log('Incoming API key:', apiKey);
-  // eslint-disable-next-line no-console
-  console.log('Org lookup result:', org ? { id: org.id, name: org.name } : null);
+  console.log('DB lookup result:', org ? { id: org.id, name: org.name } : null);
 
   if (!org) {
     return res.status(401).json({ success: false, error: 'Unauthorized' });
