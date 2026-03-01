@@ -48,24 +48,40 @@ function startWebhookServer() {
     }
   };
 
-  const getGeneralContributionMemberId = (orgId = 1) => {
-    const row = db
-      .prepare("SELECT id FROM members WHERE first_name = 'General' AND last_name = 'Contribution' AND COALESCE(organization_id, 1) = ? LIMIT 1")
-      .get(orgId);
-    if (row?.id) return row.id;
-    const result = db
-      .prepare("INSERT INTO members (first_name, last_name, status, organization_id) VALUES ('General', 'Contribution', 'active', ?)")
-      .run(orgId);
-    return result.lastInsertRowid;
+  const toOptionalPositiveId = (value) => {
+    if (value == null || value === '') return null;
+    const normalized = Number(value);
+    if (!Number.isFinite(normalized) || normalized <= 0) return null;
+    return normalized;
   };
 
-  const ensureMemberId = (memberId, orgId = 1, { allowNull = false } = {}) => {
-    if (memberId !== undefined && memberId !== null && memberId !== '') {
-      const normalized = Number(memberId);
-      if (Number.isFinite(normalized) && normalized > 0) return normalized;
+  const validateAttribution = ({ memberId, campaignId, eventId, contributorType, contributorName }) => {
+    const normalizedMemberId = toOptionalPositiveId(memberId);
+    const normalizedCampaignId = toOptionalPositiveId(campaignId);
+    const normalizedEventId = toOptionalPositiveId(eventId);
+    const normalizedContributorType = String(contributorType || '').trim().toUpperCase();
+    const normalizedContributorName = String(contributorName || '').trim() || null;
+
+    if (!normalizedMemberId && !normalizedCampaignId && !normalizedEventId && normalizedContributorType !== 'NON_MEMBER') {
+      throw new Error('Every contribution must be attributed to a Member, Non-Member, or Event.');
     }
-    if (allowNull) return null;
-    return getGeneralContributionMemberId(orgId);
+    if (normalizedMemberId && !db.prepare('SELECT id FROM members WHERE id = ?').get(normalizedMemberId)) {
+      throw new Error('Selected member does not exist.');
+    }
+    if (normalizedCampaignId && !db.prepare('SELECT id FROM campaigns WHERE id = ?').get(normalizedCampaignId)) {
+      throw new Error('Selected campaign does not exist.');
+    }
+    if (normalizedEventId && !db.prepare('SELECT id FROM events WHERE id = ?').get(normalizedEventId)) {
+      throw new Error('Selected event does not exist.');
+    }
+    const resolvedContributorType = normalizedContributorType || (normalizedMemberId ? 'MEMBER' : (normalizedCampaignId ? 'CAMPAIGN_REVENUE' : (normalizedEventId ? 'EVENT_REVENUE' : 'NON_MEMBER')));
+    return {
+      memberId: normalizedMemberId,
+      campaignId: normalizedCampaignId,
+      eventId: normalizedEventId,
+      contributorType: resolvedContributorType,
+      contributorName: normalizedContributorName,
+    };
   };
 
   const resolveContributorType = ({ memberId, campaignId, eventId }) => {
@@ -190,8 +206,7 @@ function startWebhookServer() {
       const legacyType = mapTransactionTypeToLegacyType(txnType);
 
       if (amountCents > 0) {
-        const ensuredMemberId = ensureMemberId(memberId, orgId, { allowNull: true });
-        const contributorType = resolveContributorType({ memberId: ensuredMemberId, campaignId, eventId });
+        const attribution = validateAttribution({ memberId, campaignId, eventId, contributorType: metadata.contributorType, contributorName });
         const result = db.prepare(`
           INSERT INTO transactions (
             type,
@@ -216,18 +231,18 @@ function startWebhookServer() {
           legacyType,
           txnType,
           amountCents,
-          ensuredMemberId,
-          contributorType,
-          contributorName,
-          eventId,
-          campaignId,
+          attribution.memberId,
+          attribution.contributorType,
+          attribution.contributorName,
+          attribution.eventId,
+          attribution.campaignId,
           'Stripe Payment',
           orgId,
           'STRIPE',
           session.id || null
         );
         if (result?.lastInsertRowid) {
-          queueReceiptEmail({ memberId: ensuredMemberId, orgId, amountCents, method: 'STRIPE' });
+          queueReceiptEmail({ memberId: attribution.memberId, orgId, amountCents, method: 'STRIPE' });
         }
       }
     }
@@ -242,8 +257,7 @@ function startWebhookServer() {
       const memberId = metadata.memberId ? Number(metadata.memberId) : null;
       const amountCents = Number(invoice.amount_paid ?? 0);
       if (amountCents > 0) {
-        const ensuredMemberId = ensureMemberId(memberId, orgId);
-        const contributorType = resolveContributorType({ memberId: ensuredMemberId, campaignId: null, eventId: null });
+        const attribution = validateAttribution({ memberId, campaignId: null, eventId: null, contributorType: 'MEMBER' });
         const result = db.prepare(`
           INSERT INTO transactions (
             type,
@@ -265,15 +279,15 @@ function startWebhookServer() {
           'dues',
           'DUES',
           amountCents,
-          ensuredMemberId,
-          contributorType,
+          attribution.memberId,
+          attribution.contributorType,
           'Stripe Subscription Payment',
           orgId,
           'STRIPE',
           invoice.id || null
         );
         if (result?.lastInsertRowid) {
-          queueReceiptEmail({ memberId: ensuredMemberId, orgId, amountCents, method: 'STRIPE' });
+          queueReceiptEmail({ memberId: attribution.memberId, orgId, amountCents, method: 'STRIPE' });
         }
       }
     }

@@ -48,24 +48,13 @@ function buildLedgerNote(reference, notes) {
   return null;
 }
 
-function getGeneralContributionMemberId(db, orgId = 1) {
-  const row = db
-    .prepare("SELECT id FROM members WHERE first_name = 'General' AND last_name = 'Contribution' AND COALESCE(organization_id, 1) = ? LIMIT 1")
-    .get(orgId);
-  if (row?.id) return row.id;
-  const result = db
-    .prepare("INSERT INTO members (first_name, last_name, status, organization_id) VALUES ('General', 'Contribution', 'active', ?)")
-    .run(orgId);
-  return result.lastInsertRowid;
-}
-
 function ensureMemberId(db, memberId, orgId = 1, { allowNull = false } = {}) {
   if (memberId !== undefined && memberId !== null && memberId !== '') {
     const normalized = Number(memberId);
     if (Number.isFinite(normalized) && normalized > 0) return normalized;
   }
   if (allowNull) return null;
-  return getGeneralContributionMemberId(db, orgId);
+  return null;
 }
 
 function resolveContributorType({ memberId, campaignId, eventId }) {
@@ -835,6 +824,7 @@ class ImportService {
             memberId = m?.id || null;
           }
           memberId = ensureMemberId(this.db, memberId, 1);
+          if (!memberId) continue;
           const contributorType = resolveContributorType({ memberId, campaignId: null, eventId: null });
           let period = this.db.prepare('SELECT id FROM membership_periods WHERE member_id = ? AND end_date IS NULL ORDER BY start_date DESC LIMIT 1').get(memberId);
           if (!period) {

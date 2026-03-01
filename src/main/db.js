@@ -61,6 +61,7 @@ function initializeDatabase() {
 
   try {
     db = new Database(dbPath);
+    db.pragma('foreign_keys = ON');
     db.pragma('journal_mode = WAL');
     db.pragma('busy_timeout = 5000');
 

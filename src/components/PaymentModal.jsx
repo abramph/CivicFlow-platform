@@ -21,9 +21,10 @@ const PAYMENT_METHOD_OPTIONS = [
   { value: 'import', label: 'IMPORT' },
 ];
 
-const CONTRIBUTOR_TYPE_OPTIONS = [
+const ATTRIBUTION_OPTIONS = [
   { value: 'MEMBER', label: 'Member' },
-  { value: 'NON_MEMBER', label: 'Non-member' },
+  { value: 'NON_MEMBER', label: 'Non-Member' },
+  { value: 'EVENT_CAMPAIGN', label: 'Event/Campaign' },
 ];
 
 export default function PaymentModal({
@@ -43,7 +44,7 @@ export default function PaymentModal({
   const [selectedMemberId, setSelectedMemberId] = useState('');
   const [selectedCampaignId, setSelectedCampaignId] = useState('');
   const [selectedEventId, setSelectedEventId] = useState('');
-  const [contributorType, setContributorType] = useState('MEMBER');
+  const [attributionTarget, setAttributionTarget] = useState('MEMBER');
   const [contributorName, setContributorName] = useState('');
   const [campaigns, setCampaigns] = useState([]);
   const [events, setEvents] = useState([]);
@@ -57,6 +58,7 @@ export default function PaymentModal({
   const lockContributorType = !allowMemberSelection && context?.memberId != null;
   const lockTransactionType = context?.campaignId != null || context?.eventId != null;
   const memberContextOnly = context?.memberId != null && context?.campaignId == null && context?.eventId == null;
+  const isDuesType = String(type || '').trim().toUpperCase() === 'DUES';
 
   const normalizeMethodForSelect = (value) => {
     const raw = String(value || '').trim().toLowerCase();
@@ -84,8 +86,12 @@ export default function PaymentModal({
     setSelectedMemberId(context?.memberId != null ? String(context.memberId) : '');
     setSelectedCampaignId(context?.campaignId != null ? String(context.campaignId) : '');
     setSelectedEventId(context?.eventId != null ? String(context.eventId) : '');
-    const defaultContributorType = context?.memberId != null ? 'MEMBER' : 'NON_MEMBER';
-    setContributorType(lockContributorType ? 'MEMBER' : defaultContributorType);
+    const defaultAttribution = nextType === 'DUES'
+      ? 'MEMBER'
+      : hasCampaign || hasEvent
+      ? 'EVENT_CAMPAIGN'
+      : (context?.memberId != null ? 'MEMBER' : 'NON_MEMBER');
+    setAttributionTarget(lockContributorType ? 'MEMBER' : defaultAttribution);
     setContributorName('');
     setSubmitting(false);
     setError(null);
@@ -109,7 +115,10 @@ export default function PaymentModal({
         setSelectedMemberId(tx.member_id != null ? String(tx.member_id) : '');
         setSelectedCampaignId(tx.campaign_id != null ? String(tx.campaign_id) : '');
         setSelectedEventId(tx.event_id != null ? String(tx.event_id) : '');
-        setContributorType(lockContributorType ? 'MEMBER' : (String(tx.contributor_type || '').trim().toUpperCase() || 'MEMBER'));
+        const inferredAttribution = tx.event_id || tx.campaign_id
+          ? 'EVENT_CAMPAIGN'
+          : (String(tx.contributor_type || '').trim().toUpperCase() === 'NON_MEMBER' ? 'NON_MEMBER' : 'MEMBER');
+        setAttributionTarget(lockContributorType ? 'MEMBER' : inferredAttribution);
         setContributorName(tx.contributor_name || '');
       } catch (err) {
         setError(err?.message || 'Unable to load transaction.');
@@ -152,30 +161,39 @@ export default function PaymentModal({
   const validate = () => {
     const amountValue = Number(amount);
     const normalizedType = String(type || '').trim().toUpperCase();
-    const normalizedContributorType = lockContributorType
-      ? 'MEMBER'
-      : String(contributorType || '').trim().toUpperCase();
-    const memberId = normalizedContributorType === 'MEMBER'
+    const normalizedAttribution = lockContributorType ? 'MEMBER' : String(attributionTarget || '').trim().toUpperCase();
+    const memberId = normalizedAttribution === 'MEMBER'
       ? (selectedMemberId ? Number(selectedMemberId) : (context?.memberId != null ? Number(context.memberId) : null))
       : null;
 
     if (!normalizedType) return { error: 'Transaction type is required.' };
     if (!Number.isFinite(amountValue) || amountValue <= 0) return { error: 'Amount must be greater than 0.' };
-    if (normalizedContributorType === 'MEMBER' && !memberId) return { error: 'Member is required for member contributions.' };
+    if (normalizedType === 'DUES' && normalizedAttribution !== 'MEMBER') return { error: 'Dues payments must be attributed to a member.' };
+    if (normalizedAttribution === 'MEMBER' && !memberId) return { error: 'Member is required for member contributions.' };
+    if (normalizedAttribution === 'NON_MEMBER' && !String(contributorName || '').trim()) return { error: 'Non-member name is required.' };
     if (!date) return { error: 'Date is required.' };
     if (memberContextOnly && !['DUES', 'DONATION'].includes(normalizedType)) {
       return { error: 'Member payments must be Dues or Donation.' };
     }
 
-    const rawCampaignId = selectedCampaignId ? Number(selectedCampaignId) : null;
-    const rawEventId = selectedEventId ? Number(selectedEventId) : null;
+    const rawCampaignId = normalizedAttribution === 'EVENT_CAMPAIGN' && selectedCampaignId ? Number(selectedCampaignId) : null;
+    const rawEventId = normalizedAttribution === 'EVENT_CAMPAIGN' && selectedEventId ? Number(selectedEventId) : null;
     const campaignId = Number.isFinite(rawCampaignId) ? rawCampaignId : null;
     const eventId = Number.isFinite(rawEventId) ? rawEventId : null;
+    if (normalizedAttribution === 'EVENT_CAMPAIGN' && !campaignId && !eventId) {
+      return { error: 'Select an event or campaign attribution.' };
+    }
     if (campaignId && eventId) return { error: 'Select either a campaign or an event, not both.' };
     if (campaignId && normalizedType !== 'CAMPAIGN_CONTRIBUTION') return { error: 'Campaign contributions must use Campaign Contribution type.' };
     if (eventId && normalizedType !== 'EVENT_REVENUE') return { error: 'Event payments must use Event Revenue type.' };
     if (normalizedType === 'CAMPAIGN_CONTRIBUTION' && !campaignId) return { error: 'Select a campaign for campaign contributions.' };
     if (normalizedType === 'EVENT_REVENUE' && !eventId) return { error: 'Select an event for event revenue.' };
+
+    const normalizedContributorType = normalizedAttribution === 'NON_MEMBER'
+      ? 'NON_MEMBER'
+      : (normalizedAttribution === 'EVENT_CAMPAIGN'
+        ? (eventId ? 'EVENT_REVENUE' : 'CAMPAIGN_REVENUE')
+        : 'MEMBER');
 
     return {
       normalizedType,
@@ -184,8 +202,24 @@ export default function PaymentModal({
       campaignId,
       eventId,
       contributorType: normalizedContributorType,
-      contributorName: (contributorName || '').trim() || null,
+      contributorName: normalizedContributorType === 'NON_MEMBER'
+        ? ((contributorName || '').trim() || null)
+        : ((contributorName || '').trim() || null),
     };
+  };
+
+  const isAttributionSelected = () => {
+    const target = lockContributorType ? 'MEMBER' : attributionTarget;
+    if (target === 'MEMBER') {
+      return !!(selectedMemberId || context?.memberId);
+    }
+    if (target === 'NON_MEMBER') {
+      return String(contributorName || '').trim().length > 0;
+    }
+    if (target === 'EVENT_CAMPAIGN') {
+      return !!(selectedCampaignId || selectedEventId || context?.campaignId || context?.eventId);
+    }
+    return false;
   };
 
   const handleManualSubmit = async () => {
@@ -378,6 +412,8 @@ export default function PaymentModal({
     reader.readAsDataURL(file);
   };
 
+  const submitDisabled = submitting || (!isEditMode && !isAttributionSelected());
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-6 max-h-[90vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
@@ -413,6 +449,9 @@ export default function PaymentModal({
                         if (lockTransactionType) return;
                         const next = e.target.value;
                         setType(next);
+                        if (next === 'DUES') {
+                          setAttributionTarget('MEMBER');
+                        }
                         if (next === 'CAMPAIGN_CONTRIBUTION') setSelectedEventId('');
                         if (next === 'EVENT_REVENUE') setSelectedCampaignId('');
                         if (next === 'DUES' || next === 'DONATION') {
@@ -432,21 +471,27 @@ export default function PaymentModal({
 
           {!isEditMode && (
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Contributor Type</label>
-              <div className="grid grid-cols-2 gap-2">
-                {CONTRIBUTOR_TYPE_OPTIONS.map((opt) => (
+              <label className="block text-sm font-medium text-slate-700 mb-2">Attribution</label>
+              <div className="grid grid-cols-1 gap-2">
+                {ATTRIBUTION_OPTIONS.filter((opt) => !isDuesType || opt.value === 'MEMBER').map((opt) => (
                   <label key={opt.value} className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
                     <input
                       type="radio"
-                      name="contributorType"
+                      name="attributionTarget"
                       value={opt.value}
-                      checked={contributorType === opt.value}
+                      checked={(lockContributorType ? 'MEMBER' : attributionTarget) === opt.value}
                       onChange={(e) => {
                         if (lockContributorType) return;
                         const next = e.target.value;
-                        setContributorType(next);
+                        setAttributionTarget(next);
                         if (next === 'MEMBER') {
+                          setSelectedCampaignId('');
+                          setSelectedEventId('');
                           setContributorName('');
+                        } else if (next === 'NON_MEMBER') {
+                          setSelectedCampaignId('');
+                          setSelectedEventId('');
+                          setSelectedMemberId('');
                         } else {
                           setSelectedMemberId('');
                         }
@@ -461,7 +506,7 @@ export default function PaymentModal({
             </div>
           )}
 
-          {!isEditMode && allowMemberSelection && contributorType === 'MEMBER' && (
+          {!isEditMode && allowMemberSelection && (lockContributorType || attributionTarget === 'MEMBER') && (
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Member</label>
               <select
@@ -479,14 +524,14 @@ export default function PaymentModal({
             </div>
           )}
 
-          {!isEditMode && contributorType !== 'MEMBER' && (
+          {!isEditMode && attributionTarget === 'NON_MEMBER' && !isDuesType && (
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Contributor Name</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Non-member contributor</label>
               <input
                 type="text"
                 value={contributorName}
                 onChange={(e) => setContributorName(e.target.value)}
-                placeholder="Optional"
+                placeholder="Full name"
                 className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500"
               />
             </div>
@@ -514,9 +559,9 @@ export default function PaymentModal({
             />
           </div>
 
-          {!isEditMode && (
+          {!isEditMode && attributionTarget === 'EVENT_CAMPAIGN' && (
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Campaign (optional)</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Campaign</label>
               <select
                 value={selectedCampaignId}
                 onChange={(e) => {
@@ -526,7 +571,7 @@ export default function PaymentModal({
                 }}
                 className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500"
               >
-                <option value="">No campaign</option>
+                <option value="">Select campaign</option>
                 {campaigns.map((c) => (
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
@@ -534,9 +579,9 @@ export default function PaymentModal({
             </div>
           )}
 
-          {!isEditMode && (
+          {!isEditMode && attributionTarget === 'EVENT_CAMPAIGN' && (
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Event (optional)</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Event</label>
               <select
                 value={selectedEventId}
                 onChange={(e) => {
@@ -546,7 +591,7 @@ export default function PaymentModal({
                 }}
                 className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500"
               >
-                <option value="">No event</option>
+                <option value="">Select event</option>
                 {events.map((ev) => (
                   <option key={ev.id} value={ev.id}>{ev.name}</option>
                 ))}
@@ -610,7 +655,7 @@ export default function PaymentModal({
               <button
                 type="button"
                 onClick={handleManualSubmit}
-                disabled={submitting}
+                disabled={submitDisabled}
                 className="w-full px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-60"
               >
                 {submitting ? 'Saving…' : 'Save Manual Payment'}
@@ -621,7 +666,7 @@ export default function PaymentModal({
               <button
                 type="button"
                 onClick={handleStripeSubmit}
-                disabled={submitting}
+                disabled={submitDisabled}
                 className="w-full px-4 py-2 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 disabled:opacity-60"
               >
                 {submitting ? 'Opening…' : 'Proceed to secure checkout'}
@@ -629,7 +674,7 @@ export default function PaymentModal({
               <button
                 type="button"
                 onClick={handleAutoPaySubmit}
-                disabled={submitting}
+                disabled={submitDisabled}
                 className="w-full px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-60"
               >
                 {submitting ? 'Opening…' : 'Enroll in AutoPay'}
@@ -706,7 +751,7 @@ export default function PaymentModal({
                 onClick={() => handleExternalSubmit(
                   paymentMethod === 'cashapp' ? 'CASHAPP' : (paymentMethod === 'zelle' ? 'ZELLE' : 'VENMO')
                 )}
-                disabled={submitting}
+                disabled={submitDisabled}
                 className="w-full px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-60"
               >
                 {submitting ? 'Submitting…' : 'I Have Sent Payment'}

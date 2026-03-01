@@ -32,11 +32,19 @@ function formatPaymentLabel(method) {
 function startOfMonthISO() {
   const now = new Date();
   const start = new Date(now.getFullYear(), now.getMonth(), 1);
-  return start.toISOString().slice(0, 10);
+  return toLocalDateISO(start);
 }
 
 function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+  return toLocalDateISO(new Date());
+}
+
+function toLocalDateISO(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 function formatCurrency(cents) {

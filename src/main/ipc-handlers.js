@@ -342,11 +342,64 @@ function normalizeDateRange(startDate, endDate) {
   return { startDate: start, endDate: end };
 }
 
-function ensureGeneralContributionMemberId(database) {
-  const existing = database.prepare("SELECT id FROM members WHERE LOWER(COALESCE(first_name, '')) = 'general' AND LOWER(COALESCE(last_name, '')) = 'contribution' ORDER BY id LIMIT 1").get();
-  if (existing?.id) return Number(existing.id);
-  const created = database.prepare("INSERT INTO members (first_name, last_name, status) VALUES ('General', 'Contribution', 'active')").run();
-  return Number(created.lastInsertRowid);
+function toOptionalPositiveId(value) {
+  if (value == null || value === "") return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
+function validateContributionAttribution(database, payload = {}, options = {}) {
+  const allowNonMember = options.allowNonMember !== false;
+  const requireNonMemberName = options.requireNonMemberName === true;
+
+  const memberId = toOptionalPositiveId(payload.memberId ?? payload.member_id);
+  const eventId = toOptionalPositiveId(payload.eventId ?? payload.event_id);
+  const campaignId = toOptionalPositiveId(payload.campaignId ?? payload.campaign_id);
+
+  const contributorTypeInput = String(payload.contributorType ?? payload.contributor_type ?? "").trim().toUpperCase();
+  const contributorName = String(payload.contributorName ?? payload.contributor_name ?? "").trim();
+
+  if (!memberId && !eventId && !campaignId && (!allowNonMember || contributorTypeInput !== "NON_MEMBER")) {
+    throw new Error("Every contribution must be attributed to a Member, Non-Member, or Event.");
+  }
+
+  if (memberId) {
+    const member = database.prepare("SELECT id FROM members WHERE id = ?").get(memberId);
+    if (!member) throw new Error("Selected member does not exist.");
+  }
+  if (eventId) {
+    const event = database.prepare("SELECT id FROM events WHERE id = ?").get(eventId);
+    if (!event) throw new Error("Selected event does not exist.");
+  }
+  if (campaignId) {
+    const campaign = database.prepare("SELECT id FROM campaigns WHERE id = ?").get(campaignId);
+    if (!campaign) throw new Error("Selected campaign does not exist.");
+  }
+
+  if (requireNonMemberName && !memberId && !eventId && !campaignId && contributorTypeInput === "NON_MEMBER" && !contributorName) {
+    throw new Error("Non-member contributions require a contributor name.");
+  }
+
+  let contributorType = contributorTypeInput;
+  if (!contributorType) {
+    contributorType = memberId ? "MEMBER" : (campaignId ? "CAMPAIGN_REVENUE" : (eventId ? "EVENT_REVENUE" : "NON_MEMBER"));
+  }
+
+  return {
+    memberId,
+    eventId,
+    campaignId,
+    contributorType,
+    contributorName: contributorName || null,
+  };
+}
+
+function ensureDuesAttributedToMember(transactionType, attribution = {}) {
+  const normalizedType = normalizeTransactionType(transactionType);
+  if (normalizedType === "DUES" && !toOptionalPositiveId(attribution.memberId)) {
+    throw new Error("Dues payments must be attributed to a member.");
+  }
 }
 
 function getEmailSettingsRow(database) {
@@ -705,13 +758,16 @@ function registerIpcHandlers() {
     const totalMembers = activeMemberRows.length;
     const upcomingEventsCount = scalar("SELECT COUNT(*) AS c FROM events WHERE date(date) BETWEEN date('now') AND date('now', '+30 day')");
 
-    const totalTransactionsCents = scalar("SELECT COALESCE(SUM(amount_cents), 0) AS c FROM transactions WHERE COALESCE(is_deleted, 0) = 0");
-    const duesCollectedLast30DaysCents = scalar("SELECT COALESCE(SUM(amount_cents), 0) AS c FROM transactions WHERE COALESCE(is_deleted, 0) = 0 AND amount_cents > 0 AND COALESCE(transaction_type, '') = 'DUES' AND date(occurred_on) >= date('now', '-30 day')");
-    const totalDuesCents = scalar("SELECT COALESCE(SUM(amount_cents), 0) AS c FROM transactions WHERE COALESCE(is_deleted, 0) = 0 AND amount_cents > 0 AND COALESCE(transaction_type, '') = 'DUES'");
-    const totalDonationsCents = scalar("SELECT COALESCE(SUM(amount_cents), 0) AS c FROM transactions WHERE COALESCE(is_deleted, 0) = 0 AND amount_cents > 0 AND COALESCE(transaction_type, '') = 'DONATION'");
-    const totalCampaignRevenueCents = scalar("SELECT COALESCE(SUM(amount_cents), 0) AS c FROM transactions WHERE COALESCE(is_deleted, 0) = 0 AND amount_cents > 0 AND COALESCE(transaction_type, '') = 'CAMPAIGN_CONTRIBUTION'");
-    const totalEventRevenueCents = scalar("SELECT COALESCE(SUM(amount_cents), 0) AS c FROM transactions WHERE COALESCE(is_deleted, 0) = 0 AND amount_cents > 0 AND COALESCE(transaction_type, '') = 'EVENT_REVENUE'");
-    const expenseLast30DaysCents = Math.abs(scalar("SELECT COALESCE(SUM(amount_cents), 0) AS c FROM transactions WHERE COALESCE(is_deleted, 0) = 0 AND amount_cents < 0 AND date(occurred_on) >= date('now', '-30 day')"));
+    const txnTypeExpr = "CASE WHEN LOWER(COALESCE(type, '')) IN ('dues','dues_payment','invoice','receipt') THEN 'DUES' ELSE UPPER(COALESCE(transaction_type, type, '')) END";
+    const txnDateExpr = "date(COALESCE(occurred_on, created_at))";
+    const validTxWhere = `COALESCE(is_deleted, 0) = 0 AND ${txnTypeExpr} <> 'GENERAL_CONTRIBUTION' AND (member_id IS NOT NULL OR event_id IS NOT NULL OR campaign_id IS NOT NULL OR UPPER(COALESCE(contributor_type, '')) = 'NON_MEMBER')`;
+    const totalTransactionsCents = scalar(`SELECT COALESCE(SUM(amount_cents), 0) AS c FROM transactions WHERE ${validTxWhere}`);
+    const duesCollectedLast30DaysCents = scalar(`SELECT COALESCE(SUM(amount_cents), 0) AS c FROM transactions WHERE ${validTxWhere} AND member_id IS NOT NULL AND amount_cents > 0 AND ${txnTypeExpr} = 'DUES' AND ${txnDateExpr} >= date('now', '-30 day')`);
+    const totalDuesCents = scalar(`SELECT COALESCE(SUM(amount_cents), 0) AS c FROM transactions WHERE ${validTxWhere} AND member_id IS NOT NULL AND amount_cents > 0 AND ${txnTypeExpr} = 'DUES'`);
+    const totalDonationsCents = scalar(`SELECT COALESCE(SUM(amount_cents), 0) AS c FROM transactions WHERE ${validTxWhere} AND amount_cents > 0 AND ${txnTypeExpr} = 'DONATION'`);
+    const totalCampaignRevenueCents = scalar(`SELECT COALESCE(SUM(amount_cents), 0) AS c FROM transactions WHERE ${validTxWhere} AND amount_cents > 0 AND ${txnTypeExpr} = 'CAMPAIGN_CONTRIBUTION'`);
+    const totalEventRevenueCents = scalar(`SELECT COALESCE(SUM(amount_cents), 0) AS c FROM transactions WHERE ${validTxWhere} AND amount_cents > 0 AND ${txnTypeExpr} = 'EVENT_REVENUE'`);
+    const expenseLast30DaysCents = Math.abs(scalar(`SELECT COALESCE(SUM(amount_cents), 0) AS c FROM transactions WHERE ${validTxWhere} AND amount_cents < 0 AND ${txnDateExpr} >= date('now', '-30 day')`));
 
     const expenditureCents = (dateField, rangeSql) => {
       const centsFromCentsColumn = scalar(`SELECT COALESCE(SUM(amount_cents), 0) AS c FROM expenditures WHERE date(${dateField}) >= ${rangeSql}`);
@@ -1070,11 +1126,72 @@ function registerIpcHandlers() {
   });
 
   register(registry, "db:members:list", (filters = {}) => {
+    const where = [];
+    const params = [];
+
     const status = String(filters?.status || "").trim().toLowerCase();
-    if (status) {
-      return database.prepare("SELECT m.*, c.name AS category_name FROM members m LEFT JOIN categories c ON m.category_id = c.id WHERE LOWER(COALESCE(m.status, 'active')) = ? ORDER BY m.last_name, m.first_name").all(status);
+    if (status && status !== "all") {
+      where.push("LOWER(COALESCE(m.status, 'active')) = ?");
+      params.push(status);
     }
-    return database.prepare("SELECT m.*, c.name AS category_name FROM members m LEFT JOIN categories c ON m.category_id = c.id ORDER BY m.last_name, m.first_name").all();
+
+    const search = String(filters?.search || "").trim();
+    if (search) {
+      where.push("(LOWER(COALESCE(m.first_name, '')) LIKE LOWER(?) OR LOWER(COALESCE(m.last_name, '')) LIKE LOWER(?) OR LOWER(COALESCE(m.email, '')) LIKE LOWER(?) OR LOWER(COALESCE(m.phone, '')) LIKE LOWER(?))");
+      const like = `%${search}%`;
+      params.push(like, like, like, like);
+    }
+
+    const city = String(filters?.city || "").trim();
+    if (city) {
+      where.push("LOWER(COALESCE(m.city, '')) LIKE LOWER(?)");
+      params.push(`%${city}%`);
+    }
+
+    const state = String(filters?.state || "").trim();
+    if (state) {
+      where.push("LOWER(COALESCE(m.state, '')) LIKE LOWER(?)");
+      params.push(`%${state}%`);
+    }
+
+    const zip = String(filters?.zip || "").trim();
+    if (zip) {
+      where.push("LOWER(COALESCE(m.zip, '')) LIKE LOWER(?)");
+      params.push(`%${zip}%`);
+    }
+
+    const sortByInput = String(filters?.sortBy || "last_name").trim().toLowerCase();
+    const sortDir = String(filters?.sortDir || "asc").trim().toLowerCase() === "desc" ? "DESC" : "ASC";
+    const sortExprByKey = {
+      last_name: "LOWER(COALESCE(m.last_name, '')), LOWER(COALESCE(m.first_name, '')), m.id",
+      first_name: "LOWER(COALESCE(m.first_name, '')), LOWER(COALESCE(m.last_name, '')), m.id",
+      join_date: "date(COALESCE(m.join_date, m.created_at, '1970-01-01')), LOWER(COALESCE(m.last_name, '')), LOWER(COALESCE(m.first_name, '')), m.id",
+      status: "LOWER(COALESCE(m.status, 'active')), LOWER(COALESCE(m.last_name, '')), LOWER(COALESCE(m.first_name, '')), m.id",
+      city: "LOWER(COALESCE(m.city, '')), LOWER(COALESCE(m.last_name, '')), LOWER(COALESCE(m.first_name, '')), m.id",
+      created_at: "datetime(COALESCE(m.created_at, '1970-01-01')), LOWER(COALESCE(m.last_name, '')), LOWER(COALESCE(m.first_name, '')), m.id",
+    };
+    const sortExpr = sortExprByKey[sortByInput] || sortExprByKey.last_name;
+
+    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+    const rows = database.prepare(`
+      SELECT m.*, c.name AS category_name
+      FROM members m
+      LEFT JOIN categories c ON m.category_id = c.id
+      ${whereSql}
+      ORDER BY ${sortExpr} ${sortDir}
+    `).all(...params);
+
+    if (!filters?.includeDuesStatus) {
+      return rows;
+    }
+
+    return rows.map((member) => {
+      try {
+        return { ...member, duesStatus: calculateMemberDuesStatus(Number(member.id)) };
+      } catch {
+        return { ...member, duesStatus: null };
+      }
+    });
   });
   register(registry, "db:members:get", (id) => database.prepare("SELECT m.*, c.name AS category_name FROM members m LEFT JOIN categories c ON m.category_id = c.id WHERE m.id = ?").get(id) || null);
 
@@ -1636,31 +1753,18 @@ function registerIpcHandlers() {
     const member = database.prepare("SELECT id, first_name, last_name FROM members WHERE id = ?").get(memberId);
     if (!member) return { success: false, error: "Member not found" };
 
-    const first = String(member.first_name || "").trim().toLowerCase();
-    const last = String(member.last_name || "").trim().toLowerCase();
-    if (first === "general" && last === "contribution") {
-      return { success: false, error: "General Contribution member cannot be deleted." };
-    }
-
     const fullName = [member.first_name, member.last_name].map((part) => String(part || "").trim()).filter(Boolean).join(" ") || null;
 
     const runDelete = database.transaction(() => {
-      const generalContributionId = ensureGeneralContributionMemberId(database);
       database.prepare(`
         UPDATE transactions
         SET
           contributor_name = COALESCE(NULLIF(TRIM(COALESCE(contributor_name, '')), ''), ?),
-          contributor_type = CASE
-            WHEN ? = member_id THEN 'NON_MEMBER'
-            ELSE COALESCE(contributor_type, 'NON_MEMBER')
-          END,
-          member_id = CASE
-            WHEN ? = member_id THEN ?
-            ELSE member_id
-          END,
+          contributor_type = CASE WHEN ? = member_id THEN 'NON_MEMBER' ELSE COALESCE(contributor_type, 'NON_MEMBER') END,
+          member_id = CASE WHEN ? = member_id THEN NULL ELSE member_id END,
           updated_at = datetime('now')
         WHERE member_id = ?
-      `).run(fullName, memberId, memberId, generalContributionId, memberId);
+      `).run(fullName, memberId, memberId, memberId);
 
       return database.prepare("DELETE FROM members WHERE id = ?").run(memberId).changes > 0;
     });
@@ -1671,7 +1775,6 @@ function registerIpcHandlers() {
   });
 
   register(registry, "admin:listOrphanTransactions", () => {
-    const generalContributionId = ensureGeneralContributionMemberId(database);
     return database.prepare(`
       SELECT
         t.id,
@@ -1691,26 +1794,21 @@ function registerIpcHandlers() {
         e.name AS event_name,
         CASE
           WHEN t.member_id IS NULL OR m.id IS NULL THEN 'ORPHAN'
-          WHEN t.member_id = ? THEN 'GENERAL_CONTRIBUTION'
           ELSE 'ASSIGNED'
         END AS attribution_status,
         COALESCE(
           NULLIF(TRIM(COALESCE(t.contributor_name, '')), ''),
           NULLIF(TRIM(COALESCE(t.note, '')), '')
         ) AS previous_contributor_name,
-        ? AS suggested_member_id
+        NULL AS suggested_member_id
       FROM transactions t
       LEFT JOIN members m ON m.id = t.member_id
       LEFT JOIN campaigns c ON c.id = t.campaign_id
       LEFT JOIN events e ON e.id = t.event_id
       WHERE COALESCE(t.is_deleted, 0) = 0
-        AND (
-          t.member_id IS NULL
-          OR m.id IS NULL
-          OR t.member_id = ?
-        )
+        AND (t.member_id IS NULL OR m.id IS NULL)
       ORDER BY date(t.occurred_on) DESC, t.id DESC
-    `).all(generalContributionId, generalContributionId, generalContributionId);
+    `).all();
   });
 
   register(registry, "admin:assignOrphanTransaction", (transactionId, memberId) => {
@@ -1725,18 +1823,14 @@ function registerIpcHandlers() {
     const targetMember = database.prepare("SELECT id, first_name, last_name FROM members WHERE id = ?").get(nextMemberId);
     if (!targetMember) return { success: false, error: "Member not found" };
 
-    const targetFirst = String(targetMember.first_name || "").trim().toLowerCase();
-    const targetLast = String(targetMember.last_name || "").trim().toLowerCase();
-    const isGeneralContribution = targetFirst === "general" && targetLast === "contribution";
-
     const result = database.prepare(`
       UPDATE transactions
       SET
         member_id = ?,
-        contributor_type = ?,
+        contributor_type = 'MEMBER',
         updated_at = datetime('now')
       WHERE id = ?
-    `).run(nextMemberId, isGeneralContribution ? "NON_MEMBER" : "MEMBER", txnId);
+    `).run(nextMemberId, txnId);
 
     if (!result.changes) return { success: false, error: "No transaction updated" };
     return { success: true, transactionId: txnId, memberId: nextMemberId };
@@ -1792,7 +1886,12 @@ function registerIpcHandlers() {
   });
 
   register(registry, "db:transactions:list", (filters = {}) => {
-    const where = ["COALESCE(t.is_deleted, 0) = 0"];
+    const where = [
+      "COALESCE(t.is_deleted, 0) = 0",
+      "UPPER(COALESCE(t.transaction_type, '')) <> 'GENERAL_CONTRIBUTION'",
+      "UPPER(COALESCE(t.type, '')) <> 'GENERAL_CONTRIBUTION'",
+      "(t.member_id IS NOT NULL OR t.event_id IS NOT NULL OR t.campaign_id IS NOT NULL OR UPPER(COALESCE(t.contributor_type, '')) = 'NON_MEMBER')",
+    ];
     const params = [];
     if (filters.startDate) {
       where.push("date(t.occurred_on) >= date(?)");
@@ -1821,7 +1920,9 @@ function registerIpcHandlers() {
   register(registry, "db:transactions:create", (txn = {}) => {
     const normalizedTxnType = normalizeTransactionType(txn.transaction_type ?? txn.txn_type ?? txn.type ?? "DONATION");
     const normalizedType = mapTxnTypeToLedgerType(txn.type ?? normalizedTxnType);
-    return database.prepare("INSERT INTO transactions (type, transaction_type, amount_cents, occurred_on, member_id, event_id, campaign_id, note, contributor_name, contributor_email, payment_method, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(normalizedType, normalizedTxnType, toCents(txn.amount_cents ?? txn.amount), txn.occurred_on ?? txn.date ?? new Date().toISOString().slice(0, 10), txn.member_id ?? null, txn.event_id ?? null, txn.campaign_id ?? null, txn.note ?? null, txn.contributor_name ?? null, txn.contributor_email ?? null, txn.payment_method ?? null, txn.status ?? "COMPLETED").lastInsertRowid;
+    const attribution = validateContributionAttribution(database, txn, { allowNonMember: true, requireNonMemberName: false });
+    ensureDuesAttributedToMember(normalizedTxnType, attribution);
+    return database.prepare("INSERT INTO transactions (type, transaction_type, amount_cents, occurred_on, member_id, event_id, campaign_id, note, contributor_name, contributor_email, payment_method, status, contributor_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(normalizedType, normalizedTxnType, toCents(txn.amount_cents ?? txn.amount), txn.occurred_on ?? txn.date ?? new Date().toISOString().slice(0, 10), attribution.memberId, attribution.eventId, attribution.campaignId, txn.note ?? null, attribution.contributorName ?? (txn.contributor_name ?? null), txn.contributor_email ?? null, txn.payment_method ?? null, txn.status ?? "COMPLETED", attribution.contributorType).lastInsertRowid;
   });
   register(registry, "db:transactions:update", (id, updates = {}) => {
     const normalizedTxnType = updates.transaction_type || updates.txn_type || updates.type
@@ -1848,21 +1949,26 @@ function registerIpcHandlers() {
     return { success: true };
   });
   register(registry, "transaction:addManualPayment", (data = {}) => {
-    const memberId = data.member_id ?? data.memberId ?? null;
-    const campaignId = data.campaign_id ?? data.campaignId ?? null;
-    const eventId = data.event_id ?? data.eventId ?? null;
+    const attribution = validateContributionAttribution(database, data, { allowNonMember: true, requireNonMemberName: true });
     const paymentMethod = data.payment_method ?? data.method ?? null;
     const note = data.note ?? data.notes ?? null;
     const normalizedTxnType = normalizeTransactionType(data.transaction_type ?? data.type ?? "DUES");
+    ensureDuesAttributedToMember(normalizedTxnType, attribution);
     const normalizedType = mapTxnTypeToLedgerType(normalizedTxnType);
-    const id = database.prepare("INSERT INTO transactions (type, transaction_type, amount_cents, occurred_on, member_id, campaign_id, event_id, note, payment_method, status, contributor_type, contributor_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(normalizedType, normalizedTxnType, toCents(data.amount_cents ?? data.amount), data.occurred_on ?? data.date ?? new Date().toISOString().slice(0, 10), memberId, campaignId, eventId, note, paymentMethod ?? "manual", data.status ?? "COMPLETED", data.contributor_type ?? data.contributorType ?? (memberId ? "MEMBER" : "NON_MEMBER"), data.contributor_name ?? data.contributorName ?? null).lastInsertRowid;
+    const id = database.prepare("INSERT INTO transactions (type, transaction_type, amount_cents, occurred_on, member_id, campaign_id, event_id, note, payment_method, status, contributor_type, contributor_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(normalizedType, normalizedTxnType, toCents(data.amount_cents ?? data.amount), data.occurred_on ?? data.date ?? new Date().toISOString().slice(0, 10), attribution.memberId, attribution.campaignId, attribution.eventId, note, paymentMethod ?? "manual", data.status ?? "COMPLETED", attribution.contributorType, attribution.contributorName ?? data.contributor_name ?? data.contributorName ?? null).lastInsertRowid;
     return { success: true, id };
   });
 
   register(registry, "finance:txns:list", (memberId, includeVoided = false) => {
     if (!memberId) return [];
     const sql = includeVoided
-      ? `SELECT t.id, t.member_id, t.amount_cents, t.occurred_on AS txn_date, COALESCE(t.transaction_type, 'DONATION') AS txn_type,
+      ? `SELECT t.id, t.member_id, t.amount_cents, t.occurred_on AS txn_date,
+             CASE
+               WHEN LOWER(COALESCE(t.type, '')) IN ('dues','dues_payment','invoice','receipt') THEN 'DUES'
+               WHEN UPPER(COALESCE(t.transaction_type, '')) <> '' THEN UPPER(COALESCE(t.transaction_type, ''))
+               WHEN UPPER(COALESCE(t.type, '')) <> '' THEN UPPER(COALESCE(t.type, ''))
+               ELSE 'DONATION'
+             END AS txn_type,
              t.reference, t.note AS notes, t.payment_method, t.status, COALESCE(t.is_deleted, 0) AS is_deleted, t.deleted_at,
              t.campaign_id, t.event_id, c.name AS campaign_name, e.name AS event_name
         FROM transactions t
@@ -1870,7 +1976,13 @@ function registerIpcHandlers() {
         LEFT JOIN events e ON e.id = t.event_id
           WHERE t.member_id = ?
           ORDER BY date(t.occurred_on) DESC, t.id DESC`
-      : `SELECT t.id, t.member_id, t.amount_cents, t.occurred_on AS txn_date, COALESCE(t.transaction_type, 'DONATION') AS txn_type,
+      : `SELECT t.id, t.member_id, t.amount_cents, t.occurred_on AS txn_date,
+             CASE
+               WHEN LOWER(COALESCE(t.type, '')) IN ('dues','dues_payment','invoice','receipt') THEN 'DUES'
+               WHEN UPPER(COALESCE(t.transaction_type, '')) <> '' THEN UPPER(COALESCE(t.transaction_type, ''))
+               WHEN UPPER(COALESCE(t.type, '')) <> '' THEN UPPER(COALESCE(t.type, ''))
+               ELSE 'DONATION'
+             END AS txn_type,
              t.reference, t.note AS notes, t.payment_method, t.status, COALESCE(t.is_deleted, 0) AS is_deleted, t.deleted_at,
              t.campaign_id, t.event_id, c.name AS campaign_name, e.name AS event_name
         FROM transactions t
@@ -1883,14 +1995,33 @@ function registerIpcHandlers() {
 
   register(registry, "finance:txns:getById", (id) => {
     if (!id) return null;
-    return database.prepare("SELECT id, member_id, amount_cents, occurred_on AS txn_date, COALESCE(transaction_type, 'DONATION') AS txn_type, reference, note AS notes, payment_method, status, COALESCE(is_deleted, 0) AS is_deleted, deleted_at FROM transactions WHERE id = ?").get(id) || null;
+    return database.prepare(`
+      SELECT id,
+             member_id,
+             amount_cents,
+             occurred_on AS txn_date,
+             CASE
+               WHEN LOWER(COALESCE(type, '')) IN ('dues','dues_payment','invoice','receipt') THEN 'DUES'
+               WHEN UPPER(COALESCE(transaction_type, '')) <> '' THEN UPPER(COALESCE(transaction_type, ''))
+               WHEN UPPER(COALESCE(type, '')) <> '' THEN UPPER(COALESCE(type, ''))
+               ELSE 'DONATION'
+             END AS txn_type,
+             reference,
+             note AS notes,
+             payment_method,
+             status,
+             COALESCE(is_deleted, 0) AS is_deleted,
+             deleted_at
+      FROM transactions
+      WHERE id = ?
+    `).get(id) || null;
   });
 
   register(registry, "finance:txns:create", (data = {}) => {
-    const memberId = Number(data.member_id ?? data.memberId ?? 0);
+    const attribution = validateContributionAttribution(database, data, { allowNonMember: true, requireNonMemberName: true });
     const amount = toCents(data.amount_cents ?? data.amount);
     const txnType = normalizeTransactionType(data.txn_type ?? data.transaction_type ?? data.type ?? "DONATION");
-    if (!memberId) return { success: false, error: "member_id is required" };
+    ensureDuesAttributedToMember(txnType, attribution);
     if (!Number.isFinite(amount) || amount === 0) return { success: false, error: "Amount must be non-zero" };
 
     const id = database.prepare(`
@@ -1912,12 +2043,12 @@ function registerIpcHandlers() {
       txnType,
       amount,
       data.txn_date ?? data.date ?? data.occurred_on ?? new Date().toISOString().slice(0, 10),
-      memberId,
+      attribution.memberId,
       data.reference ?? null,
       data.notes ?? data.note ?? null,
       String(data.payment_method || "manual").toUpperCase(),
       data.status ?? "COMPLETED",
-      "MEMBER",
+      attribution.contributorType,
     ).lastInsertRowid;
 
     return { success: true, id };
@@ -2335,13 +2466,11 @@ function registerIpcHandlers() {
       return { success: false, error: "Amount must be greater than 0." };
     }
 
-    const memberId = data.memberId ?? data.member_id ?? null;
-    const campaignId = data.campaignId ?? data.campaign_id ?? null;
-    const eventId = data.eventId ?? data.event_id ?? null;
+    const attribution = validateContributionAttribution(database, data, { allowNonMember: true, requireNonMemberName: true });
     const transactionType = normalizeTransactionType(data.transaction_type ?? data.type);
+    ensureDuesAttributedToMember(transactionType, attribution);
     const ledgerType = mapTxnTypeToLedgerType(transactionType);
     const paymentMethod = String(data.method || data.payment_method || "manual").trim().toUpperCase();
-    const contributorType = data.contributorType ?? data.contributor_type ?? (memberId ? "MEMBER" : "NON_MEMBER");
     const isPendingExternal = paymentMethod === "CASHAPP" || paymentMethod === "ZELLE" || paymentMethod === "VENMO";
     let proofPath = null;
     if (isPendingExternal && data.proofBase64) {
@@ -2375,16 +2504,16 @@ function registerIpcHandlers() {
       transactionType,
       amount,
       data.date ?? data.occurred_on ?? new Date().toISOString().slice(0, 10),
-      memberId,
-      campaignId,
-      eventId,
+      attribution.memberId,
+      attribution.campaignId,
+      attribution.eventId,
       data.notes ?? data.note ?? null,
       data.reference ?? null,
       proofPath,
       paymentMethod,
       isPendingExternal ? "PENDING_EXTERNAL" : "COMPLETED",
-      contributorType,
-      data.contributorName ?? data.contributor_name ?? null,
+      attribution.contributorType,
+      attribution.contributorName ?? data.contributorName ?? data.contributor_name ?? null,
     );
 
     return { success: true, id: result.lastInsertRowid, pending: isPendingExternal };
@@ -2867,7 +2996,20 @@ function registerIpcHandlers() {
     const txCount = database.prepare("SELECT COUNT(*) AS c FROM transactions WHERE member_id = ? AND COALESCE(is_deleted, 0) = 0").get(id)?.c ?? 0;
     const total = database.prepare("SELECT COALESCE(SUM(amount_cents), 0) AS s FROM transactions WHERE member_id = ? AND COALESCE(is_deleted, 0) = 0").get(id)?.s ?? 0;
     const transactions = database.prepare(`
-      SELECT t.id, t.occurred_on, t.transaction_type, t.type, t.amount_cents, t.note, t.payment_method, t.status,
+      SELECT t.id,
+             t.occurred_on,
+             CASE
+               WHEN LOWER(COALESCE(t.type, '')) IN ('dues','dues_payment','invoice','receipt') THEN 'DUES'
+               WHEN UPPER(COALESCE(t.transaction_type, '')) <> '' THEN UPPER(COALESCE(t.transaction_type, ''))
+               WHEN UPPER(COALESCE(t.type, '')) <> '' THEN UPPER(COALESCE(t.type, ''))
+               ELSE 'DONATION'
+             END AS txn_type,
+             t.transaction_type,
+             t.type,
+             t.amount_cents,
+             t.note,
+             t.payment_method,
+             t.status,
              t.campaign_id, t.event_id, c.name AS campaign_name, e.name AS event_name
       FROM transactions t
       LEFT JOIN campaigns c ON c.id = t.campaign_id
@@ -2956,17 +3098,31 @@ function registerIpcHandlers() {
   });
 
   const buildReportsTxnWhere = (filters = {}, alias = "t") => {
-    const where = [`COALESCE(${alias}.is_deleted, 0) = 0`];
+    const typeExpr = `CASE WHEN LOWER(COALESCE(${alias}.type, '')) IN ('dues','dues_payment','invoice','receipt') THEN 'DUES' ELSE UPPER(COALESCE(${alias}.transaction_type, ${alias}.type, '')) END`;
+    const dateExpr = `date(COALESCE(${alias}.occurred_on, ${alias}.created_at))`;
+    const where = [
+      `COALESCE(${alias}.is_deleted, 0) = 0`,
+      `${typeExpr} <> 'GENERAL_CONTRIBUTION'`,
+      `(
+        ${alias}.member_id IS NOT NULL
+        OR ${alias}.event_id IS NOT NULL
+        OR ${alias}.campaign_id IS NOT NULL
+        OR UPPER(COALESCE(${alias}.contributor_type, '')) = 'NON_MEMBER'
+      )`,
+      `(${alias}.member_id IS NULL OR EXISTS (SELECT 1 FROM members _m WHERE _m.id = ${alias}.member_id))`,
+      `(${alias}.event_id IS NULL OR EXISTS (SELECT 1 FROM events _e WHERE _e.id = ${alias}.event_id))`,
+      `(${alias}.campaign_id IS NULL OR EXISTS (SELECT 1 FROM campaigns _c WHERE _c.id = ${alias}.campaign_id))`,
+    ];
     const params = [];
 
     const startDate = String(filters?.startDate || "").trim();
     const endDate = String(filters?.endDate || "").trim();
     if (startDate) {
-      where.push(`date(${alias}.occurred_on) >= date(?)`);
+      where.push(`${dateExpr} >= date(?)`);
       params.push(startDate);
     }
     if (endDate) {
-      where.push(`date(${alias}.occurred_on) <= date(?)`);
+      where.push(`${dateExpr} <= date(?)`);
       params.push(endDate);
     }
 
@@ -2974,7 +3130,7 @@ function registerIpcHandlers() {
       ? filters.types.map((value) => String(value || "").trim().toUpperCase()).filter(Boolean)
       : [];
     if (types.length > 0) {
-      where.push(`UPPER(COALESCE(${alias}.transaction_type, '')) IN (${types.map(() => "?").join(",")})`);
+      where.push(`${typeExpr} IN (${types.map(() => "?").join(",")})`);
       params.push(...types);
     }
 
@@ -3000,17 +3156,29 @@ function registerIpcHandlers() {
     const transactions = database.prepare(`SELECT COUNT(*) AS c FROM transactions t WHERE ${whereSql}`).get(...params)?.c ?? 0;
     const revenue = database.prepare(`SELECT COALESCE(SUM(CASE WHEN t.amount_cents > 0 THEN t.amount_cents ELSE 0 END), 0) AS s FROM transactions t WHERE ${whereSql}`).get(...params)?.s ?? 0;
     const expenses = database.prepare(`SELECT COALESCE(SUM(CASE WHEN t.amount_cents < 0 THEN t.amount_cents ELSE 0 END), 0) AS s FROM transactions t WHERE ${whereSql}`).get(...params)?.s ?? 0;
-    return { members, transactions, revenue_cents: revenue, expenses_cents: Math.abs(expenses), net_cents: revenue + expenses };
+    const duesCollected = database.prepare(`
+      SELECT COALESCE(SUM(CASE WHEN t.amount_cents > 0 AND t.member_id IS NOT NULL AND (LOWER(COALESCE(t.type, '')) = 'dues' OR UPPER(COALESCE(t.transaction_type, '')) = 'DUES') THEN t.amount_cents ELSE 0 END), 0) AS s
+      FROM transactions t
+      WHERE ${whereSql}
+    `).get(...params)?.s ?? 0;
+    return {
+      members,
+      transactions,
+      revenue_cents: revenue,
+      expenses_cents: Math.abs(expenses),
+      net_cents: revenue + expenses,
+      dues_collected: duesCollected,
+    };
   });
 
   register(registry, "reports:timeseries", (filters = {}) => {
     const { whereSql, params } = buildReportsTxnWhere(filters, "t");
     const groupBy = String(filters?.groupBy || "month").toLowerCase();
     const periodExpr = groupBy === "day"
-      ? "date(t.occurred_on)"
+      ? "date(COALESCE(t.occurred_on, t.created_at))"
       : groupBy === "week"
-        ? "strftime('%Y-W%W', date(t.occurred_on))"
-        : "substr(t.occurred_on, 1, 7)";
+        ? "strftime('%Y-W%W', date(COALESCE(t.occurred_on, t.created_at)))"
+        : "strftime('%Y-%m', date(COALESCE(t.occurred_on, t.created_at)))";
 
     return database.prepare(`
       SELECT ${periodExpr} AS period,

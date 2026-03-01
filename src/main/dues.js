@@ -54,7 +54,14 @@ function calculateMemberDuesStatus(memberId) {
   const duesPayments = db
     .prepare(
       `SELECT COALESCE(SUM(amount_cents), 0) as total FROM transactions
-       WHERE member_id = ? AND transaction_type = 'DUES' AND COALESCE(is_deleted, 0) = 0 AND COALESCE(organization_id, 1) = 1 AND COALESCE(status, 'COMPLETED') = 'COMPLETED'`
+       WHERE member_id = ?
+         AND (
+           LOWER(COALESCE(type, '')) IN ('dues', 'dues_payment', 'invoice', 'receipt')
+           OR UPPER(COALESCE(transaction_type, '')) = 'DUES'
+         )
+         AND COALESCE(is_deleted, 0) = 0
+         AND UPPER(COALESCE(status, 'COMPLETED')) = 'COMPLETED'
+         AND date(COALESCE(occurred_on, created_at)) <= date('now')`
     )
     .get(memberId);
   const totalPaidCents = Number(duesPayments?.total ?? 0) || 0;

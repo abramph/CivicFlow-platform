@@ -59,7 +59,7 @@ function txnContributorLabel(txn) {
   if (memberName) return memberName;
   const contributorName = String(txn?.contributor_name || '').trim();
   if (contributorName) return contributorName;
-  return 'General Contribution';
+  return 'Unattributed Contributor';
 }
 
 function formatReceiptTxnType(txnType, campaignName, eventName) {
@@ -207,7 +207,7 @@ function buildReceiptPDF(db, transactionId) {
 
     const contributorName = String(txn.contributor_name || '').trim() || null;
     const memberDisplayName = member ? `${member.first_name || ''} ${member.last_name || ''}`.trim() : '';
-    const payerLabel = memberDisplayName || contributorName || 'General Contribution';
+    const payerLabel = memberDisplayName || contributorName || 'Unattributed Contributor';
     const receiptTypeLabel = formatReceiptTxnType(txn.transaction_type || txn.type, campaignName, eventName);
     const paymentMethodLabel = formatPaymentMethodLabel(txn.payment_method);
     const statusLabel = String(txn.status || 'COMPLETED').replace(/_/g, ' ');

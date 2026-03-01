@@ -28,18 +28,10 @@ export function DataCleanup() {
   const [assignSelections, setAssignSelections] = useState({});
   const [viewFilter, setViewFilter] = useState('all');
 
-  const generalContributionId = useMemo(() => {
-    const match = (members || []).find(
-      (m) => (m.first_name || '').toLowerCase() === 'general'
-        && (m.last_name || '').toLowerCase() === 'contribution'
-    );
-    return match?.id ?? null;
-  }, [members]);
-
   const isRecoveredRow = (row) => {
     const status = String(row?.attribution_status || '').toUpperCase();
     const previousName = String(row?.previous_contributor_name || '').trim();
-    return status === 'GENERAL_CONTRIBUTION' && previousName.length > 0;
+    return status === 'ORPHAN' && previousName.length > 0;
   };
 
   const recoveredCount = useMemo(
@@ -73,16 +65,7 @@ export function DataCleanup() {
       });
       setMembers(sortedMembers);
       setOrphans(orphanRows || []);
-      const generalId = (sortedMembers || []).find(
-        (m) => (m.first_name || '').toLowerCase() === 'general' && (m.last_name || '').toLowerCase() === 'contribution'
-      )?.id ?? null;
-      if (generalId) {
-        const nextSelections = {};
-        (orphanRows || []).forEach((t) => {
-          nextSelections[t.id] = generalId;
-        });
-        setAssignSelections(nextSelections);
-      }
+      setAssignSelections({});
     } catch (err) {
       setMessage({ type: 'error', text: err?.message || 'Failed to load orphan transactions.' });
     } finally {
@@ -104,7 +87,7 @@ export function DataCleanup() {
   }, [orgId]);
 
   const handleAssign = async (txnId) => {
-    const memberId = assignSelections[txnId] || generalContributionId;
+    const memberId = assignSelections[txnId];
     if (!memberId) {
       setMessage({ type: 'error', text: 'Select a member to assign.' });
       return;
@@ -176,7 +159,7 @@ export function DataCleanup() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-2xl font-bold text-slate-800">Data Cleanup</h2>
-          <p className="text-slate-600 mt-1">Review orphaned and General Contribution-attributed transactions, and recover prior contributor names when available.</p>
+          <p className="text-slate-600 mt-1">Review orphaned transactions and recover prior contributor names when available.</p>
         </div>
         <button
           onClick={loadData}
@@ -228,7 +211,7 @@ export function DataCleanup() {
           <div className="p-6 text-slate-500">
             {viewFilter === 'recovered'
               ? 'No recovered transactions found in this view.'
-              : 'No orphan or General Contribution-attributed transactions found.'}
+              : 'No orphan transactions found.'}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -255,9 +238,7 @@ export function DataCleanup() {
                     <td className="px-4 py-3 text-slate-700">
                       <div className="flex items-center gap-2">
                         <span>
-                          {t.attribution_status === 'GENERAL_CONTRIBUTION'
-                            ? 'General Contribution'
-                            : t.attribution_status === 'ORPHAN'
+                          {t.attribution_status === 'ORPHAN'
                               ? 'Orphan / Missing Member'
                               : ((`${t.last_name || ''}, ${t.first_name || ''}`).trim().replace(/^,\s*/, '') || 'Assigned')}
                         </span>
@@ -274,7 +255,7 @@ export function DataCleanup() {
                     <td className="px-4 py-3">
                       <select
                         className="w-48 rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
-                        value={assignSelections[t.id] ?? generalContributionId ?? ''}
+                        value={assignSelections[t.id] ?? ''}
                         onChange={(e) => setAssignSelections((prev) => ({ ...prev, [t.id]: Number(e.target.value) || '' }))}
                       >
                         <option value="">Select member…</option>

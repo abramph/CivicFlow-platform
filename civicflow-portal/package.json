@@ -4,15 +4,23 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:clean": "node ./scripts/dev-clean.js",
+    "dev:clean:kill": "node ./scripts/dev-clean.js --kill",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "uf:generate": "prisma generate --schema=src/modules/unionflow/prisma/schema.sqlite.prisma",
+    "uf:migrate": "prisma migrate dev --schema=src/modules/unionflow/prisma/schema.sqlite.prisma",
+    "uf:seed": "tsx src/modules/unionflow/prisma/seed.ts"
   },
   "dependencies": {
+    "@prisma/client": "^6.16.2",
     "next": "16.1.6",
     "next-auth": "^4.24.13",
+    "nodemailer": "^7.0.5",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -21,11 +29,14 @@
     "@types/babel__traverse": "^7.28.0",
     "@types/http-cache-semantics": "^4.2.0",
     "@types/node": "^20",
+    "@types/nodemailer": "^7.0.11",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
+    "prisma": "^6.16.2",
     "tailwindcss": "^4",
+    "tsx": "^4.21.0",
     "typescript": "^5"
   }
 }

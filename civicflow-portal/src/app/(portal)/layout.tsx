@@ -7,6 +7,8 @@ import { LogoutButton } from "@/components/LogoutButton";
 const navItems = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/payments", label: "Payments" },
+  { href: "/payment-links", label: "Payment Links" },
+  { href: "/unionflow", label: "UnionFlow" },
 ];
 
 export default async function PortalLayout({ children }: { children: React.ReactNode }) {

@@ -5,23 +5,38 @@ function registerStripeWebhook(app, db, { sendReceiptEmail } = {}) {
   if (!db) {
     throw new Error('registerStripeWebhook requires a database handle');
   }
-  const getGeneralContributionMemberId = (orgId = 1) => {
-    const row = db
-      .prepare("SELECT id FROM members WHERE first_name = 'General' AND last_name = 'Contribution' AND COALESCE(organization_id, 1) = ? LIMIT 1")
-      .get(orgId);
-    if (row?.id) return row.id;
-    const result = db
-      .prepare("INSERT INTO members (first_name, last_name, status, organization_id) VALUES ('General', 'Contribution', 'active', ?)")
-      .run(orgId);
-    return result.lastInsertRowid;
+  const toOptionalPositiveId = (value) => {
+    if (value == null || value === '') return null;
+    const normalized = Number(value);
+    if (!Number.isFinite(normalized) || normalized <= 0) return null;
+    return normalized;
   };
 
-  const ensureMemberId = (memberId, orgId = 1) => {
-    if (memberId !== undefined && memberId !== null && memberId !== '') {
-      const normalized = Number(memberId);
-      if (Number.isFinite(normalized) && normalized > 0) return normalized;
+  const validateAttribution = ({ memberId, campaignId, eventId, contributorType }) => {
+    const normalizedMemberId = toOptionalPositiveId(memberId);
+    const normalizedCampaignId = toOptionalPositiveId(campaignId);
+    const normalizedEventId = toOptionalPositiveId(eventId);
+    const normalizedContributorType = String(contributorType || '').trim().toUpperCase();
+
+    if (!normalizedMemberId && !normalizedCampaignId && !normalizedEventId && normalizedContributorType !== 'NON_MEMBER') {
+      throw new Error('Every contribution must be attributed to a Member, Non-Member, or Event.');
     }
-    return getGeneralContributionMemberId(orgId);
+    if (normalizedMemberId && !db.prepare('SELECT id FROM members WHERE id = ?').get(normalizedMemberId)) {
+      throw new Error('Selected member does not exist.');
+    }
+    if (normalizedCampaignId && !db.prepare('SELECT id FROM campaigns WHERE id = ?').get(normalizedCampaignId)) {
+      throw new Error('Selected campaign does not exist.');
+    }
+    if (normalizedEventId && !db.prepare('SELECT id FROM events WHERE id = ?').get(normalizedEventId)) {
+      throw new Error('Selected event does not exist.');
+    }
+
+    return {
+      memberId: normalizedMemberId,
+      campaignId: normalizedCampaignId,
+      eventId: normalizedEventId,
+      contributorType: normalizedContributorType || (normalizedMemberId ? 'MEMBER' : (normalizedCampaignId ? 'CAMPAIGN_REVENUE' : (normalizedEventId ? 'EVENT_REVENUE' : 'NON_MEMBER'))),
+    };
   };
 
   app.post('/webhook/stripe', async (req, res) => {
@@ -65,7 +80,7 @@ function registerStripeWebhook(app, db, { sendReceiptEmail } = {}) {
         const legacyType = mapTransactionTypeToLegacyType(txnType);
 
         if (amountCents > 0) {
-          const ensuredMemberId = ensureMemberId(memberId, orgId);
+          const attribution = validateAttribution({ memberId, campaignId, eventId, contributorType: metadata.contributorType });
           db.prepare(`
             INSERT INTO transactions (
               type,
@@ -75,6 +90,7 @@ function registerStripeWebhook(app, db, { sendReceiptEmail } = {}) {
               member_id,
               event_id,
               campaign_id,
+              contributor_type,
               note,
               organization_id,
               payment_method,
@@ -83,14 +99,15 @@ function registerStripeWebhook(app, db, { sendReceiptEmail } = {}) {
               reference,
               is_deleted
             )
-            VALUES (?, ?, ?, date('now'), ?, ?, ?, ?, ?, ?, 'COMPLETED', 'STRIPE', ?, 0)
+            VALUES (?, ?, ?, date('now'), ?, ?, ?, ?, ?, ?, ?, 'COMPLETED', 'STRIPE', ?, 0)
           `).run(
             legacyType,
             txnType,
             amountCents,
-            ensuredMemberId,
-            eventId,
-            campaignId,
+            attribution.memberId,
+            attribution.eventId,
+            attribution.campaignId,
+            attribution.contributorType,
             'Stripe Payment',
             orgId,
             'STRIPE',
@@ -99,7 +116,7 @@ function registerStripeWebhook(app, db, { sendReceiptEmail } = {}) {
 
           if (typeof sendReceiptEmail === 'function') {
             await sendReceiptEmail({
-              memberId: ensuredMemberId,
+              memberId: attribution.memberId,
               orgId,
               amountCents,
               provider: 'Stripe',
