@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
+    "smoke:activation": "node scripts/activation-smoke.js",
     "init": "node init-db.js",
     "migrate": "node migrate.js",
     "backup:db": "node backup-licenses-db.js",
