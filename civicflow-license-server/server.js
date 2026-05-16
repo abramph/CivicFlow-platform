@@ -163,8 +163,8 @@ function logLicenseApiRequest(route, body, reason) {
 }
 
 function respondLicenseApiNotFound(req, res) {
-  logLicenseApiRequest(req.originalUrl || req.path, req.body, "route_not_found");
-  return respondLicenseApiError(res, 404, "route_not_found", "License API route not found");
+  logLicenseApiRequest(req.originalUrl || req.path, req.body, "not_found");
+  return respondLicenseApiError(res, 404, "not_found", "License API route not found");
 }
 
 function buildServerLicenseResponse(license, activations = [], overrides = {}) {

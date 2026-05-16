@@ -489,7 +489,7 @@ test("license API returns JSON for unsupported plural routes", async () => {
   assert.deepEqual(payload, {
     success: false,
     valid: false,
-    reason: "route_not_found",
+    reason: "not_found",
     error: "License API route not found",
   });
 });
