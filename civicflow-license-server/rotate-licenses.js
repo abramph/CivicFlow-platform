@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const db = require("./db");
 
-const KEY_PATTERN = /^[A-Z0-9]{4}(?:-[A-Z0-9]{4}){3}$/;
+const KEY_PATTERN = /^CF-[A-Z0-9]{4}(?:-[A-Z0-9]{4}){3}$/;
 
 function allAsync(sql, params = []) {
   return new Promise((resolve, reject) => {
@@ -37,7 +37,7 @@ function generateKey() {
   for (let i = 0; i < 16; i += 1) {
     raw += alphabet[bytes[i] % alphabet.length];
   }
-  return `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}-${raw.slice(12, 16)}`;
+  return `CF-${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}-${raw.slice(12, 16)}`;
 }
 
 function timestamp() {

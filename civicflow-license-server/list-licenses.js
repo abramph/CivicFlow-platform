@@ -35,9 +35,20 @@ function buildQuery(columns, activationColumns) {
     "l.id AS license_id",
     "l.license_key",
     columns.has("org_name") ? "COALESCE(l.org_name, '') AS org_name" : "'' AS org_name",
+    columns.has("customer_email") ? "COALESCE(l.customer_email, '') AS customer_email" : "'' AS customer_email",
     columns.has("plan") ? "COALESCE(l.plan, '') AS plan" : "'' AS plan",
+    columns.has("license_type")
+      ? "COALESCE(l.license_type, '') AS license_type"
+      : (
+        columns.has("expiry_date")
+          ? "CASE WHEN l.expiry_date IS NULL OR trim(COALESCE(l.expiry_date, '')) = '' THEN 'perpetual' ELSE 'annual' END AS license_type"
+          : "'perpetual' AS license_type"
+      ),
+    columns.has("status") ? "COALESCE(l.status, 'active') AS status" : "'active' AS status",
+    columns.has("issued_at") ? "l.issued_at" : "NULL AS issued_at",
     columns.has("seats_allowed") ? "COALESCE(l.seats_allowed, 0) AS seats_allowed" : "0 AS seats_allowed",
     columns.has("expiry_date") ? "l.expiry_date" : "NULL AS expiry_date",
+    columns.has("support_expiry_date") ? "l.support_expiry_date" : "NULL AS support_expiry_date",
     "COUNT(a.id) AS active_devices",
     deviceIdsExpr,
     deviceNamesExpr,
@@ -64,10 +75,14 @@ function printTable(rows) {
     ID: row.license_id,
     Key: row.license_key,
     Org: row.org_name || "-",
+    Email: row.customer_email || "-",
     Plan: row.plan || "-",
+    Type: row.license_type || "-",
+    Status: row.status || "active",
     Seats: row.seats_allowed,
     Active: row.active_devices,
     Expires: row.expiry_date || "perpetual",
+    Support: row.support_expiry_date || "-",
     Devices: row.device_names || row.device_ids || "-",
   }));
 

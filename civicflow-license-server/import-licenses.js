@@ -45,6 +45,20 @@ function seatsForPlan(plan) {
   return normalizePlan(plan) === "Elite" ? 3 : 2;
 }
 
+function normalizeLicenseType(licenseType, expiryDate = null) {
+  const value = String(licenseType || "").trim().toLowerCase();
+  if (value === "trial") return "trial";
+  if (value === "perpetual" || value === "lifetime") return "perpetual";
+  if (value === "annual" || value === "yearly" || value === "subscription") return "annual";
+  return expiryDate ? "annual" : "perpetual";
+}
+
+function normalizeStatus(status) {
+  const value = String(status || "").trim().toLowerCase();
+  if (value === "revoked" || value === "disabled") return "revoked";
+  return "active";
+}
+
 function toExpiryDate(daysRaw, expiryDateRaw) {
   const explicit = String(expiryDateRaw || "").trim();
   if (explicit) return explicit;
@@ -66,7 +80,7 @@ function generateLicenseKey(plan) {
   for (let i = 0; i < 16; i += 1) {
     raw += alphabet[bytes[i] % alphabet.length];
   }
-  return `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}-${raw.slice(12, 16)}`;
+  return `CF-${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}-${raw.slice(12, 16)}`;
 }
 
 function loadRows(csvPath) {
@@ -120,7 +134,17 @@ function run() {
       return;
     }
 
-    const optionalColumns = ["plan", "org_name", "seats_allowed", "expiry_date"];
+    const optionalColumns = [
+      "plan",
+      "org_name",
+      "customer_email",
+      "license_type",
+      "status",
+      "issued_at",
+      "seats_allowed",
+      "expiry_date",
+      "support_expiry_date",
+    ];
     const insertColumns = ["license_key", ...optionalColumns.filter((col) => availableColumns.has(col))];
     const placeholders = insertColumns.map(() => "?").join(", ");
 
@@ -143,15 +167,25 @@ function run() {
 
         const plan = normalizePlan(row.plan);
         const seatsAllowed = Number(row.seats_allowed || seatsForPlan(plan));
-        const expiryDate = toExpiryDate(row.days, row.expiry_date);
+        const expiryDate = toExpiryDate(row.days, row.expiry_date || row.expires_at);
+        const customerEmail = String(row.customer_email || row.email || "").trim() || null;
+        const licenseType = normalizeLicenseType(row.license_type || row.type, expiryDate);
+        const status = normalizeStatus(row.status);
+        const issuedAt = String(row.issued_at || "").trim() || null;
+        const supportExpiryDate = String(row.support_expiry_date || row.support_expires_at || "").trim() || null;
         const licenseKey = String(row.license_key || "").trim() || generateLicenseKey(plan);
 
         const valueMap = {
           license_key: licenseKey,
           plan,
           org_name: orgName,
+          customer_email: customerEmail,
+          license_type: licenseType,
+          status,
+          issued_at: issuedAt,
           seats_allowed: Number.isFinite(seatsAllowed) && seatsAllowed > 0 ? seatsAllowed : seatsForPlan(plan),
           expiry_date: expiryDate,
+          support_expiry_date: supportExpiryDate,
         };
 
         const values = insertColumns.map((column) => valueMap[column] ?? null);
