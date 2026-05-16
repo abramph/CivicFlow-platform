@@ -3,7 +3,7 @@ const db = require("./db");
 const { envFlag } = require("./config");
 const { migrateDatabase } = require("./migrate");
 
-const LICENSE_KEY_PATTERN = /^CF-[A-Z0-9]{4}(?:-[A-Z0-9]{4}){3}$/;
+const LICENSE_KEY_PATTERN = /^CF(?:-[A-Z0-9]{3,8}){4}$/;
 const ALLOW_SERVER_TRIAL_LICENSES = envFlag("ALLOW_SERVER_TRIAL_LICENSES", false);
 
 function allAsync(sql, params = []) {
@@ -160,7 +160,7 @@ function normalizeLicenseKey(value, label = "key") {
   const text = String(value || "").trim().toUpperCase();
   if (!text) return null;
   if (!LICENSE_KEY_PATTERN.test(text)) {
-    throw new Error(`${label} must match CF-XXXX-XXXX-XXXX-XXXX`);
+    throw new Error(`${label} must match a valid CivicFlow license key format`);
   }
   return text;
 }

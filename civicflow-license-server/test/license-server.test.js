@@ -260,6 +260,30 @@ test("new perpetual purchase creates a perpetual license with one year of suppor
   assert.equal(result.details.summary.supportExpiresAt, "2027-01-15");
 });
 
+test("legacy CivicFlow license keys can activate through plural route aliases", async () => {
+  await createLicense({
+    orgName: "ULAB",
+    customerEmail: "ops@ulab.example",
+    plan: "Essential",
+    licenseType: "perpetual",
+    seatsAllowed: 5,
+    licenseKey: "CF-PERP-2026-ULAB-001",
+    environment: "prod",
+  });
+
+  const { response, payload } = await postJson(`${baseUrl}/api/licenses/activate`, {
+    licenseKey: "CF-PERP-2026-ULAB-001",
+    deviceFingerprint: "legacy-device-001",
+    deviceName: "Legacy Test Device",
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.success, true);
+  assert.equal(payload.valid, true);
+  assert.equal(payload.environment, "prod");
+  assert.ok(payload.activationToken);
+});
+
 test("new annual purchase creates an annual license with a one-year expiry", async () => {
   const result = await processLicensePurchase({
     stripeEventId: "evt_annual_001",

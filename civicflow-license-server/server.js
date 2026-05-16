@@ -87,6 +87,7 @@ function normalizeLicenseRequestBody(req) {
     deviceName: firstTrimmed(body.deviceName, body.device_name),
     activationToken: firstTrimmed(body.activationToken, body.activation_token, body.token),
     email: firstTrimmed(body.email),
+    environment: parseEnvironmentArg(body.environment, "prod"),
   };
 
   Object.assign(body, normalized);
@@ -241,7 +242,7 @@ function buildManualLicenseInput(body = {}, actorType = "admin", actorId = null)
     seatsAllowed: body.seatsAllowed,
     expiryDate: body.expiryDate || body.expiry_date || null,
     supportExpiryDate: body.supportExpiryDate || body.support_expiry_date || null,
-    environment: body.environment || "test",
+    environment: body.environment || "prod",
     notes: body.notes,
     actorType,
     actorId,
@@ -364,7 +365,7 @@ function createApp() {
       const customerEmail = String(req.body.customerEmail || "").trim() || null;
       const organizationName = String(req.body.organizationName || "").trim() || null;
       const targetLicenseKey = String(req.body.targetLicenseKey || "").trim() || null;
-      const environment = parseEnvironmentArg(req.body.environment || "test", "test");
+      const environment = parseEnvironmentArg(req.body.environment || "prod", "prod");
       const successUrl = String(req.body.successUrl || "").trim();
       const cancelUrl = String(req.body.cancelUrl || "").trim();
 
