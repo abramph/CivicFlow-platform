@@ -5,7 +5,7 @@ import { LoginForm } from "@/components/LoginForm";
 
 export default async function LoginPage() {
   const session = await getServerSession(authOptions);
-  if (session?.api_key) {
+  if (session?.userId || session?.api_key) {
     redirect("/dashboard");
   }
 

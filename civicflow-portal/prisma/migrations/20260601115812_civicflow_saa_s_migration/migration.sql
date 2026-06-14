@@ -1,0 +1,2 @@
+-- RenameIndex
+ALTER INDEX "CommunicationLog_organizationId_followUpRequired_followUpDate_i" RENAME TO "CommunicationLog_organizationId_followUpRequired_followUpDa_idx";

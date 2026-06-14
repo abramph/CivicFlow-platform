@@ -6,20 +6,32 @@
     "dev": "next dev",
     "dev:clean": "node ./scripts/dev-clean.js",
     "dev:clean:kill": "node ./scripts/dev-clean.js --kill",
-    "build": "next build",
+    "build": "node ./scripts/prebuild-clean.mjs && next build",
     "start": "next start",
     "lint": "eslint",
-    "uf:generate": "prisma generate --schema=src/modules/unionflow/prisma/schema.sqlite.prisma",
-    "uf:migrate": "prisma migrate dev --schema=src/modules/unionflow/prisma/schema.sqlite.prisma",
-    "uf:seed": "tsx src/modules/unionflow/prisma/seed.ts"
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:deploy": "prisma migrate deploy",
+    "db:seed": "tsx prisma/seed.ts",
+    "db:studio": "prisma studio",
+    "typecheck": "tsc --noEmit",
+    "worker:reminders": "tsx src/workers/reminders.ts",
+    "worker:reports": "tsx src/workers/reports.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.840.0",
+    "@aws-sdk/s3-request-presigner": "^3.840.0",
     "@prisma/client": "^6.16.2",
+    "bcryptjs": "^2.4.3",
     "next": "16.1.6",
     "next-auth": "^4.24.13",
     "nodemailer": "^7.0.5",
+    "pdf-lib": "^1.17.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
+    "stripe": "^16.12.0",
+    "xlsx": "^0.18.5",
     "zod": "^3.25.76"
   },
   "devDependencies": {
@@ -27,6 +39,7 @@
     "@types/babel__generator": "^7.27.0",
     "@types/babel__template": "^7.4.4",
     "@types/babel__traverse": "^7.28.0",
+    "@types/bcryptjs": "^2.4.6",
     "@types/http-cache-semantics": "^4.2.0",
     "@types/node": "^20",
     "@types/nodemailer": "^7.0.11",
@@ -38,5 +51,8 @@
     "tailwindcss": "^4",
     "tsx": "^4.21.0",
     "typescript": "^5"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
   }
 }

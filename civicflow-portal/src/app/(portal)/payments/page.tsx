@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { approvePayment, getPayments, rejectPayment, sendReceiptEmail } from "@/lib/apiClient";
@@ -84,14 +85,28 @@ export default async function PaymentsPage({
           <h2 className="text-2xl font-bold">Payments</h2>
           <p className="mt-1 text-sm text-slate-600">Payment confirmations from cloud API</p>
         </div>
-        <form action={syncAction}>
-          <button
-            type="submit"
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href="/payment-links"
             className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
-            Sync Cloud Data
-          </button>
-        </form>
+            Payment Links
+          </Link>
+          <Link
+            href="/dashboard"
+            className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Dashboard
+          </Link>
+          <form action={syncAction}>
+            <button
+              type="submit"
+              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Sync Cloud Data
+            </button>
+          </form>
+        </div>
       </div>
 
       {params.msg ? (

@@ -1,0 +1,2 @@
+-- RenameIndex
+ALTER INDEX "PaymentImportItem_organizationId_sourceType_externalTransaction" RENAME TO "PaymentImportItem_organizationId_sourceType_externalTransac_key";

@@ -1,0 +1,2 @@
+-- RenameIndex
+ALTER INDEX "DuesCharge_organizationId_memberId_duesAccountId_periodStart_pe" RENAME TO "DuesCharge_organizationId_memberId_duesAccountId_periodStar_key";
