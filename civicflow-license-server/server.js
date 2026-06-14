@@ -1,5 +1,4 @@
 const express = require("express");
-const cors = require("cors");
 const crypto = require("crypto");
 const {
   activateLicenseSeat,
@@ -25,6 +24,7 @@ const {
   validateLicenseRecord,
 } = require("./license-service");
 const { envNumber } = require("./config");
+const { createRateLimiter } = require("./rate-limit");
 const {
   clearSessionCookie,
   isAdminConfigured,
@@ -305,11 +305,69 @@ async function resolveActivationForAdminRequest(licenseId, body = {}) {
   throw new Error("activationId or deviceId is required.");
 }
 
+// ── Rate limiters ─────────────────────────────────────────────────────────────
+const activateLimiter  = createRateLimiter({ windowMs: 5 * 60_000,  limit: 30 });
+const refreshLimiter   = createRateLimiter({ windowMs:      60_000,  limit: 60 });
+const checkoutLimiter  = createRateLimiter({ windowMs: 10 * 60_000, limit: 10 });
+const adminLoginLimiter = createRateLimiter({
+  windowMs: 15 * 60_000,
+  limit: 10,
+  // Key on IP only — not path — so all failed login attempts share a bucket.
+  keyFn: (req) => `admin-login:${req.ip || req.socket?.remoteAddress || "unknown"}`,
+});
+
+// ── CORS ──────────────────────────────────────────────────────────────────────
+// Electron renderers send Origin: null (file:) or an electron:// origin.
+// Any origin listed in CORS_ALLOWED_ORIGINS (comma-separated) is also allowed.
+// In non-production the wildcard is kept open for local development.
+function buildAllowedOrigins() {
+  const configured = String(process.env.CORS_ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return new Set([...configured, "null", "file://"]);
+}
+
+function corsMiddleware(req, res, next) {
+  const origin = req.headers.origin;
+
+  if (process.env.NODE_ENV !== "production") {
+    // Development: reflect whatever origin was sent.
+    if (origin) res.setHeader("Access-Control-Allow-Origin", origin);
+    else res.setHeader("Access-Control-Allow-Origin", "*");
+  } else {
+    const allowed = buildAllowedOrigins();
+    if (!origin || allowed.has(origin)) {
+      if (origin) res.setHeader("Access-Control-Allow-Origin", origin);
+    } else {
+      // Unknown origin — do not set ACAO header; browser will block the request.
+    }
+  }
+
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+  if (req.method === "OPTIONS") {
+    res.setHeader("Access-Control-Max-Age", "86400");
+    return res.sendStatus(204);
+  }
+
+  next();
+}
+
 function createApp() {
   const app = express();
   app.disable("x-powered-by");
   app.set("trust proxy", 1);
-  app.use(cors());
+  app.use(corsMiddleware);
+
+  // Security headers
+  app.use((_req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    next();
+  });
 
   app.post("/webhooks/stripe", express.raw({ type: "application/json" }), async (req, res) => {
     if (!isStripeConfigured()) {
@@ -355,10 +413,10 @@ function createApp() {
     }
   });
 
-  app.use(express.urlencoded({ extended: false }));
-  app.use(express.json());
+  app.use(express.urlencoded({ extended: false, limit: "16kb" }));
+  app.use(express.json({ limit: "16kb" }));
 
-  app.post("/api/store/checkout", async (req, res) => {
+  app.post("/api/store/checkout", checkoutLimiter, async (req, res) => {
     try {
       const priceId = String(req.body.priceId || "").trim();
       const purchaseKind = parsePurchaseKindArg(req.body.purchaseKind || "new_purchase");
@@ -478,8 +536,8 @@ function createApp() {
     }
   }
 
-  app.post("/api/license/activate", normalizeActivationBody, activationHandler);
-  app.post("/api/licenses/activate", normalizeActivationBody, activationHandler);
+  app.post("/api/license/activate", activateLimiter, normalizeActivationBody, activationHandler);
+  app.post("/api/licenses/activate", activateLimiter, normalizeActivationBody, activationHandler);
 
   async function refreshHandler(req, res) {
     const route = req.originalUrl || req.path;
@@ -526,9 +584,9 @@ function createApp() {
     }
   }
 
-  app.post("/api/license/refresh", normalizeRefreshBody, refreshHandler);
-  app.post("/api/licenses/refresh", normalizeRefreshBody, refreshHandler);
-  app.post("/api/licenses/validate", normalizeRefreshBody, refreshHandler);
+  app.post("/api/license/refresh", refreshLimiter, normalizeRefreshBody, refreshHandler);
+  app.post("/api/licenses/refresh", refreshLimiter, normalizeRefreshBody, refreshHandler);
+  app.post("/api/licenses/validate", refreshLimiter, normalizeRefreshBody, refreshHandler);
 
   async function deactivateHandler(req, res) {
     const route = req.originalUrl || req.path;
@@ -576,8 +634,8 @@ function createApp() {
     }
   }
 
-  app.post("/api/license/deactivate", normalizeDeactivateBody, deactivateHandler);
-  app.post("/api/licenses/deactivate", normalizeDeactivateBody, deactivateHandler);
+  app.post("/api/license/deactivate", activateLimiter, normalizeDeactivateBody, deactivateHandler);
+  app.post("/api/licenses/deactivate", activateLimiter, normalizeDeactivateBody, deactivateHandler);
 
   app.use("/api/license", respondLicenseApiNotFound);
   app.use("/api/licenses", respondLicenseApiNotFound);
@@ -590,7 +648,7 @@ function createApp() {
     }));
   });
 
-  app.post("/admin/login", (req, res) => {
+  app.post("/admin/login", adminLoginLimiter, (req, res) => {
     const username = String(req.body.username || "").trim();
     const password = String(req.body.password || "").trim();
     const nextUrl = String(req.body.next || "/admin/licenses").trim() || "/admin/licenses";
