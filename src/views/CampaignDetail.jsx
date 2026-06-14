@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { ArrowLeft, Target, Plus, Receipt } from 'lucide-react';
 import PaymentModal from '../components/PaymentModal';
+import * as moneyUtils from '../shared/money.js';
 
 const api = window.civicflow;
+const { formatMoneyFromCents } = moneyUtils;
 const emitInvalidation = (keys) => {
   if (typeof window === 'undefined') return;
   const detail = Array.isArray(keys) ? keys : [];
@@ -90,8 +92,7 @@ export function CampaignDetail({ campaignId, onNavigate }) {
     }
   };
 
-  const formatCurrency = (cents) =>
-    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format((cents ?? 0) / 100);
+  const formatCurrency = (cents) => formatMoneyFromCents(cents);
   const formatDate = (d) => {
     if (!d) return '—';
     try {
@@ -170,7 +171,7 @@ export function CampaignDetail({ campaignId, onNavigate }) {
             </button>
             <button
               type="button"
-              onClick={() => openPaymentModal({ memberId: null, orgId: organizationId, type: 'CAMPAIGN_CONTRIBUTION', campaignId, eventId: null })}
+              onClick={() => openPaymentModal({ memberId: null, orgId: organizationId, type: 'CAMPAIGN_CONTRIBUTION', campaignId, eventId: null, source: 'CAMPAIGN' })}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700"
             >
               <Plus size={20} />
@@ -211,7 +212,7 @@ export function CampaignDetail({ campaignId, onNavigate }) {
             {campaign.contributions.map((c) => (
               <div key={c.id} className="grid grid-cols-1 gap-2 py-2 border-b border-slate-100 last:border-0 md:grid-cols-6 md:items-center">
                 <div className="md:col-span-2">
-                  <div className="font-medium text-slate-800">{c.display_name || 'Unknown'}</div>
+                  <div className="font-medium text-slate-800">{c.display_name || 'Unattributed external donor'}</div>
                   <div className="text-sm text-slate-500">{formatDate(c.occurred_on)}</div>
                 </div>
                 <div className="text-sm text-slate-600">{String(c.transaction_type || c.type || '').toUpperCase() || '—'}</div>
@@ -271,7 +272,7 @@ export function CampaignDetail({ campaignId, onNavigate }) {
               {topMembers.map((row, idx) => {
                 const name = row.member_id
                   ? [row.first_name, row.last_name].filter(Boolean).join(' ') || `Member #${row.member_id}`
-                  : 'Non-member';
+                  : 'Unattributed external donor';
                 return (
                   <div key={`${row.member_id ?? 'none'}-${idx}`} className="flex items-center justify-between text-sm">
                     <span className="text-slate-700">{name}</span>

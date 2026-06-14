@@ -2,8 +2,10 @@ import { useState, useEffect, useRef } from 'react';
 import { Save, ArrowLeft, User, Receipt, DollarSign, X, Pencil, Trash2, FileDown, Mail, Target, Calendar, Plus, CheckCircle, XCircle, AlertTriangle, Clock, RotateCcw, Ban, Shield, ArrowRightLeft, Send } from 'lucide-react';
 import EmailReportModal from '../components/EmailReportModal';
 import PaymentModal from '../components/PaymentModal';
+import * as moneyUtils from '../shared/money.js';
 
 const api = window.civicflow;
+const { formatMoneyFromCents, formatMoneyValue, parseMoneyToCents, parseMoneyValue, resolveAmountCents } = moneyUtils;
 
 const emitInvalidation = (keys) => {
   if (typeof window === 'undefined') return;
@@ -100,6 +102,7 @@ export function MemberProfile({ memberId, onBack }) {
   const [stripeAccountId, setStripeAccountId] = useState(null);
   const [reminderSending, setReminderSending] = useState(false);
   const [reminderMessage, setReminderMessage] = useState(null);
+  const [reminderFallbackUrl, setReminderFallbackUrl] = useState(null);
   const [contribModalOpen, setContribModalOpen] = useState(false);
   const [campaigns, setCampaigns] = useState([]);
   const [events, setEvents] = useState([]);
@@ -329,10 +332,7 @@ export function MemberProfile({ memberId, onBack }) {
     }
   };
 
-  const formatCurrency = (cents) =>
-    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(
-      (cents ?? 0) / 100
-    );
+  const formatCurrency = (cents) => formatMoneyFromCents(cents);
 
   const formatDate = (d) => {
     if (d == null || d === '') return '—';
@@ -369,9 +369,7 @@ export function MemberProfile({ memberId, onBack }) {
   };
 
   const getLedgerAmountCents = (txn) => {
-    if (Number.isFinite(Number(txn?.amount_cents))) return Number(txn.amount_cents);
-    if (Number.isFinite(Number(txn?.amount))) return Math.round(Number(txn.amount) * 100);
-    return 0;
+    return resolveAmountCents(txn?.amount_cents, txn?.amount) ?? 0;
   };
 
   const isLedgerVoided = (txn) => {
@@ -424,11 +422,13 @@ export function MemberProfile({ memberId, onBack }) {
 
   const handleSendDuesReminder = async () => {
     if (!member?.email) {
-      setReminderMessage({ type: 'error', text: 'Member has no email address.' });
+      setReminderFallbackUrl(null);
+      setReminderMessage({ type: 'error', text: 'Member has no email address on file.' });
       return;
     }
     setReminderSending(true);
     setReminderMessage(null);
+    setReminderFallbackUrl(null);
     try {
       const result = await api?.email?.sendDuesReminder?.({
         id: memberId ?? member?.id,
@@ -440,7 +440,22 @@ export function MemberProfile({ memberId, onBack }) {
         setReminderMessage({ type: 'success', text: 'No reminder sent: member has no past-due balance.' });
         return;
       }
-      if (result?.error) throw new Error(result.error);
+      if (result?.success === false || result?.error) {
+        if (result?.code === 'EMAIL_NOT_CONFIGURED' && result?.fallback?.mailtoUrl) {
+          setReminderFallbackUrl(result.fallback.mailtoUrl);
+          setReminderMessage({ type: 'error', text: result.error || 'Email service is not configured.' });
+          return;
+        }
+        if (result?.code === 'MISSING_EMAIL') {
+          setReminderMessage({ type: 'error', text: 'Member has no email address on file.' });
+          return;
+        }
+        if (result?.code === 'INVALID_EMAIL') {
+          setReminderMessage({ type: 'error', text: `Reminder email failed for ${displayName}: the email address on file is invalid.` });
+          return;
+        }
+        throw new Error(result.error);
+      }
       setReminderMessage({ type: 'success', text: 'Dues reminder sent.' });
     } catch (err) {
       setReminderMessage({ type: 'error', text: err?.message ?? 'Failed to send reminder.' });
@@ -527,7 +542,7 @@ export function MemberProfile({ memberId, onBack }) {
 
   const handleAddContribution = async (e) => {
     e.preventDefault();
-    const amountCents = Math.round(parseFloat(contribForm.amountDollars || 0) * 100);
+    const amountCents = parseMoneyToCents(contribForm.amountDollars);
     if (amountCents <= 0) {
       setContribError('Amount must be greater than 0');
       return;
@@ -550,8 +565,9 @@ export function MemberProfile({ memberId, onBack }) {
         campaign_id: campaignId,
         event_id: eventId,
         note: contribForm.note || null,
+        source: 'MEMBER_PROFILE',
       });
-      emitInvalidation(['transactions', 'dashboard', 'dues']);
+      emitInvalidation(['transactions', 'dashboard', 'dues', 'reports']);
       setContribModalOpen(false);
       setContribForm({ targetType: 'campaign', campaignId: '', eventId: '', amountDollars: '', note: '', occurredOn: new Date().toISOString().slice(0, 10) });
       refreshMember();
@@ -624,8 +640,8 @@ export function MemberProfile({ memberId, onBack }) {
 
   const handleFinCorrect = async () => {
     if (!correctModal) return;
-    const amt = parseFloat(correctAmount);
-    if (isNaN(amt)) { setFinError('Enter a valid amount'); return; }
+    const amt = parseMoneyValue(correctAmount);
+    if (!Number.isFinite(amt)) { setFinError('Enter a valid amount'); return; }
     const normalizedReason = String(correctReason || '').trim();
     if (normalizedReason.length < 5) { setFinError('Reason is required for financial modifications.'); return; }
     setFinSaving(true);
@@ -645,8 +661,8 @@ export function MemberProfile({ memberId, onBack }) {
 
   const handleFinAdjust = async () => {
     if (!adjustModal) return;
-    const delta = parseFloat(adjustDelta);
-    if (isNaN(delta) || delta === 0) { setFinError('Enter a non-zero amount'); return; }
+    const delta = parseMoneyValue(adjustDelta);
+    if (!Number.isFinite(delta) || delta === 0) { setFinError('Enter a non-zero amount'); return; }
     const normalizedReason = String(adjustReason || '').trim();
     if (normalizedReason.length < 5) { setFinError('Reason is required for financial modifications.'); return; }
     setFinSaving(true);
@@ -666,8 +682,8 @@ export function MemberProfile({ memberId, onBack }) {
 
   const handleFinEdit = async () => {
     if (!editModal) return;
-    const amt = parseFloat(editForm.amount);
-    if (isNaN(amt)) { setFinError('Enter a valid amount'); return; }
+    const amt = parseMoneyValue(editForm.amount);
+    if (!Number.isFinite(amt)) { setFinError('Enter a valid amount'); return; }
     if (!editForm.txn_date) { setFinError('Date is required'); return; }
     const normalizedReason = String(editReason || '').trim();
     if (normalizedReason.length < 5) { setFinError('Reason is required for financial modifications.'); return; }
@@ -731,8 +747,8 @@ export function MemberProfile({ memberId, onBack }) {
   };
 
   const handleCreateLedgerEntry = async () => {
-    const amt = parseFloat(ledgerForm.amount);
-    if (isNaN(amt) || amt === 0) { setFinError('Enter a valid amount'); return; }
+    const amt = parseMoneyValue(ledgerForm.amount);
+    if (!Number.isFinite(amt) || amt === 0) { setFinError('Enter a valid amount'); return; }
     if (!ledgerForm.txn_date) { setFinError('Date is required'); return; }
     setFinSaving(true);
     setFinError(null);
@@ -1135,6 +1151,7 @@ export function MemberProfile({ memberId, onBack }) {
                     orgId: organizationId ?? 1,
                     type: 'DUES',
                     amount: defaultAmountDollars > 0 ? defaultAmountDollars : '',
+                    source: 'MEMBER_PROFILE',
                   });
                 }}
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-60"
@@ -1147,7 +1164,18 @@ export function MemberProfile({ memberId, onBack }) {
         <div className="p-6">
           {reminderMessage && (
             <div className={`mb-4 rounded-lg border px-4 py-3 text-sm ${reminderMessage.type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-red-200 bg-red-50 text-red-800'}`}>
-              {reminderMessage.text}
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <span>{reminderMessage.text}</span>
+                {reminderFallbackUrl && (
+                  <button
+                    type="button"
+                    onClick={() => window.open(reminderFallbackUrl, '_self')}
+                    className="inline-flex items-center gap-2 rounded-lg border border-current px-3 py-1.5 text-xs font-medium hover:bg-white/40"
+                  >
+                    Open mail app
+                  </button>
+                )}
+              </div>
             </div>
           )}
           {autopayError && (
@@ -1618,7 +1646,7 @@ export function MemberProfile({ memberId, onBack }) {
           <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-6" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-semibold text-slate-800 mb-2">Correct Transaction #{correctModal.id}</h3>
             <div className="mb-4 p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-700">
-              This will create a reversal of the original ({new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(correctModal.amount)}) and a new corrected entry. The original remains for audit.
+              This will create a reversal of the original ({formatCurrency(getLedgerAmountCents(correctModal))}) and a new corrected entry. The original remains for audit.
             </div>
             {finError && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-red-800 text-sm">{finError}</div>}
             <div className="space-y-4">
@@ -1649,7 +1677,7 @@ export function MemberProfile({ memberId, onBack }) {
           <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-6" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-semibold text-slate-800 mb-2">Adjust Transaction #{adjustModal.id}</h3>
             <div className="mb-4 p-3 rounded-lg bg-blue-50 border border-blue-200 text-sm text-blue-700">
-              This adds an adjustment entry linked to the original ({new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(adjustModal.amount)}). Use positive to add, negative to reduce.
+              This adds an adjustment entry linked to the original ({formatCurrency(getLedgerAmountCents(adjustModal))}). Use positive to add, negative to reduce.
             </div>
             {finError && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-red-800 text-sm">{finError}</div>}
             <div className="space-y-4">
@@ -1721,7 +1749,7 @@ export function MemberProfile({ memberId, onBack }) {
           <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-6" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-semibold text-slate-800 mb-2">Reverse Transaction #{reverseModal.id}</h3>
             <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">
-              This will create a new reversal entry for {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(reverseModal.amount || 0)}.
+              This will create a new reversal entry for {formatCurrency(getLedgerAmountCents(reverseModal))}.
             </div>
             {finError && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-red-800 text-sm">{finError}</div>}
             <div className="space-y-4">
@@ -1994,7 +2022,7 @@ export function MemberProfile({ memberId, onBack }) {
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="font-semibold text-emerald-700">
-                      {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(payout.amount || 0)}
+                      {formatMoneyValue(payout.amount || 0)}
                     </span>
                     {payout.status && (
                       <span className={`px-2 py-1 rounded text-xs font-medium ${

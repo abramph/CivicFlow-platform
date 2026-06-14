@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { DollarSign, Plus, Edit, Trash2, X, Filter } from 'lucide-react';
+import * as moneyUtils from '../shared/money.js';
 
 const api = window.civicflow;
+const { formatMoneyValue, parseMoneyValue } = moneyUtils;
 
 const emitInvalidation = (keys) => {
   if (typeof window === 'undefined') return;
@@ -92,7 +94,7 @@ export function Expenditures({ onNavigate }) {
 
   const formatCurrency = (amount) => {
     if (amount == null) return '$0.00';
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+    return formatMoneyValue(amount);
   };
 
   const getPayeeName = (exp) => {
@@ -122,9 +124,14 @@ export function Expenditures({ onNavigate }) {
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    const amountValue = parseMoneyValue(formData.amount);
+    if (!Number.isFinite(amountValue) || amountValue <= 0) {
+      setError('Amount must be greater than 0.');
+      return;
+    }
     const payload = {
       ...formData,
-      amount: parseFloat(formData.amount) || 0,
+      amount: amountValue,
       payee_member_id: formData.payee_type === 'member' ? (formData.payee_member_id || null) : null,
       payee_name: formData.payee_type === 'vendor' ? formData.payee_name : null,
       source_id: formData.source_type === 'organization' ? null : (formData.source_id || null),

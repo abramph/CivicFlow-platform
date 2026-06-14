@@ -2,6 +2,7 @@ const crypto = require('node:crypto');
 const XLSX = require('xlsx');
 const Papa = require('papaparse');
 const { z } = require('zod');
+const { parseMoneyToCents, parseMoneyValue } = require('../../shared/money.cjs');
 
 const MEMBERSHIP_STATUSES = ['Active', 'Inactive', 'Terminated', 'Reinstated'];
 const GRANT_STATUSES = ['Draft', 'Submitted', 'Awarded', 'Denied', 'Closed'];
@@ -194,12 +195,8 @@ function normalizeDate(v) {
 }
 
 function normalizeAmount(v) {
-  if (v === undefined || v === null || v === '') return undefined;
-  if (typeof v === 'number') return v;
-  const s = String(v).replace(/[$,]/g, '').trim();
-  if (!s) return undefined;
-  const n = Number(s);
-  return Number.isFinite(n) ? n : undefined;
+  const amount = parseMoneyValue(v);
+  return amount == null ? undefined : amount;
 }
 
 function normalizeBoolean(v) {
@@ -840,7 +837,7 @@ class ImportService {
           `).run(
             mapLedgerTypeToTxnType(data.txn_type),
             normalizeTransactionType(data.txn_type),
-            Math.round(Number(data.amount) * 100),
+            parseMoneyToCents(data.amount),
             data.txn_date,
             memberId,
             contributorType,
@@ -893,7 +890,7 @@ class ImportService {
               VALUES ('donation', ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 1, ?, 'COMPLETED', 'IMPORT', ?)
             `).run(
               transactionType,
-              Math.round(Number(data.amount) * 100),
+              parseMoneyToCents(data.amount),
               data.txn_date,
               memberId,
               contributorType,

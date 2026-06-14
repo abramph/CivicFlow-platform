@@ -13,8 +13,10 @@ import {
   FileText,
   X,
 } from 'lucide-react';
+import * as moneyUtils from '../shared/money.js';
 
 const api = window.civicflow;
+const { formatMoneyValue, parseMoneyValue } = moneyUtils;
 
 const STATUS_OPTIONS = ['Draft', 'Submitted', 'Awarded', 'Denied', 'Closed'];
 
@@ -34,7 +36,7 @@ const emitInvalidation = (keys) => {
 
 function formatCurrency(amount) {
   if (amount === null || amount === undefined) return '—';
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+  return formatMoneyValue(amount);
 }
 
 function formatDate(dateStr) {
@@ -137,12 +139,23 @@ export function GrantDetail({ grantId, onNavigate }) {
       return;
     }
 
+    const amountRequested = form.amount_requested === '' ? null : parseMoneyValue(form.amount_requested);
+    const amountAwarded = form.amount_awarded === '' ? null : parseMoneyValue(form.amount_awarded);
+    if (form.amount_requested !== '' && amountRequested == null) {
+      alert('Enter a valid requested amount');
+      return;
+    }
+    if (form.amount_awarded !== '' && amountAwarded == null) {
+      alert('Enter a valid awarded amount');
+      return;
+    }
+
     setSaving(true);
     try {
       const payload = {
         ...form,
-        amount_requested: form.amount_requested ? parseFloat(form.amount_requested) : null,
-        amount_awarded: form.amount_awarded ? parseFloat(form.amount_awarded) : null,
+        amount_requested: amountRequested,
+        amount_awarded: amountAwarded,
       };
 
       if (isNew) {
@@ -240,7 +253,7 @@ export function GrantDetail({ grantId, onNavigate }) {
   };
 
   const handleAllocate = async () => {
-    const amountNum = parseFloat(allocationForm.amount);
+    const amountNum = parseMoneyValue(allocationForm.amount);
     if (!Number.isFinite(amountNum) || amountNum <= 0) {
       setAllocationMessage({ type: 'error', text: 'Enter a valid allocation amount.' });
       return;

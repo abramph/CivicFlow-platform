@@ -14,10 +14,9 @@ function safeMachineId() {
 
 function buildFingerprintMaterial() {
   return [
+    safeMachineId(),
     os.platform(),
     os.arch(),
-    os.hostname(),
-    safeMachineId(),
     DEVICE_SALT,
   ].join("|");
 }
@@ -26,8 +25,17 @@ function getDeviceId() {
   return crypto.createHash("sha256").update(buildFingerprintMaterial()).digest("hex");
 }
 
+function getDeviceFingerprint() {
+  return getDeviceId();
+}
+
 function getDeviceName() {
   return os.hostname();
 }
 
-module.exports = { getDeviceId, getDeviceName };
+module.exports = {
+  getDeviceId,
+  getDeviceFingerprint,
+  getDeviceName,
+  buildFingerprintMaterial,
+};

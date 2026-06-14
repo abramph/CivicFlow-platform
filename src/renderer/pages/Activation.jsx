@@ -102,7 +102,7 @@ export default function Activation({ onLicensed }) {
           />
 
           <input
-            placeholder="Enter license key (e.g. XXXX-XXXX-XXXX-XXXX)"
+            placeholder="Enter license key (e.g. CF-XXXX-XXXX-XXXX-XXXX)"
             value={licenseKey}
             onChange={(e) => setLicenseKey(e.target.value)}
             style={{ width: "100%", padding: 10, marginBottom: 10 }}

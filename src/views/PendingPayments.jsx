@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react';
 import { CheckCircle, XCircle, RefreshCcw } from 'lucide-react';
+import { toLocalFileUrl } from '../utils/localFileUrl.js';
+import * as moneyUtils from '../shared/money.js';
 
 const api = window.civicflow;
+const { amountFromCents, formatMoneyFromCents } = moneyUtils;
 
 const emitInvalidation = (keys) => {
   if (typeof window === 'undefined') return;
@@ -9,19 +12,7 @@ const emitInvalidation = (keys) => {
   window.dispatchEvent(new CustomEvent('civicflow:invalidate', { detail }));
 };
 
-const toAppUrl = (filePath) => {
-  if (!filePath) return null;
-  let normalized = String(filePath).replace(/\\/g, '/');
-  if (/^[A-Za-z]\//.test(normalized)) {
-    normalized = normalized.replace(/^([A-Za-z])\//, '$1:/');
-  }
-  return `app://${normalized}`;
-};
-
-const formatCurrency = (cents) =>
-  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(
-    (cents ?? 0) / 100
-  );
+const formatCurrency = (cents) => formatMoneyFromCents(cents);
 
 export function PendingPayments() {
   const [pending, setPending] = useState([]);
@@ -65,7 +56,7 @@ export function PendingPayments() {
         const receiptResult = await api?.payments?.sendReceipt?.({
           member_name: memberName,
           email: memberEmail,
-          amount: Number((Number(payment?.amount_cents || 0) / 100).toFixed(2)),
+          amount: amountFromCents(payment?.amount_cents || 0),
           method: payment?.payment_method || 'PAYMENT',
           invoice_id: payment?.invoice_id || payment?.id,
         });
@@ -184,7 +175,7 @@ export function PendingPayments() {
               <tbody className="divide-y divide-slate-200">
                 {pending.map((t) => {
                   const memberName = [t.member_first_name, t.member_last_name].filter(Boolean).join(' ') || '—';
-                  const proofUrl = toAppUrl(t.proof_url);
+                  const proofUrl = toLocalFileUrl(t.proof_url);
                   const method = (t.payment_method || '').toString().toUpperCase() || '—';
                   const source = (t.source || (t.review_type === 'SUBMISSION' ? 'CLOUD' : 'LOCAL') || 'LOCAL').toString().toUpperCase();
                   const status = (t.status || 'PENDING_VERIFICATION').toString().toUpperCase();

@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Target, Plus, X, Pencil } from 'lucide-react';
+import * as moneyUtils from '../shared/money.js';
 
 const api = window.civicflow;
+const { formatMoneyFromCents, parseMoneyToCents } = moneyUtils;
 
 export function Campaigns({ onNavigate }) {
   const [campaigns, setCampaigns] = useState([]);
@@ -35,7 +37,7 @@ export function Campaigns({ onNavigate }) {
     loadCampaigns();
   }, []);
 
-  const goalCents = Math.round(parseFloat(formData.goalAmountCents || 0) * 100) || 0;
+  const goalCents = parseMoneyToCents(formData.goalAmountCents) ?? 0;
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -123,7 +125,7 @@ export function Campaigns({ onNavigate }) {
             const goalC = c.goal_amount_cents ?? 0;
             const raisedC = c.raised_cents ?? 0;
             const pct = c.progress_pct ?? (goalC > 0 ? Math.min(100, Math.round((raisedC / goalC) * 100)) : null);
-            const formatCur = (n) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format((n ?? 0) / 100);
+            const formatCur = (n) => formatMoneyFromCents(n);
             return (
               <div
                 key={c.id}

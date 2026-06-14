@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
+import * as moneyUtils from '../shared/money.js';
 
 const api = window.civicflow;
+const { formatMoneyInputFromCents, parseMoneyValue } = moneyUtils;
 
 export function ExternalPaymentReport({ onNavigate, initialMemberId }) {
   const [members, setMembers] = useState([]);
@@ -51,7 +53,7 @@ export function ExternalPaymentReport({ onNavigate, initialMemberId }) {
       .then((status) => {
         if (cancelled) return;
         const balanceCents = Number(status?.balanceCents ?? 0);
-        const suggested = balanceCents < 0 ? (Math.abs(balanceCents) / 100).toFixed(2) : '';
+        const suggested = balanceCents < 0 ? formatMoneyInputFromCents(Math.abs(balanceCents)) : '';
         setSuggestedAmount(suggested);
         if (!amountTouched) {
           setAmount(suggested);
@@ -89,7 +91,7 @@ export function ExternalPaymentReport({ onNavigate, initialMemberId }) {
 
   const handleSubmit = async () => {
     const numericMemberId = Number(memberId || 0);
-    const numericAmount = Number(amount || 0);
+    const numericAmount = parseMoneyValue(amount);
     if (!numericMemberId) {
       setMessage({ type: 'error', text: 'Please select a member.' });
       return;

@@ -1,7 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Users, Calendar, DollarSign, TrendingDown, AlertCircle, UserCheck, Target, Receipt, Award, Lock, ChevronRight, Mail, Ban, Shield, FileText } from 'lucide-react';
+import { toLocalFileUrl } from '../utils/localFileUrl.js';
+import * as moneyUtils from '../shared/money.js';
 
 const api = window.civicflow;
+const { formatMoneyFromCents } = moneyUtils;
 const getDashboardStats = () => {
   const p = api?.getDashboardStats?.();
   if (p && typeof p.then === 'function') return p;
@@ -166,14 +169,7 @@ export function Dashboard({ onNavigate }) {
       orgPromise.then((org) => {
         if (cancelled || !org?.logo_path) return;
         try {
-          // Use app:// protocol instead of file:// to avoid Electron security restrictions
-          // Ensure Windows drive letter colon is preserved (C:\ → C:/)
-          let normalizedPath = org.logo_path.replace(/\\/g, '/');
-          // Ensure drive letter has colon (C/Users → C:/Users)
-          if (/^[A-Za-z]\//.test(normalizedPath)) {
-            normalizedPath = normalizedPath.replace(/^([A-Za-z])\//, '$1:/');
-          }
-          setLogoUrl(`app://${normalizedPath}`);
+          setLogoUrl(toLocalFileUrl(org.logo_path));
         } catch (_) {}
       });
     }
@@ -272,12 +268,7 @@ export function Dashboard({ onNavigate }) {
     };
   }, []);
 
-  const formatCurrency = (cents) =>
-    new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 2,
-    }).format((cents ?? 0) / 100);
+  const formatCurrency = (cents) => formatMoneyFromCents(cents);
 
   const PAYMENT_METHOD_LABELS = {
     STRIPE: 'Stripe',

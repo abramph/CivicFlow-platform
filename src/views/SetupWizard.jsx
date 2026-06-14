@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { ArrowRight, ArrowLeft, Building2, Tag, Mail, Server, Check } from 'lucide-react';
+import * as moneyUtils from '../shared/money.js';
 
 const api = window.civicflow;
+const { formatMoneyFromCents, parseMoneyToCents } = moneyUtils;
 
 const STEPS = [
   { id: 1, title: 'Organization', icon: Building2 },
@@ -74,6 +76,7 @@ export function SetupWizard({ onComplete }) {
         logo_path: settings.logo_path || null,
         email_display_name: settings.email_from_name.trim() || null,
         email_from_address: settings.email_from_address.trim() || null,
+        auto_archive_enabled: 0,
       });
       setMessage({ type: 'success', text: 'Saved.' });
     } catch (err) {
@@ -143,6 +146,7 @@ export function SetupWizard({ onComplete }) {
         logo_path: settings.logo_path || null,
         email_display_name: settings.email_from_name.trim() || null,
         email_from_address: settings.email_from_address.trim() || null,
+        auto_archive_enabled: 0,
       });
       await api.branding.set({
         cboName: settings.organization_name.trim() || 'Civicflow',
@@ -235,7 +239,7 @@ export function SetupWizard({ onComplete }) {
               step="0.01"
               min="0"
               value={categoryForm.monthly_dues_cents ? categoryForm.monthly_dues_cents / 100 : ''}
-              onChange={(e) => setCategoryForm((f) => ({ ...f, monthly_dues_cents: Math.round(parseFloat(e.target.value || 0) * 100) }))}
+              onChange={(e) => setCategoryForm((f) => ({ ...f, monthly_dues_cents: parseMoneyToCents(e.target.value) ?? 0 }))}
               placeholder="Monthly dues ($)"
               className="w-32 px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500"
             />
@@ -245,7 +249,7 @@ export function SetupWizard({ onComplete }) {
           </div>
           <ul className="list-disc list-inside text-slate-600">
             {categories.map((c) => (
-              <li key={c.id}>{c.name} — ${((c.monthly_dues_cents ?? 0) / 100).toFixed(2)}/mo</li>
+              <li key={c.id}>{c.name} — {formatMoneyFromCents(c.monthly_dues_cents)}/mo</li>
             ))}
           </ul>
         </div>

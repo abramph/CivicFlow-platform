@@ -1,5 +1,6 @@
 const { getStripe } = require('./stripe-client.js');
 const { getDatabase } = require('./db.js');
+const { parseMoneyValue } = require('../shared/money.cjs');
 
 function getAppBaseUrl() {
   return process.env.APP_BASE_URL || 'https://civicflow.app';
@@ -23,7 +24,7 @@ function normalizeTransactionType(value) {
   return 'DONATION';
 }
 
-async function createCheckoutSession({ orgId = 1, memberId, amount, description, type, campaignId, eventId, contributorName, contributorType }) {
+async function createCheckoutSession({ orgId = 1, memberId, amount, description, type, campaignId, eventId, contributorName, contributorType, source }) {
   const db = getDatabase();
   if (!db) throw new Error('Database not initialized');
   const normalizedType = normalizeTransactionType(type);
@@ -39,7 +40,7 @@ async function createCheckoutSession({ orgId = 1, memberId, amount, description,
     return { error: 'Organization not connected to Stripe' };
   }
 
-  const normalizedAmount = Number(amount);
+  const normalizedAmount = parseMoneyValue(amount);
   if (!Number.isFinite(normalizedAmount) || normalizedAmount <= 0) {
     throw new Error('Payment amount must be greater than 0');
   }
@@ -73,6 +74,7 @@ async function createCheckoutSession({ orgId = 1, memberId, amount, description,
       eventId: eventId ? String(eventId) : '',
       contributorName: contributorName ? String(contributorName) : '',
       contributorType: normalizedContributorType || '',
+      source: source ? String(source) : '',
     },
     success_url: `${getAppBaseUrl()}/payment-success`,
     cancel_url: `${getAppBaseUrl()}/payment-cancel`,
@@ -81,7 +83,7 @@ async function createCheckoutSession({ orgId = 1, memberId, amount, description,
   return { url: session.url };
 }
 
-async function createSubscriptionCheckout({ orgId = 1, memberId, amount, interval }) {
+async function createSubscriptionCheckout({ orgId = 1, memberId, amount, interval, source }) {
   const db = getDatabase();
   if (!db) throw new Error('Database not initialized');
   const stripe = getStripe();
@@ -91,7 +93,7 @@ async function createSubscriptionCheckout({ orgId = 1, memberId, amount, interva
     return { error: 'Organization not connected to Stripe' };
   }
 
-  const normalizedAmount = Number(amount);
+  const normalizedAmount = parseMoneyValue(amount);
   if (!Number.isFinite(normalizedAmount) || normalizedAmount <= 0) {
     throw new Error('Payment amount must be greater than 0');
   }
@@ -120,6 +122,7 @@ async function createSubscriptionCheckout({ orgId = 1, memberId, amount, interva
         memberId: memberId ? String(memberId) : '',
         type: 'DUES',
         transaction_type: 'DUES',
+        source: source ? String(source) : '',
       },
       application_fee_percent: 1.0,
       transfer_data: {

@@ -1,5 +1,6 @@
 const { getDatabase, initializeDatabase } = require("../db");
 const { API_BASE, API_KEY } = require("../config/apiConfig");
+const { parseMoneyValue } = require("../../shared/money.cjs");
 
 function getDb() {
   return getDatabase() || initializeDatabase();
@@ -80,7 +81,7 @@ async function insertIntoLocalDB(submissions) {
 
       const memberId = resolveMemberIdFromNote(database, item.note) || resolveMemberIdByName(database, item.member_name);
       const invoiceId = Number.isFinite(Number(item.invoice_id)) ? Number(item.invoice_id) : null;
-      const amount = Number(item.amount || 0);
+      const amount = parseMoneyValue(item.amount);
 
       insert.run(
         memberId,

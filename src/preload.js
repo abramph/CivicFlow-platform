@@ -7,10 +7,12 @@ contextBridge.exposeInMainWorld('electron', {
 contextBridge.exposeInMainWorld('civicflow', {
   license: {
     getStatus: () => ipcRenderer.invoke('license:getStatus'),
+    getConfig: () => ipcRenderer.invoke('license:getConfig'),
     activate: (data) => ipcRenderer.invoke('license:activate', data),
     canActivate: () => ipcRenderer.invoke('license:can-activate'),
     deactivate: (data) => ipcRenderer.invoke('license:deactivate', data),
     refresh: () => ipcRenderer.invoke('license:refresh'),
+    resetLocal: () => ipcRenderer.invoke('license:resetLocal'),
     status: () => ipcRenderer.invoke('license:getStatus'),
   },
   getDeviceId: () => ipcRenderer.invoke('get-device-id'),
@@ -217,6 +219,7 @@ contextBridge.exposeInMainWorld('civicflow', {
     updateSettings: (data) => ipcRenderer.invoke('email:settings:update', data),
     sendTest: (toEmail) => ipcRenderer.invoke('email:send:test', toEmail),
     queue: (data) => ipcRenderer.invoke('email:queue', data),
+    getDuesReminderPreview: (data) => ipcRenderer.invoke('email:getDuesReminderPreview', data),
     processOutbox: () => ipcRenderer.invoke('email:processOutbox'),
     outboxList: (filters) => ipcRenderer.invoke('email:outbox:list', filters),
     resolveRecipients: (group) => ipcRenderer.invoke('email:resolveRecipients', group),

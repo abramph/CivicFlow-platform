@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Calendar, Download, Filter, LineChart as LineChartIcon } from 'lucide-react';
+import * as moneyUtils from '../shared/money.js';
 
 const api = window.civicflow;
+const { formatMoneyFromCents } = moneyUtils;
 
 const TYPE_OPTIONS = [
   { value: 'DUES', label: 'Dues Payment' },
@@ -48,8 +50,7 @@ function toLocalDateISO(value) {
 }
 
 function formatCurrency(cents) {
-  const dollars = (Number(cents || 0) / 100);
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(dollars);
+  return formatMoneyFromCents(cents);
 }
 
 function formatTxnTypeWithContext(txn) {
@@ -69,6 +70,9 @@ function contributorDisplay(txn) {
     return `${txn.last_name || ''}${txn.last_name ? ', ' : ''}${txn.first_name || ''}`.trim();
   }
   if (txn?.contributor_name) return txn.contributor_name;
+  if (txn?.campaign_id || txn?.event_id || String(txn?.contributor_type || '').toUpperCase() === 'NON_MEMBER') {
+    return 'Unattributed external donor';
+  }
   return '—';
 }
 
@@ -147,6 +151,7 @@ export function ReportsDashboard({ initialTypes }) {
     : TYPE_OPTIONS.map((t) => t.value);
   const [selectedTypes, setSelectedTypes] = useState(defaultTypes);
   const [paymentMethod, setPaymentMethod] = useState('');
+  const [attributionFilter, setAttributionFilter] = useState('');
   const [paymentMethods, setPaymentMethods] = useState([]);
   const [memberId, setMemberId] = useState('');
   const [groupBy, setGroupBy] = useState('day');
@@ -220,9 +225,10 @@ export function ReportsDashboard({ initialTypes }) {
     endDate,
     types: selectedTypes,
     paymentMethod: paymentMethod || null,
+    attribution: attributionFilter || null,
     memberId: memberId ? Number(memberId) : null,
     groupBy,
-  }), [orgId, startDate, endDate, selectedTypes, paymentMethod, memberId, groupBy, refreshTick]);
+  }), [orgId, startDate, endDate, selectedTypes, paymentMethod, attributionFilter, memberId, groupBy, refreshTick]);
 
   useEffect(() => {
     const key = JSON.stringify(filters);
@@ -406,6 +412,18 @@ export function ReportsDashboard({ initialTypes }) {
             </select>
           </div>
           <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Attribution</label>
+            <select
+              value={attributionFilter}
+              onChange={(e) => setAttributionFilter(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500"
+            >
+              <option value="">All contributions</option>
+              <option value="MEMBER">Credited to member</option>
+              <option value="UNATTRIBUTED">Unattributed / external donor</option>
+            </select>
+          </div>
+          <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Member</label>
             <select
               value={memberId}
@@ -493,9 +511,9 @@ export function ReportsDashboard({ initialTypes }) {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-          <h3 className="text-lg font-semibold text-slate-800 mb-4">Top Members by Payments</h3>
+          <h3 className="text-lg font-semibold text-slate-800 mb-4">Top Contributors by Payments</h3>
           {byMember.length === 0 ? (
-            <p className="text-sm text-slate-500">No member payments in this range.</p>
+            <p className="text-sm text-slate-500">No contributions in this range.</p>
           ) : (
             <div className="space-y-2">
               {byMember.map((m, index) => (
@@ -503,7 +521,7 @@ export function ReportsDashboard({ initialTypes }) {
                   <span className="text-slate-700">
                     {m.first_name || m.last_name
                       ? `${m.last_name || ''}${m.last_name ? ', ' : ''}${m.first_name || ''}`.trim()
-                      : 'Unknown'}
+                      : 'Unattributed external donor'}
                   </span>
                   <span className="font-medium text-slate-800">{formatCurrency(m.total)}</span>
                 </div>

@@ -2,8 +2,10 @@ import { useState, useEffect } from 'react';
 import { DollarSign, Download, Plus, Send } from 'lucide-react';
 import EmailReportModal from '../components/EmailReportModal';
 import PaymentModal from '../components/PaymentModal';
+import * as moneyUtils from '../shared/money.js';
 
 const api = window.civicflow;
+const { formatMoneyFromCents } = moneyUtils;
 
 const emitInvalidation = (keys) => {
   if (typeof window === 'undefined') return;
@@ -30,6 +32,7 @@ export function Finances() {
   const [orgId, setOrgId] = useState(1);
   const [filters, setFilters] = useState(() => getDateRange(90));
   const [typeFilter, setTypeFilter] = useState('');
+  const [attributionFilter, setAttributionFilter] = useState('');
   const [exporting, setExporting] = useState(false);
   const [currentRole, setCurrentRole] = useState('Admin');
   const [emailReportModal, setEmailReportModal] = useState(null);
@@ -53,10 +56,9 @@ export function Finances() {
     const memberName = [txn.member_first_name, txn.member_last_name].filter(Boolean).join(' ').trim();
     if (memberName) return memberName;
     if (txn.contributor_name) return txn.contributor_name;
-    const ct = String(txn.contributor_type || '').toUpperCase();
-    if (ct === 'CAMPAIGN_REVENUE') return 'Campaign contribution';
-    if (ct === 'EVENT_REVENUE') return 'Event revenue';
-    if (ct === 'NON_MEMBER') return 'Non-member';
+    if (txn.campaign_id || txn.event_id || String(txn.contributor_type || '').toUpperCase() === 'NON_MEMBER') {
+      return 'Unattributed external donor';
+    }
     return '—';
   };
 
@@ -65,6 +67,7 @@ export function Finances() {
     setError(null);
     const q = { ...filters };
     if (typeFilter) q.type = typeFilter;
+    if (attributionFilter) q.attribution = attributionFilter;
     Promise.all([api?.transactions?.list(q), api?.members?.list()])
       .then(([txns, membersData]) => {
         setTransactions(Array.isArray(txns) ? txns : []);
@@ -87,7 +90,7 @@ export function Finances() {
       if (org?.name) setOrgName(org.name);
       if (org?.id) setOrgId(org.id);
     }).catch(() => {});
-  }, [filters.startDate, filters.endDate, typeFilter]);
+  }, [filters.startDate, filters.endDate, typeFilter, attributionFilter]);
 
   useEffect(() => {
     const handler = (e) => {
@@ -98,7 +101,7 @@ export function Finances() {
     };
     window.addEventListener('civicflow:invalidate', handler);
     return () => window.removeEventListener('civicflow:invalidate', handler);
-  }, [filters.startDate, filters.endDate, typeFilter]);
+  }, [filters.startDate, filters.endDate, typeFilter, attributionFilter]);
 
   const isCompleted = (t) => String(t?.status || 'COMPLETED').toUpperCase() === 'COMPLETED';
   const incomeCents = transactions
@@ -109,15 +112,16 @@ export function Finances() {
     .reduce((s, t) => s + Math.abs(t.amount_cents), 0);
   const runningTotal = incomeCents - expenseCents;
 
-  const formatCurrency = (cents) =>
-    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(
-      (cents ?? 0) / 100
-    );
+  const formatCurrency = (cents) => formatMoneyFromCents(cents);
 
   const handleExport = async () => {
     setExporting(true);
     try {
-      const result = await api.export.transactionsCsv(filters);
+      const result = await api.export.transactionsCsv({
+        ...filters,
+        type: typeFilter || null,
+        attribution: attributionFilter || null,
+      });
       if (!result?.canceled && result?.success) {
         setError(null);
       }
@@ -133,6 +137,7 @@ export function Finances() {
       memberId: memberId ?? null,
       orgId: modalOrgId ?? orgId ?? 1,
       type: type || 'DONATION',
+      source: 'FINANCES',
     });
   };
 
@@ -263,6 +268,18 @@ export function Finances() {
             <option value="CAMPAIGN_CONTRIBUTION">Campaign Contributions</option>
             <option value="EVENT_REVENUE">Event Revenue</option>
             <option value="OTHER_INCOME">Other Income</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">Attribution</label>
+          <select
+            value={attributionFilter}
+            onChange={(e) => setAttributionFilter(e.target.value)}
+            className="px-3 py-2 rounded-lg border border-slate-300 text-sm"
+          >
+            <option value="">All</option>
+            <option value="MEMBER">Credited to member</option>
+            <option value="UNATTRIBUTED">Unattributed / external donor</option>
           </select>
         </div>
       </div>

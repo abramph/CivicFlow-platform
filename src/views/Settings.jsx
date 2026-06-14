@@ -1,7 +1,26 @@
 import { useState, useEffect } from 'react';
 import { Settings as SettingsIcon, Key, Database, Info, Tag, Pencil, Trash2, AlertTriangle, Mail, Shield, Send, Upload, DollarSign } from 'lucide-react';
+import * as moneyUtils from '../shared/money.js';
 
 const api = window.civicflow;
+const { formatMoneyFromCents, parseMoneyToCents } = moneyUtils;
+
+function getActivationErrorMessage(rawError) {
+  const text = String(rawError || '').trim();
+  const lower = text.toLowerCase();
+  if (!text) return 'Activation failed. Check the license key and try again.';
+  if (lower.includes('not configured') || lower.includes('configuration') || lower.includes('invalid activation server url')) {
+    return 'CivicFlow does not have a valid license server URL configured. Check Licensing Diagnostics and update the activation server setting.';
+  }
+  if (lower.includes('seat limit')) return 'All seats for this license are already in use. Reset an activation or contact CivicFlow support.';
+  if (lower.includes('revoked')) return 'This license has been revoked. Contact CivicFlow support if you believe this is incorrect.';
+  if (lower.includes('expired')) return 'This license is expired. Renew or replace it to continue.';
+  if (lower.includes('invalid key') || lower.includes('invalid license')) return 'That license key was not recognized. Check the key and try again.';
+  if (lower.includes('hostname could not be resolved')) return 'The configured license server hostname could not be resolved. Check the activation server URL.';
+  if (lower.includes('unreachable at')) return 'The configured license server could not be reached. Confirm internet access and the activation server URL.';
+  if (lower.includes('server unavailable') || lower.includes('timeout') || lower.includes('network error')) return 'The license server is unavailable right now. If this device checked in recently, offline grace may still apply.';
+  return text;
+}
 
 export function Settings({ onNavigate, onOpenActivation }) {
   const [cboName, setCboName] = useState('');
@@ -30,6 +49,8 @@ export function Settings({ onNavigate, onOpenActivation }) {
   const [licenseEmail, setLicenseEmail] = useState('');
   const [licenseMessage, setLicenseMessage] = useState(null);
   const [licenseRefreshing, setLicenseRefreshing] = useState(false);
+  const [licenseResetting, setLicenseResetting] = useState(false);
+  const [licenseConfig, setLicenseConfig] = useState(null);
   const [backupMessage, setBackupMessage] = useState(null);
   const [restoreMessage, setRestoreMessage] = useState(null);
   const [restoring, setRestoring] = useState(false);
@@ -95,7 +116,10 @@ export function Settings({ onNavigate, onOpenActivation }) {
     let cancelled = false;
     api?.license?.getStatus?.().then((s) => {
       if (!cancelled) setLicenseStatus(s);
-    });
+    }).catch(() => {});
+    api?.license?.getConfig?.().then((config) => {
+      if (!cancelled) setLicenseConfig(config || null);
+    }).catch(() => {});
     api?.email?.getSettings?.().then((s) => {
       if (!cancelled && s) {
         setEmailSettings(s);
@@ -138,6 +162,7 @@ export function Settings({ onNavigate, onOpenActivation }) {
         cashapp_handle: cashappHandle.trim() || null,
         zelle_contact: zelleContact.trim() || null,
         venmo_handle: venmoHandle.trim() || null,
+        auto_archive_enabled: autoArchiveEnabled ? 1 : 0,
       });
       await api.branding.set({ cboName: cboName.trim() || 'Civicflow', logoPath: logoPath.trim() || null });
       setSaved(true);
@@ -160,6 +185,7 @@ export function Settings({ onNavigate, onOpenActivation }) {
         cashapp_handle: cashappHandle.trim() || null,
         zelle_contact: zelleContact.trim() || null,
         venmo_handle: venmoHandle.trim() || null,
+        auto_archive_enabled: autoArchiveEnabled ? 1 : 0,
       });
       if (result) {
         setPaymentsEnabled(!!nextEnabled);
@@ -305,11 +331,14 @@ export function Settings({ onNavigate, onOpenActivation }) {
         setLicenseEmail('');
         const status = await api.license.getStatus();
         setLicenseStatus(status);
+        setLicenseConfig(await api.license.getConfig?.());
       } else {
-        setLicenseMessage({ type: 'error', text: result?.error || 'Activation failed.' });
+        setLicenseMessage({ type: 'error', text: getActivationErrorMessage(result?.error) });
+        setLicenseConfig(await api.license.getConfig?.());
       }
     } catch (err) {
-      setLicenseMessage({ type: 'error', text: err?.message || 'Invalid key.' });
+      setLicenseMessage({ type: 'error', text: getActivationErrorMessage(err?.message) });
+      setLicenseConfig(await api.license.getConfig?.());
     }
   };
 
@@ -320,8 +349,10 @@ export function Settings({ onNavigate, onOpenActivation }) {
       await api.license.deactivate();
       setLicenseMessage({ type: 'success', text: 'License deactivated.' });
       setLicenseStatus(await api.license.getStatus());
+      setLicenseConfig(await api.license.getConfig?.());
     } catch (err) {
       setLicenseMessage({ type: 'error', text: err?.message || 'Deactivation failed.' });
+      setLicenseConfig(await api.license.getConfig?.());
     }
   };
 
@@ -332,14 +363,42 @@ export function Settings({ onNavigate, onOpenActivation }) {
       const result = await api.license.refresh();
       if (result?.success) {
         setLicenseMessage({ type: 'success', text: 'License check-in completed.' });
+      } else if (result?.keptLocalAccess && result?.validationWarning) {
+        setLicenseMessage({ type: 'success', text: result.validationWarning });
       } else {
-        setLicenseMessage({ type: 'error', text: result?.error || 'License check-in failed.' });
+        setLicenseMessage({ type: 'error', text: getActivationErrorMessage(result?.error || 'License check-in failed.') });
       }
       setLicenseStatus(await api.license.getStatus());
+      setLicenseConfig(await api.license.getConfig?.());
     } catch (err) {
-      setLicenseMessage({ type: 'error', text: err?.message || 'License check-in failed.' });
+      setLicenseMessage({ type: 'error', text: getActivationErrorMessage(err?.message || 'License check-in failed.') });
+      setLicenseConfig(await api.license.getConfig?.());
     } finally {
       setLicenseRefreshing(false);
+    }
+  };
+
+  const handleResetLocalLicense = async () => {
+    const confirmed = confirm(
+      'Reset local license data on this device?\n\nThis clears the cached activation file only. Organization, member, and payment data are not deleted.'
+    );
+    if (!confirmed) return;
+
+    setLicenseResetting(true);
+    setLicenseMessage(null);
+    try {
+      const result = await api.license.resetLocal?.();
+      setLicenseStatus(result || await api.license.getStatus());
+      setLicenseConfig(await api.license.getConfig?.());
+      setLicenseMessage({
+        type: 'success',
+        text: 'Local license cache cleared. Activate again with your license key.',
+      });
+      setLicenseKey('');
+    } catch (err) {
+      setLicenseMessage({ type: 'error', text: err?.message || 'Failed to reset local license data.' });
+    } finally {
+      setLicenseResetting(false);
     }
   };
 
@@ -473,11 +532,44 @@ export function Settings({ onNavigate, onOpenActivation }) {
               <p className="text-sm mt-1">
                 {licenseStatus.plan ? `Plan: ${licenseStatus.plan}` : 'Plan: Essential'}
               </p>
-              <p className="text-xs mt-1 text-emerald-700">
-                {`Offline days remaining: ${licenseStatus.daysRemainingOffline ?? 0}`}
-                {' · '}
-                {`Last online check: ${licenseStatus.lastOnlineCheckAt ? new Date(licenseStatus.lastOnlineCheckAt).toLocaleString() : 'Never'}`}
+              <p className="text-sm mt-1">
+                {licenseStatus.licenseType ? `Type: ${licenseStatus.licenseType}` : 'Type: Annual'}
               </p>
+              {licenseStatus.organizationName && (
+                <p className="text-sm mt-1">
+                  {`Organization: ${licenseStatus.organizationName}`}
+                </p>
+              )}
+              {licenseStatus.customerEmail && (
+                <p className="text-sm mt-1">
+                  {`Email: ${licenseStatus.customerEmail}`}
+                </p>
+              )}
+              {licenseStatus.seatsAllowed != null && (
+                <p className="text-sm mt-1">
+                  {`Seats allowed: ${licenseStatus.seatsAllowed}`}
+                </p>
+              )}
+              {licenseStatus.activeDeviceCount != null && (
+                <p className="text-sm mt-1">
+                  {`Active device count: ${licenseStatus.activeDeviceCount}`}
+                </p>
+              )}
+              <p className="text-sm mt-1">
+                {`Expires: ${formatExpiry(licenseStatus.expiresAt)}`}
+              </p>
+              {licenseStatus.supportExpiresAt && (
+                <p className="text-sm mt-1">
+                  {`Support through: ${formatExpiry(licenseStatus.supportExpiresAt)}`}
+                </p>
+              )}
+              {licenseStatus.validationMode === 'server' && (
+                <p className="text-xs mt-1 text-emerald-700">
+                  {`Offline days remaining: ${licenseStatus.daysRemainingOffline ?? 0}`}
+                  {' · '}
+                  {`Last validated: ${licenseStatus.lastValidatedAt ? new Date(licenseStatus.lastValidatedAt).toLocaleString() : 'Never'}`}
+                </p>
+              )}
               <div className="mt-3 flex gap-2">
                 <button
                   type="button"
@@ -508,6 +600,56 @@ export function Settings({ onNavigate, onOpenActivation }) {
             </div>
           )}
           <div>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+            <p className="font-medium text-slate-800">Licensing Diagnostics</p>
+            <p className="mt-1">{`Server URL: ${licenseConfig?.url || 'Not configured'}`}</p>
+            <p className="mt-1">{`Source: ${licenseConfig?.source || 'unknown'}`}</p>
+            <p className="mt-1">{`Mode: ${licenseConfig?.isPackaged ? 'Production' : 'Development'}`}</p>
+            {licenseStatus?.validationMode === 'server' && (
+              <p className="mt-1">{`Offline grace: ${licenseStatus?.activated ? 'active' : 'inactive'}${licenseStatus?.daysRemainingOffline != null ? ` · ${licenseStatus.daysRemainingOffline} day(s) remaining` : ''}`}</p>
+            )}
+            {licenseConfig?.requestDiagnostics?.lastAttemptAt && (
+              <p className="mt-1">{`Last request: ${new Date(licenseConfig.requestDiagnostics.lastAttemptAt).toLocaleString()} · ${licenseConfig.requestDiagnostics.lastMethod || 'GET'} ${licenseConfig.requestDiagnostics.lastEndpoint || ''}`}</p>
+            )}
+            {licenseConfig?.requestDiagnostics?.lastResult && (
+              <p className="mt-1">{`Last result: ${licenseConfig.requestDiagnostics.lastResult}${licenseConfig.requestDiagnostics.lastStatusCode ? ` (HTTP ${licenseConfig.requestDiagnostics.lastStatusCode})` : ''}`}</p>
+            )}
+            {licenseConfig?.requestDiagnostics?.lastError && (
+              <p className="mt-2 text-red-700">{licenseConfig.requestDiagnostics.lastError}</p>
+            )}
+            {licenseConfig?.error && !licenseConfig?.requestDiagnostics?.lastError && (
+              <p className="mt-2 text-red-700">{licenseConfig.error}</p>
+            )}
+            {licenseStatus?.licenseFilePath && (
+              <p className="mt-1 break-all">{`License file: ${licenseStatus.licenseFilePath}`}</p>
+            )}
+            {licenseStatus?.licenseKeyMasked && (
+              <p className="mt-1">{`License key: ${licenseStatus.licenseKeyMasked}`}</p>
+            )}
+            {licenseStatus?.storedDeviceFingerprint && (
+              <p className="mt-1 break-all">{`Stored fingerprint: ${licenseStatus.storedDeviceFingerprint}`}</p>
+            )}
+            {licenseStatus?.currentDeviceFingerprint && (
+              <p className="mt-1 break-all">{`Current fingerprint: ${licenseStatus.currentDeviceFingerprint}`}</p>
+            )}
+            {licenseStatus?.offlineGraceUntil && (
+              <p className="mt-1">{`Offline grace until: ${new Date(licenseStatus.offlineGraceUntil).toLocaleString()}`}</p>
+            )}
+          </div>
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+            <p className="font-medium text-red-900">Support tools</p>
+            <p className="mt-1 text-red-800">
+              Reset only the local activation cache if licensing is stuck. This does not delete your organization database.
+            </p>
+            <button
+              type="button"
+              onClick={handleResetLocalLicense}
+              disabled={licenseResetting}
+              className="mt-3 px-3 py-1.5 rounded text-sm border border-red-300 bg-white text-red-800 hover:bg-red-100 disabled:opacity-50"
+            >
+              {licenseResetting ? 'Resetting…' : 'Reset local license data'}
+            </button>
+          </div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Email (optional)</label>
             <input
               type="email"
@@ -522,7 +664,7 @@ export function Settings({ onNavigate, onOpenActivation }) {
             <textarea
               value={licenseKey}
               onChange={(e) => setLicenseKey(e.target.value)}
-              placeholder="CFLOW-XXXX-XXXX"
+              placeholder="CF-XXXX-XXXX-XXXX-XXXX"
               className="w-full px-3 py-2 rounded-lg border border-slate-300 font-mono text-sm focus:ring-2 focus:ring-emerald-500"
               rows={2}
             />
@@ -755,7 +897,7 @@ export function Settings({ onNavigate, onOpenActivation }) {
                 step="0.01"
                 min="0"
                 value={categoryForm.monthly_dues_cents === 0 ? '' : categoryForm.monthly_dues_cents / 100}
-                onChange={(e) => setCategoryForm((f) => ({ ...f, monthly_dues_cents: Math.round(parseFloat(e.target.value || 0) * 100) }))}
+                onChange={(e) => setCategoryForm((f) => ({ ...f, monthly_dues_cents: parseMoneyToCents(e.target.value) ?? 0 }))}
                 placeholder="0"
                 className="w-24 px-3 py-2 rounded-lg border border-slate-300 text-sm"
               />
@@ -789,7 +931,7 @@ export function Settings({ onNavigate, onOpenActivation }) {
               {categories.map((c) => (
                 <li key={c.id} className="flex items-center justify-between py-2 border-b border-slate-100 last:border-0">
                   <span className="font-medium text-slate-800">{c.name}</span>
-                  <span className="text-slate-600">${((c.monthly_dues_cents ?? 0) / 100).toFixed(2)}/mo</span>
+                  <span className="text-slate-600">{formatMoneyFromCents(c.monthly_dues_cents)}/mo</span>
                   <button
                     type="button"
                     onClick={() => { setEditingCategoryId(c.id); setCategoryForm({ name: c.name, monthly_dues_cents: c.monthly_dues_cents ?? 0 }); }}
@@ -1177,3 +1319,14 @@ export function Settings({ onNavigate, onOpenActivation }) {
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+

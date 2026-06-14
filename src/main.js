@@ -4,7 +4,10 @@ const os = require("os");
 const http = require("http");
 const fs = require("fs");
 const logger = require("./main/logger");
+const { APP_PRODUCT_NAME } = require("./shared/appConfig");
 const { getDatabase, initializeDatabase } = require("./main/db");
+const { persistLogo } = require("./main/logoStorage");
+const { upsertOrganization } = require("./main/organization-persistence");
 
 let mainWindowRef = null;
 let pendingDeepLinkHash = null;
@@ -74,7 +77,9 @@ const tempUserData = path.join(os.tmpdir(), "CivicFlowDevProfile");
 if (!app.isPackaged) {
   app.setPath("userData", tempUserData);
   app.setPath("cache", path.join(tempUserData, "Cache"));
+  app.commandLine.appendSwitch("disable-http-cache");
 }
+app.setName(APP_PRODUCT_NAME);
 app.disableHardwareAcceleration();
 
 // =====================================================
@@ -118,12 +123,30 @@ function ensureCriticalIpcHandlers() {
     logger.warn("ipc-fallback-registered", { channel: "license:getStatus" });
   }
 
+  if (!hasInvokeHandler("license:getConfig")) {
+    ipcMain.removeHandler("license:getConfig");
+    ipcMain.handle("license:getConfig", async () => {
+      return typeof licenseService.getLicenseServerConfig === "function"
+        ? licenseService.getLicenseServerConfig()
+        : { ok: false, error: "License configuration is unavailable." };
+    });
+    logger.warn("ipc-fallback-registered", { channel: "license:getConfig" });
+  }
+
   if (!hasInvokeHandler("license:refresh")) {
     ipcMain.removeHandler("license:refresh");
     ipcMain.handle("license:refresh", async () => {
       return licenseService.refreshLicense();
     });
     logger.warn("ipc-fallback-registered", { channel: "license:refresh" });
+  }
+
+  if (!hasInvokeHandler("license:resetLocal")) {
+    ipcMain.removeHandler("license:resetLocal");
+    ipcMain.handle("license:resetLocal", async () => {
+      return licenseService.resetLocalLicenseData();
+    });
+    logger.warn("ipc-fallback-registered", { channel: "license:resetLocal" });
   }
 
   if (!hasInvokeHandler("license:activate")) {
@@ -152,53 +175,7 @@ function ensureCriticalIpcHandlers() {
   });
 
   forceRegister("organization:set", async (_event, data = {}) => {
-    database
-      .prepare(`
-        INSERT INTO organization (
-          id,
-          name,
-          logo_path,
-          email_display_name,
-          email_from_address,
-          payments_enabled,
-          stripe_account_id,
-          cashapp_handle,
-          zelle_contact,
-          venmo_handle,
-          auto_archive_enabled,
-          auto_archive_events_days,
-          auto_archive_campaigns_days,
-          updated_at
-        ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-        ON CONFLICT(id) DO UPDATE SET
-          name = COALESCE(excluded.name, organization.name),
-          logo_path = COALESCE(excluded.logo_path, organization.logo_path),
-          email_display_name = COALESCE(excluded.email_display_name, organization.email_display_name),
-          email_from_address = COALESCE(excluded.email_from_address, organization.email_from_address),
-          payments_enabled = COALESCE(excluded.payments_enabled, organization.payments_enabled),
-          stripe_account_id = COALESCE(excluded.stripe_account_id, organization.stripe_account_id),
-          cashapp_handle = COALESCE(excluded.cashapp_handle, organization.cashapp_handle),
-          zelle_contact = COALESCE(excluded.zelle_contact, organization.zelle_contact),
-          venmo_handle = COALESCE(excluded.venmo_handle, organization.venmo_handle),
-            auto_archive_enabled = COALESCE(excluded.auto_archive_enabled, organization.auto_archive_enabled),
-            auto_archive_events_days = COALESCE(excluded.auto_archive_events_days, organization.auto_archive_events_days),
-            auto_archive_campaigns_days = COALESCE(excluded.auto_archive_campaigns_days, organization.auto_archive_campaigns_days),
-          updated_at = datetime('now')
-      `)
-      .run(
-        data.name ?? null,
-        data.logo_path ?? null,
-        data.email_display_name ?? null,
-        data.email_from_address ?? null,
-        data.payments_enabled == null ? null : (data.payments_enabled ? 1 : 0),
-        data.stripe_account_id ?? null,
-        data.cashapp_handle ?? null,
-        data.zelle_contact ?? null,
-        data.venmo_handle ?? null,
-        data.auto_archive_enabled == null ? null : (data.auto_archive_enabled ? 1 : 0),
-        data.auto_archive_events_days == null ? null : Math.max(0, Number(data.auto_archive_events_days) || 0),
-        data.auto_archive_campaigns_days == null ? null : Math.max(0, Number(data.auto_archive_campaigns_days) || 0),
-      );
+    upsertOrganization(database, data);
     return { success: true };
   });
 
@@ -222,16 +199,7 @@ function ensureCriticalIpcHandlers() {
     ipcMain.removeHandler("organization:upload-logo");
     ipcMain.handle("organization:upload-logo", async (_event, base64OrPath) => {
       if (!base64OrPath) return { success: false, error: "No logo payload provided" };
-      const userData = app.getPath("userData");
-      const orgDir = path.join(userData, "logos");
-      fs.mkdirSync(orgDir, { recursive: true });
-      let logoPath = base64OrPath;
-      if (typeof base64OrPath === "string" && base64OrPath.startsWith("data:image/")) {
-        const data = base64OrPath.split(",")[1] || "";
-        const file = path.join(orgDir, `logo-${Date.now()}.png`);
-        fs.writeFileSync(file, Buffer.from(data, "base64"));
-        logoPath = file;
-      }
+      const logoPath = persistLogo(base64OrPath);
       database.prepare("UPDATE organization SET logo_path = ?, updated_at = datetime('now') WHERE id = 1").run(logoPath);
       return { success: true, logo_path: logoPath, logoPath };
     });
@@ -456,6 +424,12 @@ async function createWindow() {
   if (isDev) {
     const devUrl = await resolveDevServerUrl();
     logger.info("dev-server-url", devUrl);
+    try {
+      await mainWindow.webContents.session.clearCache();
+      logger.info("dev-cache-cleared", "renderer session cache cleared before loadURL");
+    } catch (err) {
+      logger.warn("dev-cache-clear-failed", err?.message || err);
+    }
     await mainWindow.loadURL(devUrl);
   } else {
     const indexPath = path.join(app.getAppPath(), "dist", "index.html");
@@ -516,8 +490,42 @@ app.whenReady().then(() => {
   ensureCriticalIpcHandlers();
 
   try {
+    const {
+      logAppIdentity,
+      migrateLegacyLicenseIfNeeded,
+    } = require("./main/license-userdata-migration");
+
+    logAppIdentity((event, payload) => logger.info(event, payload));
+
+    const licenseMigration = migrateLegacyLicenseIfNeeded({
+      log: (event, payload) => logger.info(event, payload),
+    });
+    if (!licenseMigration.migrated && licenseMigration.reason === "no-legacy-license-found") {
+      logger.info("license-userdata-migration-skipped", {
+        reason: licenseMigration.reason,
+        currentUserDataPath: licenseMigration.currentUserDataPath,
+        scannedDirectoryCount: Array.isArray(licenseMigration.scannedDirectories)
+          ? licenseMigration.scannedDirectories.length
+          : 0,
+      });
+    }
+  } catch (err) {
+    logger.error("license-userdata-migration-failed", err?.message || err);
+  }
+
+  try {
     if (typeof licenseService?.ensureLicenseInitialized === "function") {
       licenseService.ensureLicenseInitialized();
+    }
+    if (typeof licenseService?.getLicenseServerConfig === "function") {
+      const config = licenseService.getLicenseServerConfig();
+      logger.info("license-server-config", {
+        ok: config?.ok,
+        url: config?.url || null,
+        source: config?.source || null,
+        isPackaged: app.isPackaged,
+        error: config?.error || null,
+      });
     }
   } catch (err) {
     console.warn("⚠️ Failed to initialize license state:", err?.message || err);

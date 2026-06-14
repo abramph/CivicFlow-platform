@@ -15,7 +15,6 @@ import { ReportsDashboard } from './views/ReportsDashboard.jsx';
 import { Settings } from './views/Settings.jsx';
 import { SetupWizard } from './views/SetupWizard.jsx';
 import { ActivationScreen } from './views/ActivationScreen.jsx';
-import Activation from './renderer/pages/Activation.jsx';
 import { Grants } from './views/Grants.jsx';
 import { GrantDetail } from './views/GrantDetail.jsx';
 import { Communications } from './views/Communications.jsx';
@@ -107,9 +106,19 @@ export function App() {
   const [setupComplete, setSetupComplete] = useState(false);
   const [setupChecked, setSetupChecked] = useState(false);
   const [licenseStatus, setLicenseStatus] = useState(null);
+  const [licenseCheckComplete, setLicenseCheckComplete] = useState(false);
+  const [licenseValidationWarning, setLicenseValidationWarning] = useState(null);
+  const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const searchParams = new URLSearchParams(window.location.search);
   const isActivationMode = searchParams.get('mode') === 'activation';
   const activationReason = searchParams.get('reason');
+
+  const exitActivationMode = () => {
+    const next = new URL(window.location.href);
+    next.searchParams.delete('mode');
+    next.searchParams.delete('reason');
+    window.history.replaceState({}, '', next.toString());
+  };
 
   const openActivationWindow = () => {
     const next = new URL(window.location.href);
@@ -117,7 +126,33 @@ export function App() {
     window.location.href = next.toString();
   };
 
-  // Startup check: setup status
+  const handleOnboardingStatusChange = async (status) => {
+    if (status) {
+      setLicenseStatus(status);
+      return;
+    }
+    setLicenseStatus(await window.civicflow.license.getStatus());
+  };
+
+  const handleOnboardingComplete = async (status) => {
+    if (status) {
+      setLicenseStatus(status);
+    } else {
+      setLicenseStatus(await window.civicflow.license.getStatus());
+    }
+    setOnboardingDismissed(false);
+    if (isActivationMode) {
+      exitActivationMode();
+    }
+  };
+
+  const handleContinueTrial = async () => {
+    setOnboardingDismissed(true);
+    if (isActivationMode) {
+      exitActivationMode();
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
     const setupPromise = window.civicflow?.organization?.getSetupStatus?.();
@@ -189,14 +224,60 @@ export function App() {
   }, [setupChecked, setupComplete]);
 
   useEffect(() => {
-    const wait = () => {
-      if (window.civicflow && window.civicflow.license) {
-        window.civicflow.license.getStatus().then(setLicenseStatus);
-      } else {
-        setTimeout(wait, 100);
+    let cancelled = false;
+    let timerId = null;
+
+    const loadLicense = async () => {
+      try {
+        const status = await window.civicflow.license.getStatus();
+        if (cancelled) return;
+        setLicenseStatus(status);
+        setLicenseCheckComplete(true);
+
+        const shouldRefreshInBackground = status?.type === 'paid'
+          && status?.validationMode === 'server'
+          && status?.valid;
+
+        if (!shouldRefreshInBackground) return;
+
+        const refreshed = await window.civicflow.license.refresh();
+        if (cancelled) return;
+
+        if (refreshed?.validationWarning && (refreshed?.keptLocalAccess || status?.valid)) {
+          setLicenseValidationWarning(refreshed.validationWarning);
+          if (refreshed?.valid) {
+            setLicenseStatus(refreshed);
+          }
+          return;
+        }
+
+        setLicenseStatus(refreshed);
+        if (refreshed?.valid) {
+          setLicenseValidationWarning(null);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setLicenseCheckComplete(true);
+          setLicenseValidationWarning(err?.message || 'License check failed.');
+        }
       }
     };
+
+    const wait = () => {
+      if (window.civicflow && window.civicflow.license) {
+        void loadLicense();
+      } else {
+        timerId = setTimeout(wait, 100);
+      }
+    };
+
     wait();
+    return () => {
+      cancelled = true;
+      if (timerId) {
+        clearTimeout(timerId);
+      }
+    };
   }, []);
 
   const onNavigate = (viewId, params = {}) => {
@@ -228,7 +309,7 @@ export function App() {
     );
   }
 
-  if (!licenseStatus) {
+  if (!licenseCheckComplete || !licenseStatus) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-slate-50">
         <p className="text-slate-500">Checking license…</p>
@@ -237,17 +318,20 @@ export function App() {
   }
 
   const trialDaysRemaining = Number(licenseStatus?.daysRemaining ?? 0);
-  const trialIsValid = licenseStatus?.status === 'trial' && trialDaysRemaining > 0;
+  const trialIsValid = licenseStatus?.type === 'trial' && licenseStatus?.valid && trialDaysRemaining > 0;
+  const paidLicenseActive = licenseStatus?.type === 'paid' && licenseStatus?.valid;
+  const shouldShowOnboarding = isActivationMode || (!paidLicenseActive && (!trialIsValid || !onboardingDismissed));
 
-  if (!licenseStatus.valid && !trialIsValid) {
+  if (shouldShowOnboarding) {
     return (
-      <Activation onLicensed={async () => setLicenseStatus(await window.civicflow.license.getStatus())} />
-    );
-  }
-
-  if (isActivationMode) {
-    return (
-      <ActivationScreen reason={activationReason} />
+      <ActivationScreen
+        reason={activationReason || licenseStatus?.reason || null}
+        licenseStatus={licenseStatus}
+        forcedStep={isActivationMode ? 'activate' : null}
+        onContinueTrial={handleContinueTrial}
+        onStatusChange={handleOnboardingStatusChange}
+        onComplete={handleOnboardingComplete}
+      />
     );
   }
 
@@ -261,6 +345,18 @@ export function App() {
 
   return (
     <ErrorBoundary>
+      {licenseValidationWarning && (
+        <div className="w-full bg-amber-50 border-b border-amber-200 px-4 py-2 text-amber-800 text-sm flex items-center justify-between gap-4">
+          <span>{licenseValidationWarning}</span>
+          <button
+            type="button"
+            onClick={() => setLicenseValidationWarning(null)}
+            className="shrink-0 px-3 py-1 rounded border border-amber-300 bg-white hover:bg-amber-100 text-amber-900 font-medium"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       {trialIsValid && (
         <div className="w-full bg-amber-50 border-b border-amber-200 px-4 py-2 text-amber-800 text-sm flex items-center justify-between">
           <span>{`Trial: ${trialDaysRemaining} day${trialDaysRemaining === 1 ? '' : 's'} remaining`}</span>
@@ -283,6 +379,7 @@ export function App() {
         ) : activeView === 'reports' ? (
           <Reports
             initialReportType={viewParams.reportType}
+            initialMemberId={viewParams.memberId}
             initialCampaignId={viewParams.campaignId}
             initialEventId={viewParams.eventId}
           />

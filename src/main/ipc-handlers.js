@@ -14,6 +14,9 @@ const { syncPayments } = require("./services/paymentSyncService");
 const { ImportService, buildFileHash } = require("./services/importService");
 const { buildPeriodReportPDF } = require("./pdf-service");
 const { createCheckoutSession } = require("./stripe-payments");
+const { persistLogo } = require("./logoStorage");
+const { upsertOrganization } = require("./organization-persistence");
+const { formatMoneyInputFromCents, parseMoneyValue, parseMoneyToCents, resolveAmountCents } = require("../shared/money.cjs");
 const {
   PRODUCTION_REPORT_PAYMENT_URL,
   CIVICFLOW_DEEP_LINK_URL,
@@ -111,6 +114,7 @@ const ALL_PRELOAD_CHANNELS = [
   "email:outbox:list",
   "email:processOutbox",
   "email:queue",
+  "email:getDuesReminderPreview",
   "email:resolveRecipients",
   "email:send:test",
   "email:sendDuesReminder",
@@ -175,8 +179,10 @@ const ALL_PRELOAD_CHANNELS = [
   "license:activate",
   "license:can-activate",
   "license:deactivate",
+  "license:getConfig",
   "license:getStatus",
   "license:refresh",
+  "license:resetLocal",
   "license:startTrial",
   "license:start-trial",
   "license:status",
@@ -249,10 +255,110 @@ function db() {
 }
 
 function toCents(value) {
-  const n = Number(value ?? 0);
-  if (!Number.isFinite(n)) return 0;
-  if (Math.abs(n) > 1000) return Math.round(n);
-  return Math.round(n * 100);
+  return parseMoneyToCents(value) ?? 0;
+}
+
+function resolveInputAmountCents(amountCentsValue, amountValue) {
+  return resolveAmountCents(amountCentsValue, amountValue) ?? 0;
+}
+
+function unwrapSelectValue(value) {
+  if (value == null) return value;
+  if (value instanceof Date || Buffer.isBuffer(value)) return value;
+  if (Array.isArray(value)) return null;
+  if (typeof value === "object") {
+    if (Object.prototype.hasOwnProperty.call(value, "value")) {
+      return value.value ?? value.id ?? null;
+    }
+    if (Object.prototype.hasOwnProperty.call(value, "id")) {
+      return value.id ?? null;
+    }
+    return null;
+  }
+  return value;
+}
+
+function toNullableNumber(value) {
+  const raw = unwrapSelectValue(value);
+  if (raw == null || raw === "") return null;
+  const numeric = Number(raw);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function toNullableString(value) {
+  const raw = unwrapSelectValue(value);
+  if (raw == null) return null;
+  const text = String(raw).trim();
+  return text ? text : null;
+}
+
+function toNullableIdString(value) {
+  const raw = unwrapSelectValue(value);
+  if (raw == null) return null;
+  const text = String(raw).trim();
+  return text ? text : null;
+}
+
+function toNullableIsoString(value) {
+  const raw = unwrapSelectValue(value);
+  if (raw == null || raw === "") return null;
+  if (raw instanceof Date) {
+    return Number.isNaN(raw.getTime()) ? null : raw.toISOString();
+  }
+  const text = String(raw).trim();
+  if (!text) return null;
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString();
+}
+
+function toOptionalPositiveId(value) {
+  const idText = toNullableIdString(value);
+  if (!idText) return null;
+  const numeric = Number(idText);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
+
+function sanitizeTransactionPayload(data = {}) {
+  return {
+    id: toNullableIdString(data.id ?? null),
+    amount: toNullableNumber(data.amount),
+    amount_cents: toNullableNumber(data.amount_cents),
+    date: toNullableIsoString(data.date ?? data.occurred_on ?? data.txn_date ?? null),
+    occurred_on: toNullableIsoString(data.occurred_on ?? data.date ?? data.txn_date ?? null),
+    txn_date: toNullableIsoString(data.txn_date ?? data.date ?? data.occurred_on ?? null),
+    memberId: toNullableIdString(data.memberId ?? data.member_id ?? null),
+    member_id: toNullableIdString(data.member_id ?? data.memberId ?? null),
+    eventId: toNullableIdString(data.eventId ?? data.event_id ?? null),
+    event_id: toNullableIdString(data.event_id ?? data.eventId ?? null),
+    campaignId: toNullableIdString(data.campaignId ?? data.campaign_id ?? null),
+    campaign_id: toNullableIdString(data.campaign_id ?? data.campaignId ?? null),
+    contributorId: toNullableIdString(data.contributorId ?? data.contributor_id ?? null),
+    contributor_id: toNullableIdString(data.contributor_id ?? data.contributorId ?? null),
+    notes: toNullableString(data.notes ?? data.note ?? null),
+    note: toNullableString(data.note ?? data.notes ?? null),
+    payment_method: toNullableString(data.payment_method ?? null),
+    status: toNullableString(data.status ?? null),
+    contributor_name: toNullableString(data.contributor_name ?? data.contributorName ?? null),
+    contributorName: toNullableString(data.contributorName ?? data.contributor_name ?? null),
+    contributor_type: toNullableString(data.contributor_type ?? data.contributorType ?? null),
+    contributorType: toNullableString(data.contributorType ?? data.contributor_type ?? null),
+    transaction_type: toNullableString(data.transaction_type ?? data.txn_type ?? data.type ?? null),
+    txn_type: toNullableString(data.txn_type ?? data.transaction_type ?? data.type ?? null),
+    type: toNullableString(data.type ?? data.transaction_type ?? data.txn_type ?? null),
+  };
+}
+
+function toSqliteFlag(value) {
+  return value ? 1 : 0;
+}
+
+function describeBindingType(value) {
+  if (value === null) return "null";
+  if (Buffer.isBuffer(value)) return "buffer";
+  if (Array.isArray(value)) return "array";
+  if (value instanceof Date) return "date";
+  return typeof value;
 }
 
 function decodeBase64ToBuffer(base64) {
@@ -326,6 +432,17 @@ function toCsv(rows = []) {
   return lines.join("\n");
 }
 
+function writeAuditLog(database, action, entityType, entityId, metadata) {
+  try {
+    const payload = metadata ? JSON.stringify(metadata) : null;
+    database.prepare(
+      "INSERT INTO audit_logs (action, entity_type, entity_id, metadata_json) VALUES (?, ?, ?, ?)"
+    ).run(action, entityType, entityId ?? null, payload);
+  } catch (_err) {
+    // Avoid blocking primary flows on audit failures.
+  }
+}
+
 function monthToRange(month) {
   const m = String(month || "").trim();
   if (!/^\d{4}-\d{2}$/.test(m)) return null;
@@ -340,6 +457,68 @@ function normalizeDateRange(startDate, endDate) {
   const start = String(startDate || "").trim() || "1970-01-01";
   const end = String(endDate || "").trim() || new Date().toISOString().slice(0, 10);
   return { startDate: start, endDate: end };
+}
+
+function buildPdfReportRequest(reportType, params = {}) {
+  const normalizedType = String(reportType || "").trim();
+  const memberId = toOptionalPositiveId(params.memberId);
+  const eventId = toOptionalPositiveId(params.eventId);
+  const campaignId = toOptionalPositiveId(params.campaignId);
+
+  switch (normalizedType) {
+    case "member_monthly":
+      return {
+        reportType: normalizedType,
+        title: "Member Monthly Statement",
+        memberId,
+      };
+    case "member_contribution":
+      return {
+        reportType: normalizedType,
+        title: "Member Contribution Report",
+        memberId,
+      };
+    case "event_contribution":
+      return {
+        reportType: normalizedType,
+        title: "Event Financial Report",
+        eventId,
+      };
+    case "campaign_contribution":
+      return {
+        reportType: normalizedType,
+        title: "Campaign Financial Report",
+        campaignId,
+      };
+    case "org_financial":
+      return {
+        reportType: normalizedType,
+        title: "Organization Financial Report",
+      };
+    case "roster_active":
+      return {
+        reportType: normalizedType,
+        title: "Active Roster Report",
+      };
+    case "roster_inactive":
+      return {
+        reportType: normalizedType,
+        title: "Inactive Roster Report",
+      };
+    case "roster_combined":
+      return {
+        reportType: normalizedType,
+        title: "Active + Inactive Combined Roster",
+      };
+    default:
+      return {
+        reportType: normalizedType || "report",
+        title: normalizedType || "Report",
+        memberId,
+        eventId,
+        campaignId,
+      };
+  }
 }
 
 function toOptionalPositiveId(value) {
@@ -402,23 +581,199 @@ function ensureDuesAttributedToMember(transactionType, attribution = {}) {
   }
 }
 
+function normalizeTransactionSource(payload = {}, fallback = "LOCAL") {
+  const raw = payload?.source ?? payload?.context ?? fallback;
+  const text = String(raw || "").trim().toUpperCase();
+  return text || fallback;
+}
+
 function getEmailSettingsRow(database) {
   return database.prepare("SELECT * FROM email_settings WHERE id = 1").get() || null;
 }
 
-function buildEmailTransport(database) {
-  const settings = getEmailSettingsRow(database);
-  if (!settings) {
-    throw new Error("Email settings not found.");
+function getOrganizationSettingsRow(database) {
+  return database.prepare("SELECT * FROM organization_settings WHERE id = 1").get() || null;
+}
+
+function normalizeEmailAddress(value) {
+  const email = String(value || "").trim().toLowerCase();
+  return email || "";
+}
+
+function isValidEmailAddress(value) {
+  const email = normalizeEmailAddress(value);
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function toOptionalBooleanFlag(value) {
+  if (value == null || value === "") return null;
+  return value ? 1 : 0;
+}
+
+function emailConfigError(message = "Email service is not configured.") {
+  const err = new Error(message);
+  err.code = "EMAIL_NOT_CONFIGURED";
+  return err;
+}
+
+function normalizeEmailSendError(err) {
+  const code = String(err?.code || "").toUpperCase();
+  const responseCode = Number(err?.responseCode || 0);
+  const message = String(err?.message || "").trim();
+
+  if (code === "EMAIL_NOT_CONFIGURED") {
+    return { code, message: message || "Email service is not configured." };
   }
+
+  if (["EAUTH", "ESOCKET", "ECONNECTION", "ETIMEDOUT", "ECONNREFUSED", "ENOTFOUND"].includes(code)) {
+    return {
+      code: "EMAIL_NOT_CONFIGURED",
+      message: "Email service is not configured or could not connect using the current SMTP settings.",
+    };
+  }
+
+  if (responseCode === 535 || /auth|invalid login|authentication/i.test(message)) {
+    return {
+      code: "EMAIL_NOT_CONFIGURED",
+      message: "Email service is not configured or the current SMTP credentials were rejected.",
+    };
+  }
+
+  return {
+    code: code || "EMAIL_SEND_FAILED",
+    message: message || "Failed to send email.",
+  };
+}
+
+function getMergedEmailSettings(database) {
+  const emailSettings = getEmailSettingsRow(database) || {};
+  const organizationSettings = getOrganizationSettingsRow(database) || {};
+
+  const envHost = String(process.env.SMTP_HOST || "").trim();
+  const envFrom = String(process.env.SMTP_FROM || process.env.EMAIL_FROM || "").trim();
+  const envUser = String(process.env.SMTP_USER || "").trim();
+  const envPass = String(process.env.SMTP_PASS || "").trim();
+  const envPortRaw = process.env.SMTP_PORT;
+  const envSecureRaw = process.env.SMTP_SECURE;
+
+  const host = String(emailSettings.smtp_host || organizationSettings.smtp_host || envHost || "").trim();
+  const fromEmail = String(emailSettings.from_email || organizationSettings.email_from_address || envFrom || "").trim();
+  const fromName = String(
+    emailSettings.from_name
+    || organizationSettings.email_from_name
+    || organizationSettings.organization_name
+    || ""
+  ).trim();
+  const smtpUser = String(emailSettings.smtp_user || organizationSettings.smtp_user || envUser || "").trim();
+  const password = String(
+    emailSettings.smtp_password_ref
+    || organizationSettings.smtp_pass
+    || envPass
+    || ""
+  ).trim();
+  const emailSettingsHaveOwnConfig = Boolean(
+    String(emailSettings.from_email || "").trim()
+    || String(emailSettings.smtp_host || "").trim()
+    || String(emailSettings.smtp_user || "").trim()
+    || String(emailSettings.smtp_password_ref || "").trim()
+  );
+  const fallbackConfigExists = Boolean(
+    String(organizationSettings.email_from_address || "").trim()
+    || String(organizationSettings.smtp_host || "").trim()
+    || envHost
+    || envFrom
+  );
+
+  let enabled = emailSettings.enabled;
+  if ((enabled == null || enabled === "") || (!emailSettingsHaveOwnConfig && Number(enabled || 0) === 0 && fallbackConfigExists)) {
+    enabled = host && fromEmail ? 1 : 0;
+  }
+
+  let smtpPort = emailSettings.smtp_port;
+  if (smtpPort == null || smtpPort === "") smtpPort = organizationSettings.smtp_port;
+  if (smtpPort == null || smtpPort === "") smtpPort = envPortRaw;
+  smtpPort = Number(smtpPort || 587) || 587;
+
+  let smtpSecure = emailSettings.smtp_secure;
+  if (smtpSecure == null || smtpSecure === "") smtpSecure = organizationSettings.smtp_secure;
+  if (smtpSecure == null || smtpSecure === "") smtpSecure = envSecureRaw;
+  const secure = typeof smtpSecure === "string"
+    ? ["1", "true", "yes", "on"].includes(smtpSecure.trim().toLowerCase())
+    : Number(smtpSecure || 0) === 1;
+
+  return {
+    provider: "SMTP",
+    from_name: fromName,
+    from_email: fromEmail,
+    smtp_host: host,
+    smtp_port: smtpPort,
+    smtp_secure: secure ? 1 : 0,
+    smtp_user: smtpUser,
+    smtp_password_ref: password,
+    enabled: Number(enabled || 0) === 1 ? 1 : 0,
+    hasPassword: Boolean(password),
+  };
+}
+
+function persistEmailSettings(database, payload = {}) {
+  const merged = getMergedEmailSettings(database);
+
+  const fromName = payload.from_name ?? payload.email_from_name ?? merged.from_name ?? null;
+  const fromEmail = payload.from_email ?? payload.email_from_address ?? merged.from_email ?? null;
+  const smtpHost = payload.smtp_host ?? merged.smtp_host ?? null;
+  const smtpPort = payload.smtp_port ?? merged.smtp_port ?? null;
+  const smtpSecure = payload.smtp_secure == null ? merged.smtp_secure : (payload.smtp_secure ? 1 : 0);
+  const smtpUser = payload.smtp_user ?? merged.smtp_user ?? null;
+  const smtpPassword = Object.prototype.hasOwnProperty.call(payload, "smtp_password")
+    ? (payload.smtp_password ? String(payload.smtp_password) : null)
+    : Object.prototype.hasOwnProperty.call(payload, "smtp_pass")
+      ? (payload.smtp_pass ? String(payload.smtp_pass) : null)
+      : merged.smtp_password_ref || null;
+  const hasIncomingTransportConfig = Boolean(
+    String(payload.from_email ?? payload.email_from_address ?? "").trim()
+    || String(payload.smtp_host ?? "").trim()
+    || String(payload.smtp_user ?? "").trim()
+    || String(payload.smtp_password ?? payload.smtp_pass ?? "").trim()
+  );
+  const enabled = payload.enabled == null ? (hasIncomingTransportConfig ? 1 : merged.enabled) : (payload.enabled ? 1 : 0);
+
+  database.prepare(`
+    INSERT INTO email_settings (
+      id, provider, from_name, from_email, smtp_host, smtp_port,
+      smtp_secure, smtp_user, smtp_password_ref, enabled, updated_at
+    ) VALUES (1, 'SMTP', ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(id) DO UPDATE SET
+      from_name = COALESCE(excluded.from_name, email_settings.from_name),
+      from_email = COALESCE(excluded.from_email, email_settings.from_email),
+      smtp_host = COALESCE(excluded.smtp_host, email_settings.smtp_host),
+      smtp_port = COALESCE(excluded.smtp_port, email_settings.smtp_port),
+      smtp_secure = COALESCE(excluded.smtp_secure, email_settings.smtp_secure),
+      smtp_user = COALESCE(excluded.smtp_user, email_settings.smtp_user),
+      smtp_password_ref = COALESCE(excluded.smtp_password_ref, email_settings.smtp_password_ref),
+      enabled = COALESCE(excluded.enabled, email_settings.enabled),
+      updated_at = datetime('now')
+  `).run(
+    fromName ?? null,
+    fromEmail ?? null,
+    smtpHost ?? null,
+    smtpPort ?? null,
+    smtpSecure == null ? null : (smtpSecure ? 1 : 0),
+    smtpUser ?? null,
+    smtpPassword,
+    enabled == null ? null : (enabled ? 1 : 0),
+  );
+}
+
+function buildEmailTransport(database) {
+  const settings = getMergedEmailSettings(database);
   if (!Number(settings.enabled || 0)) {
-    throw new Error("Email sending is disabled in settings.");
+    throw emailConfigError("Email service is not configured. Enable email sending and add SMTP settings in Settings.");
   }
 
   const host = String(settings.smtp_host || "").trim();
   const fromEmail = String(settings.from_email || "").trim();
   if (!host || !fromEmail) {
-    throw new Error("Email settings are incomplete. Configure SMTP host and From Email.");
+    throw emailConfigError("Email service is not configured. Configure SMTP Host and From Email in Settings.");
   }
 
   const port = Number(settings.smtp_port || 587);
@@ -436,6 +791,15 @@ function buildEmailTransport(database) {
   const fromName = String(settings.from_name || "").trim();
   const from = fromName ? `${fromName} <${fromEmail}>` : fromEmail;
   return { transport, from, settings };
+}
+
+function buildReminderMailtoUrl({ to, rendered }) {
+  const email = normalizeEmailAddress(to);
+  if (!email || !rendered) return null;
+  const params = new URLSearchParams();
+  params.set("subject", String(rendered.subject || "Payment Reminder"));
+  params.set("body", String(rendered.text || "").trim());
+  return `mailto:${encodeURIComponent(email)}?${params.toString()}`;
 }
 
 function escapeHtml(text) {
@@ -592,6 +956,91 @@ function buildReminderInvoiceReference(memberId, dueDate) {
   return `DUES-${safeId}-${today}`;
 }
 
+function buildDuesReminderPreview(database, { recipientGroup = "active" } = {}) {
+  const normalizedGroup = String(recipientGroup || "active").trim().toLowerCase();
+  const where = [];
+
+  if (normalizedGroup === "active") {
+    where.push("LOWER(COALESCE(m.status, 'active')) = 'active'");
+  } else if (normalizedGroup === "active_inactive") {
+    where.push("LOWER(COALESCE(m.status, 'active')) IN ('active', 'inactive')");
+  }
+
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const candidates = database.prepare(`
+    SELECT
+      m.id,
+      m.email,
+      COALESCE(NULLIF(TRIM(COALESCE(m.first_name, '') || ' ' || COALESCE(m.last_name, '')), ''), 'Member') AS member_name
+    FROM members m
+    ${whereSql}
+    ORDER BY m.id ASC
+  `).all();
+
+  const recipients = [];
+  let totalMembers = 0;
+  let dueMembersCount = 0;
+  let skippedMissingEmail = 0;
+  let skippedInvalidEmail = 0;
+  let skippedNoBalance = 0;
+
+  for (const row of candidates) {
+    totalMembers += 1;
+    const duesStatus = calculateMemberDuesStatus(Number(row.id));
+    const balanceCents = Number(duesStatus?.balanceCents || 0);
+    if (balanceCents >= 0) {
+      skippedNoBalance += 1;
+      continue;
+    }
+
+    dueMembersCount += 1;
+    const email = normalizeEmailAddress(row.email);
+    if (!email) {
+      skippedMissingEmail += 1;
+      continue;
+    }
+    if (!isValidEmailAddress(email)) {
+      skippedInvalidEmail += 1;
+      continue;
+    }
+
+    const amountDueCents = Math.abs(balanceCents);
+    const amountDue = formatMoneyInputFromCents(amountDueCents);
+    const dueDate = "N/A";
+    const invoiceId = buildReminderInvoiceReference(row.id, dueDate);
+    const rendered = renderPaymentReminder({
+      member_name: String(row.member_name || "Member").trim() || "Member",
+      invoice_id: invoiceId,
+      amount_due: amountDue,
+      due_date: dueDate,
+      organization_name: "CivicFlow",
+    });
+    recipients.push({
+      id: Number(row.id || 0),
+      name: String(row.member_name || "Member").trim() || "Member",
+      email,
+      balanceCents,
+      amountDueCents,
+      amountDue,
+      status: String(duesStatus?.status || "past_due").toLowerCase(),
+      invoiceId,
+      subject: rendered.subject,
+      mailtoUrl: buildReminderMailtoUrl({ to: email, rendered }),
+    });
+  }
+
+  return {
+    recipientGroup: normalizedGroup,
+    totalMembers,
+    dueMembersCount,
+    deliverableCount: recipients.length,
+    skippedMissingEmail,
+    skippedInvalidEmail,
+    skippedNoBalance,
+    recipients,
+  };
+}
+
 function tableHasColumn(database, tableName, columnName) {
   try {
     const rows = database.prepare(`PRAGMA table_info(${tableName})`).all();
@@ -696,6 +1145,276 @@ function defaultForChannel(channel) {
   if (channel.includes(":archive") || channel.includes(":restore")) return { success: true };
   if (channel.includes("reports:")) return [];
   return { success: true };
+}
+
+function analyticsScalar(database, sql, params = [], field = "c") {
+  try {
+    const row = database.prepare(sql).get(...params);
+    return Number(row?.[field] ?? 0) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function analyticsRows(database, sql, params = []) {
+  try {
+    return database.prepare(sql).all(...params);
+  } catch {
+    return [];
+  }
+}
+
+function analyticsTxnTypeExpr(alias = "t") {
+  const prefix = alias ? `${alias}.` : "";
+  return `CASE
+    WHEN LOWER(COALESCE(${prefix}type, '')) IN ('dues', 'dues_payment', 'invoice', 'receipt') THEN 'DUES'
+    ELSE UPPER(COALESCE(${prefix}transaction_type, ${prefix}type, ''))
+  END`;
+}
+
+function analyticsTxnDateExpr(alias = "t") {
+  const prefix = alias ? `${alias}.` : "";
+  return `date(COALESCE(${prefix}occurred_on, ${prefix}created_at))`;
+}
+
+function buildDesktopAnalyticsSummary(database) {
+  const txnTypeExpr = analyticsTxnTypeExpr("t");
+  const txnDateExpr = analyticsTxnDateExpr("t");
+  const baseCompletedWhere = `COALESCE(t.is_deleted, 0) = 0 AND UPPER(COALESCE(t.status, 'COMPLETED')) = 'COMPLETED'`;
+  const positivePaymentsWhere = `${baseCompletedWhere} AND t.amount_cents > 0 AND ${txnTypeExpr} <> 'GENERAL_CONTRIBUTION'`;
+  const contributorLabelExpr = `COALESCE(
+    NULLIF(TRIM(COALESCE(m.first_name, '') || ' ' || COALESCE(m.last_name, '')), ''),
+    NULLIF(TRIM(COALESCE(t.contributor_name, '')), ''),
+    CASE
+      WHEN t.campaign_id IS NOT NULL AND c.name IS NOT NULL THEN 'Campaign: ' || c.name
+      WHEN t.event_id IS NOT NULL AND e.name IS NOT NULL THEN 'Event: ' || e.name
+      ELSE 'Unattributed external donor'
+    END
+  )`;
+  const contextExpr = `LOWER(COALESCE(
+    NULLIF(t.source, ''),
+    CASE
+      WHEN t.campaign_id IS NOT NULL THEN 'campaign'
+      WHEN t.event_id IS NOT NULL THEN 'event'
+      WHEN t.member_id IS NOT NULL THEN 'member_profile'
+      ELSE 'local'
+    END
+  ))`;
+
+  const totalMembers = analyticsScalar(database, "SELECT COUNT(*) AS c FROM members");
+  const activeMemberRows = analyticsRows(
+    database,
+    "SELECT id, first_name, last_name FROM members WHERE LOWER(COALESCE(status, 'active')) = 'active' ORDER BY id ASC"
+  );
+
+  let unpaidBalancesCents = 0;
+  const unpaidBalances = [];
+  for (const row of activeMemberRows) {
+    const memberId = Number(row?.id || 0);
+    if (!memberId) continue;
+    const duesStatus = calculateMemberDuesStatus(memberId);
+    const balanceCents = Number(duesStatus?.balanceCents || 0);
+    if (balanceCents >= 0) continue;
+
+    unpaidBalancesCents += Math.abs(balanceCents);
+    const memberName = `${row?.first_name || ""} ${row?.last_name || ""}`.trim() || `Member #${memberId}`;
+    unpaidBalances.push({
+      member_id: memberId,
+      member_name: memberName,
+      balance_cents: Math.abs(balanceCents),
+      status: String(duesStatus?.status || "past_due").toLowerCase(),
+    });
+  }
+
+  unpaidBalances.sort((left, right) => Number(right.balance_cents || 0) - Number(left.balance_cents || 0));
+
+  const totalPayments = analyticsScalar(
+    database,
+    `SELECT COUNT(*) AS c FROM transactions t WHERE ${positivePaymentsWhere}`
+  );
+  const totalAmountCents = analyticsScalar(
+    database,
+    `SELECT COALESCE(SUM(t.amount_cents), 0) AS c FROM transactions t WHERE ${positivePaymentsWhere}`
+  );
+  const campaignTotalCents = analyticsScalar(
+    database,
+    `SELECT COALESCE(SUM(t.amount_cents), 0) AS c
+     FROM transactions t
+     WHERE ${positivePaymentsWhere} AND ${txnTypeExpr} = 'CAMPAIGN_CONTRIBUTION'`
+  );
+  const eventTotalCents = analyticsScalar(
+    database,
+    `SELECT COALESCE(SUM(t.amount_cents), 0) AS c
+     FROM transactions t
+     WHERE ${positivePaymentsWhere} AND ${txnTypeExpr} = 'EVENT_REVENUE'`
+  );
+
+  const paymentsByMethod = analyticsRows(
+    database,
+    `SELECT
+       COALESCE(t.payment_method, 'unknown') AS method,
+       COUNT(*) AS count,
+       COALESCE(SUM(t.amount_cents), 0) AS total_cents
+     FROM transactions t
+     WHERE ${positivePaymentsWhere}
+     GROUP BY COALESCE(t.payment_method, 'unknown')
+     ORDER BY total_cents DESC`
+  ).map((row) => ({
+    method: row.method,
+    count: Number(row.count || 0),
+    total_cents: Number(row.total_cents || 0),
+    total: Number(row.total_cents || 0) / 100,
+  }));
+
+  const monthlyTotals = analyticsRows(
+    database,
+    `SELECT
+       strftime('%Y-%m', ${txnDateExpr}) AS month,
+       COUNT(*) AS count,
+       COALESCE(SUM(t.amount_cents), 0) AS total_cents
+     FROM transactions t
+     WHERE ${positivePaymentsWhere}
+     GROUP BY strftime('%Y-%m', ${txnDateExpr})
+     ORDER BY month ASC`
+  ).map((row) => ({
+    month: row.month,
+    count: Number(row.count || 0),
+    total_cents: Number(row.total_cents || 0),
+    total: Number(row.total_cents || 0) / 100,
+  }));
+
+  const yearlyTotals = analyticsRows(
+    database,
+    `SELECT
+       strftime('%Y', ${txnDateExpr}) AS year,
+       COUNT(*) AS count,
+       COALESCE(SUM(t.amount_cents), 0) AS total_cents
+     FROM transactions t
+     WHERE ${positivePaymentsWhere}
+     GROUP BY strftime('%Y', ${txnDateExpr})
+     ORDER BY year ASC`
+  ).map((row) => ({
+    year: row.year,
+    count: Number(row.count || 0),
+    total_cents: Number(row.total_cents || 0),
+    total: Number(row.total_cents || 0) / 100,
+  }));
+
+  const campaignTotals = analyticsRows(
+    database,
+    `SELECT
+       c.id AS campaign_id,
+       COALESCE(c.name, 'Unnamed campaign') AS name,
+       COUNT(t.id) AS count,
+       COALESCE(SUM(t.amount_cents), 0) AS total_cents
+     FROM transactions t
+     LEFT JOIN campaigns c ON c.id = t.campaign_id
+     WHERE ${positivePaymentsWhere} AND t.campaign_id IS NOT NULL
+     GROUP BY c.id, c.name
+     ORDER BY total_cents DESC, name ASC
+     LIMIT 10`
+  ).map((row) => ({
+    campaign_id: Number(row.campaign_id || 0),
+    name: row.name,
+    count: Number(row.count || 0),
+    total_cents: Number(row.total_cents || 0),
+    total: Number(row.total_cents || 0) / 100,
+  }));
+
+  const eventTotals = analyticsRows(
+    database,
+    `SELECT
+       e.id AS event_id,
+       COALESCE(e.name, 'Unnamed event') AS name,
+       COUNT(t.id) AS count,
+       COALESCE(SUM(t.amount_cents), 0) AS total_cents
+     FROM transactions t
+     LEFT JOIN events e ON e.id = t.event_id
+     WHERE ${positivePaymentsWhere} AND t.event_id IS NOT NULL
+     GROUP BY e.id, e.name
+     ORDER BY total_cents DESC, name ASC
+     LIMIT 10`
+  ).map((row) => ({
+    event_id: Number(row.event_id || 0),
+    name: row.name,
+    count: Number(row.count || 0),
+    total_cents: Number(row.total_cents || 0),
+    total: Number(row.total_cents || 0) / 100,
+  }));
+
+  const recentPayments = analyticsRows(
+    database,
+    `SELECT
+       t.id,
+       t.member_id,
+       t.campaign_id,
+       t.event_id,
+       t.payment_method,
+       COALESCE(t.status, 'COMPLETED') AS status,
+       t.occurred_on,
+       t.created_at,
+       t.amount_cents,
+       t.contributor_name,
+       t.contributor_type,
+       ${contextExpr} AS source,
+       COALESCE(c.name, '') AS campaign_name,
+       COALESCE(e.name, '') AS event_name,
+       ${contributorLabelExpr} AS contributor_label
+     FROM transactions t
+     LEFT JOIN members m ON m.id = t.member_id
+     LEFT JOIN campaigns c ON c.id = t.campaign_id
+     LEFT JOIN events e ON e.id = t.event_id
+     WHERE ${positivePaymentsWhere}
+     ORDER BY ${txnDateExpr} DESC, t.id DESC
+     LIMIT 10`
+  ).map((row) => ({
+    id: Number(row.id || 0),
+    member_id: row.member_id == null ? null : Number(row.member_id),
+    campaign_id: row.campaign_id == null ? null : Number(row.campaign_id),
+    event_id: row.event_id == null ? null : Number(row.event_id),
+    amount_cents: Number(row.amount_cents || 0),
+    amount: Number(row.amount_cents || 0) / 100,
+    occurred_on: row.occurred_on || row.created_at || null,
+    payment_method: row.payment_method || "unknown",
+    status: row.status || "COMPLETED",
+    contributor_name: row.contributor_name || null,
+    contributor_type: row.contributor_type || null,
+    contributor_label: row.contributor_label || "Unattributed external donor",
+    campaign_name: row.campaign_name || null,
+    event_name: row.event_name || null,
+    source: row.source || "local",
+  }));
+
+  return {
+    total_members: totalMembers,
+    active_members: activeMemberRows.length,
+    total_payments: totalPayments,
+    total_amount_cents: totalAmountCents,
+    total_amount: totalAmountCents / 100,
+    campaign_total_cents: campaignTotalCents,
+    campaign_total: campaignTotalCents / 100,
+    event_total_cents: eventTotalCents,
+    event_total: eventTotalCents / 100,
+    unpaid_balances_cents: unpaidBalancesCents,
+    unpaid_balances_total: unpaidBalancesCents / 100,
+    unpaid_balances: unpaidBalances.slice(0, 10),
+    payments_by_method: paymentsByMethod,
+    payment_method_breakdown: paymentsByMethod,
+    monthly_totals: monthlyTotals,
+    monthly_contribution_summaries: monthlyTotals,
+    yearly_totals: yearlyTotals,
+    yearly_contribution_summaries: yearlyTotals,
+    campaign_totals: campaignTotals,
+    event_totals: eventTotals,
+    recent_payments: recentPayments,
+    totalMembers,
+    activeMembers: activeMemberRows.length,
+    totalPayments,
+    totalAmountCents,
+    campaignTotalCents,
+    eventTotalCents,
+    unpaidBalancesCents,
+  };
 }
 
 function registerIpcHandlers() {
@@ -1015,53 +1734,7 @@ function registerIpcHandlers() {
   });
 
   register(registry, "organization:set", (data = {}) => {
-    database
-      .prepare(`
-        INSERT INTO organization (
-          id,
-          name,
-          logo_path,
-          email_display_name,
-          email_from_address,
-          payments_enabled,
-          stripe_account_id,
-          cashapp_handle,
-          zelle_contact,
-          venmo_handle,
-          auto_archive_enabled,
-          auto_archive_events_days,
-          auto_archive_campaigns_days,
-          updated_at
-        ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-        ON CONFLICT(id) DO UPDATE SET
-          name = COALESCE(excluded.name, organization.name),
-          logo_path = COALESCE(excluded.logo_path, organization.logo_path),
-          email_display_name = COALESCE(excluded.email_display_name, organization.email_display_name),
-          email_from_address = COALESCE(excluded.email_from_address, organization.email_from_address),
-          payments_enabled = COALESCE(excluded.payments_enabled, organization.payments_enabled),
-          stripe_account_id = COALESCE(excluded.stripe_account_id, organization.stripe_account_id),
-          cashapp_handle = COALESCE(excluded.cashapp_handle, organization.cashapp_handle),
-          zelle_contact = COALESCE(excluded.zelle_contact, organization.zelle_contact),
-          venmo_handle = COALESCE(excluded.venmo_handle, organization.venmo_handle),
-            auto_archive_enabled = COALESCE(excluded.auto_archive_enabled, organization.auto_archive_enabled),
-            auto_archive_events_days = COALESCE(excluded.auto_archive_events_days, organization.auto_archive_events_days),
-            auto_archive_campaigns_days = COALESCE(excluded.auto_archive_campaigns_days, organization.auto_archive_campaigns_days),
-          updated_at = datetime('now')
-      `)
-      .run(
-        data.name ?? null,
-        data.logo_path ?? null,
-        data.email_display_name ?? null,
-        data.email_from_address ?? null,
-        data.payments_enabled == null ? null : (data.payments_enabled ? 1 : 0),
-        data.stripe_account_id ?? null,
-        data.cashapp_handle ?? null,
-        data.zelle_contact ?? null,
-        data.venmo_handle ?? null,
-        data.auto_archive_enabled == null ? null : (data.auto_archive_enabled ? 1 : 0),
-        data.auto_archive_events_days == null ? null : Math.max(0, Number(data.auto_archive_events_days) || 0),
-        data.auto_archive_campaigns_days == null ? null : Math.max(0, Number(data.auto_archive_campaigns_days) || 0),
-      );
+    upsertOrganization(database, data);
 
     try {
       runAutoArchive(database);
@@ -1082,8 +1755,38 @@ function registerIpcHandlers() {
 
   register(registry, "organization:updateSettings", (data = {}) => {
     database
-      .prepare("INSERT INTO organization_settings (id, organization_name, email_from_name, email_from_address, setup_completed, updated_at) VALUES (1, ?, ?, ?, COALESCE(?, 0), datetime('now')) ON CONFLICT(id) DO UPDATE SET organization_name = COALESCE(excluded.organization_name, organization_settings.organization_name), email_from_name = COALESCE(excluded.email_from_name, organization_settings.email_from_name), email_from_address = COALESCE(excluded.email_from_address, organization_settings.email_from_address), setup_completed = COALESCE(excluded.setup_completed, organization_settings.setup_completed), updated_at = datetime('now')")
-      .run(data.organization_name ?? null, data.email_from_name ?? null, data.email_from_address ?? null, data.setup_completed ?? null);
+      .prepare("INSERT INTO organization_settings (id, organization_name, email_from_name, email_from_address, smtp_host, smtp_port, smtp_user, smtp_pass, smtp_secure, setup_completed, updated_at) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 0), datetime('now')) ON CONFLICT(id) DO UPDATE SET organization_name = COALESCE(excluded.organization_name, organization_settings.organization_name), email_from_name = COALESCE(excluded.email_from_name, organization_settings.email_from_name), email_from_address = COALESCE(excluded.email_from_address, organization_settings.email_from_address), smtp_host = COALESCE(excluded.smtp_host, organization_settings.smtp_host), smtp_port = COALESCE(excluded.smtp_port, organization_settings.smtp_port), smtp_user = COALESCE(excluded.smtp_user, organization_settings.smtp_user), smtp_pass = COALESCE(excluded.smtp_pass, organization_settings.smtp_pass), smtp_secure = COALESCE(excluded.smtp_secure, organization_settings.smtp_secure), setup_completed = COALESCE(excluded.setup_completed, organization_settings.setup_completed), updated_at = datetime('now')")
+      .run(
+        data.organization_name ?? null,
+        data.email_from_name ?? null,
+        data.email_from_address ?? null,
+        data.smtp_host ?? null,
+        data.smtp_port ?? null,
+        data.smtp_user ?? null,
+        Object.prototype.hasOwnProperty.call(data, "smtp_pass") ? (data.smtp_pass ? String(data.smtp_pass) : null) : null,
+        data.smtp_secure == null ? null : (data.smtp_secure ? 1 : 0),
+        data.setup_completed ?? null,
+      );
+
+    if (
+      Object.prototype.hasOwnProperty.call(data, "email_from_name")
+      || Object.prototype.hasOwnProperty.call(data, "email_from_address")
+      || Object.prototype.hasOwnProperty.call(data, "smtp_host")
+      || Object.prototype.hasOwnProperty.call(data, "smtp_port")
+      || Object.prototype.hasOwnProperty.call(data, "smtp_user")
+      || Object.prototype.hasOwnProperty.call(data, "smtp_pass")
+      || Object.prototype.hasOwnProperty.call(data, "smtp_secure")
+    ) {
+      persistEmailSettings(database, {
+        from_name: data.email_from_name,
+        from_email: data.email_from_address,
+        smtp_host: data.smtp_host,
+        smtp_port: data.smtp_port,
+        smtp_user: data.smtp_user,
+        smtp_pass: data.smtp_pass,
+        smtp_secure: data.smtp_secure,
+      });
+    }
     return { success: true };
   });
 
@@ -1094,18 +1797,9 @@ function registerIpcHandlers() {
 
   register(registry, "organization:upload-logo", (base64OrPath) => {
     if (!base64OrPath) return { success: false, error: "No logo payload provided" };
-    const userData = app.getPath("userData");
-    const orgDir = path.join(userData, "logos");
-    fs.mkdirSync(orgDir, { recursive: true });
-    let logoPath = base64OrPath;
-    if (typeof base64OrPath === "string" && base64OrPath.startsWith("data:image/")) {
-      const data = base64OrPath.split(",")[1] || "";
-      const file = path.join(orgDir, `logo-${Date.now()}.png`);
-      fs.writeFileSync(file, Buffer.from(data, "base64"));
-      logoPath = file;
-    }
+    const logoPath = persistLogo(base64OrPath);
     database.prepare("UPDATE organization SET logo_path = ?, updated_at = datetime('now') WHERE id = 1").run(logoPath);
-    return { success: true, logo_path: logoPath };
+    return { success: true, logo_path: logoPath, logoPath };
   });
 
   register(registry, "db:categories:list", () => database.prepare("SELECT * FROM categories ORDER BY name").all());
@@ -1196,7 +1890,7 @@ function registerIpcHandlers() {
   register(registry, "db:members:get", (id) => database.prepare("SELECT m.*, c.name AS category_name FROM members m LEFT JOIN categories c ON m.category_id = c.id WHERE m.id = ?").get(id) || null);
 
   register(registry, "email:settings:get", () => {
-    const row = getEmailSettingsRow(database) || {};
+    const row = getMergedEmailSettings(database) || {};
     return {
       ...row,
       hasPassword: !!String(row.smtp_password_ref || "").trim(),
@@ -1205,30 +1899,28 @@ function registerIpcHandlers() {
   });
 
   register(registry, "email:settings:update", (payload = {}) => {
+    persistEmailSettings(database, payload);
     database.prepare(`
-      INSERT INTO email_settings (
-        id, provider, from_name, from_email, smtp_host, smtp_port,
-        smtp_secure, smtp_user, smtp_password_ref, enabled, updated_at
-      ) VALUES (1, 'SMTP', ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      INSERT INTO organization_settings (
+        id, email_from_name, email_from_address, smtp_host, smtp_port, smtp_user, smtp_pass, smtp_secure, updated_at
+      ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
       ON CONFLICT(id) DO UPDATE SET
-        from_name = COALESCE(excluded.from_name, email_settings.from_name),
-        from_email = COALESCE(excluded.from_email, email_settings.from_email),
-        smtp_host = COALESCE(excluded.smtp_host, email_settings.smtp_host),
-        smtp_port = COALESCE(excluded.smtp_port, email_settings.smtp_port),
-        smtp_secure = COALESCE(excluded.smtp_secure, email_settings.smtp_secure),
-        smtp_user = COALESCE(excluded.smtp_user, email_settings.smtp_user),
-        smtp_password_ref = COALESCE(excluded.smtp_password_ref, email_settings.smtp_password_ref),
-        enabled = COALESCE(excluded.enabled, email_settings.enabled),
+        email_from_name = COALESCE(excluded.email_from_name, organization_settings.email_from_name),
+        email_from_address = COALESCE(excluded.email_from_address, organization_settings.email_from_address),
+        smtp_host = COALESCE(excluded.smtp_host, organization_settings.smtp_host),
+        smtp_port = COALESCE(excluded.smtp_port, organization_settings.smtp_port),
+        smtp_user = COALESCE(excluded.smtp_user, organization_settings.smtp_user),
+        smtp_pass = COALESCE(excluded.smtp_pass, organization_settings.smtp_pass),
+        smtp_secure = COALESCE(excluded.smtp_secure, organization_settings.smtp_secure),
         updated_at = datetime('now')
     `).run(
       payload.from_name ?? null,
       payload.from_email ?? null,
       payload.smtp_host ?? null,
       payload.smtp_port ?? null,
-      payload.smtp_secure == null ? null : (payload.smtp_secure ? 1 : 0),
       payload.smtp_user ?? null,
-      payload.smtp_password ? String(payload.smtp_password) : null,
-      payload.enabled == null ? null : (payload.enabled ? 1 : 0),
+      Object.prototype.hasOwnProperty.call(payload, "smtp_password") ? (payload.smtp_password ? String(payload.smtp_password) : null) : null,
+      payload.smtp_secure == null ? null : (payload.smtp_secure ? 1 : 0),
     );
     return { success: true };
   });
@@ -1255,6 +1947,10 @@ function registerIpcHandlers() {
       .filter(Boolean);
   });
 
+  register(registry, "email:getDuesReminderPreview", ({ recipientGroup } = {}) => {
+    return buildDuesReminderPreview(database, { recipientGroup });
+  });
+
   register(registry, "email:queue", async (payload = {}) => {
     let toEmails = String(payload.to_emails || payload.toEmails || "").trim();
     const emailType = String(payload.email_type || payload.emailType || "NOTICE").trim().toUpperCase();
@@ -1266,41 +1962,36 @@ function registerIpcHandlers() {
     if (emailType === "DUES_REMINDER") {
       const orgId = Number(payload.orgId || payload.organizationId || 1) || 1;
       const recipientGroup = String(payload.recipient_group || payload.recipientGroup || "active").trim().toLowerCase();
+      const preview = buildDuesReminderPreview(database, { recipientGroup });
 
-      const dueWhere = [
-        "NULLIF(TRIM(COALESCE(m.email, '')), '') IS NOT NULL",
-      ];
-      if (recipientGroup === "active") {
-        dueWhere.push("LOWER(COALESCE(m.status, 'active')) = 'active'");
-      } else if (recipientGroup === "active_inactive") {
-        dueWhere.push("LOWER(COALESCE(m.status, 'active')) IN ('active', 'inactive')");
+      if (!preview.dueMembersCount) {
+        return {
+          success: false,
+          code: "NO_DUE_MEMBERS",
+          error: "No delinquent or past-due members were found for this group.",
+          preview,
+        };
       }
 
-      const dueCandidates = database.prepare(`
-        SELECT
-          m.id,
-          LOWER(TRIM(m.email)) AS email,
-          COALESCE(NULLIF(TRIM(COALESCE(m.first_name, '') || ' ' || COALESCE(m.last_name, '')), ''), 'Member') AS member_name
-        FROM members m
-        WHERE ${dueWhere.join(" AND ")}
-        ORDER BY m.id ASC
-      `).all();
-
-      const dueMembers = [];
-      for (const row of dueCandidates) {
-        const balance = Number(calculateMemberDuesStatus(Number(row.id))?.balanceCents || 0);
-        if (balance < 0) {
-          dueMembers.push({
-            id: Number(row.id),
-            email: String(row.email || "").trim(),
-            name: String(row.member_name || "Member").trim() || "Member",
-            balanceCents: balance,
-          });
-        }
+      if (!preview.deliverableCount) {
+        return {
+          success: false,
+          code: "NO_VALID_RECIPIENTS",
+          error: "No delinquent or past-due members with valid email addresses were found.",
+          preview,
+        };
       }
 
-      if (!dueMembers.length) {
-        return { success: false, error: "No members with balance due were found for this group." };
+      try {
+        buildEmailTransport(database);
+      } catch (err) {
+        const normalized = normalizeEmailSendError(err);
+        return {
+          success: false,
+          code: normalized.code,
+          error: normalized.message,
+          preview,
+        };
       }
 
       const org = database.prepare(`
@@ -1324,9 +2015,9 @@ function registerIpcHandlers() {
       `);
 
       const ids = [];
-      for (const member of dueMembers) {
+      for (const member of preview.recipients) {
         let stripeCheckoutUrl = null;
-        const amountDue = (Math.abs(Number(member.balanceCents || 0)) / 100).toFixed(2);
+        const amountDue = String(member.amountDue || formatMoneyInputFromCents(Math.abs(Number(member.balanceCents || 0))));
         if (stripeEnabled) {
           try {
             const checkout = await createCheckoutSession({
@@ -1373,7 +2064,7 @@ function registerIpcHandlers() {
         ids.push(Number(out.lastInsertRowid));
       }
 
-      return { success: true, queued: ids.length, ids };
+      return { success: true, queued: ids.length, ids, preview };
     }
 
     if (!toEmails) return { success: false, error: "Recipient email(s) required." };
@@ -1484,7 +2175,12 @@ function registerIpcHandlers() {
         }
       }
       const range = normalizeDateRange(startDate, endDate);
-      const pdf = await buildPeriodReportPDF(database, range.startDate, range.endDate, reportType);
+      const pdf = await buildPeriodReportPDF(
+        database,
+        range.startDate,
+        range.endDate,
+        buildPdfReportRequest(reportType, p)
+      );
 
       const { transport, from } = buildEmailTransport(database);
       const bodyText = String(data.bodyText || "").trim() || "Please see attached report.";
@@ -1526,9 +2222,10 @@ function registerIpcHandlers() {
   register(registry, "email:sendDuesReminder", async (member = {}) => {
     try {
       const memberId = Number(member.id || member.memberId || 0);
-      const to = String(member.email || "").trim();
+      const to = normalizeEmailAddress(member.email);
       if (!memberId) return { success: false, error: "Member id is required." };
-      if (!to) return { success: false, error: "Member email is required." };
+      if (!to) return { success: false, code: "MISSING_EMAIL", error: "Member has no email address on file." };
+      if (!isValidEmailAddress(to)) return { success: false, code: "INVALID_EMAIL", error: "Member email address is invalid." };
 
       const dues = calculateMemberDuesStatus(memberId);
       const balance = Number(dues?.balanceCents || 0);
@@ -1537,7 +2234,7 @@ function registerIpcHandlers() {
       }
 
       const amountDueCents = Math.abs(balance);
-      const amountDue = (amountDueCents / 100).toFixed(2);
+      const amountDue = formatMoneyInputFromCents(amountDueCents);
       const memberName = String(member.name || "").trim() || "Member";
       const orgId = Number(member.orgId || member.organizationId || 1) || 1;
 
@@ -1591,7 +2288,26 @@ function registerIpcHandlers() {
         deep_link_url: CIVICFLOW_DEEP_LINK_URL,
       });
 
-      const { transport, from } = buildEmailTransport(database);
+      const mailtoUrl = buildReminderMailtoUrl({ to, rendered });
+      let transport;
+      let from;
+      try {
+        const built = buildEmailTransport(database);
+        transport = built.transport;
+        from = built.from;
+      } catch (err) {
+        const normalized = normalizeEmailSendError(err);
+        return {
+          success: false,
+          code: normalized.code,
+          error: normalized.message,
+          fallback: {
+            type: "mailto",
+            mailtoUrl,
+          },
+        };
+      }
+
       await transport.sendMail({
         from,
         to,
@@ -1602,7 +2318,8 @@ function registerIpcHandlers() {
 
       return { success: true, skipped: false };
     } catch (err) {
-      return { success: false, error: err?.message || "Failed to send dues reminder." };
+      const normalized = normalizeEmailSendError(err);
+      return { success: false, code: normalized.code, error: normalized.message };
     }
   });
 
@@ -1620,7 +2337,7 @@ function registerIpcHandlers() {
       transport = built.transport;
       from = built.from;
     } catch (err) {
-      transportError = err?.message || "Email transport unavailable.";
+      transportError = normalizeEmailSendError(err).message;
     }
 
     let sent = 0;
@@ -1654,7 +2371,6 @@ function registerIpcHandlers() {
           const recipientMember = firstRecipient
             ? database.prepare(`
                 SELECT id,
-                invoice_id,
                        COALESCE(NULLIF(TRIM(COALESCE(first_name, '') || ' ' || COALESCE(last_name, '')), ''), 'Member') AS member_name
                 FROM members
                 WHERE LOWER(TRIM(COALESCE(email, ''))) = ?
@@ -1676,7 +2392,7 @@ function registerIpcHandlers() {
             try {
               const balanceCents = Number(calculateMemberDuesStatus(Number(recipientMember.id))?.balanceCents || 0);
               if (balanceCents < 0) {
-                const amountDue = (Math.abs(balanceCents) / 100).toFixed(2);
+                const amountDue = formatMoneyInputFromCents(Math.abs(balanceCents));
                 const checkout = await createCheckoutSession({
                   orgId: 1,
                   memberId: Number(recipientMember.id),
@@ -1694,9 +2410,9 @@ function registerIpcHandlers() {
           const balanceCents = recipientMember?.id
             ? Number(calculateMemberDuesStatus(Number(recipientMember.id))?.balanceCents || 0)
             : 0;
-          const amountDue = balanceCents < 0 ? (Math.abs(balanceCents) / 100).toFixed(2) : "0.00";
+          const amountDue = balanceCents < 0 ? formatMoneyInputFromCents(Math.abs(balanceCents)) : "0.00";
           const dueDate = "N/A";
-          const invoiceId = String(recipientMember?.invoice_id || "").trim() || buildReminderInvoiceReference(recipientMember?.id, dueDate);
+          const invoiceId = buildReminderInvoiceReference(recipientMember?.id, dueDate);
           const reportPaymentUrl = buildPrefilledReportPaymentUrl({
             memberName: String(recipientMember?.member_name || "Member").trim() || "Member",
             memberId: recipientMember?.id,
@@ -1731,7 +2447,7 @@ function registerIpcHandlers() {
         database.prepare("UPDATE email_outbox SET status = 'SENT', error = NULL, sent_at = datetime('now') WHERE id = ?").run(email.id);
       } catch (err) {
         failed += 1;
-        const errMsg = err?.message || "Send failed.";
+        const errMsg = normalizeEmailSendError(err).message;
         errors.push({ id: email.id, error: errMsg });
         database.prepare("UPDATE email_outbox SET status = 'FAILED', error = ? WHERE id = ?").run(errMsg, email.id);
       }
@@ -1905,6 +2621,12 @@ function registerIpcHandlers() {
       where.push("(COALESCE(t.transaction_type, '') = ? OR COALESCE(t.type, '') = ?)");
       params.push(filters.type, filters.type);
     }
+    const attributionFilter = String(filters.attribution || "").trim().toUpperCase();
+    if (attributionFilter === "MEMBER") {
+      where.push("t.member_id IS NOT NULL");
+    } else if (attributionFilter === "UNATTRIBUTED") {
+      where.push("(t.member_id IS NULL AND (t.event_id IS NOT NULL OR t.campaign_id IS NOT NULL OR UPPER(COALESCE(t.contributor_type, '')) = 'NON_MEMBER'))");
+    }
     const sql = `
       SELECT t.*, m.first_name AS member_first_name, m.last_name AS member_last_name,
              c.name AS campaign_name, e.name AS event_name
@@ -1922,30 +2644,206 @@ function registerIpcHandlers() {
     const normalizedType = mapTxnTypeToLedgerType(txn.type ?? normalizedTxnType);
     const attribution = validateContributionAttribution(database, txn, { allowNonMember: true, requireNonMemberName: false });
     ensureDuesAttributedToMember(normalizedTxnType, attribution);
-    return database.prepare("INSERT INTO transactions (type, transaction_type, amount_cents, occurred_on, member_id, event_id, campaign_id, note, contributor_name, contributor_email, payment_method, status, contributor_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(normalizedType, normalizedTxnType, toCents(txn.amount_cents ?? txn.amount), txn.occurred_on ?? txn.date ?? new Date().toISOString().slice(0, 10), attribution.memberId, attribution.eventId, attribution.campaignId, txn.note ?? null, attribution.contributorName ?? (txn.contributor_name ?? null), txn.contributor_email ?? null, txn.payment_method ?? null, txn.status ?? "COMPLETED", attribution.contributorType).lastInsertRowid;
+    return database.prepare("INSERT INTO transactions (type, transaction_type, amount_cents, occurred_on, member_id, event_id, campaign_id, note, contributor_name, contributor_email, payment_method, status, contributor_type, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(normalizedType, normalizedTxnType, resolveInputAmountCents(txn.amount_cents, txn.amount), txn.occurred_on ?? txn.date ?? new Date().toISOString().slice(0, 10), attribution.memberId, attribution.eventId, attribution.campaignId, txn.note ?? null, attribution.contributorName ?? (txn.contributor_name ?? null), txn.contributor_email ?? null, txn.payment_method ?? null, txn.status ?? "COMPLETED", attribution.contributorType, normalizeTransactionSource(txn, attribution.memberId ? "MEMBER_PROFILE" : (attribution.eventId ? "EVENT" : (attribution.campaignId ? "CAMPAIGN" : "LOCAL")))).lastInsertRowid;
   });
   register(registry, "db:transactions:update", (id, updates = {}) => {
-    const normalizedTxnType = updates.transaction_type || updates.txn_type || updates.type
-      ? normalizeTransactionType(updates.transaction_type ?? updates.txn_type ?? updates.type)
+    const sanitizedUpdates = sanitizeTransactionPayload(updates);
+    const normalizedTxnType = sanitizedUpdates.transaction_type || sanitizedUpdates.txn_type || sanitizedUpdates.type
+      ? normalizeTransactionType(sanitizedUpdates.transaction_type ?? sanitizedUpdates.txn_type ?? sanitizedUpdates.type)
       : null;
-    const normalizedType = updates.type || normalizedTxnType
-      ? mapTxnTypeToLedgerType(updates.type ?? normalizedTxnType)
+    const normalizedType = sanitizedUpdates.type || normalizedTxnType
+      ? mapTxnTypeToLedgerType(sanitizedUpdates.type ?? normalizedTxnType)
       : null;
-    database.prepare("UPDATE transactions SET type = COALESCE(?, type), transaction_type = COALESCE(?, transaction_type), amount_cents = COALESCE(?, amount_cents), occurred_on = COALESCE(?, occurred_on), member_id = COALESCE(?, member_id), event_id = COALESCE(?, event_id), campaign_id = COALESCE(?, campaign_id), note = COALESCE(?, note), payment_method = COALESCE(?, payment_method), status = COALESCE(?, status), updated_at = datetime('now') WHERE id = ?").run(normalizedType, normalizedTxnType, updates.amount_cents != null || updates.amount != null ? toCents(updates.amount_cents ?? updates.amount) : null, updates.occurred_on ?? updates.date ?? null, updates.member_id ?? null, updates.event_id ?? null, updates.campaign_id ?? null, updates.note ?? null, updates.payment_method ?? null, updates.status ?? null, id);
+    const boundValues = {
+      type: normalizedType,
+      transaction_type: normalizedTxnType,
+      amount_cents: sanitizedUpdates.amount_cents != null || sanitizedUpdates.amount != null ? resolveInputAmountCents(sanitizedUpdates.amount_cents, sanitizedUpdates.amount) : null,
+      occurred_on: sanitizedUpdates.occurred_on ?? sanitizedUpdates.date ?? null,
+      member_id: toOptionalPositiveId(sanitizedUpdates.member_id ?? sanitizedUpdates.memberId ?? null),
+      event_id: toOptionalPositiveId(sanitizedUpdates.event_id ?? sanitizedUpdates.eventId ?? null),
+      campaign_id: toOptionalPositiveId(sanitizedUpdates.campaign_id ?? sanitizedUpdates.campaignId ?? null),
+      note: sanitizedUpdates.note ?? null,
+      payment_method: sanitizedUpdates.payment_method ?? null,
+      status: sanitizedUpdates.status ?? null,
+      id: Number(id),
+    };
+    database.prepare("UPDATE transactions SET type = COALESCE(?, type), transaction_type = COALESCE(?, transaction_type), amount_cents = COALESCE(?, amount_cents), occurred_on = COALESCE(?, occurred_on), member_id = COALESCE(?, member_id), event_id = COALESCE(?, event_id), campaign_id = COALESCE(?, campaign_id), note = COALESCE(?, note), payment_method = COALESCE(?, payment_method), status = COALESCE(?, status), updated_at = datetime('now') WHERE id = ?").run(boundValues.type, boundValues.transaction_type, boundValues.amount_cents, boundValues.occurred_on, boundValues.member_id, boundValues.event_id, boundValues.campaign_id, boundValues.note, boundValues.payment_method, boundValues.status, boundValues.id);
     return true;
   });
   register(registry, "db:transactions:delete", (id) => database.prepare("UPDATE transactions SET is_deleted = 1, deleted_at = datetime('now') WHERE id = ?").run(id).changes > 0);
 
   register(registry, "transaction:getById", (id) => database.prepare("SELECT * FROM transactions WHERE id = ?").get(id) || null);
   register(registry, "transaction:update", (data = {}) => {
-    if (!data.id) return { success: false, error: "Missing id" };
-    const normalizedTxnType = data.transaction_type || data.txn_type || data.type
-      ? normalizeTransactionType(data.transaction_type ?? data.txn_type ?? data.type)
+    const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+    console.log("transaction update payload", data);
+    console.log("payload types", {
+      id: describeBindingType(data.id ?? null),
+      amount: describeBindingType(data.amount ?? null),
+      date: describeBindingType(data.date ?? data.occurred_on ?? data.txn_date ?? null),
+      memberId: describeBindingType(data.memberId ?? data.member_id ?? null),
+      notes: describeBindingType(data.notes ?? data.note ?? null),
+      contributorType: describeBindingType(data.contributorType ?? data.contributor_type ?? null),
+      contributorName: describeBindingType(data.contributorName ?? data.contributor_name ?? null),
+    });
+    const sanitizedData = sanitizeTransactionPayload(data);
+    console.log("transaction update sanitized payload", sanitizedData);
+    console.log("sanitized payload types", {
+      id: describeBindingType(sanitizedData.id),
+      amount: describeBindingType(sanitizedData.amount),
+      date: describeBindingType(sanitizedData.date),
+      memberId: describeBindingType(sanitizedData.memberId ?? sanitizedData.member_id ?? null),
+      notes: describeBindingType(sanitizedData.notes ?? sanitizedData.note ?? null),
+      contributorType: describeBindingType(sanitizedData.contributorType ?? sanitizedData.contributor_type ?? null),
+      contributorName: describeBindingType(sanitizedData.contributorName ?? sanitizedData.contributor_name ?? null),
+    });
+    const txId = Number(sanitizedData.id);
+    if (!Number.isFinite(txId) || txId <= 0) return { success: false, error: "Missing id" };
+    const original = database.prepare("SELECT * FROM transactions WHERE id = ?").get(txId);
+    if (!original) return { success: false, error: "Transaction not found" };
+    const normalizedTxnType = sanitizedData.transaction_type || sanitizedData.txn_type || sanitizedData.type
+      ? normalizeTransactionType(sanitizedData.transaction_type ?? sanitizedData.txn_type ?? sanitizedData.type)
       : null;
-    const normalizedType = data.type || normalizedTxnType
-      ? mapTxnTypeToLedgerType(data.type ?? normalizedTxnType)
+    const normalizedType = sanitizedData.type || normalizedTxnType
+      ? mapTxnTypeToLedgerType(sanitizedData.type ?? normalizedTxnType)
       : null;
-    database.prepare("UPDATE transactions SET type = COALESCE(?, type), transaction_type = COALESCE(?, transaction_type), amount_cents = COALESCE(?, amount_cents), occurred_on = COALESCE(?, occurred_on), member_id = COALESCE(?, member_id), event_id = COALESCE(?, event_id), campaign_id = COALESCE(?, campaign_id), note = COALESCE(?, note), payment_method = COALESCE(?, payment_method), status = COALESCE(?, status), updated_at = datetime('now') WHERE id = ?").run(normalizedType, normalizedTxnType, data.amount_cents != null || data.amount != null ? toCents(data.amount_cents ?? data.amount) : null, data.occurred_on ?? data.date ?? null, data.member_id ?? null, data.event_id ?? null, data.campaign_id ?? null, data.note ?? null, data.payment_method ?? null, data.status ?? null, data.id);
+    const hasType = normalizedType != null;
+    const hasTxnType = normalizedTxnType != null;
+    const hasAmount = sanitizedData.amount_cents != null || sanitizedData.amount != null;
+    const hasOccurredOn = hasOwn(data, "occurred_on") || hasOwn(data, "date") || hasOwn(data, "txn_date");
+    const hasMemberId = hasOwn(data, "member_id") || hasOwn(data, "memberId");
+    const hasEventId = hasOwn(data, "event_id") || hasOwn(data, "eventId");
+    const hasCampaignId = hasOwn(data, "campaign_id") || hasOwn(data, "campaignId");
+    const hasNote = hasOwn(data, "note") || hasOwn(data, "notes");
+    const hasPaymentMethod = hasOwn(data, "payment_method");
+    const hasStatus = hasOwn(data, "status");
+    const hasContributorType = hasOwn(data, "contributor_type") || hasOwn(data, "contributorType");
+    const hasContributorName = hasOwn(data, "contributor_name") || hasOwn(data, "contributorName");
+
+    const nextOccurredOn = toNullableIsoString(sanitizedData.occurred_on ?? sanitizedData.date ?? sanitizedData.txn_date ?? null);
+    const nextNote = toNullableString(sanitizedData.note ?? sanitizedData.notes ?? null);
+    const nextContributorTypeRaw = sanitizedData.contributor_type ?? sanitizedData.contributorType ?? null;
+    const nextContributorType = nextContributorTypeRaw == null
+      ? null
+      : String(nextContributorTypeRaw).trim().toUpperCase() || null;
+    const nextContributorNameRaw = sanitizedData.contributor_name ?? sanitizedData.contributorName ?? null;
+    const nextContributorName = nextContributorNameRaw == null
+      ? null
+      : (String(nextContributorNameRaw).trim() || null);
+
+    const nextMemberId = hasMemberId ? toOptionalPositiveId(sanitizedData.member_id ?? sanitizedData.memberId ?? null) : original.member_id;
+    const nextEventId = hasEventId ? toOptionalPositiveId(sanitizedData.event_id ?? sanitizedData.eventId ?? null) : original.event_id;
+    const nextCampaignId = hasCampaignId ? toOptionalPositiveId(sanitizedData.campaign_id ?? sanitizedData.campaignId ?? null) : original.campaign_id;
+    const nextContributorTypeValue = hasContributorType ? nextContributorType : original.contributor_type;
+    const nextContributorNameValue = hasContributorName ? nextContributorName : original.contributor_name;
+    const effectiveTxnType = normalizedTxnType ?? original.transaction_type ?? original.type;
+    const nextPaymentMethod = hasPaymentMethod ? toNullableString(sanitizedData.payment_method ?? null) : original.payment_method;
+    const nextStatus = hasStatus ? toNullableString(sanitizedData.status ?? null) : original.status;
+
+    const attribution = validateContributionAttribution(database, {
+      memberId: nextMemberId,
+      eventId: nextEventId,
+      campaignId: nextCampaignId,
+      contributorType: nextContributorTypeValue,
+      contributorName: nextContributorNameValue,
+    }, { allowNonMember: true, requireNonMemberName: String(nextContributorTypeValue || '').toUpperCase() === "NON_MEMBER" });
+    ensureDuesAttributedToMember(effectiveTxnType, attribution);
+
+    const boundValues = {
+      hasType: toSqliteFlag(hasType),
+      normalizedType: normalizedType ?? null,
+      hasTxnType: toSqliteFlag(hasTxnType),
+      normalizedTxnType: normalizedTxnType ?? null,
+      hasAmount: toSqliteFlag(hasAmount),
+      amountCents: hasAmount ? resolveInputAmountCents(sanitizedData.amount_cents, sanitizedData.amount) : null,
+      hasOccurredOn: toSqliteFlag(hasOccurredOn),
+      occurredOn: nextOccurredOn ?? null,
+      hasMemberId: toSqliteFlag(hasMemberId),
+      memberId: nextMemberId ?? null,
+      hasEventId: toSqliteFlag(hasEventId),
+      eventId: nextEventId ?? null,
+      hasCampaignId: toSqliteFlag(hasCampaignId),
+      campaignId: nextCampaignId ?? null,
+      hasNote: toSqliteFlag(hasNote),
+      note: nextNote ?? null,
+      hasPaymentMethod: toSqliteFlag(hasPaymentMethod),
+      paymentMethod: nextPaymentMethod ?? null,
+      hasStatus: toSqliteFlag(hasStatus),
+      status: nextStatus ?? null,
+      hasContributorType: toSqliteFlag(hasContributorType),
+      contributorType: nextContributorType ?? null,
+      hasContributorName: toSqliteFlag(hasContributorName),
+      contributorName: nextContributorName ?? null,
+      txId,
+    };
+    console.log("transaction update bound value types", {
+      hasType: describeBindingType(boundValues.hasType),
+      normalizedType: describeBindingType(boundValues.normalizedType),
+      hasTxnType: describeBindingType(boundValues.hasTxnType),
+      normalizedTxnType: describeBindingType(boundValues.normalizedTxnType),
+      hasAmount: describeBindingType(boundValues.hasAmount),
+      amountCents: describeBindingType(boundValues.amountCents),
+      hasOccurredOn: describeBindingType(boundValues.hasOccurredOn),
+      occurredOn: describeBindingType(boundValues.occurredOn),
+      hasMemberId: describeBindingType(boundValues.hasMemberId),
+      memberId: describeBindingType(boundValues.memberId),
+      hasEventId: describeBindingType(boundValues.hasEventId),
+      eventId: describeBindingType(boundValues.eventId),
+      hasCampaignId: describeBindingType(boundValues.hasCampaignId),
+      campaignId: describeBindingType(boundValues.campaignId),
+      hasNote: describeBindingType(boundValues.hasNote),
+      note: describeBindingType(boundValues.note),
+      hasPaymentMethod: describeBindingType(boundValues.hasPaymentMethod),
+      paymentMethod: describeBindingType(boundValues.paymentMethod),
+      hasStatus: describeBindingType(boundValues.hasStatus),
+      status: describeBindingType(boundValues.status),
+      hasContributorType: describeBindingType(boundValues.hasContributorType),
+      contributorType: describeBindingType(boundValues.contributorType),
+      hasContributorName: describeBindingType(boundValues.hasContributorName),
+      contributorName: describeBindingType(boundValues.contributorName),
+      txId: describeBindingType(boundValues.txId),
+    });
+    database.prepare(`
+      UPDATE transactions
+      SET
+        type = CASE WHEN ? THEN ? ELSE type END,
+        transaction_type = CASE WHEN ? THEN ? ELSE transaction_type END,
+        amount_cents = CASE WHEN ? THEN ? ELSE amount_cents END,
+        occurred_on = CASE WHEN ? THEN ? ELSE occurred_on END,
+        member_id = CASE WHEN ? THEN ? ELSE member_id END,
+        event_id = CASE WHEN ? THEN ? ELSE event_id END,
+        campaign_id = CASE WHEN ? THEN ? ELSE campaign_id END,
+        note = CASE WHEN ? THEN ? ELSE note END,
+        payment_method = CASE WHEN ? THEN ? ELSE payment_method END,
+        status = CASE WHEN ? THEN ? ELSE status END,
+        contributor_type = CASE WHEN ? THEN ? ELSE contributor_type END,
+        contributor_name = CASE WHEN ? THEN ? ELSE contributor_name END,
+        updated_at = datetime('now')
+      WHERE id = ?
+    `).run(
+      boundValues.hasType, boundValues.normalizedType,
+      boundValues.hasTxnType, boundValues.normalizedTxnType,
+      boundValues.hasAmount, boundValues.amountCents,
+      boundValues.hasOccurredOn, boundValues.occurredOn,
+      boundValues.hasMemberId, boundValues.memberId,
+      boundValues.hasEventId, boundValues.eventId,
+      boundValues.hasCampaignId, boundValues.campaignId,
+      boundValues.hasNote, boundValues.note,
+      boundValues.hasPaymentMethod, boundValues.paymentMethod,
+      boundValues.hasStatus, boundValues.status,
+      boundValues.hasContributorType, boundValues.contributorType,
+      boundValues.hasContributorName, boundValues.contributorName,
+      boundValues.txId,
+    );
+
+    if ((original.member_id ?? null) !== (nextMemberId ?? null)) {
+      writeAuditLog(database, "CONTRIBUTION_MEMBER_CHANGED", "transaction", txId, {
+        oldMemberId: original.member_id ?? null,
+        newMemberId: nextMemberId ?? null,
+        transactionType: effectiveTxnType || null,
+        eventId: nextEventId ?? null,
+        campaignId: nextCampaignId ?? null,
+      });
+    }
     return { success: true };
   });
   register(registry, "transaction:addManualPayment", (data = {}) => {
@@ -1955,7 +2853,8 @@ function registerIpcHandlers() {
     const normalizedTxnType = normalizeTransactionType(data.transaction_type ?? data.type ?? "DUES");
     ensureDuesAttributedToMember(normalizedTxnType, attribution);
     const normalizedType = mapTxnTypeToLedgerType(normalizedTxnType);
-    const id = database.prepare("INSERT INTO transactions (type, transaction_type, amount_cents, occurred_on, member_id, campaign_id, event_id, note, payment_method, status, contributor_type, contributor_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(normalizedType, normalizedTxnType, toCents(data.amount_cents ?? data.amount), data.occurred_on ?? data.date ?? new Date().toISOString().slice(0, 10), attribution.memberId, attribution.campaignId, attribution.eventId, note, paymentMethod ?? "manual", data.status ?? "COMPLETED", attribution.contributorType, attribution.contributorName ?? data.contributor_name ?? data.contributorName ?? null).lastInsertRowid;
+    const source = normalizeTransactionSource(data, attribution.memberId ? "MEMBER_PROFILE" : (attribution.eventId ? "EVENT" : (attribution.campaignId ? "CAMPAIGN" : "LOCAL")));
+    const id = database.prepare("INSERT INTO transactions (type, transaction_type, amount_cents, occurred_on, member_id, campaign_id, event_id, note, payment_method, status, contributor_type, contributor_name, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(normalizedType, normalizedTxnType, resolveInputAmountCents(data.amount_cents, data.amount), data.occurred_on ?? data.date ?? new Date().toISOString().slice(0, 10), attribution.memberId, attribution.campaignId, attribution.eventId, note, paymentMethod ?? "manual", data.status ?? "COMPLETED", attribution.contributorType, attribution.contributorName ?? data.contributor_name ?? data.contributorName ?? null, source).lastInsertRowid;
     return { success: true, id };
   });
 
@@ -2019,7 +2918,7 @@ function registerIpcHandlers() {
 
   register(registry, "finance:txns:create", (data = {}) => {
     const attribution = validateContributionAttribution(database, data, { allowNonMember: true, requireNonMemberName: true });
-    const amount = toCents(data.amount_cents ?? data.amount);
+    const amount = resolveInputAmountCents(data.amount_cents, data.amount);
     const txnType = normalizeTransactionType(data.txn_type ?? data.transaction_type ?? data.type ?? "DONATION");
     ensureDuesAttributedToMember(txnType, attribution);
     if (!Number.isFinite(amount) || amount === 0) return { success: false, error: "Amount must be non-zero" };
@@ -2071,7 +2970,7 @@ function registerIpcHandlers() {
     `).run(
       normalizedType,
       normalizedType ? mapTxnTypeToLedgerType(normalizedType) : null,
-      updates.amount_cents != null || updates.amount != null ? toCents(updates.amount_cents ?? updates.amount) : null,
+      updates.amount_cents != null || updates.amount != null ? resolveInputAmountCents(updates.amount_cents, updates.amount) : null,
       updates.txn_date ?? updates.date ?? updates.occurred_on ?? null,
       updates.reference ?? null,
       updates.notes ?? updates.note ?? null,
@@ -2218,7 +3117,7 @@ function registerIpcHandlers() {
   });
 
   register(registry, "expenditures:create", (payload = {}) => {
-    const amount = Number(payload.amount ?? 0);
+    const amount = parseMoneyValue(payload.amount);
     if (!Number.isFinite(amount) || amount <= 0) {
       return { success: false, error: "Amount must be greater than 0." };
     }
@@ -2271,7 +3170,7 @@ function registerIpcHandlers() {
 
   register(registry, "expenditures:update", (id, payload = {}) => {
     if (!id) return { success: false, error: "Missing expenditure id" };
-    const amount = Number(payload.amount ?? 0);
+    const amount = parseMoneyValue(payload.amount);
     if (!Number.isFinite(amount) || amount <= 0) {
       return { success: false, error: "Amount must be greater than 0." };
     }
@@ -2422,7 +3321,7 @@ function registerIpcHandlers() {
   });
 
   register(registry, "grants:allocate", (allocation = {}) => {
-    const amount = Number(allocation.amount ?? 0);
+    const amount = parseMoneyValue(allocation.amount);
     if (!Number.isFinite(amount) || amount <= 0) return { success: false, error: "Allocation amount must be greater than 0." };
     const txnId = database.prepare(`
       INSERT INTO transactions (type, transaction_type, amount_cents, occurred_on, note, payment_method, status, contributor_type, is_deleted)
@@ -2461,7 +3360,7 @@ function registerIpcHandlers() {
   });
 
   register(registry, "payments:createExternalPayment", (data = {}) => {
-    const amount = toCents(data.amount_cents ?? data.amount);
+    const amount = resolveInputAmountCents(data.amount_cents, data.amount);
     if (!Number.isFinite(amount) || amount <= 0) {
       return { success: false, error: "Amount must be greater than 0." };
     }
@@ -2480,6 +3379,7 @@ function registerIpcHandlers() {
         proofPath = null;
       }
     }
+    const source = normalizeTransactionSource(data, attribution.memberId ? "MEMBER_PROFILE" : (attribution.eventId ? "EVENT" : (attribution.campaignId ? "CAMPAIGN" : "LOCAL")));
 
     const result = database.prepare(`
       INSERT INTO transactions (
@@ -2497,8 +3397,9 @@ function registerIpcHandlers() {
         status,
         contributor_type,
         contributor_name,
+        source,
         is_deleted
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
     `).run(
       ledgerType,
       transactionType,
@@ -2514,6 +3415,7 @@ function registerIpcHandlers() {
       isPendingExternal ? "PENDING_EXTERNAL" : "COMPLETED",
       attribution.contributorType,
       attribution.contributorName ?? data.contributorName ?? data.contributor_name ?? null,
+      source,
     );
 
     return { success: true, id: result.lastInsertRowid, pending: isPendingExternal };
@@ -2692,18 +3594,9 @@ function registerIpcHandlers() {
 
   register(registry, "analytics:getSummary", async () => {
     try {
-      const response = await fetch(`${API_BASE}/analytics/summary`, {
-        headers: {
-          "x-api-key": API_KEY,
-        },
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        return { success: false, error: payload?.error || `Analytics API failed (${response.status})` };
-      }
-      return { success: true, data: payload };
+      return { success: true, data: buildDesktopAnalyticsSummary(database) };
     } catch (err) {
-      return { success: false, error: err?.message || "Failed to load analytics." };
+      return { success: false, error: err?.message || "Failed to load analytics summary." };
     }
   });
 
@@ -3045,7 +3938,7 @@ function registerIpcHandlers() {
         COALESCE(
           NULLIF(TRIM(COALESCE(m.first_name, '') || ' ' || COALESCE(m.last_name, '')), ''),
           NULLIF(TRIM(COALESCE(t.contributor_name, '')), ''),
-          'Unknown'
+          'Unattributed external donor'
         ) AS display_name
       FROM transactions t
       LEFT JOIN members m ON m.id = t.member_id
@@ -3081,7 +3974,7 @@ function registerIpcHandlers() {
         COALESCE(
           NULLIF(TRIM(COALESCE(m.first_name, '') || ' ' || COALESCE(m.last_name, '')), ''),
           NULLIF(TRIM(COALESCE(t.contributor_name, '')), ''),
-          'Unknown'
+          'Unattributed external donor'
         ) AS display_name
       FROM transactions t
       LEFT JOIN members m ON m.id = t.member_id
@@ -3144,6 +4037,13 @@ function registerIpcHandlers() {
     if (Number.isFinite(memberId) && memberId > 0) {
       where.push(`${alias}.member_id = ?`);
       params.push(memberId);
+    }
+
+    const attributionFilter = String(filters?.attribution || "").trim().toUpperCase();
+    if (attributionFilter === "MEMBER") {
+      where.push(`${alias}.member_id IS NOT NULL`);
+    } else if (attributionFilter === "UNATTRIBUTED") {
+      where.push(`(${alias}.member_id IS NULL AND (${alias}.event_id IS NOT NULL OR ${alias}.campaign_id IS NOT NULL OR UPPER(COALESCE(${alias}.contributor_type, '')) = 'NON_MEMBER'))`);
     }
 
     return { whereSql: where.join(" AND "), params };
@@ -3250,7 +4150,7 @@ function registerIpcHandlers() {
              COALESCE(
                NULLIF(TRIM(COALESCE(m.first_name, '') || ' ' || COALESCE(m.last_name, '')), ''),
                NULLIF(TRIM(COALESCE(t.contributor_name, '')), ''),
-               'Unknown'
+               'Unattributed external donor'
              ) AS contributor_label
       FROM transactions t
       LEFT JOIN members m ON m.id = t.member_id
@@ -3324,50 +4224,90 @@ function registerIpcHandlers() {
 
   register(registry, "reports:org-financial-pdf", async (opts = {}) => {
     const { startDate, endDate } = normalizeDateRange(opts.startDate, opts.endDate);
-    const pdf = await buildPeriodReportPDF(database, startDate, endDate, "Organization Financial");
+    const pdf = await buildPeriodReportPDF(
+      database,
+      startDate,
+      endDate,
+      buildPdfReportRequest("org_financial", opts)
+    );
     return savePdfDialog(pdf, `Org_Financial_${startDate}_to_${endDate}.pdf`);
   });
 
   register(registry, "reports:member-contribution-pdf", async (opts = {}) => {
     const { startDate, endDate } = normalizeDateRange(opts.startDate, opts.endDate);
-    const pdf = await buildPeriodReportPDF(database, startDate, endDate, `Member Contribution #${opts.memberId || ''}`);
+    const pdf = await buildPeriodReportPDF(
+      database,
+      startDate,
+      endDate,
+      buildPdfReportRequest("member_contribution", opts)
+    );
     return savePdfDialog(pdf, `Member_Contribution_${opts.memberId || 'member'}_${startDate}_to_${endDate}.pdf`);
   });
 
   register(registry, "reports:event-contribution-pdf", async (opts = {}) => {
     const { startDate, endDate } = normalizeDateRange(opts.startDate, opts.endDate);
-    const pdf = await buildPeriodReportPDF(database, startDate, endDate, `Event Contribution #${opts.eventId || ''}`);
+    const pdf = await buildPeriodReportPDF(
+      database,
+      startDate,
+      endDate,
+      buildPdfReportRequest("event_contribution", opts)
+    );
     return savePdfDialog(pdf, `Event_Contribution_${opts.eventId || 'event'}_${startDate}_to_${endDate}.pdf`);
   });
 
   register(registry, "reports:campaign-contribution-pdf", async (opts = {}) => {
     const { startDate, endDate } = normalizeDateRange(opts.startDate, opts.endDate);
-    const pdf = await buildPeriodReportPDF(database, startDate, endDate, `Campaign Contribution #${opts.campaignId || ''}`);
+    const pdf = await buildPeriodReportPDF(
+      database,
+      startDate,
+      endDate,
+      buildPdfReportRequest("campaign_contribution", opts)
+    );
     return savePdfDialog(pdf, `Campaign_Contribution_${opts.campaignId || 'campaign'}_${startDate}_to_${endDate}.pdf`);
   });
 
   register(registry, "reports:member-monthly-pdf", async (opts = {}) => {
     const range = monthToRange(opts.month);
     if (!range) return { ok: false, error: "Invalid month format. Use YYYY-MM." };
-    const pdf = await buildPeriodReportPDF(database, range.startDate, range.endDate, `Member Monthly #${opts.memberId || ''}`);
+    const pdf = await buildPeriodReportPDF(
+      database,
+      range.startDate,
+      range.endDate,
+      buildPdfReportRequest("member_monthly", opts)
+    );
     return savePdfDialog(pdf, `Member_Monthly_${opts.memberId || 'member'}_${opts.month || ''}.pdf`);
   });
 
   register(registry, "reports:roster-active-pdf", async () => {
     const now = new Date().toISOString().slice(0, 10);
-    const pdf = await buildPeriodReportPDF(database, "1970-01-01", now, "Roster Active");
+    const pdf = await buildPeriodReportPDF(
+      database,
+      "1970-01-01",
+      now,
+      buildPdfReportRequest("roster_active")
+    );
     return savePdfDialog(pdf, "Roster_Active.pdf");
   });
 
   register(registry, "reports:roster-inactive-pdf", async () => {
     const now = new Date().toISOString().slice(0, 10);
-    const pdf = await buildPeriodReportPDF(database, "1970-01-01", now, "Roster Inactive");
+    const pdf = await buildPeriodReportPDF(
+      database,
+      "1970-01-01",
+      now,
+      buildPdfReportRequest("roster_inactive")
+    );
     return savePdfDialog(pdf, "Roster_Inactive.pdf");
   });
 
   register(registry, "reports:roster-combined-pdf", async () => {
     const now = new Date().toISOString().slice(0, 10);
-    const pdf = await buildPeriodReportPDF(database, "1970-01-01", now, "Roster Combined");
+    const pdf = await buildPeriodReportPDF(
+      database,
+      "1970-01-01",
+      now,
+      buildPdfReportRequest("roster_combined")
+    );
     return savePdfDialog(pdf, "Roster_Combined.pdf");
   });
 
@@ -3386,7 +4326,12 @@ function registerIpcHandlers() {
     }
     const range = normalizeDateRange(startDate, endDate);
     try {
-      const pdf = await buildPeriodReportPDF(database, range.startDate, range.endDate, String(reportType || "report"));
+      const pdf = await buildPeriodReportPDF(
+        database,
+        range.startDate,
+        range.endDate,
+        buildPdfReportRequest(String(reportType || "report"), p)
+      );
       return {
         ok: true,
         pdfBase64: pdf.toString("base64"),
@@ -3403,10 +4348,12 @@ function registerIpcHandlers() {
 
   register(registry, "license:status", () => licenseService.getLicenseStatus());
   register(registry, "license:getStatus", () => licenseService.getLicenseStatus());
+  register(registry, "license:getConfig", () => licenseService.getLicenseServerConfig());
   register(registry, "license:activate", async (data) => licenseService.activateLicense(data));
   register(registry, "license:can-activate", () => ({ canActivate: true }));
   register(registry, "license:deactivate", () => licenseService.deactivateLicense());
   register(registry, "license:refresh", () => licenseService.refreshLicense());
+  register(registry, "license:resetLocal", () => licenseService.resetLocalLicenseData());
   register(registry, "license:startTrial", () => licenseService.startTrial());
   register(registry, "license:start-trial", () => licenseService.startTrial());
   register(registry, "get-device-id", () => ({ deviceId: getDeviceId() }));
@@ -3423,4 +4370,4 @@ function registerIpcHandlers() {
   console.log(`[IPC] registerIpcHandlers run #${registerCount} registered ${registry.size} channels`);
 }
 
-module.exports = { registerIpcHandlers };
+module.exports = { registerIpcHandlers, buildDesktopAnalyticsSummary };

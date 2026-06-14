@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { RefreshCw, UserCheck, Trash2, Undo2 } from 'lucide-react';
+import * as moneyUtils from '../shared/money.js';
 
 const api = window.civicflow;
+const { formatMoneyFromCents } = moneyUtils;
 
-const formatCurrency = (cents) =>
-  '$' + ((Number(cents || 0) || 0) / 100).toFixed(2);
+const formatCurrency = (cents) => formatMoneyFromCents(cents);
 
 const formatTxnType = (value) => {
   const normalized = String(value || '').trim();
@@ -29,19 +30,27 @@ export function DataCleanup() {
   const [viewFilter, setViewFilter] = useState('all');
 
   const isRecoveredRow = (row) => {
-    const status = String(row?.attribution_status || '').toUpperCase();
-    const previousName = String(row?.previous_contributor_name || '').trim();
-    return status === 'ORPHAN' && previousName.length > 0;
+    return Number(row?.member_id || 0) > 0;
   };
+
+  const isUnattributedRow = (row) => !Number(row?.member_id || 0);
 
   const recoveredCount = useMemo(
     () => (orphans || []).filter((row) => isRecoveredRow(row)).length,
     [orphans]
   );
 
+  const unattributedCount = useMemo(
+    () => (orphans || []).filter((row) => isUnattributedRow(row)).length,
+    [orphans]
+  );
+
   const visibleRows = useMemo(() => {
     if (viewFilter === 'recovered') {
       return (orphans || []).filter((row) => isRecoveredRow(row));
+    }
+    if (viewFilter === 'unattributed') {
+      return (orphans || []).filter((row) => isUnattributedRow(row));
     }
     return orphans || [];
   }, [orphans, viewFilter]);
@@ -159,7 +168,7 @@ export function DataCleanup() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-2xl font-bold text-slate-800">Data Cleanup</h2>
-          <p className="text-slate-600 mt-1">Review orphaned transactions and recover prior contributor names when available.</p>
+          <p className="text-slate-600 mt-1">Review unattributed contributions, external donors, and transactions that still point at deleted members.</p>
         </div>
         <button
           onClick={loadData}
@@ -186,7 +195,7 @@ export function DataCleanup() {
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm">
         <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-slate-700">Orphan / Reattributed Transactions</h3>
+          <h3 className="text-sm font-semibold text-slate-700">Unattributed / Reattributed Contributions</h3>
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -194,6 +203,13 @@ export function DataCleanup() {
               className={`px-3 py-1 rounded-md text-xs font-medium border ${viewFilter === 'all' ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
             >
               All ({orphans.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewFilter('unattributed')}
+              className={`px-3 py-1 rounded-md text-xs font-medium border ${viewFilter === 'unattributed' ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
+            >
+              Unattributed ({unattributedCount})
             </button>
             <button
               type="button"
@@ -211,7 +227,9 @@ export function DataCleanup() {
           <div className="p-6 text-slate-500">
             {viewFilter === 'recovered'
               ? 'No recovered transactions found in this view.'
-              : 'No orphan transactions found.'}
+              : viewFilter === 'unattributed'
+                ? 'No unattributed contributions found.'
+                : 'No unattributed or recoverable transactions found.'}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -238,9 +256,9 @@ export function DataCleanup() {
                     <td className="px-4 py-3 text-slate-700">
                       <div className="flex items-center gap-2">
                         <span>
-                          {t.attribution_status === 'ORPHAN'
-                              ? 'Orphan / Missing Member'
-                              : ((`${t.last_name || ''}, ${t.first_name || ''}`).trim().replace(/^,\s*/, '') || 'Assigned')}
+                          {isUnattributedRow(t)
+                            ? 'Unattributed / external donor'
+                            : 'Deleted member reference'}
                         </span>
                         {isRecoveredRow(t) && (
                           <span className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">

@@ -7,7 +7,12 @@ export default defineConfig({
   server: {
     host: "localhost",
     port: 5173,
-    strictPort: false
+    strictPort: false,
+    headers: {
+      "Cache-Control": "no-store, max-age=0",
+      Pragma: "no-cache",
+      Expires: "0"
+    }
   },
   build: {
     outDir: "dist",

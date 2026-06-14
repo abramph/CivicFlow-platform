@@ -8,8 +8,10 @@ import {
   Archive,
   AlertTriangle,
 } from 'lucide-react';
+import * as moneyUtils from '../shared/money.js';
 
 const api = window.civicflow;
+const { formatMoneyFromCents, formatMoneyValue } = moneyUtils;
 
 const STATUS_COLORS = {
   Draft: 'bg-slate-100 text-slate-700',
@@ -21,7 +23,7 @@ const STATUS_COLORS = {
 
 function formatCurrency(amount) {
   if (amount === null || amount === undefined) return '—';
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+  return formatMoneyValue(amount);
 }
 
 function formatDate(dateStr) {
@@ -192,11 +194,11 @@ export function Grants({ onNavigate }) {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         <div className="rounded-xl border-2 border-emerald-200 bg-emerald-500/10 p-4">
           <p className="text-sm font-semibold text-slate-600">Total Grants Received</p>
-          <p className="text-2xl font-bold text-slate-800">{formatCurrency(summary.total_grants_received_cents / 100)}</p>
+          <p className="text-2xl font-bold text-slate-800">{formatMoneyFromCents(summary.total_grants_received_cents)}</p>
         </div>
         <div className="rounded-xl border-2 border-amber-200 bg-amber-500/10 p-4">
           <p className="text-sm font-semibold text-slate-600">Total Grants Used</p>
-          <p className="text-2xl font-bold text-slate-800">{formatCurrency(Math.abs(summary.total_grants_used_cents) / 100)}</p>
+          <p className="text-2xl font-bold text-slate-800">{formatMoneyFromCents(Math.abs(summary.total_grants_used_cents))}</p>
         </div>
       </div>
 

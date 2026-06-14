@@ -2,6 +2,7 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const { getStripe } = require('./stripe-client.js');
 const { getDatabase } = require('./db.js');
+const { formatMoneyInputFromCents } = require('../shared/money.cjs');
 
 const escapeHtml = (value) =>
   String(value ?? '')
@@ -100,7 +101,7 @@ function startWebhookServer() {
       const orgName = getOrgName(orgId);
       const name = [member?.first_name, member?.last_name].filter(Boolean).join(' ').trim();
       const subject = `${orgName} Payment Receipt`;
-      const amountDollars = ((amountCents ?? 0) / 100).toFixed(2);
+      const amountDollars = formatMoneyInputFromCents(amountCents ?? 0);
       const bodyText = `Hello${name ? ' ' + name : ''},\n\nPayment of $${amountDollars} recorded via ${method}.\n\nThank you,\n${orgName}\n`;
       const safeName = escapeHtml(name || 'there');
       const bodyHtml = `<p>Hello ${safeName},</p><p>Payment of <strong>$${amountDollars}</strong> recorded via <strong>${escapeHtml(method)}</strong>.</p><p>Thank you,<br>${escapeHtml(orgName)}</p>`;
@@ -180,6 +181,7 @@ function startWebhookServer() {
       const campaignId = metadata.campaignId ? Number(metadata.campaignId) : null;
       const eventId = metadata.eventId ? Number(metadata.eventId) : null;
       const contributorName = (metadata.contributorName || '').toString().trim() || null;
+      const source = (metadata.source || '').toString().trim();
       const amountCents = Number(session.amount_total ?? 0);
       const normalizeTransactionType = (value) => {
         const t = String(value || '').trim().toUpperCase();
@@ -207,6 +209,7 @@ function startWebhookServer() {
 
       if (amountCents > 0) {
         const attribution = validateAttribution({ memberId, campaignId, eventId, contributorType: metadata.contributorType, contributorName });
+        const storedSource = source ? `STRIPE:${source}` : 'STRIPE';
         const result = db.prepare(`
           INSERT INTO transactions (
             type,
@@ -226,7 +229,7 @@ function startWebhookServer() {
             reference,
             is_deleted
           )
-          VALUES (?, ?, ?, date('now'), ?, ?, ?, ?, ?, ?, ?, 'COMPLETED', 'STRIPE', ?, 0)
+          VALUES (?, ?, ?, date('now'), ?, ?, ?, ?, ?, ?, ?, 'COMPLETED', ?, ?, 0)
         `).run(
           legacyType,
           txnType,
@@ -239,6 +242,7 @@ function startWebhookServer() {
           'Stripe Payment',
           orgId,
           'STRIPE',
+          storedSource,
           session.id || null
         );
         if (result?.lastInsertRowid) {
@@ -255,9 +259,11 @@ function startWebhookServer() {
         {};
       const orgId = metadata.orgId ? Number(metadata.orgId) : 1;
       const memberId = metadata.memberId ? Number(metadata.memberId) : null;
+      const source = (metadata.source || '').toString().trim();
       const amountCents = Number(invoice.amount_paid ?? 0);
       if (amountCents > 0) {
         const attribution = validateAttribution({ memberId, campaignId: null, eventId: null, contributorType: 'MEMBER' });
+        const storedSource = source ? `STRIPE:${source}` : 'STRIPE';
         const result = db.prepare(`
           INSERT INTO transactions (
             type,
@@ -274,7 +280,7 @@ function startWebhookServer() {
             reference,
             is_deleted
           )
-          VALUES (?, ?, ?, date('now'), ?, ?, ?, ?, ?, 'COMPLETED', 'STRIPE', ?, 0)
+          VALUES (?, ?, ?, date('now'), ?, ?, ?, ?, ?, 'COMPLETED', ?, ?, 0)
         `).run(
           'dues',
           'DUES',
@@ -284,6 +290,7 @@ function startWebhookServer() {
           'Stripe Subscription Payment',
           orgId,
           'STRIPE',
+          storedSource,
           invoice.id || null
         );
         if (result?.lastInsertRowid) {

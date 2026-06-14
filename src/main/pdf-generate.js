@@ -7,6 +7,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { getBranding } = require('./branding.js');
 const { APP_NAME } = require('../shared/appConfig.js');
+const { formatMoneyFromCents } = require('../shared/money.cjs');
 const { error: logError } = require('./logger.js');
 
 function buildReceiptHtml(data) {
@@ -29,7 +30,7 @@ function buildReceiptHtml(data) {
     '<div class="row"><strong>Receipt ID:</strong> ' + escapeHtml(String(receiptId ?? '')) + '</div>',
     '<div class="row"><strong>Date:</strong> ' + escapeHtml(String(date ?? '—')) + '</div>',
     '<div class="row"><strong>Payment type:</strong> ' + escapeHtml(String((paymentType ?? '').replace(/_/g, ' '))) + '</div>',
-    '<div class="row"><strong>Amount:</strong> $' + (Number(amount ?? 0) / 100).toFixed(2) + '</div>',
+    '<div class="row"><strong>Amount:</strong> ' + formatMoneyFromCents(amount ?? 0) + '</div>',
   ];
   if (memberName) parts.push('<div class="row" style="margin-top:12px;"><strong>Member:</strong> ' + escapeHtml(memberName) + (memberEmail ? ' (' + escapeHtml(memberEmail) + ')' : '') + '</div>');
   if (eventName) parts.push('<div class="row"><strong>Event:</strong> ' + escapeHtml(eventName) + '</div>');

@@ -23,7 +23,7 @@ function getMonthRange(offset = 0) {
   return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
 }
 
-export function Reports({ initialReportType, initialCampaignId, initialEventId }) {
+export function Reports({ initialReportType, initialMemberId, initialCampaignId, initialEventId }) {
   const [reportType, setReportType] = useState('member_monthly');
   const [startDate, setStartDate] = useState(getMonthRange().start);
   const [endDate, setEndDate] = useState(getMonthRange().end);
@@ -121,13 +121,16 @@ export function Reports({ initialReportType, initialCampaignId, initialEventId }
 
   useEffect(() => {
     if (initialReportType) setReportType(initialReportType);
+    if (initialMemberId !== undefined && initialMemberId !== null && initialMemberId !== '') {
+      setSelectedMember(String(initialMemberId));
+    }
     if (initialCampaignId !== undefined && initialCampaignId !== null && initialCampaignId !== '') {
       setSelectedCampaign(String(initialCampaignId));
     }
     if (initialEventId !== undefined && initialEventId !== null && initialEventId !== '') {
       setSelectedEvent(String(initialEventId));
     }
-  }, [initialReportType, initialCampaignId, initialEventId]);
+  }, [initialReportType, initialMemberId, initialCampaignId, initialEventId]);
 
   const downloadCsv = (csv, filename) => {
     const blob = new Blob([csv], { type: 'text/csv' });

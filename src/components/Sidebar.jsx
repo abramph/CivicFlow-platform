@@ -14,11 +14,12 @@ import {
   ClipboardCheck,
   Upload,
 } from 'lucide-react';
+import { normalizeLocalFilePath } from '../utils/localFileUrl.js';
 
 const api = window.civicflow;
 
 export function Sidebar({ activeView, onNavigate }) {
-  const [logoUrl, setLogoUrl] = useState(null);
+  const [logoPath, setLogoPath] = useState(null);
   const [orgName, setOrgName] = useState('Civicflow');
   const [logoVersion, setLogoVersion] = useState(0); // Cache-busting version
   const [grantsEnabled, setGrantsEnabled] = useState(true);
@@ -40,23 +41,14 @@ export function Sidebar({ activeView, onNavigate }) {
         setOrgName(org?.name || branding?.cboName || 'Civicflow');
         if (path) {
           try {
-            // Convert absolute file path to app:// protocol URL
-            // This avoids Electron security restrictions on file:// URLs
-            // Ensure Windows drive letter colon is preserved (C:\ → C:/)
-            let normalizedPath = path.replace(/\\/g, '/');
-            // Ensure drive letter has colon (C/Users → C:/Users)
-            if (/^[A-Za-z]\//.test(normalizedPath)) {
-              normalizedPath = normalizedPath.replace(/^([A-Za-z])\//, '$1:/');
-            }
-            const appUrl = `app://${normalizedPath}`;
-            setLogoUrl(appUrl);
-            // Increment version to force image reload (cache-busting)
-            setLogoVersion(v => v + 1);
+            const normalizedPath = normalizeLocalFilePath(path);
+            setLogoPath(normalizedPath);
+            setLogoVersion((v) => v + 1);
           } catch (_) {
-            setLogoUrl(null);
+            setLogoPath(null);
           }
         } else {
-          setLogoUrl(null);
+          setLogoPath(null);
         }
       })
       .catch(() => {});
@@ -122,12 +114,13 @@ export function Sidebar({ activeView, onNavigate }) {
   return (
     <aside className="sidebar-container w-56 min-h-screen bg-slate-900 text-slate-100 flex flex-col border-r border-slate-700">
       <div className="p-5 border-b border-slate-700 flex items-center gap-3">
-        {logoUrl ? (
+        {logoPath ? (
           <img 
-            src={`${logoUrl}?v=${logoVersion}&t=${Date.now()}`} 
+            key={`${logoPath}:${logoVersion}`}
+            src={`file://${logoPath}`}
             alt="" 
             className="h-10 w-10 rounded object-contain bg-white/10"
-            onError={() => setLogoUrl(null)} // Fallback if image fails to load
+            onError={() => setLogoPath(null)}
           />
         ) : (
           <div className="h-10 w-10 rounded bg-emerald-600 flex items-center justify-center text-white font-bold text-sm shrink-0">
