@@ -19,7 +19,8 @@
     "worker:reminders": "tsx src/workers/reminders.ts",
     "worker:reports": "tsx src/workers/reports.ts",
     "stripe:listen": "stripe listen --forward-to localhost:3000/api/webhooks/stripe",
-    "stripe:setup": "node scripts/setup-stripe-webhook.js"
+    "stripe:setup": "node scripts/setup-stripe-webhook.js",
+    "stripe:products": "node scripts/create-stripe-products.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.840.0",
