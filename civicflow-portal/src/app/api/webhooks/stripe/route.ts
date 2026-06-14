@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 
 function getStripeClient() {
   const env = getServerEnv();
-  return new Stripe(env.STRIPE_SECRET_KEY, { apiVersion: "2025-05-28.basil" });
+  return new Stripe(env.STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" });
 }
 
 function mapSubscriptionStatus(status: Stripe.Subscription.Status): SubscriptionStatus {
