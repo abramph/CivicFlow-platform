@@ -162,6 +162,7 @@ cd civicflow-portal && npm run db:deploy && npm run start
 | `SMTP_PASS` | SMTP password |
 | `FROM_EMAIL` | Sender address, e.g. `CivicFlow <noreply@civicflowapp.com>` |
 | `ENABLE_EMAIL_SEND` | `1` to enable real email sends (default safe mode is off) |
+| `CRON_SECRET` | Long random secret for authenticating cron endpoint calls |
 | `RATE_LIMIT_REDIS_URL` | Optional Redis URL for production rate limiting |
 | `RATE_LIMIT_REDIS_TOKEN` | Optional token/secret for Redis provider |
 
@@ -187,14 +188,33 @@ npm run db:seed      # seeds starter data
 npm run db:studio    # inspect data
 ```
 
-### Run worker foundations (manual)
+### Scheduled workers (cron endpoints)
+
+Workers are exposed as authenticated HTTP endpoints and triggered on a schedule by an external cron service.
+
+**Endpoints:**
+| Endpoint | Purpose | Recommended schedule |
+|---|---|---|
+| `POST /api/cron/reminders` | Send queued email reminders | Every 10 minutes |
+| `POST /api/cron/reports` | Process queued CSV report exports | Every 5 minutes |
+
+**Authentication:** `Authorization: Bearer <CRON_SECRET>`
+
+**Required env var:** `CRON_SECRET` — a long random string (e.g. `openssl rand -base64 32`). Add it to DO App Platform env vars alongside the other secrets.
+
+**Recommended: cron-job.org (free)**
+1. Create a free account at cron-job.org
+2. Add two jobs:
+   - URL: `https://app.civicflowapp.com/api/cron/reminders`, Method: POST, Header: `Authorization: Bearer <CRON_SECRET>`
+   - URL: `https://app.civicflowapp.com/api/cron/reports`, Method: POST, Header: `Authorization: Bearer <CRON_SECRET>`
+3. Set schedules (every 10 min / every 5 min respectively)
+
+**Alternative: run manually during development**
 ```bash
 cd civicflow-portal
-npm run worker:reports
 npm run worker:reminders
+npm run worker:reports
 ```
-
-Use DigitalOcean worker components later for scheduling.
 
 ### File uploads and exports: DigitalOcean Spaces (Phase 3 foundation)
 - S3-compatible helper added using `@aws-sdk/client-s3`
@@ -218,6 +238,7 @@ Use DigitalOcean worker components later for scheduling.
   - `invoice.payment_failed`
 - [ ] CORS origin locked to production domain
 - [ ] Production Redis-backed rate limiting configured (Upstash / DO Managed Redis)
+- [ ] `CRON_SECRET` set and cron jobs configured (cron-job.org or equivalent)
 - [ ] Error tracking configured (e.g., Sentry)
 - [ ] DO Managed PostgreSQL automated backups enabled
 - [ ] Spaces bucket is private; files served via presigned URLs only

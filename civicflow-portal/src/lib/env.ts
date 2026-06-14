@@ -29,6 +29,7 @@ const serverEnvSchema = z.object({
   RATE_LIMIT_REDIS_URL: z.string().url().optional(),
   RATE_LIMIT_REDIS_TOKEN: z.string().optional(),
   ENABLE_EMAIL_SEND: z.string().optional(),
+  CRON_SECRET: z.string().optional(),
 });
 
 const relaxedEnvSchema = serverEnvSchema.partial().extend({
@@ -106,6 +107,7 @@ export function getServerEnv(): ServerEnv {
     RATE_LIMIT_REDIS_URL: parsed.RATE_LIMIT_REDIS_URL,
     RATE_LIMIT_REDIS_TOKEN: parsed.RATE_LIMIT_REDIS_TOKEN,
     ENABLE_EMAIL_SEND: parsed.ENABLE_EMAIL_SEND,
+    CRON_SECRET: parsed.CRON_SECRET,
   };
 
   return cached;

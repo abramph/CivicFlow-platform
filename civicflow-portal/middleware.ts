@@ -38,8 +38,8 @@ export async function middleware(req: NextRequest) {
     if (limited) return limited;
   }
 
-  // Stripe webhooks must not require auth — Stripe signs them with a secret instead
-  if (pathname === "/api/webhooks/stripe") {
+  // Stripe webhooks and cron endpoints use their own secret — not NextAuth sessions
+  if (pathname === "/api/webhooks/stripe" || pathname.startsWith("/api/cron/")) {
     return NextResponse.next();
   }
 
