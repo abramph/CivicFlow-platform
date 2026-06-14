@@ -5,7 +5,7 @@ import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-export function LoginForm() {
+export function LoginForm({ verified }: { verified?: boolean } = {}) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -55,6 +55,12 @@ export function LoginForm() {
     <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
       <h1 className="text-2xl font-bold text-slate-900">CivicFlow SaaS Portal</h1>
       <p className="mt-1 text-sm text-slate-600">Sign in with your email and password.</p>
+
+      {verified ? (
+        <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          Email verified! You can now sign in.
+        </div>
+      ) : null}
 
       {error ? (
         <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">

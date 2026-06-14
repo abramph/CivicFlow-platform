@@ -8,6 +8,7 @@ type ResendState = "idle" | "sending" | "sent" | "error";
 
 export function SignupForm() {
   const [stage, setStage] = useState<Stage>("form");
+  const [orgName, setOrgName] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -28,6 +29,7 @@ export function SignupForm() {
           email: email.trim().toLowerCase(),
           password,
           displayName: displayName.trim() || undefined,
+          orgName: orgName.trim(),
         }),
       });
       const data = await res.json();
@@ -96,6 +98,10 @@ export function SignupForm() {
                 setSubmitting(false);
                 setResendState("idle");
                 setError(null);
+                setOrgName("");
+                setDisplayName("");
+                setEmail("");
+                setPassword("");
               }}
             >
               Use a different email
@@ -116,6 +122,21 @@ export function SignupForm() {
       ) : null}
 
       <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
+        <div>
+          <label htmlFor="orgName" className="mb-1 block text-sm font-medium text-slate-700">Organization name <span className="text-red-500">*</span></label>
+          <input
+            id="orgName"
+            name="orgName"
+            type="text"
+            required
+            autoComplete="organization"
+            value={orgName}
+            onChange={(e) => setOrgName(e.target.value)}
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+            placeholder="Riverside Community Coalition"
+          />
+        </div>
+
         <div>
           <label htmlFor="displayName" className="mb-1 block text-sm font-medium text-slate-700">Your name</label>
           <input
