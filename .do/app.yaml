@@ -7,7 +7,7 @@ services:
     branch: main
     deploy_on_push: true
   source_dir: civicflow-portal
-  build_command: npm install && npx prisma generate && npm run build
+  build_command: npm install --include=dev && ./node_modules/.bin/prisma generate && npm run build
   run_command: npm run db:deploy && npm start
   http_port: 3000
   instance_size_slug: apps-s-1vcpu-1gb
