@@ -10,8 +10,12 @@ build/
 release-build/
 release-build-*/
 release/
-out12/
+release-fix/
+release-*/
+out*/
 .vite/
+.next/
+.vercel/
 
 # Environment
 .env

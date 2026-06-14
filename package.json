@@ -1,7 +1,7 @@
 {
   "name": "civicflow",
   "productName": "CivicFlow",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Civicflow - Offline desktop app for community organizations",
   "main": "src/main.js",
   "private": true,
@@ -13,21 +13,22 @@
     "start": "electron-forge start",
     "build": "npm run build:app",
     "package": "electron-forge package",
-    "premake": "node -e \"if(process.platform==='win32'){try{require('child_process').execSync('taskkill /IM Civicflow.exe /F',{stdio:'ignore'})}catch(e){}}else{try{require('child_process').execSync('pkill -f Civicflow',{stdio:'ignore'})}catch(e){}}\"",
-    "clean": "rimraf out dist dist-forge .vite .next build",
-    "clean:all": "rimraf out dist dist-forge .vite .next build && node scripts/clean-and-reset.cjs",
+    "premake": "node -e \"if(process.platform==='win32'){try{require('child_process').execSync('taskkill /IM CivicFlow.exe /F',{stdio:'ignore'})}catch(e){try{require('child_process').execSync('taskkill /IM Civicflow.exe /F',{stdio:'ignore'})}catch(e2){}}}else{try{require('child_process').execSync('pkill -f CivicFlow',{stdio:'ignore'})}catch(e){}}\"",
+    "clean": "rimraf out dist dist-forge .vite .next release release-build",
+    "clean:all": "rimraf out dist dist-forge .vite .next release release-build && node scripts/clean-and-reset.cjs",
     "make": "npm run clean && electron-forge make",
     "publish": "electron-forge publish",
     "lint": "echo \"No linting configured\"",
     "postinstall": "electron-rebuild -f -w sharp || echo \"Rebuild skipped (may need manual rebuild)\"",
     "rebuild": "electron-rebuild -f -w sharp",
-    "dist": "electron-forge make",
+    "dist": "npm run build && electron-builder --publish never",
     "build:renderer": "vite build --config vite.renderer.config.mjs",
     "build:electron": "vite build --config vite.main.config.mjs --outDir .vite/build --emptyOutDir true && vite build --config vite.preload.config.mjs --outDir .vite/build --emptyOutDir false",
     "build:app": "npm run clean && npm run build:renderer && npm run build:electron",
     "generate:license": "node tools/generate-license.js",
-    "build:win": "npm run build:app && electron-builder --win nsis --publish never",
-    "dist:win": "npm run build:win",
+    "win": "npm run build && electron-builder --win nsis --publish never",
+    "build:win": "npm run win",
+    "dist:win": "npm run win",
     "build:mac": "npm run build:app && electron-builder --mac dmg --publish never",
     "build:all": "npm run build:app && electron-builder -mwl --publish never"
   },
@@ -84,8 +85,11 @@
   "build": {
     "appId": "com.civicflow.app",
     "productName": "CivicFlow",
+    "executableName": "CivicFlow",
+    "artifactName": "${productName} Setup ${version}.${ext}",
     "directories": {
-      "output": "release-build"
+      "output": "release",
+      "buildResources": "build"
     },
     "files": [
       "dist/**/*",
@@ -98,12 +102,17 @@
       "package.json"
     ],
     "win": {
-      "target": "nsis",
-      "icon": "assets/icon.ico"
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "CivicFlow"
     }
   }
 }
