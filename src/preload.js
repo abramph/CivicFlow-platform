@@ -122,6 +122,10 @@ contextBridge.exposeInMainWorld('civicflow', {
   restore: {
     db: () => ipcRenderer.invoke('restore:db'),
   },
+  migration: {
+    exportData: () => ipcRenderer.invoke('migration:exportData'),
+    saveExport: (data) => ipcRenderer.invoke('migration:saveExport', data),
+  },
   branding: {
     get: () => ipcRenderer.invoke('get-cbo-branding'),
     set: (data) => ipcRenderer.invoke('set-cbo-branding', data),

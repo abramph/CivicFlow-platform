@@ -54,6 +54,8 @@ export function Settings({ onNavigate, onOpenActivation }) {
   const [backupMessage, setBackupMessage] = useState(null);
   const [restoreMessage, setRestoreMessage] = useState(null);
   const [restoring, setRestoring] = useState(false);
+  const [migrationExporting, setMigrationExporting] = useState(false);
+  const [migrationMessage, setMigrationMessage] = useState(null);
   const [categories, setCategories] = useState([]);
   const [categoryForm, setCategoryForm] = useState({ name: '', monthly_dues_cents: 0 });
   const [editingCategoryId, setEditingCategoryId] = useState(null);
@@ -446,6 +448,32 @@ export function Settings({ onNavigate, onOpenActivation }) {
     }
   };
 
+  const handleMigrationExport = async () => {
+    setMigrationMessage(null);
+    setMigrationExporting(true);
+    try {
+      const result = await api.migration.exportData();
+      if (!result?.ok) {
+        setMigrationMessage({ type: 'error', text: result?.error || 'Failed to collect data for export.' });
+        return;
+      }
+      const saveResult = await api.migration.saveExport(result.data);
+      if (saveResult?.canceled) {
+        setMigrationMessage(null);
+        return;
+      }
+      if (saveResult?.ok) {
+        setMigrationMessage({ type: 'success', text: `Export saved to ${saveResult.filePath}. Upload this file in your CivicFlow SaaS portal to import your data.` });
+      } else {
+        setMigrationMessage({ type: 'error', text: saveResult?.error || 'Failed to save export file.' });
+      }
+    } catch (err) {
+      setMigrationMessage({ type: 'error', text: err?.message || 'Export failed.' });
+    } finally {
+      setMigrationExporting(false);
+    }
+  };
+
   const openSampleDataModal = async () => {
     setSampleDataConfirmText('');
     setSampleDataMessage(null);
@@ -722,6 +750,38 @@ export function Settings({ onNavigate, onOpenActivation }) {
           {restoreMessage && (
             <div className={`rounded-lg px-4 py-3 ${restoreMessage.type === 'success' ? 'bg-emerald-50 text-emerald-800' : restoreMessage.type === 'info' ? 'bg-slate-100 text-slate-800' : 'bg-red-50 text-red-800'}`}>
               {restoreMessage.text}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Cloud Migration Export */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-2xl mb-8">
+        <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
+          <Upload className="h-5 w-5 text-slate-500" />
+          <h3 className="text-lg font-semibold text-slate-800">Export for Cloud Migration</h3>
+        </div>
+        <div className="p-6 space-y-4">
+          <p className="text-sm text-slate-600">
+            Export all your data to a JSON file that you can import into your CivicFlow SaaS account.
+            This includes members, categories, events, campaigns, meetings, attendance, contributions, and expenditures.
+          </p>
+          <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
+            <p className="text-blue-800 text-sm">
+              After exporting, log in to your CivicFlow SaaS portal and go to <strong>Migration</strong> to upload the file.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleMigrationExport}
+            disabled={migrationExporting}
+            className="px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {migrationExporting ? 'Exporting…' : 'Export Data for Cloud Migration'}
+          </button>
+          {migrationMessage && (
+            <div className={`rounded-lg px-4 py-3 ${migrationMessage.type === 'success' ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-800'}`}>
+              {migrationMessage.text}
             </div>
           )}
         </div>

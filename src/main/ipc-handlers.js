@@ -248,6 +248,8 @@ const ALL_PRELOAD_CHANNELS = [
   "transaction:update",
   "transactions:importCSV",
   "update-member-profile",
+  "migration:exportData",
+  "migration:saveExport",
 ];
 
 function db() {
@@ -4361,6 +4363,58 @@ function registerIpcHandlers() {
   register(registry, "receipt:save-pdf-dialog", async () => dialog.showSaveDialog({ title: "Save Receipt PDF", defaultPath: "receipt.pdf", filters: [{ name: "PDF", extensions: ["pdf"] }] }));
   register(registry, "receipt:is-email-configured", () => false);
   register(registry, "receipt:email-receipt", () => ({ success: false, error: "Email receipt is not configured." }));
+
+  register(registry, "migration:exportData", async () => {
+    const database = db();
+    const org = database.prepare("SELECT name FROM organization LIMIT 1").get();
+    const members = database.prepare("SELECT * FROM members WHERE is_deleted = 0 OR is_deleted IS NULL").all();
+    const categories = database.prepare("SELECT * FROM categories").all();
+    const events = database.prepare("SELECT * FROM events WHERE is_deleted = 0 OR is_deleted IS NULL").all();
+    const campaigns = database.prepare("SELECT * FROM campaigns WHERE is_deleted = 0 OR is_deleted IS NULL").all();
+    const meetings = database.prepare("SELECT * FROM meetings").all();
+    const attendance = database.prepare("SELECT * FROM attendance").all();
+    const transactions = database.prepare(
+      "SELECT * FROM transactions WHERE (is_deleted = 0 OR is_deleted IS NULL)"
+    ).all();
+    const expenditures = database.prepare("SELECT * FROM expenditures").all();
+
+    return {
+      ok: true,
+      data: {
+        version: 1,
+        schema: "civicflow-desktop-export",
+        exportedAt: new Date().toISOString(),
+        organizationName: org?.name || "",
+        members,
+        categories,
+        events,
+        campaigns,
+        meetings,
+        attendance,
+        transactions,
+        expenditures,
+      },
+    };
+  });
+
+  register(registry, "migration:saveExport", async (exportData) => {
+    const orgName = (exportData?.organizationName || "civicflow").replace(/[^a-z0-9]/gi, "_").toLowerCase();
+    const date = new Date().toISOString().slice(0, 10);
+    const defaultPath = `${orgName}_migration_${date}.json`;
+
+    const result = await dialog.showSaveDialog({
+      title: "Save Migration Export",
+      defaultPath,
+      filters: [{ name: "JSON", extensions: ["json"] }],
+    });
+
+    if (result.canceled || !result.filePath) {
+      return { ok: false, canceled: true };
+    }
+
+    fs.writeFileSync(result.filePath, JSON.stringify(exportData, null, 2), "utf-8");
+    return { ok: true, filePath: result.filePath };
+  });
 
   ALL_PRELOAD_CHANNELS.forEach((channel) => {
     if (registry.has(channel)) return;

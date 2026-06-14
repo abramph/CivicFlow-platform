@@ -59,7 +59,6 @@ export function PortalShell({ children }: { children: ReactNode }) {
     { href: "/reports", label: "Reports" },
     { href: "/receipts", label: "Receipts" },
     { href: "/reminders", label: "Reminders" },
-    { href: "/payment-links", label: "Payment Links" },
     { href: "/payments/imports", label: "Payment Imports" },
     { href: "/payments/reconciliation", label: "Reconciliation" },
     { href: "/settings", label: "Settings" },
@@ -69,6 +68,7 @@ export function PortalShell({ children }: { children: ReactNode }) {
     { href: "/settings/users", label: "Users & Roles" },
     { href: "/settings/billing", label: "Billing" },
     { href: "/onboarding/organization", label: "Onboarding" },
+    { href: "/migration", label: "Migration" },
   ];
 
   const legacyNav = [
@@ -103,6 +103,9 @@ export function PortalShell({ children }: { children: ReactNode }) {
         }
         if (item.href.startsWith("/payments/imports") || item.href.startsWith("/payments/reconciliation")) {
           return canDo(session?.role ?? "READ_ONLY", "dues:read");
+        }
+        if (item.href === "/migration") {
+          return canDo(session?.role ?? "READ_ONLY", "org_settings:write");
         }
         if (item.href.startsWith("/attendance")) {
           return canDo(session?.role ?? "READ_ONLY", "attendance:read");
