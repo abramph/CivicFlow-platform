@@ -1,0 +1,74 @@
+name: civicflow-portal
+region: nyc
+services:
+- name: web
+  github:
+    repo: abramph/CivicFlow-platform
+    branch: main
+    deploy_on_push: true
+  source_dir: civicflow-portal
+  build_command: npm install && npm run db:generate && npm run build
+  run_command: npm run db:deploy && npm start
+  http_port: 3000
+  instance_size_slug: apps-s-1vcpu-1gb
+  instance_count: 1
+  routes:
+  - path: /
+  health_check:
+    http_path: /api/health
+    initial_delay_seconds: 30
+    period_seconds: 30
+    timeout_seconds: 10
+    failure_threshold: 3
+  envs:
+  - key: NODE_ENV
+    value: "production"
+  - key: NEXTAUTH_URL
+    value: "https://civicflow-portal-PLACEHOLDER.ondigitalocean.app"
+  - key: NEXTAUTH_SECRET
+    type: SECRET
+    value: "REPLACE_ME"
+  - key: DATABASE_URL
+    type: SECRET
+    value: "REPLACE_ME"
+  - key: STRIPE_SECRET_KEY
+    type: SECRET
+    value: "REPLACE_ME"
+  - key: NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+    value: "REPLACE_ME"
+  - key: STRIPE_WEBHOOK_SECRET
+    type: SECRET
+    value: "REPLACE_ME"
+  - key: STRIPE_PRICE_ESSENTIAL_MONTHLY
+    value: "REPLACE_ME"
+  - key: DO_SPACES_ENDPOINT
+    value: "https://nyc3.digitaloceanspaces.com"
+  - key: DO_SPACES_REGION
+    value: "nyc3"
+  - key: DO_SPACES_BUCKET
+    type: SECRET
+    value: "REPLACE_ME"
+  - key: DO_SPACES_ACCESS_KEY_ID
+    type: SECRET
+    value: "REPLACE_ME"
+  - key: DO_SPACES_SECRET_ACCESS_KEY
+    type: SECRET
+    value: "REPLACE_ME"
+  - key: SMTP_HOST
+    type: SECRET
+    value: "REPLACE_ME"
+  - key: SMTP_PORT
+    value: "587"
+  - key: SMTP_USER
+    type: SECRET
+    value: "REPLACE_ME"
+  - key: SMTP_PASS
+    type: SECRET
+    value: "REPLACE_ME"
+  - key: FROM_EMAIL
+    value: "CivicFlow <noreply@civicflowapp.com>"
+  - key: ENABLE_EMAIL_SEND
+    value: "0"
+  - key: CRON_SECRET
+    type: SECRET
+    value: "REPLACE_ME"
