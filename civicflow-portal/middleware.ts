@@ -52,8 +52,9 @@ export async function middleware(req: NextRequest) {
     pathname === "/reset-password" ||
     pathname === "/pricing";
   const isAuthApi = pathname.startsWith("/api/auth");
+  const isPublicApi = pathname === "/api/health";
 
-  if (!token && !isPublicPage && !isAuthApi) {
+  if (!token && !isPublicPage && !isAuthApi && !isPublicApi) {
     return NextResponse.redirect(new URL("/login", req.url));
   }
 
