@@ -1,5 +1,6 @@
 const express = require("express");
 const crypto = require("crypto");
+const Sentry = require("@sentry/node");
 const {
   activateLicenseSeat,
   buildLicenseClientPayload,
@@ -25,6 +26,10 @@ const {
 } = require("./license-service");
 const { envNumber } = require("./config");
 const { createRateLimiter } = require("./rate-limit");
+
+if (process.env.SENTRY_DSN) {
+  Sentry.init({ dsn: process.env.SENTRY_DSN, tracesSampleRate: 0.1 });
+}
 const {
   clearSessionCookie,
   isAdminConfigured,
@@ -1096,6 +1101,10 @@ function createApp() {
       stripeConfigured: isStripeConfigured(),
     });
   });
+
+  if (process.env.SENTRY_DSN) {
+    Sentry.setupExpressErrorHandler(app);
+  }
 
   return app;
 }

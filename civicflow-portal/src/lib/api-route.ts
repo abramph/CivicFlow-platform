@@ -1,10 +1,8 @@
+import * as Sentry from "@sentry/nextjs";
 import { ForbiddenError, withForbiddenHandler } from "@/lib/auth-guards";
 import { ValidationError, jsonError } from "@/lib/validation";
 import { PlanLimitError } from "@/lib/plan-gate";
 
-/**
- * Wrap API handlers with consistent JSON error handling.
- */
 export async function withApiErrorHandling(
   fn: () => Promise<Response>
 ): Promise<Response> {
@@ -21,6 +19,7 @@ export async function withApiErrorHandling(
       if (error instanceof PlanLimitError) {
         return jsonError(error.message, error.status);
       }
+      Sentry.captureException(error);
       const isProd = process.env.NODE_ENV === "production";
       const message = isProd
         ? "Internal server error"

@@ -70,6 +70,7 @@ pm2 startup
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Admin UI credentials |
 | `ADMIN_SESSION_SECRET` | Long random secret for session cookies |
 | `SMTP_*` | Email delivery for license receipts |
+| `SENTRY_DSN` | Optional — Sentry DSN for error tracking |
 
 See `civicflow-license-server/.env.example` for the full list.
 
@@ -163,8 +164,12 @@ cd civicflow-portal && npm run db:deploy && npm run start
 | `FROM_EMAIL` | Sender address, e.g. `CivicFlow <noreply@civicflowapp.com>` |
 | `ENABLE_EMAIL_SEND` | `1` to enable real email sends (default safe mode is off) |
 | `CRON_SECRET` | Long random secret for authenticating cron endpoint calls |
+| `NEXT_PUBLIC_SENTRY_DSN` | Sentry DSN for error tracking (portal client + server) |
 | `RATE_LIMIT_REDIS_URL` | Optional Redis URL for production rate limiting |
 | `RATE_LIMIT_REDIS_TOKEN` | Optional token/secret for Redis provider |
+| `SENTRY_AUTH_TOKEN` | Optional — enables source map uploads to Sentry at build time |
+| `SENTRY_ORG` | Optional — Sentry org slug (only needed with `SENTRY_AUTH_TOKEN`) |
+| `SENTRY_PROJECT` | Optional — Sentry project slug (only needed with `SENTRY_AUTH_TOKEN`) |
 
 ### DigitalOcean Managed PostgreSQL connection string format
 ```
@@ -239,7 +244,7 @@ npm run worker:reports
 - [ ] CORS origin locked to production domain
 - [ ] Production Redis-backed rate limiting configured (Upstash / DO Managed Redis)
 - [ ] `CRON_SECRET` set and cron jobs configured (cron-job.org or equivalent)
-- [ ] Error tracking configured (e.g., Sentry)
+- [ ] `NEXT_PUBLIC_SENTRY_DSN` set in DO App Platform env vars
 - [ ] DO Managed PostgreSQL automated backups enabled
 - [ ] Spaces bucket is private; files served via presigned URLs only
 - [ ] Seed passwords changed after first deploy
