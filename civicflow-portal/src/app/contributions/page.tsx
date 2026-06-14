@@ -78,8 +78,13 @@ export default async function ContributionsPage() {
                 </tr>
               ) : (
                 rows.map((row) => (
-                  <tr key={row.id} className="border-t border-slate-100">
-                    <td className="px-4 py-3 text-slate-900">{formatDate(row.contributionDate)}</td>
+                  <tr key={row.id} className={`border-t border-slate-100 ${row.voidedAt ? "opacity-50" : ""}`}>
+                    <td className="px-4 py-3 text-slate-900">
+                      <Link href={`/contributions/${row.id}`} className="text-emerald-700 hover:underline">
+                        {formatDate(row.contributionDate)}
+                      </Link>
+                      {row.voidedAt ? <span className="ml-2 text-xs font-semibold text-red-600">VOID</span> : null}
+                    </td>
                     <td className="px-4 py-3 text-slate-900">
                       {row.member ? (
                         <Link href={`/members/${row.member.id}`} className="font-semibold text-emerald-700 hover:underline">
