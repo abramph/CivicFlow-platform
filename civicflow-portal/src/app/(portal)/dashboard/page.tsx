@@ -25,6 +25,10 @@ export default async function DashboardPage() {
   const hasSaasSession = Boolean(session?.userId && session?.organizationId);
 
   if (!hasLegacySession && !hasSaasSession) {
+    // Authenticated but no org yet — send to onboarding rather than login
+    if (session?.userId) {
+      redirect("/onboarding/organization");
+    }
     redirect("/login");
   }
 

@@ -16,16 +16,14 @@ export default async function OnboardingOrganizationPage() {
 
   return (
     <main className="min-h-screen bg-slate-100 px-6 py-10">
-      <div className="mx-auto max-w-4xl space-y-6">
-        <div className="space-y-2">
+      <div className="mx-auto max-w-2xl space-y-6">
+        <div>
           <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-700">
-            CivicFlow Onboarding
+            CivicFlow
           </p>
-          <h1 className="text-3xl font-semibold text-slate-950">Set up your organization</h1>
-          <p className="max-w-2xl text-sm leading-6 text-slate-700">
-            Create the organization profile, seed default membership and dues categories,
-            and get the SaaS portal ready for member, contribution, and dues workflows.
-          </p>
+          <h1 className="mt-1 text-2xl font-semibold text-slate-950">
+            Welcome — let&apos;s set up your organization.
+          </h1>
         </div>
 
         <div className="rounded-2xl border border-slate-300 bg-white p-6 shadow-sm">
