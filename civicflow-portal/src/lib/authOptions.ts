@@ -94,24 +94,25 @@ export const authOptions: NextAuthOptions = {
     },
     async session({ session, token }) {
       if (token.userId) {
-        const membership = await prisma.organizationMembership.findFirst({
-          where: {
-            userId: String(token.userId),
-            organization: {
-              status: "active",
+        const [membership, user] = await Promise.all([
+          prisma.organizationMembership.findFirst({
+            where: {
+              userId: String(token.userId),
+              organization: { status: "active" },
             },
-          },
-          orderBy: { joinedAt: "asc" },
-        });
-
-        const user = await prisma.user.findUnique({
-          where: { id: String(token.userId) },
-          select: { email: true },
-        });
+            orderBy: { joinedAt: "asc" },
+            include: { organization: { select: { name: true } } },
+          }),
+          prisma.user.findUnique({
+            where: { id: String(token.userId) },
+            select: { email: true },
+          }),
+        ]);
 
         session.userId = String(token.userId);
         session.userEmail = user?.email ?? String(token.userEmail || "");
         session.organizationId = membership?.organizationId ?? null;
+        session.orgName = membership?.organization?.name ?? null;
         session.role = membership?.role ?? null;
       } else {
       // SaaS

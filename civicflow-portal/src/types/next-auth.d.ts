@@ -24,6 +24,7 @@ declare module "next-auth" {
     // SaaS auth
     userId?: string;
     organizationId?: string | null;
+    orgName?: string | null;
     role?: OrgRole | null;
     userEmail?: string;
   }
@@ -38,6 +39,7 @@ declare module "next-auth/jwt" {
     // SaaS
     userId?: string;
     organizationId?: string | null;
+    orgName?: string | null;
     role?: OrgRole | null;
     userEmail?: string;
   }

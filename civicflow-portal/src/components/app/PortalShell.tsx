@@ -115,7 +115,7 @@ export function PortalShell({ children }: { children: ReactNode }) {
     : navItems;
 
   const orgLabel =
-    session?.organizationId || session?.org_id || "(setup required)";
+    session?.orgName || session?.org_id || "(setup required)";
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-950">
