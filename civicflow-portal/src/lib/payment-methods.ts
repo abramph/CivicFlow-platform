@@ -15,6 +15,7 @@ export const defaultPaymentMethods: Array<{
   { method: "VENMO", label: "Venmo", sortOrder: 80 },
   { method: "PAYPAL", label: "PayPal", sortOrder: 90 },
   { method: "STRIPE", label: "Stripe", sortOrder: 100 },
+  { method: "ZEFFY", label: "Zeffy", sortOrder: 105 },
   { method: "OTHER", label: "Other", sortOrder: 110 },
 ];
 

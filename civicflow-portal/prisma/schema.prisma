@@ -78,6 +78,7 @@ enum DuesPaymentMethod {
   VENMO
   PAYPAL
   STRIPE
+  ZEFFY
   OTHER
 }
 

@@ -18,6 +18,7 @@ const PAYMENT_METHOD_OPTIONS = [
   { value: 'zelle', label: 'ZELLE' },
   { value: 'cashapp', label: 'CASHAPP' },
   { value: 'venmo', label: 'VENMO' },
+  { value: 'zeffy', label: 'ZEFFY' },
   { value: 'cash', label: 'CASH' },
   { value: 'check', label: 'CHECK' },
   { value: 'other', label: 'OTHER' },
@@ -899,6 +900,11 @@ export default function PaymentModal({
                         : 'Zelle contact not configured.'}
                     </div>
                   </>
+                ) : paymentMethod === 'zeffy' ? (
+                  <>
+                    <div className="font-semibold">Received via Zeffy</div>
+                    <div className="mt-1">Record a payment that was collected through your Zeffy form. Enter the amount and reference from the Zeffy receipt.</div>
+                  </>
                 ) : (
                   <>
                     <div className="font-semibold">Send via Venmo</div>
@@ -940,7 +946,9 @@ export default function PaymentModal({
               <button
                 type="button"
                 onClick={() => handleExternalSubmit(
-                  paymentMethod === 'cashapp' ? 'CASHAPP' : (paymentMethod === 'zelle' ? 'ZELLE' : 'VENMO')
+                  paymentMethod === 'cashapp' ? 'CASHAPP' :
+                  paymentMethod === 'zelle' ? 'ZELLE' :
+                  paymentMethod === 'zeffy' ? 'ZEFFY' : 'VENMO'
                 )}
                 disabled={submitDisabled}
                 className="w-full px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-60"
