@@ -4373,9 +4373,11 @@ function registerIpcHandlers() {
     const campaigns = database.prepare("SELECT * FROM campaigns").all();
     const meetings = database.prepare("SELECT * FROM meetings").all();
     const attendance = database.prepare("SELECT * FROM attendance").all();
-    const transactions = database.prepare(
-      "SELECT * FROM transactions WHERE COALESCE(is_deleted, 0) = 0"
-    ).all();
+    const transactions = (() => {
+      const cols = database.prepare("PRAGMA table_info(transactions)").all().map((c) => c.name);
+      const where = cols.includes("is_deleted") ? "WHERE COALESCE(is_deleted, 0) = 0" : "";
+      return database.prepare(`SELECT * FROM transactions ${where}`).all();
+    })();
     const expenditures = database.prepare("SELECT * FROM expenditures").all();
 
     return {
