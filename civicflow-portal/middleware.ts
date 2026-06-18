@@ -45,9 +45,11 @@ export async function middleware(req: NextRequest) {
 
   const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
 
-  // MFA pending: gate all routes behind the MFA challenge page
+  // MFA pending: gate all non-auth routes behind the MFA challenge page
   if (token?.mfaPending) {
-    if (pathname !== "/login/mfa") {
+    const isMfaPage = pathname === "/login/mfa";
+    const isAuthEndpoint = pathname.startsWith("/api/auth");
+    if (!isMfaPage && !isAuthEndpoint) {
       return NextResponse.redirect(new URL("/login/mfa", req.url));
     }
     const response = NextResponse.next();
