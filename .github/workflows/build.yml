@@ -2,6 +2,11 @@ name: Build Installers
 
 on:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "GitHub release tag to upload assets to (e.g. v1.0.1). Leave blank to skip release upload."
+        required: false
+        default: ""
   push:
     tags:
       - "v*"
@@ -29,8 +34,17 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: civicflow-windows
-          path: release/*
+          path: release/*.exe
           if-no-files-found: error
+
+      - name: Attach to GitHub release
+        if: startsWith(github.ref, 'refs/tags/') || inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          TAG="${{ inputs.release_tag || github.ref_name }}"
+          gh release upload "$TAG" release/*.exe --clobber
 
   build-macos:
     runs-on: macos-latest
@@ -54,5 +68,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: civicflow-macos
-          path: release/*
+          path: release/*.dmg
           if-no-files-found: error
+
+      - name: Attach to GitHub release
+        if: startsWith(github.ref, 'refs/tags/') || inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ inputs.release_tag || github.ref_name }}"
+          gh release upload "$TAG" release/*.dmg --clobber
