@@ -4367,14 +4367,14 @@ function registerIpcHandlers() {
   register(registry, "migration:exportData", async () => {
     const database = db();
     const org = database.prepare("SELECT name FROM organization LIMIT 1").get();
-    const members = database.prepare("SELECT * FROM members WHERE is_deleted = 0 OR is_deleted IS NULL").all();
+    const members = database.prepare("SELECT * FROM members").all();
     const categories = database.prepare("SELECT * FROM categories").all();
-    const events = database.prepare("SELECT * FROM events WHERE is_deleted = 0 OR is_deleted IS NULL").all();
-    const campaigns = database.prepare("SELECT * FROM campaigns WHERE is_deleted = 0 OR is_deleted IS NULL").all();
+    const events = database.prepare("SELECT * FROM events").all();
+    const campaigns = database.prepare("SELECT * FROM campaigns").all();
     const meetings = database.prepare("SELECT * FROM meetings").all();
     const attendance = database.prepare("SELECT * FROM attendance").all();
     const transactions = database.prepare(
-      "SELECT * FROM transactions WHERE (is_deleted = 0 OR is_deleted IS NULL)"
+      "SELECT * FROM transactions WHERE COALESCE(is_deleted, 0) = 0"
     ).all();
     const expenditures = database.prepare("SELECT * FROM expenditures").all();
 

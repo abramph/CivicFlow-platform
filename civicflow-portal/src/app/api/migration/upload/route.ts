@@ -32,7 +32,7 @@ function buildExportFromSqlite(buffer: Buffer): DesktopExport {
 
     const members = readTable<DesktopExport["members"][number]>(
       db, "members",
-      "SELECT id, first_name, last_name, email, phone, status, join_date, city, state, zip, dob, category_id FROM members WHERE is_deleted = 0 OR is_deleted IS NULL"
+      "SELECT id, first_name, last_name, email, phone, status, join_date, city, state, zip, dob, category_id FROM members"
     );
     const categories = readTable<DesktopExport["categories"][number]>(
       db, "categories",
