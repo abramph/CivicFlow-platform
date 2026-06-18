@@ -3,8 +3,9 @@ import { requirePermission } from "@/lib/auth-guards";
 import { prisma } from "@/lib/prisma";
 import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { formatDate } from "@/lib/formatting";
-import { PLANS, getPlan, planRank } from "@/lib/plans";
-import { UpgradeButton, ManageBillingButton } from "@/components/app/BillingActions";
+import { PLANS, getPlan } from "@/lib/plans";
+import { ManageBillingButton } from "@/components/app/BillingActions";
+import { BillingPlans } from "@/components/app/BillingPlans";
 import { checkMemberLimit, getTrialStatus } from "@/lib/plan-gate";
 
 type SearchParams = Promise<{ success?: string }>;
@@ -40,8 +41,6 @@ export default async function BillingSettingsPage({
     subscription?.stripeCustomerId &&
     ["active", "trialing", "past_due"].includes(subscription?.status ?? "")
   );
-
-  const planOrder: Array<keyof typeof PLANS> = ["essential", "elite"];
 
   return (
     <main className="space-y-6">
@@ -114,79 +113,15 @@ export default async function BillingSettingsPage({
         description={
           hasActiveSubscription
             ? "Use the billing portal below to change or cancel your plan."
-            : "Choose a plan. Changes take effect immediately after payment."
+            : "Choose a plan and billing cycle. Changes take effect immediately after payment."
         }
       >
-        <div className="grid gap-4 md:grid-cols-3">
-          {planOrder.map((planId) => {
-            const plan = PLANS[planId];
-            const isCurrent = !trial.isInTrial && currentPlanId === planId;
-            const isTrialPlan = trial.isInTrial && planId === "essential";
-            const isUpgrade = planRank(planId) > planRank(trial.isInTrial ? "essential" : currentPlanId);
-            const isDowngrade = planRank(planId) < planRank(trial.isInTrial ? "essential" : currentPlanId);
-
-            return (
-              <div
-                key={planId}
-                className={`flex flex-col rounded-xl border p-5 ${
-                  isCurrent || isTrialPlan
-                    ? "border-emerald-400 bg-emerald-50"
-                    : "border-slate-200 bg-white"
-                }`}
-              >
-                <div className="mb-3 flex items-start justify-between">
-                  <div>
-                    <p className="text-sm font-bold text-slate-950">{plan.name}</p>
-                    {plan.monthlyPriceCents === 0 ? (
-                      <p className="mt-1 text-2xl font-bold text-slate-950">Free</p>
-                    ) : (
-                      <p className="mt-1 text-2xl font-bold text-slate-950">
-                        ${(plan.monthlyPriceCents / 100).toFixed(0)}
-                        <span className="text-sm font-normal text-slate-500">/mo</span>
-                      </p>
-                    )}
-                  </div>
-                  {isTrialPlan ? (
-                    <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">Trial</span>
-                  ) : isCurrent ? (
-                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">Current</span>
-                  ) : isUpgrade ? (
-                    <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">Upgrade</span>
-                  ) : isDowngrade ? (
-                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">Downgrade</span>
-                  ) : null}
-                </div>
-
-                <ul className="mb-4 flex-1 space-y-1.5">
-                  {plan.highlights.map((item) => (
-                    <li key={item} className="flex items-start gap-2 text-xs text-slate-700">
-                      <span className="mt-0.5 text-emerald-600">✓</span>
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-
-                {/* Action area */}
-                {canManageBilling && !hasActiveSubscription ? (
-                  <UpgradeButton
-                    plan={planId as "essential" | "elite"}
-                    currentPlan={currentPlanId}
-                    label={trial.isInTrial ? `Subscribe — $${(plan.monthlyPriceCents / 100).toFixed(0)}/mo` : undefined}
-                  />
-                ) : !canManageBilling ? (
-                  <p className="text-center text-xs text-slate-500">Contact your org owner to change plans</p>
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
-
-        {hasActiveSubscription && canManageBilling ? (
-          <p className="mt-4 text-sm text-slate-600">
-            To upgrade, downgrade, or cancel, open the{" "}
-            <span className="font-medium text-slate-900">billing portal</span> below.
-          </p>
-        ) : null}
+        <BillingPlans
+          currentPlanId={currentPlanId}
+          isInTrial={trial.isInTrial}
+          hasActiveSubscription={hasActiveSubscription}
+          canManageBilling={canManageBilling}
+        />
       </SectionCard>
 
       {/* Subscription management */}

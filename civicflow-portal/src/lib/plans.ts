@@ -1,4 +1,5 @@
 export type PlanId = "free" | "essential" | "elite";
+export type BillingInterval = "month" | "year";
 
 export interface PlanLimits {
   members: number;           // Infinity = unlimited
@@ -13,6 +14,10 @@ export interface PlanConfig {
   name: string;
   description: string;
   monthlyPriceCents: number;
+  yearlyPriceCents: number;
+  monthlyPriceEnvKey: string | null;
+  yearlyPriceEnvKey: string | null;
+  /** @deprecated use monthlyPriceEnvKey */
   priceEnvKey: string | null;
   limits: PlanLimits;
   highlights: string[];
@@ -22,8 +27,11 @@ export const PLANS: Record<PlanId, PlanConfig> = {
   free: {
     id: "free",
     name: "Free",
-    description: "Get started at no cost. Perfect for small orgs just getting organized.",
+    description: "Internal state — no public free plan.",
     monthlyPriceCents: 0,
+    yearlyPriceCents: 0,
+    monthlyPriceEnvKey: null,
+    yearlyPriceEnvKey: null,
     priceEnvKey: null,
     limits: {
       members: 50,
@@ -32,19 +40,16 @@ export const PLANS: Record<PlanId, PlanConfig> = {
       advancedReports: false,
       apiAccess: false,
     },
-    highlights: [
-      "Up to 50 members",
-      "Dues tracking",
-      "Contributions",
-      "Events & meetings",
-      "CSV export",
-    ],
+    highlights: [],
   },
   essential: {
     id: "essential",
     name: "Essential",
     description: "For growing organizations that need full member management and communication tools.",
     monthlyPriceCents: 4900,
+    yearlyPriceCents: 53900,
+    monthlyPriceEnvKey: "STRIPE_PRICE_ESSENTIAL_MONTHLY",
+    yearlyPriceEnvKey: "STRIPE_PRICE_ESSENTIAL_YEARLY",
     priceEnvKey: "STRIPE_PRICE_ESSENTIAL_MONTHLY",
     limits: {
       members: 500,
@@ -66,6 +71,9 @@ export const PLANS: Record<PlanId, PlanConfig> = {
     name: "Elite",
     description: "Unlimited scale with every feature for large or fast-growing organizations.",
     monthlyPriceCents: 9900,
+    yearlyPriceCents: 108900,
+    monthlyPriceEnvKey: "STRIPE_PRICE_ELITE_MONTHLY",
+    yearlyPriceEnvKey: "STRIPE_PRICE_ELITE_YEARLY",
     priceEnvKey: "STRIPE_PRICE_ELITE_MONTHLY",
     limits: {
       members: Infinity,
@@ -85,7 +93,7 @@ export const PLANS: Record<PlanId, PlanConfig> = {
 };
 
 export function getPlan(planId: string): PlanConfig {
-  return PLANS[(planId as PlanId)] ?? PLANS.free;
+  return PLANS[(planId as PlanId)] ?? PLANS.essential;
 }
 
 export function planRank(planId: string): number {

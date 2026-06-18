@@ -11,6 +11,7 @@ import { getServerEnv } from "@/lib/env";
 
 const checkoutSchema = z.object({
   plan: z.enum(["essential", "elite"]),
+  interval: z.enum(["month", "year"]).default("month"),
 });
 
 export async function POST(req: Request) {
@@ -20,7 +21,7 @@ export async function POST(req: Request) {
     const body = await parseJsonBody(req, checkoutSchema);
     const env = getServerEnv();
 
-    const priceId = priceIdForPlan(body.plan);
+    const priceId = priceIdForPlan(body.plan, body.interval);
 
     const [org, activeSubscription] = await Promise.all([
       prisma.organization.findUnique({

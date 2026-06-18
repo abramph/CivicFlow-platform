@@ -1,16 +1,18 @@
 "use client";
 
 import { useState } from "react";
+import type { BillingInterval } from "@/lib/plans";
 
 type Plan = "essential" | "elite";
 
 interface UpgradeButtonProps {
   plan: Plan;
   currentPlan: string;
+  interval: BillingInterval;
   label?: string;
 }
 
-export function UpgradeButton({ plan, currentPlan, label }: UpgradeButtonProps) {
+export function UpgradeButton({ plan, currentPlan, interval, label }: UpgradeButtonProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -24,7 +26,7 @@ export function UpgradeButton({ plan, currentPlan, label }: UpgradeButtonProps) 
       const res = await fetch("/api/billing/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan }),
+        body: JSON.stringify({ plan, interval }),
       });
       const data = await res.json();
       if (!res.ok) {

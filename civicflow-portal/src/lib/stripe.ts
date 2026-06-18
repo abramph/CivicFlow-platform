@@ -17,18 +17,24 @@ export function stripeWebhookSecret(): string {
   return secret;
 }
 
-export function priceIdForPlan(planId: "essential" | "elite"): string {
+export function priceIdForPlan(planId: "essential" | "elite", interval: "month" | "year" = "month"): string {
   const key =
-    planId === "essential"
-      ? process.env.STRIPE_PRICE_ESSENTIAL_MONTHLY
-      : process.env.STRIPE_PRICE_ELITE_MONTHLY;
-  if (!key) throw new Error(`Stripe price not configured for plan: ${planId}`);
+    interval === "year"
+      ? planId === "essential"
+        ? process.env.STRIPE_PRICE_ESSENTIAL_YEARLY
+        : process.env.STRIPE_PRICE_ELITE_YEARLY
+      : planId === "essential"
+        ? process.env.STRIPE_PRICE_ESSENTIAL_MONTHLY
+        : process.env.STRIPE_PRICE_ELITE_MONTHLY;
+  if (!key) throw new Error(`Stripe price not configured for plan: ${planId} (${interval})`);
   return key;
 }
 
 export function planFromPriceId(priceId: string): "essential" | "elite" | null {
-  if (priceId === process.env.STRIPE_PRICE_ESSENTIAL_MONTHLY) return "essential";
-  if (priceId === process.env.STRIPE_PRICE_ELITE_MONTHLY) return "elite";
+  const monthlyIds = [process.env.STRIPE_PRICE_ESSENTIAL_MONTHLY, process.env.STRIPE_PRICE_ESSENTIAL_YEARLY];
+  const eliteIds = [process.env.STRIPE_PRICE_ELITE_MONTHLY, process.env.STRIPE_PRICE_ELITE_YEARLY];
+  if (monthlyIds.includes(priceId)) return "essential";
+  if (eliteIds.includes(priceId)) return "elite";
   return null;
 }
 
