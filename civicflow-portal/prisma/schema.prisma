@@ -321,6 +321,9 @@ model User {
   displayName   String?
   passwordHash  String
   emailVerified Boolean  @default(false)
+  mfaEnabled    Boolean  @default(false)
+  mfaSecret     String?
+  mfaBackupCodes String[]
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -328,6 +331,7 @@ model User {
   savedFilters SavedFilter[]
   auditEvents  AuditEvent[]
   verificationTokens   AccountVerificationToken[]
+  mfaChallengeTokens   MfaChallengeToken[]
   createdContributions Contribution[] @relation("ContributionCreatedBy")
   communicationLogs    CommunicationLog[] @relation("CommunicationCreatedBy")
   communicationCampaigns CommunicationCampaign[] @relation("CommunicationCampaignCreatedBy")
@@ -339,6 +343,20 @@ model User {
   uploadedAttachments Attachment[] @relation("AttachmentUploadedBy")
 
   @@index([email])
+}
+
+/// Short-lived token for two-phase MFA login flow.
+model MfaChallengeToken {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique @default(cuid())
+  type      String   // "pending" | "completion"
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([userId])
 }
 
 /// Single-use token for email verification and password reset.

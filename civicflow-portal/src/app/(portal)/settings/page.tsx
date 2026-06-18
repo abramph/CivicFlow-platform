@@ -74,6 +74,7 @@ export default async function SettingsPage() {
     { href: "/settings/payment-methods", label: "Payment Methods", visible: canDo(role, "org_settings:read") },
     { href: "/settings/users", label: "Users & Roles", visible: canDo(role, "users:read") },
     { href: "/settings/billing", label: "Billing", visible: canDo(role, "billing:read") },
+    { href: "/settings/security", label: "Security (MFA)", visible: true },
     { href: "/onboarding/organization", label: "Onboarding", visible: true },
   ].filter((tile) => tile.visible);
 

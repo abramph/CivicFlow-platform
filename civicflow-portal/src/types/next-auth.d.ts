@@ -14,6 +14,10 @@ declare module "next-auth" {
     displayName?: string | null;
     organizationId?: string | null;
     role?: OrgRole | null;
+    // MFA pending state
+    mfaPending?: boolean;
+    mfaUserId?: string;
+    mfaTokenId?: string;
   }
 
   interface Session {
@@ -27,6 +31,10 @@ declare module "next-auth" {
     orgName?: string | null;
     role?: OrgRole | null;
     userEmail?: string;
+    // MFA pending state
+    mfaPending?: boolean;
+    mfaUserId?: string;
+    mfaTokenId?: string;
   }
 }
 
@@ -42,5 +50,9 @@ declare module "next-auth/jwt" {
     orgName?: string | null;
     role?: OrgRole | null;
     userEmail?: string;
+    // MFA pending state
+    mfaPending?: boolean;
+    mfaUserId?: string;
+    mfaTokenId?: string;
   }
 }

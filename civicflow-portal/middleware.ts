@@ -44,8 +44,20 @@ export async function middleware(req: NextRequest) {
   }
 
   const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
+
+  // MFA pending: gate all routes behind the MFA challenge page
+  if (token?.mfaPending) {
+    if (pathname !== "/login/mfa") {
+      return NextResponse.redirect(new URL("/login/mfa", req.url));
+    }
+    const response = NextResponse.next();
+    response.headers.set("x-pathname", pathname);
+    return response;
+  }
+
   const isPublicPage =
     pathname === "/login" ||
+    pathname === "/login/mfa" ||
     pathname === "/signup" ||
     pathname === "/verify-email" ||
     pathname === "/forgot-password" ||
@@ -58,7 +70,7 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(new URL("/login", req.url));
   }
 
-  if (token && pathname === "/login") {
+  if (token && !token.mfaPending && pathname === "/login") {
     return NextResponse.redirect(new URL("/dashboard", req.url));
   }
 

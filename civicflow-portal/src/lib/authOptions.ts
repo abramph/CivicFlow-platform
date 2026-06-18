@@ -13,7 +13,7 @@ export const authOptions: NextAuthOptions = {
     signIn: "/login",
   },
   providers: [
-    // ── SaaS: email + password, verified against the PostgreSQL database ──
+    // ── SaaS: email + password ──
     CredentialsProvider({
       id: "saas-credentials",
       name: "CivicFlow",
@@ -32,10 +32,28 @@ export const authOptions: NextAuthOptions = {
         const valid = await bcrypt.compare(password, user.passwordHash);
         if (!valid) return null;
 
-        // In production, block unverified accounts. In dev, allow them through.
         if (!user.emailVerified && process.env.NODE_ENV === "production") return null;
 
-        // organizationId is always derived server-side — never from the client.
+        // If MFA is enabled, return a pending state instead of a full session.
+        if (user.mfaEnabled) {
+          await prisma.mfaChallengeToken.deleteMany({
+            where: { userId: user.id, expiresAt: { lt: new Date() } },
+          });
+          const pendingToken = await prisma.mfaChallengeToken.create({
+            data: {
+              userId: user.id,
+              type: "pending",
+              expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+            },
+          });
+          return {
+            id: "mfa-pending",
+            mfaPending: true,
+            mfaUserId: user.id,
+            mfaTokenId: pendingToken.id,
+          } as never;
+        }
+
         const membership = await prisma.organizationMembership.findFirst({
           where:   { userId: user.id },
           orderBy: { joinedAt: "asc" },
@@ -55,7 +73,50 @@ export const authOptions: NextAuthOptions = {
       },
     }),
 
-    // ── Legacy: Organization API Key (preserved for existing portal usage) ──
+    // ── MFA completion: exchange a short-lived completion token for a full session ──
+    CredentialsProvider({
+      id: "mfa-complete",
+      name: "MFA Complete",
+      credentials: {
+        completionToken: { label: "Completion Token", type: "text" },
+      },
+      async authorize(credentials) {
+        const tokenValue = String(credentials?.completionToken ?? "").trim();
+        if (!tokenValue) return null;
+
+        const record = await prisma.mfaChallengeToken.findUnique({
+          where: { token: tokenValue },
+        });
+
+        if (!record || record.type !== "completion" || record.expiresAt < new Date()) {
+          if (record) await prisma.mfaChallengeToken.delete({ where: { id: record.id } }).catch(() => {});
+          return null;
+        }
+
+        await prisma.mfaChallengeToken.delete({ where: { id: record.id } });
+
+        const user = await prisma.user.findUnique({ where: { id: record.userId } });
+        if (!user) return null;
+
+        const membership = await prisma.organizationMembership.findFirst({
+          where:   { userId: user.id },
+          orderBy: { joinedAt: "asc" },
+          include: { organization: { select: { status: true } } },
+        });
+
+        const activeOrg = membership?.organization?.status === "active" ? membership : null;
+
+        return {
+          id:             user.id,
+          email:          user.email,
+          displayName:    user.displayName,
+          organizationId: activeOrg?.organizationId ?? null,
+          role:           activeOrg?.role           ?? null,
+        };
+      },
+    }),
+
+    // ── Legacy: Organization API Key ──
     CredentialsProvider({
       id: "org-api-key",
       name: "Organization API Key",
@@ -76,23 +137,62 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
-        // SaaS fields
-        if ((user as { organizationId?: unknown }).organizationId !== undefined) {
+        const u = user as {
+          mfaPending?: boolean;
+          mfaUserId?: string;
+          mfaTokenId?: string;
+          organizationId?: string | null;
+          role?: string | null;
+          org_id?: string;
+          api_key?: string;
+          api_base?: string;
+        };
+
+        if (u.mfaPending) {
+          return {
+            ...token,
+            mfaPending: true,
+            mfaUserId: u.mfaUserId,
+            mfaTokenId: u.mfaTokenId,
+            // Clear any previous full-session data
+            userId: undefined,
+            userEmail: undefined,
+            organizationId: undefined,
+            role: undefined,
+          };
+        }
+
+        // Clear MFA pending state on successful full login
+        token.mfaPending = false;
+        token.mfaUserId = undefined;
+        token.mfaTokenId = undefined;
+
+        if (u.organizationId !== undefined) {
           token.userId         = user.id;
           token.userEmail      = user.email ?? "";
-          token.organizationId = (user as { organizationId?: string | null }).organizationId ?? null;
-          token.role           = (user as { role?: string | null }).role as typeof token.role ?? null;
+          token.organizationId = u.organizationId ?? null;
+          token.role           = u.role as typeof token.role ?? null;
         }
-        // Legacy fields
-        if ((user as { org_id?: string }).org_id) {
-          token.org_id   = String((user as { org_id?: string }).org_id   || "");
-          token.api_key  = String((user as { api_key?: string }).api_key  || "");
-          token.api_base = String((user as { api_base?: string }).api_base || defaultApiBase);
+        if (u.org_id) {
+          token.org_id   = String(u.org_id   || "");
+          token.api_key  = String(u.api_key  || "");
+          token.api_base = String(u.api_base || defaultApiBase);
         }
       }
       return token;
     },
+
     async session({ session, token }) {
+      if (token.mfaPending) {
+        session.mfaPending = true;
+        session.mfaUserId  = token.mfaUserId;
+        session.mfaTokenId = token.mfaTokenId;
+        session.org_id  = "";
+        session.api_key = "";
+        session.api_base = defaultApiBase;
+        return session;
+      }
+
       if (token.userId) {
         const [membership, user] = await Promise.all([
           prisma.organizationMembership.findFirst({
@@ -115,13 +215,12 @@ export const authOptions: NextAuthOptions = {
         session.orgName = membership?.organization?.name ?? null;
         session.role = membership?.role ?? null;
       } else {
-      // SaaS
         session.userId = token.userId;
         session.userEmail = token.userEmail;
         session.organizationId = token.organizationId ?? null;
         session.role = token.role ?? null;
       }
-      // Legacy (preserved)
+
       session.org_id   = String(token.org_id  || "");
       session.api_key  = String(token.api_key || "");
       session.api_base = String(token.api_base || defaultApiBase);
