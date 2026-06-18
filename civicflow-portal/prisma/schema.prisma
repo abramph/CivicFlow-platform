@@ -275,6 +275,7 @@ model Organization {
   country   String?
   plan         String    @default("free")   // "free" | "essential" | "elite"
   trialEndsAt  DateTime?                    // set at org creation; nil once subscribed or expired
+  seatLimit    Int?                         // null = use plan default; set explicitly when seats are purchased
   status    OrgStatus @default(active)
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt

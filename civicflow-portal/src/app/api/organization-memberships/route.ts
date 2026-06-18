@@ -4,6 +4,7 @@ import { withApiErrorHandling } from "@/lib/api-route";
 import { createAuditEvent } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 import { parseJsonBody, ValidationError, z } from "@/lib/validation";
+import { requireSeatSlot } from "@/lib/plan-gate";
 
 const createMembershipSchema = z.object({
   email: z.string().trim().email(),
@@ -68,6 +69,8 @@ export async function POST(request: Request) {
         data: { displayName: input.displayName.trim() },
       });
     }
+
+    await requireSeatSlot(organizationId);
 
     const existingMembership = await prisma.organizationMembership.findFirst({
       where: {

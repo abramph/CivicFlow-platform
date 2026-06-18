@@ -3,7 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { getServerEnv } from "@/lib/env";
 import { createAuditEvent } from "@/lib/audit";
 import { requireRateLimit } from "@/lib/rate-limit";
-import { planFromPriceId } from "@/lib/stripe";
+import { planFromPriceId, isSeatPriceId } from "@/lib/stripe";
+import { getPlan } from "@/lib/plans";
 import type { SubscriptionStatus } from "@prisma/client";
 
 export const runtime = "nodejs";
@@ -44,8 +45,22 @@ async function upsertSubscriptionFromStripe(
 
   const stripeCustomerId =
     typeof sub.customer === "string" ? sub.customer : null;
-  const priceId = sub.items.data[0]?.price?.id ?? null;
+
+  let priceId: string | null = null;
+  let additionalSeats = 0;
+  for (const item of sub.items.data) {
+    const pid = item.price?.id;
+    if (!pid) continue;
+    if (isSeatPriceId(pid)) {
+      additionalSeats += item.quantity ?? 0;
+    } else if (!priceId) {
+      priceId = pid;
+    }
+  }
+
   const plan = (priceId ? planFromPriceId(priceId) : null) ?? "essential";
+  const planConfig = getPlan(plan);
+  const seatLimit = planConfig.includedSeats + additionalSeats;
   const status = mapSubscriptionStatus(sub.status);
   const isActive = sub.status === "active" || sub.status === "trialing";
 
@@ -81,10 +96,12 @@ async function upsertSubscriptionFromStripe(
     },
   });
 
-  // Only update org.plan — never touch org.status from billing events
   await prisma.organization.update({
     where: { id: orgId },
-    data: { plan: isActive ? plan : "free" },
+    data: {
+      plan: isActive ? plan : "free",
+      ...(isActive ? { seatLimit } : { seatLimit: null }),
+    },
   });
 
   return { orgId, record };

@@ -31,11 +31,33 @@ export function priceIdForPlan(planId: "essential" | "elite", interval: "month" 
 }
 
 export function planFromPriceId(priceId: string): "essential" | "elite" | null {
-  const monthlyIds = [process.env.STRIPE_PRICE_ESSENTIAL_MONTHLY, process.env.STRIPE_PRICE_ESSENTIAL_YEARLY];
+  const essentialIds = [process.env.STRIPE_PRICE_ESSENTIAL_MONTHLY, process.env.STRIPE_PRICE_ESSENTIAL_YEARLY];
   const eliteIds = [process.env.STRIPE_PRICE_ELITE_MONTHLY, process.env.STRIPE_PRICE_ELITE_YEARLY];
-  if (monthlyIds.includes(priceId)) return "essential";
+  if (essentialIds.includes(priceId)) return "essential";
   if (eliteIds.includes(priceId)) return "elite";
   return null;
+}
+
+export function seatPriceIdForPlan(planId: "essential" | "elite", interval: "month" | "year" = "month"): string | null {
+  const key =
+    interval === "year"
+      ? planId === "essential"
+        ? process.env.STRIPE_PRICE_ESSENTIAL_SEAT_YEARLY
+        : process.env.STRIPE_PRICE_ELITE_SEAT_YEARLY
+      : planId === "essential"
+        ? process.env.STRIPE_PRICE_ESSENTIAL_SEAT_MONTHLY
+        : process.env.STRIPE_PRICE_ELITE_SEAT_MONTHLY;
+  return key ?? null;
+}
+
+export function isSeatPriceId(priceId: string): boolean {
+  const seatIds = [
+    process.env.STRIPE_PRICE_ESSENTIAL_SEAT_MONTHLY,
+    process.env.STRIPE_PRICE_ESSENTIAL_SEAT_YEARLY,
+    process.env.STRIPE_PRICE_ELITE_SEAT_MONTHLY,
+    process.env.STRIPE_PRICE_ELITE_SEAT_YEARLY,
+  ];
+  return seatIds.includes(priceId);
 }
 
 export async function getOrCreateStripeCustomer(
@@ -66,21 +88,30 @@ export async function createCheckoutSession({
   organizationId,
   stripeCustomerId,
   priceId,
+  seatPriceId,
+  additionalSeats,
   successUrl,
   cancelUrl,
 }: {
   organizationId: string;
   stripeCustomerId: string;
   priceId: string;
+  seatPriceId?: string | null;
+  additionalSeats?: number;
   successUrl: string;
   cancelUrl: string;
 }): Promise<string> {
   const stripe = getStripe();
 
+  const lineItems: { price: string; quantity: number }[] = [{ price: priceId, quantity: 1 }];
+  if (seatPriceId && additionalSeats && additionalSeats > 0) {
+    lineItems.push({ price: seatPriceId, quantity: additionalSeats });
+  }
+
   const session = await stripe.checkout.sessions.create({
     customer: stripeCustomerId,
     mode: "subscription",
-    line_items: [{ price: priceId, quantity: 1 }],
+    line_items: lineItems,
     success_url: successUrl,
     cancel_url: cancelUrl,
     metadata: { organizationId },

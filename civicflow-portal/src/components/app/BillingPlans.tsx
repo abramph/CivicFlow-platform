@@ -12,8 +12,53 @@ interface BillingPlansProps {
   canManageBilling: boolean;
 }
 
+function SeatStepper({
+  value,
+  onChange,
+  seatCents,
+  interval,
+}: {
+  value: number;
+  onChange: (n: number) => void;
+  seatCents: number;
+  interval: BillingInterval;
+}) {
+  return (
+    <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+      <p className="mb-1.5 text-xs font-medium text-slate-600">Additional seats</p>
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => onChange(Math.max(0, value - 1))}
+          className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-40"
+          disabled={value === 0}
+        >
+          −
+        </button>
+        <span className="min-w-[1.5rem] text-center text-sm font-semibold text-slate-900">{value}</span>
+        <button
+          type="button"
+          onClick={() => onChange(Math.min(50, value + 1))}
+          className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-100"
+        >
+          +
+        </button>
+        {value > 0 && (
+          <span className="text-xs text-slate-500">
+            +${((seatCents * value) / 100).toFixed(0)}/{interval === "year" ? "yr" : "mo"}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function BillingPlans({ currentPlanId, isInTrial, hasActiveSubscription, canManageBilling }: BillingPlansProps) {
   const [interval, setInterval] = useState<BillingInterval>("month");
+  const [additionalSeats, setAdditionalSeats] = useState<Record<string, number>>({
+    essential: 0,
+    elite: 0,
+  });
   const plans = [PLANS.essential, PLANS.elite] as const;
 
   return (
@@ -41,8 +86,11 @@ export function BillingPlans({ currentPlanId, isInTrial, hasActiveSubscription, 
           const isUpgrade = planRank(plan.id) > planRank(isInTrial ? "essential" : currentPlanId);
           const isDowngrade = planRank(plan.id) < planRank(isInTrial ? "essential" : currentPlanId);
 
-          const price = interval === "year" ? plan.yearlyPriceCents : plan.monthlyPriceCents;
+          const basePrice = interval === "year" ? plan.yearlyPriceCents : plan.monthlyPriceCents;
           const effectiveMonthly = interval === "year" ? Math.round(plan.yearlyPriceCents / 12) : plan.monthlyPriceCents;
+          const seatCents = interval === "year" ? plan.additionalSeatCentsYearly : plan.additionalSeatCentsMonthly;
+          const extraSeats = additionalSeats[plan.id] ?? 0;
+          const totalSeats = plan.includedSeats + extraSeats;
 
           return (
             <div
@@ -57,7 +105,7 @@ export function BillingPlans({ currentPlanId, isInTrial, hasActiveSubscription, 
                     <span className="text-sm font-normal text-slate-500">/mo</span>
                   </p>
                   {interval === "year" && (
-                    <p className="text-xs text-slate-500">${(price / 100).toFixed(0)} billed annually</p>
+                    <p className="text-xs text-slate-500">${(basePrice / 100).toFixed(0)} billed annually</p>
                   )}
                 </div>
                 {isTrialPlan ? (
@@ -78,15 +126,31 @@ export function BillingPlans({ currentPlanId, isInTrial, hasActiveSubscription, 
                     {item}
                   </li>
                 ))}
+                <li className="flex items-start gap-2 text-xs text-slate-500">
+                  <span className="mt-0.5">+</span>
+                  ${(seatCents / 100).toFixed(0)}/{interval === "year" ? "yr" : "mo"} per additional seat
+                </li>
               </ul>
 
               {canManageBilling && !hasActiveSubscription ? (
-                <UpgradeButton
-                  plan={plan.id as "essential" | "elite"}
-                  currentPlan={currentPlanId}
-                  interval={interval}
-                  label={isInTrial ? `Subscribe — $${(effectiveMonthly / 100).toFixed(0)}/mo` : undefined}
-                />
+                <>
+                  <SeatStepper
+                    value={extraSeats}
+                    onChange={(n) => setAdditionalSeats((prev) => ({ ...prev, [plan.id]: n }))}
+                    seatCents={seatCents}
+                    interval={interval}
+                  />
+                  {extraSeats > 0 && (
+                    <p className="mb-2 text-center text-xs text-slate-500">{totalSeats} total seats</p>
+                  )}
+                  <UpgradeButton
+                    plan={plan.id as "essential" | "elite"}
+                    currentPlan={currentPlanId}
+                    interval={interval}
+                    additionalSeats={extraSeats}
+                    label={isInTrial ? `Subscribe — $${(effectiveMonthly / 100).toFixed(0)}/mo` : undefined}
+                  />
+                </>
               ) : !canManageBilling ? (
                 <p className="text-center text-xs text-slate-500">Contact your org owner to change plans</p>
               ) : null}
@@ -97,7 +161,7 @@ export function BillingPlans({ currentPlanId, isInTrial, hasActiveSubscription, 
 
       {hasActiveSubscription && canManageBilling && (
         <p className="text-sm text-slate-600">
-          To change billing interval, upgrade, or cancel, open the <span className="font-medium text-slate-900">billing portal</span> below.
+          To add seats, change billing interval, upgrade, or cancel, open the <span className="font-medium text-slate-900">billing portal</span> below.
         </p>
       )}
     </div>

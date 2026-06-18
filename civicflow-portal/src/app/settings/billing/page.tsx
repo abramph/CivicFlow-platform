@@ -6,7 +6,7 @@ import { formatDate } from "@/lib/formatting";
 import { PLANS, getPlan } from "@/lib/plans";
 import { ManageBillingButton } from "@/components/app/BillingActions";
 import { BillingPlans } from "@/components/app/BillingPlans";
-import { checkMemberLimit, getTrialStatus } from "@/lib/plan-gate";
+import { checkMemberLimit, getTrialStatus, checkSeatLimit } from "@/lib/plan-gate";
 
 type SearchParams = Promise<{ success?: string }>;
 
@@ -18,7 +18,7 @@ export default async function BillingSettingsPage({
   const params = await searchParams;
   const { organizationId, role } = await requirePermission("billing:read");
 
-  const [organization, subscription, memberCheck, trial] = await Promise.all([
+  const [organization, subscription, memberCheck, trial, seatCheck] = await Promise.all([
     prisma.organization.findUnique({
       where: { id: organizationId },
       select: { id: true, name: true, plan: true, status: true, createdAt: true },
@@ -29,6 +29,7 @@ export default async function BillingSettingsPage({
     }),
     checkMemberLimit(organizationId),
     getTrialStatus(organizationId),
+    checkSeatLimit(organizationId),
   ]);
 
   const currentPlanId = organization?.plan ?? "free";
@@ -83,6 +84,11 @@ export default async function BillingSettingsPage({
           label="Members"
           value={`${memberCheck.current}${memberCheck.limit === Infinity ? "" : ` / ${memberCheck.limit}`}`}
           helper={memberCheck.limit === Infinity ? "Unlimited" : `${memberCheck.limit - memberCheck.current} slots remaining`}
+        />
+        <StatCard
+          label="Portal Users (Seats)"
+          value={`${seatCheck.current} / ${seatCheck.limit}`}
+          helper={seatCheck.allowed ? `${seatCheck.limit - seatCheck.current} seat${seatCheck.limit - seatCheck.current === 1 ? "" : "s"} available` : "Seat limit reached"}
         />
         <StatCard label="Subscription Status" value={subscription?.status ?? (trial.isInTrial ? "trial" : "none")} />
         <StatCard label="Your Role" value={role} />

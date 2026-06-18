@@ -9,10 +9,11 @@ interface UpgradeButtonProps {
   plan: Plan;
   currentPlan: string;
   interval: BillingInterval;
+  additionalSeats?: number;
   label?: string;
 }
 
-export function UpgradeButton({ plan, currentPlan, interval, label }: UpgradeButtonProps) {
+export function UpgradeButton({ plan, currentPlan, interval, additionalSeats = 0, label }: UpgradeButtonProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -26,7 +27,7 @@ export function UpgradeButton({ plan, currentPlan, interval, label }: UpgradeBut
       const res = await fetch("/api/billing/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan, interval }),
+        body: JSON.stringify({ plan, interval, additionalSeats }),
       });
       const data = await res.json();
       if (!res.ok) {

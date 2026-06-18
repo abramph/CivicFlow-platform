@@ -6,12 +6,14 @@ import {
   getOrCreateStripeCustomer,
   createCheckoutSession,
   priceIdForPlan,
+  seatPriceIdForPlan,
 } from "@/lib/stripe";
 import { getServerEnv } from "@/lib/env";
 
 const checkoutSchema = z.object({
   plan: z.enum(["essential", "elite"]),
   interval: z.enum(["month", "year"]).default("month"),
+  additionalSeats: z.number().int().min(0).max(50).default(0),
 });
 
 export async function POST(req: Request) {
@@ -22,6 +24,8 @@ export async function POST(req: Request) {
     const env = getServerEnv();
 
     const priceId = priceIdForPlan(body.plan, body.interval);
+    const extraSeats = body.additionalSeats ?? 0;
+    const seatPriceId = extraSeats > 0 ? seatPriceIdForPlan(body.plan, body.interval) : null;
 
     const [org, activeSubscription] = await Promise.all([
       prisma.organization.findUnique({
@@ -65,6 +69,8 @@ export async function POST(req: Request) {
       organizationId,
       stripeCustomerId,
       priceId,
+      seatPriceId,
+      additionalSeats: extraSeats,
       successUrl: `${baseUrl}/settings/billing?success=1`,
       cancelUrl: `${baseUrl}/settings/billing`,
     });

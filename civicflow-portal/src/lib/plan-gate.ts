@@ -62,6 +62,31 @@ export async function requireMemberSlot(organizationId: string): Promise<void> {
   }
 }
 
+export async function checkSeatLimit(
+  organizationId: string
+): Promise<{ allowed: boolean; current: number; limit: number }> {
+  const org = await prisma.organization.findUnique({
+    where: { id: organizationId },
+    select: { plan: true, trialEndsAt: true, seatLimit: true },
+  });
+
+  const planId = await getOrgPlan(organizationId);
+  const planConfig = getPlan(planId);
+  const limit = org?.seatLimit ?? planConfig.includedSeats;
+  const current = await prisma.organizationMembership.count({ where: { organizationId } });
+
+  return { allowed: current < limit, current, limit };
+}
+
+export async function requireSeatSlot(organizationId: string): Promise<void> {
+  const { allowed, current, limit } = await checkSeatLimit(organizationId);
+  if (!allowed) {
+    throw new PlanLimitError(
+      `Your plan allows up to ${limit} portal user seat${limit === 1 ? "" : "s"} (you have ${current}). Purchase additional seats in Billing to add more users.`
+    );
+  }
+}
+
 export async function requirePlanFeature(
   organizationId: string,
   feature: "emailCampaigns" | "pdfExport" | "advancedReports" | "apiAccess"
