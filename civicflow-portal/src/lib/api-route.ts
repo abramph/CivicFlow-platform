@@ -20,6 +20,7 @@ export async function withApiErrorHandling(
         return jsonError(error.message, error.status);
       }
       Sentry.captureException(error);
+      console.error("[api-route] Unhandled error:", error);
       const isProd = process.env.NODE_ENV === "production";
       const message = isProd
         ? "Internal server error"
