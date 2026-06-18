@@ -69,6 +69,7 @@ export function PortalShell({ children }: { children: ReactNode }) {
     { href: "/settings/billing", label: "Billing" },
     { href: "/onboarding/organization", label: "Onboarding" },
     { href: "/migration", label: "Migration" },
+    { href: "/import", label: "Import Data" },
   ];
 
   const legacyNav = [
@@ -103,6 +104,9 @@ export function PortalShell({ children }: { children: ReactNode }) {
         }
         if (item.href.startsWith("/payments/imports") || item.href.startsWith("/payments/reconciliation")) {
           return canDo(session?.role ?? "READ_ONLY", "dues:read");
+        }
+        if (item.href === "/import") {
+          return canDo(session?.role ?? "READ_ONLY", "members:write");
         }
         if (item.href === "/migration") {
           return canDo(session?.role ?? "READ_ONLY", "org_settings:write");

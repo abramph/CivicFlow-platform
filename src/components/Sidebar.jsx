@@ -101,7 +101,7 @@ export function Sidebar({ activeView, onNavigate }) {
     ...(grantsEnabled && isAdmin ? [{ id: 'grants', label: 'Grants', icon: Award }] : []),
     { id: 'finances', label: 'Financials', icon: DollarSign },
     { id: 'report-external-payment', label: 'Report Payment', icon: ClipboardCheck },
-    ...(isAdmin ? [{ id: 'import-transactions', label: 'Import Transactions', icon: Upload }] : []),
+    ...(isAdmin ? [{ id: 'data-import', label: 'Import Data', icon: Upload }] : []),
     ...(isAdmin ? [{ id: 'pending-payments', label: 'Pending Payments', icon: ClipboardCheck }] : []),
     ...(isAdmin ? [{ id: 'analytics', label: 'Analytics', icon: FileText }] : []),
     ...(isAdmin ? [{ id: 'data-cleanup', label: 'Data Cleanup', icon: ClipboardList }] : []),
