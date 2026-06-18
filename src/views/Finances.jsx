@@ -55,10 +55,8 @@ export function Finances() {
   const contributorLabel = (txn) => {
     const memberName = [txn.member_first_name, txn.member_last_name].filter(Boolean).join(' ').trim();
     if (memberName) return memberName;
-    if (txn.contributor_name) return txn.contributor_name;
-    if (txn.campaign_id || txn.event_id || String(txn.contributor_type || '').toUpperCase() === 'NON_MEMBER') {
-      return 'Unattributed external donor';
-    }
+    if (txn.campaign_id) return `Campaign #${txn.campaign_id}`;
+    if (txn.event_id) return `Event #${txn.event_id}`;
     return '—';
   };
 
@@ -279,7 +277,8 @@ export function Finances() {
           >
             <option value="">All</option>
             <option value="MEMBER">Credited to member</option>
-            <option value="UNATTRIBUTED">Unattributed / external donor</option>
+            <option value="CAMPAIGN">Campaign</option>
+            <option value="EVENT">Event</option>
           </select>
         </div>
       </div>

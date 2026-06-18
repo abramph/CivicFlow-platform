@@ -140,7 +140,7 @@ export default async function PaymentLinksPage() {
                     <td className="px-4 py-3 text-slate-900">
                       {contribution.member
                         ? `${contribution.member.lastName}, ${contribution.member.firstName}`
-                        : "Unattributed"}
+                        : (contribution.contributorName || "Non-member")}
                     </td>
                     <td className="px-4 py-3 text-slate-900">
                       {contribution.campaign?.name || contribution.event?.title || "Direct contribution"}

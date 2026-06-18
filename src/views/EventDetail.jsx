@@ -201,7 +201,7 @@ export function EventDetail({ eventId, onNavigate }) {
             {event.contributions.map((c) => (
               <div key={c.id} className="grid grid-cols-1 gap-2 py-2 border-b border-slate-100 last:border-0 md:grid-cols-6 md:items-center">
                 <div className="md:col-span-2">
-                  <div className="font-medium text-slate-800">{c.display_name || 'Unattributed external donor'}</div>
+                  <div className="font-medium text-slate-800">{c.display_name || '—'}</div>
                   <div className="text-sm text-slate-500">{formatDate(c.occurred_on)}</div>
                 </div>
                 <div className="text-sm text-slate-600">{String(c.transaction_type || c.type || '').toUpperCase() || '—'}</div>

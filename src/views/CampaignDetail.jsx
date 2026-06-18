@@ -212,7 +212,7 @@ export function CampaignDetail({ campaignId, onNavigate }) {
             {campaign.contributions.map((c) => (
               <div key={c.id} className="grid grid-cols-1 gap-2 py-2 border-b border-slate-100 last:border-0 md:grid-cols-6 md:items-center">
                 <div className="md:col-span-2">
-                  <div className="font-medium text-slate-800">{c.display_name || 'Unattributed external donor'}</div>
+                  <div className="font-medium text-slate-800">{c.display_name || '—'}</div>
                   <div className="text-sm text-slate-500">{formatDate(c.occurred_on)}</div>
                 </div>
                 <div className="text-sm text-slate-600">{String(c.transaction_type || c.type || '').toUpperCase() || '—'}</div>
@@ -272,7 +272,7 @@ export function CampaignDetail({ campaignId, onNavigate }) {
               {topMembers.map((row, idx) => {
                 const name = row.member_id
                   ? [row.first_name, row.last_name].filter(Boolean).join(' ') || `Member #${row.member_id}`
-                  : 'Unattributed external donor';
+                  : '—';
                 return (
                   <div key={`${row.member_id ?? 'none'}-${idx}`} className="flex items-center justify-between text-sm">
                     <span className="text-slate-700">{name}</span>

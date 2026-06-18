@@ -13,6 +13,11 @@ const TRANSACTION_TYPE_OPTIONS = [
   { value: 'OTHER_INCOME', label: 'Other Income' },
 ];
 
+const ATTRIBUTION_OPTIONS = [
+  { value: 'MEMBER', label: 'Member' },
+  { value: 'NON_MEMBER', label: 'Non-member / external donor' },
+];
+
 const PAYMENT_METHOD_OPTIONS = [
   { value: 'stripe', label: 'STRIPE' },
   { value: 'zelle', label: 'ZELLE' },
@@ -25,18 +30,6 @@ const PAYMENT_METHOD_OPTIONS = [
   { value: 'import', label: 'IMPORT' },
 ];
 
-const ATTRIBUTION_OPTIONS = [
-  { value: 'MEMBER', label: 'Member' },
-  { value: 'NON_MEMBER', label: 'No member attribution / external donor' },
-];
-
-const buildExplicitContributorName = ({ contributorName, campaignId, eventId }) => {
-  const trimmed = String(contributorName || '').trim();
-  if (trimmed) return trimmed;
-  if (eventId) return 'Unattributed external donor (event contribution)';
-  if (campaignId) return 'Unattributed external donor (campaign contribution)';
-  return 'Unattributed external donor';
-};
 
 export default function PaymentModal({
   open,
@@ -233,10 +226,8 @@ export default function PaymentModal({
     if (!normalizedType) return { error: 'Transaction type is required.' };
     if (!Number.isFinite(amountValue) || amountValue <= 0) return { error: 'Amount must be greater than 0.' };
     if (normalizedType === 'DUES' && normalizedAttribution !== 'MEMBER') return { error: 'Dues payments must be attributed to a member.' };
-    if (normalizedAttribution === 'MEMBER' && !memberId) return { error: 'Member is required for member contributions.' };
-    if (normalizedAttribution === 'NON_MEMBER' && !isScopedContributionContext && !String(contributorName || '').trim()) {
-      return { error: 'Non-member name is required.' };
-    }
+    if (normalizedAttribution === 'MEMBER' && !memberId) return { error: 'Select a member for this contribution.' };
+    if (normalizedAttribution === 'NON_MEMBER' && !campaignId && !eventId) return { error: 'Non-member contributions must be linked to a campaign or event.' };
     if (!date) return { error: 'Date is required.' };
     if (memberContextOnly && !['DUES', 'DONATION'].includes(normalizedType)) {
       return { error: 'Member payments must be Dues or Donation.' };
@@ -248,9 +239,9 @@ export default function PaymentModal({
     if (normalizedType === 'CAMPAIGN_CONTRIBUTION' && !campaignId) return { error: 'Select a campaign for campaign contributions.' };
     if (normalizedType === 'EVENT_REVENUE' && !eventId) return { error: 'Select an event for event revenue.' };
 
-    const normalizedContributorType = normalizedAttribution === 'NON_MEMBER' ? 'NON_MEMBER' : 'MEMBER';
-    const normalizedContributorName = normalizedContributorType === 'NON_MEMBER'
-      ? buildExplicitContributorName({ contributorName, campaignId, eventId })
+    const normalizedContributorType = memberId ? 'MEMBER' : (campaignId ? 'CAMPAIGN_REVENUE' : 'EVENT_REVENUE');
+    const normalizedContributorName = normalizedAttribution === 'NON_MEMBER'
+      ? (String(contributorName || '').trim() || null)
       : null;
 
     return {
@@ -604,14 +595,12 @@ export default function PaymentModal({
             </div>
           )}
 
-          {!isEditMode && (
+          {!isEditMode && !isDuesType && (
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">
-                {isScopedContributionContext ? 'Credit this contribution to member' : 'Attribution'}
-              </label>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Attribution</label>
               <div className="grid grid-cols-1 gap-2">
-                {ATTRIBUTION_OPTIONS.filter((opt) => !isDuesType || opt.value === 'MEMBER').map((opt) => (
-                  <label key={opt.value} className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
+                {ATTRIBUTION_OPTIONS.map((opt) => (
+                  <label key={opt.value} className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 cursor-pointer">
                     <input
                       type="radio"
                       name="attributionTarget"
@@ -621,26 +610,19 @@ export default function PaymentModal({
                         if (lockContributorType) return;
                         const next = e.target.value;
                         setAttributionTarget(next);
-                        if (next === 'MEMBER') {
-                          setContributorName('');
-                        } else {
-                          setSelectedMemberId('');
-                        }
+                        if (next === 'MEMBER') setContributorName('');
+                        else setSelectedMemberId('');
                       }}
                       className="h-4 w-4 text-emerald-600"
                       disabled={lockContributorType}
                     />
-                    <span>
-                      {isScopedContributionContext
-                        ? (opt.value === 'MEMBER' ? 'Yes, assign to a member' : 'No member attribution / external donor')
-                        : opt.label}
-                    </span>
+                    <span>{opt.label}</span>
                   </label>
                 ))}
               </div>
-              {isScopedContributionContext && (
-                <p className="mt-2 text-xs text-slate-500">
-                  Campaign and event totals will still update either way. Select a member when you want the contribution to appear in that member&apos;s history.
+              {attributionTarget === 'NON_MEMBER' && (
+                <p className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  Non-member contributions must be linked to a campaign or event below.
                 </p>
               )}
             </div>
@@ -648,7 +630,9 @@ export default function PaymentModal({
 
           {!isEditMode && allowMemberSelection && (lockContributorType || attributionTarget === 'MEMBER') && (
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Credit this contribution to member</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Member <span className="text-red-500">*</span>
+              </label>
               <MemberSearchSelect
                 members={members}
                 value={selectedMemberId}
@@ -660,21 +644,14 @@ export default function PaymentModal({
 
           {!isEditMode && attributionTarget === 'NON_MEMBER' && !isDuesType && (
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                {isScopedContributionContext ? 'External donor name (optional)' : 'Non-member contributor'}
-              </label>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Non-member name (optional)</label>
               <input
                 type="text"
                 value={contributorName}
                 onChange={(e) => setContributorName(e.target.value)}
-                placeholder={isScopedContributionContext ? 'Leave blank if donor is unknown' : 'Full name'}
-                className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500"
+                placeholder="Full name"
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500 text-slate-900 placeholder:text-slate-400"
               />
-              {isScopedContributionContext && (
-                <p className="mt-2 text-xs text-slate-500">
-                  If you leave this blank, CivicFlow will save the payment as an unattributed external donor instead of leaving attribution ambiguous.
-                </p>
-              )}
             </div>
           )}
 

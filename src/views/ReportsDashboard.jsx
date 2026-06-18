@@ -69,10 +69,8 @@ function contributorDisplay(txn) {
   if (txn?.first_name || txn?.last_name) {
     return `${txn.last_name || ''}${txn.last_name ? ', ' : ''}${txn.first_name || ''}`.trim();
   }
-  if (txn?.contributor_name) return txn.contributor_name;
-  if (txn?.campaign_id || txn?.event_id || String(txn?.contributor_type || '').toUpperCase() === 'NON_MEMBER') {
-    return 'Unattributed external donor';
-  }
+  if (txn?.campaign_id) return `Campaign #${txn.campaign_id}`;
+  if (txn?.event_id) return `Event #${txn.event_id}`;
   return '—';
 }
 
@@ -420,7 +418,8 @@ export function ReportsDashboard({ initialTypes }) {
             >
               <option value="">All contributions</option>
               <option value="MEMBER">Credited to member</option>
-              <option value="UNATTRIBUTED">Unattributed / external donor</option>
+              <option value="CAMPAIGN">Campaign</option>
+              <option value="EVENT">Event</option>
             </select>
           </div>
           <div>
@@ -521,7 +520,7 @@ export function ReportsDashboard({ initialTypes }) {
                   <span className="text-slate-700">
                     {m.first_name || m.last_name
                       ? `${m.last_name || ''}${m.last_name ? ', ' : ''}${m.first_name || ''}`.trim()
-                      : 'Unattributed external donor'}
+                      : '—'}
                   </span>
                   <span className="font-medium text-slate-800">{formatCurrency(m.total)}</span>
                 </div>

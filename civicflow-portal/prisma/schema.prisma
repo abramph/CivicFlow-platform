@@ -887,6 +887,7 @@ model Contribution {
   source         ContributionSource @default(MANUAL)
   receiptRequested Boolean          @default(false)
   notes          String?
+  contributorName String?
   createdByUserId String?
   lockedAt       DateTime?
   lockedByUserId String?

@@ -127,7 +127,7 @@ export default async function CampaignDetailPage({
                     <td className="px-4 py-3 text-slate-900">
                       {contribution.member
                         ? `${contribution.member.lastName}, ${contribution.member.firstName}`
-                        : "Unattributed"}
+                        : (contribution.contributorName || "Non-member")}
                     </td>
                     <td className="px-4 py-3 text-slate-900">{formatEnumLabel(contribution.source)}</td>
                     <td className="px-4 py-3 text-slate-900">

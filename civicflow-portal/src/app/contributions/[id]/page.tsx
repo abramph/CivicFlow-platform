@@ -108,7 +108,7 @@ export default async function ContributionDetailPage({
                   {formatPersonName(contribution.member)}
                 </Link>
               ) : (
-                <span className="text-slate-500">Unattributed</span>
+                <span className="text-slate-500">{contribution.contributorName || "Non-member"}</span>
               )}
             </dd>
           </div>

@@ -530,19 +530,14 @@ function toOptionalPositiveId(value) {
   return parsed;
 }
 
-function validateContributionAttribution(database, payload = {}, options = {}) {
-  const allowNonMember = options.allowNonMember !== false;
-  const requireNonMemberName = options.requireNonMemberName === true;
-
+function validateContributionAttribution(database, payload = {}) {
   const memberId = toOptionalPositiveId(payload.memberId ?? payload.member_id);
   const eventId = toOptionalPositiveId(payload.eventId ?? payload.event_id);
   const campaignId = toOptionalPositiveId(payload.campaignId ?? payload.campaign_id);
+  const contributorName = String(payload.contributorName ?? payload.contributor_name ?? "").trim() || null;
 
-  const contributorTypeInput = String(payload.contributorType ?? payload.contributor_type ?? "").trim().toUpperCase();
-  const contributorName = String(payload.contributorName ?? payload.contributor_name ?? "").trim();
-
-  if (!memberId && !eventId && !campaignId && (!allowNonMember || contributorTypeInput !== "NON_MEMBER")) {
-    throw new Error("Every contribution must be attributed to a Member, Non-Member, or Event.");
+  if (!memberId && !eventId && !campaignId) {
+    throw new Error("Every contribution must be attributed to a member, campaign, or event.");
   }
 
   if (memberId) {
@@ -558,22 +553,9 @@ function validateContributionAttribution(database, payload = {}, options = {}) {
     if (!campaign) throw new Error("Selected campaign does not exist.");
   }
 
-  if (requireNonMemberName && !memberId && !eventId && !campaignId && contributorTypeInput === "NON_MEMBER" && !contributorName) {
-    throw new Error("Non-member contributions require a contributor name.");
-  }
+  const contributorType = memberId ? "MEMBER" : (campaignId ? "CAMPAIGN_REVENUE" : "EVENT_REVENUE");
 
-  let contributorType = contributorTypeInput;
-  if (!contributorType) {
-    contributorType = memberId ? "MEMBER" : (campaignId ? "CAMPAIGN_REVENUE" : (eventId ? "EVENT_REVENUE" : "NON_MEMBER"));
-  }
-
-  return {
-    memberId,
-    eventId,
-    campaignId,
-    contributorType,
-    contributorName: contributorName || null,
-  };
+  return { memberId, eventId, campaignId, contributorType, contributorName: memberId ? null : contributorName };
 }
 
 function ensureDuesAttributedToMember(transactionType, attribution = {}) {
@@ -2644,7 +2626,7 @@ function registerIpcHandlers() {
   register(registry, "db:transactions:create", (txn = {}) => {
     const normalizedTxnType = normalizeTransactionType(txn.transaction_type ?? txn.txn_type ?? txn.type ?? "DONATION");
     const normalizedType = mapTxnTypeToLedgerType(txn.type ?? normalizedTxnType);
-    const attribution = validateContributionAttribution(database, txn, { allowNonMember: true, requireNonMemberName: false });
+    const attribution = validateContributionAttribution(database, txn);
     ensureDuesAttributedToMember(normalizedTxnType, attribution);
     return database.prepare("INSERT INTO transactions (type, transaction_type, amount_cents, occurred_on, member_id, event_id, campaign_id, note, contributor_name, contributor_email, payment_method, status, contributor_type, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(normalizedType, normalizedTxnType, resolveInputAmountCents(txn.amount_cents, txn.amount), txn.occurred_on ?? txn.date ?? new Date().toISOString().slice(0, 10), attribution.memberId, attribution.eventId, attribution.campaignId, txn.note ?? null, attribution.contributorName ?? (txn.contributor_name ?? null), txn.contributor_email ?? null, txn.payment_method ?? null, txn.status ?? "COMPLETED", attribution.contributorType, normalizeTransactionSource(txn, attribution.memberId ? "MEMBER_PROFILE" : (attribution.eventId ? "EVENT" : (attribution.campaignId ? "CAMPAIGN" : "LOCAL")))).lastInsertRowid;
   });
@@ -2745,9 +2727,7 @@ function registerIpcHandlers() {
       memberId: nextMemberId,
       eventId: nextEventId,
       campaignId: nextCampaignId,
-      contributorType: nextContributorTypeValue,
-      contributorName: nextContributorNameValue,
-    }, { allowNonMember: true, requireNonMemberName: String(nextContributorTypeValue || '').toUpperCase() === "NON_MEMBER" });
+    });
     ensureDuesAttributedToMember(effectiveTxnType, attribution);
 
     const boundValues = {
@@ -2849,7 +2829,7 @@ function registerIpcHandlers() {
     return { success: true };
   });
   register(registry, "transaction:addManualPayment", (data = {}) => {
-    const attribution = validateContributionAttribution(database, data, { allowNonMember: true, requireNonMemberName: true });
+    const attribution = validateContributionAttribution(database, data);
     const paymentMethod = data.payment_method ?? data.method ?? null;
     const note = data.note ?? data.notes ?? null;
     const normalizedTxnType = normalizeTransactionType(data.transaction_type ?? data.type ?? "DUES");
@@ -2919,7 +2899,7 @@ function registerIpcHandlers() {
   });
 
   register(registry, "finance:txns:create", (data = {}) => {
-    const attribution = validateContributionAttribution(database, data, { allowNonMember: true, requireNonMemberName: true });
+    const attribution = validateContributionAttribution(database, data);
     const amount = resolveInputAmountCents(data.amount_cents, data.amount);
     const txnType = normalizeTransactionType(data.txn_type ?? data.transaction_type ?? data.type ?? "DONATION");
     ensureDuesAttributedToMember(txnType, attribution);
@@ -3367,7 +3347,7 @@ function registerIpcHandlers() {
       return { success: false, error: "Amount must be greater than 0." };
     }
 
-    const attribution = validateContributionAttribution(database, data, { allowNonMember: true, requireNonMemberName: true });
+    const attribution = validateContributionAttribution(database, data);
     const transactionType = normalizeTransactionType(data.transaction_type ?? data.type);
     ensureDuesAttributedToMember(transactionType, attribution);
     const ledgerType = mapTxnTypeToLedgerType(transactionType);

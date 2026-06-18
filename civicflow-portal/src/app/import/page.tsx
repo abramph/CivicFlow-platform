@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import PortalShell from "@/components/app/PortalShell";
+import { PortalShell } from "@/components/app/PortalShell";
 import * as XLSX from "xlsx";
 
 type ImportType = "members" | "contributions";

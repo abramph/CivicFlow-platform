@@ -25,6 +25,7 @@ const createDuesPaymentSchema = z.object({
     "VENMO",
     "PAYPAL",
     "STRIPE",
+    "ZEFFY",
     "OTHER",
   ]).optional(),
   reference: z.union([z.string().max(120), z.literal(""), z.null()]).optional(),

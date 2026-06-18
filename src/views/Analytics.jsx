@@ -232,7 +232,7 @@ export function Analytics() {
                 <tbody>
                   {summary.recent_payments.map((payment) => (
                     <tr key={payment.id} className="border-b border-slate-100 last:border-b-0">
-                      <td className="py-2 pr-4 text-slate-800">{payment.contributor_label || 'Unattributed external donor'}</td>
+                      <td className="py-2 pr-4 text-slate-800">{payment.contributor_label || '—'}</td>
                       <td className="py-2 pr-4 text-slate-600">{formatDate(payment.occurred_on)}</td>
                       <td className="py-2 pr-4 text-slate-600">{formatMethod(payment.payment_method)}</td>
                       <td className="py-2 pr-4 text-slate-600">{formatSource(payment.source)}</td>

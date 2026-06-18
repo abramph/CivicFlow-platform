@@ -10,6 +10,7 @@ const createContributionSchema = z.object({
   memberId: z.union([z.string().min(1), z.literal(""), z.null()]).optional(),
   campaignId: z.union([z.string().min(1), z.literal(""), z.null()]).optional(),
   eventId: z.union([z.string().min(1), z.literal(""), z.null()]).optional(),
+  contributorName: z.union([z.string().max(500), z.literal(""), z.null()]).optional(),
   amount: z.number().positive(),
   contributionDate: z.string().datetime(),
   paymentMethod: z
@@ -72,13 +73,12 @@ export async function POST(request: Request) {
     const memberId = input.memberId || null;
     const campaignId = input.campaignId || null;
     const eventId = input.eventId || null;
+    const contributorName = typeof input.contributorName === "string" ? input.contributorName.trim() || null : null;
     const notes = typeof input.notes === "string" ? input.notes.trim() || null : input.notes ?? null;
 
-    // Attribution rule:
-    // - CAMPAIGN_PAGE / EVENT_PAGE / MEMBER_PROFILE must include memberId
-    // - MANUAL / IMPORT may omit memberId (for external or unattributed entries)
-    if ((input.source === "CAMPAIGN_PAGE" || input.source === "EVENT_PAGE" || input.source === "MEMBER_PROFILE") && !memberId) {
-      throw new ValidationError("memberId is required for campaign/event/member-profile contributions");
+    // Every contribution must be tied to at least one of: member, campaign, or event
+    if (!memberId && !campaignId && !eventId) {
+      throw new ValidationError("Every contribution must be attributed to a member, campaign, or event.");
     }
 
     if (memberId) {
@@ -108,6 +108,7 @@ export async function POST(request: Request) {
         memberId,
         campaignId,
         eventId,
+        contributorName: memberId ? null : contributorName,
         amount: input.amount,
         contributionDate: new Date(input.contributionDate),
         paymentMethod: input.paymentMethod ?? null,

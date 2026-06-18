@@ -91,7 +91,7 @@ export default async function ContributionsPage() {
                           {formatPersonName(row.member)}
                         </Link>
                       ) : (
-                        "Unattributed"
+                        row.contributorName || "Non-member"
                       )}
                     </td>
                     <td className="px-4 py-3 text-slate-900">
