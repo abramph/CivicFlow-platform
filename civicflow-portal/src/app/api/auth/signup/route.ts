@@ -49,7 +49,7 @@ export async function POST(request: Request) {
       uniqueSlug(input.orgName),
     ]);
 
-    const trialEndsAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+    const trialEndsAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
     const user = await prisma.$transaction(async (tx) => {
       const newUser = await tx.user.create({
