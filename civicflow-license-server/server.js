@@ -425,6 +425,7 @@ function createApp() {
     try {
       const priceId = String(req.body.priceId || "").trim();
       const purchaseKind = parsePurchaseKindArg(req.body.purchaseKind || "new_purchase");
+      const quantity = Math.max(1, Math.floor(Number(req.body.quantity) || 1));
       const customerEmail = String(req.body.customerEmail || "").trim() || null;
       const organizationName = String(req.body.organizationName || "").trim() || null;
       const targetLicenseKey = String(req.body.targetLicenseKey || "").trim() || null;
@@ -445,6 +446,7 @@ function createApp() {
       const session = await createCheckoutSessionForLicensePurchase({
         priceId,
         purchaseKind,
+        quantity,
         customerEmail,
         organizationName,
         targetLicenseKey,

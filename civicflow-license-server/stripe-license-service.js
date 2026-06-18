@@ -3,6 +3,7 @@ const {
   addDays,
   createLicense,
   createOrReusePurchaseRecord,
+  addSeatsToLicense,
   extendAnnualLicense,
   extendMaintenance,
   fetchLicenseDetails,
@@ -49,20 +50,16 @@ function getPriceCatalog() {
 
   const entries = [
     {
-      envName: "STRIPE_PRICE_ID_ANNUAL_ESSENTIAL",
-      config: { plan: "Essential", licenseType: "annual", seatsAllowed: 2, durationDays: 365 },
+      envName: "STRIPE_PRICE_ID_PROFESSIONAL",
+      config: { plan: "Professional", licenseType: "perpetual", seatsAllowed: 5, supportDays: 365 },
     },
     {
-      envName: "STRIPE_PRICE_ID_ANNUAL_ELITE",
-      config: { plan: "Elite", licenseType: "annual", seatsAllowed: 3, durationDays: 365 },
+      envName: "STRIPE_PRICE_ID_ADDITIONAL_SEAT",
+      config: { plan: "Professional", licenseType: "seat_addon", seatsPerUnit: 1 },
     },
     {
-      envName: "STRIPE_PRICE_ID_PERPETUAL_ESSENTIAL",
-      config: { plan: "Essential", licenseType: "perpetual", seatsAllowed: 2, supportDays: 365 },
-    },
-    {
-      envName: "STRIPE_PRICE_ID_PERPETUAL_ELITE",
-      config: { plan: "Elite", licenseType: "perpetual", seatsAllowed: 3, supportDays: 365 },
+      envName: "STRIPE_PRICE_ID_ANNUAL_MAINTENANCE",
+      config: { plan: "Professional", licenseType: "maintenance_renewal", supportDays: 365 },
     },
   ];
 
@@ -111,38 +108,36 @@ function resolvePriceConfigForPurchase({ priceId, purchaseKind, targetLicense = 
   }
 
   const normalizedPurchaseKind = parsePurchaseKindArg(purchaseKind);
-  if (normalizedPurchaseKind === "new_purchase") {
-    return priceConfig;
-  }
+  const licenseType = priceConfig.licenseType;
 
-  if (!targetLicense) {
-    throw new Error("A target license is required for renewals.");
-  }
-
-  const targetPlan = normalizePlan(targetLicense.plan);
-  const targetType = normalizeLicenseType(targetLicense.license_type, targetLicense.expiry_date);
-
-  if (priceConfig.plan !== targetPlan) {
-    throw new Error(`Renewal price ${normalizedPriceId} does not match target license plan ${targetPlan}.`);
-  }
-
-  if (normalizedPurchaseKind === "annual_renewal") {
-    if (targetType !== "annual") {
-      throw new Error("Annual renewal can only be applied to annual licenses.");
-    }
-    if (priceConfig.licenseType !== "annual") {
-      throw new Error("Annual renewal requires one of the configured annual CivicFlow price IDs.");
+  if (licenseType === "perpetual") {
+    if (normalizedPurchaseKind !== "new_purchase") {
+      throw new Error("Professional license price can only be used for new purchases.");
     }
     return priceConfig;
   }
 
-  if (targetType !== "perpetual") {
-    throw new Error("Maintenance renewal can only be applied to perpetual licenses.");
+  if (licenseType === "seat_addon") {
+    if (normalizedPurchaseKind !== "seat_addon") {
+      throw new Error("Additional seat price requires purchaseKind: seat_addon.");
+    }
+    if (!targetLicense) {
+      throw new Error("A target license key is required for seat add-ons.");
+    }
+    return priceConfig;
   }
-  if (priceConfig.licenseType !== "perpetual") {
-    throw new Error("Maintenance renewal requires one of the configured perpetual CivicFlow price IDs.");
+
+  if (licenseType === "maintenance_renewal") {
+    if (normalizedPurchaseKind !== "maintenance_renewal") {
+      throw new Error("Maintenance renewal price requires purchaseKind: maintenance_renewal.");
+    }
+    if (!targetLicense) {
+      throw new Error("A target license key is required for maintenance renewals.");
+    }
+    return priceConfig;
   }
-  return priceConfig;
+
+  throw new Error(`Unknown license type in price catalog: ${licenseType}`);
 }
 
 async function resolveSessionPriceId(stripe, session) {
@@ -190,6 +185,7 @@ async function resolveCustomerRecord(stripe, session) {
 async function createCheckoutSessionForLicensePurchase(input = {}) {
   const priceId = String(input.priceId || "").trim();
   const purchaseKind = parsePurchaseKindArg(input.purchaseKind || "new_purchase");
+  const quantity = Math.max(1, Math.floor(Number(input.quantity) || 1));
   const customerEmail = String(input.customerEmail || "").trim();
   const organizationName = String(input.organizationName || "").trim();
   const targetLicenseKey = input.targetLicenseKey ? normalizeLicenseKey(input.targetLicenseKey, "targetLicenseKey") : null;
@@ -211,12 +207,13 @@ async function createCheckoutSessionForLicensePurchase(input = {}) {
   const session = await stripe.checkout.sessions.create({
     mode: "payment",
     customer_email: customerEmail || undefined,
-    line_items: [{ price: priceId, quantity: 1 }],
+    line_items: [{ price: priceId, quantity }],
     success_url: successUrl,
     cancel_url: cancelUrl,
     metadata: {
       priceId,
       purchaseKind,
+      quantity: String(quantity),
       targetLicenseKey: targetLicenseKey || "",
       customerEmail: customerEmail || "",
       organizationName: organizationName || "",
@@ -251,15 +248,26 @@ async function extractPurchaseFromCheckoutSession(stripe, event, session) {
   const targetLicenseKey = metadata.targetLicenseKey
     ? normalizeLicenseKey(metadata.targetLicenseKey, "targetLicenseKey")
     : null;
+  const customFieldOrg = (() => {
+    const fields = session.custom_fields;
+    if (!Array.isArray(fields)) return null;
+    const f = fields.find((x) => x.key === "organization");
+    return String(f?.text?.value || f?.dropdown?.value || "").trim() || null;
+  })();
   const orgName = normalizeOrgName(
     metadata.organizationName
     || metadata.org_name
     || metadata.orgName
     || metadata.organization
     || metadata.company_name
+    || customFieldOrg
     || customer.name
     || session.customer_details?.name
   ) || (customer.email ? `${customer.email.split("@")[0]} organization` : "CivicFlow Customer");
+
+  const quantityRaw = Number(metadata.quantity) || 1;
+  const lineItemQuantity = session.line_items?.data?.[0]?.quantity || 1;
+  const quantity = Math.max(1, Number.isFinite(quantityRaw) && quantityRaw > 1 ? quantityRaw : lineItemQuantity);
 
   return {
     provider: "stripe",
@@ -267,6 +275,7 @@ async function extractPurchaseFromCheckoutSession(stripe, event, session) {
     stripeSessionId: session?.id || null,
     checkoutSessionId: session?.id || null,
     stripePaymentIntentId: session?.payment_intent || null,
+    quantity,
     stripeCustomerId: session?.customer || null,
     stripePriceId: priceId,
     priceId,
@@ -391,6 +400,17 @@ async function processLicensePurchase(purchaseData) {
       });
 
       emailDelivery = await sendNewLicenseEmail(details.summary);
+    } else if (purchaseKind === "seat_addon") {
+      const seatsToAdd = (priceConfig.seatsPerUnit || 1) * (purchaseData?.quantity || 1);
+      details = await addSeatsToLicense({
+        licenseId: targetLicense.id,
+        additionalSeats: seatsToAdd,
+        actorType: "stripe",
+        actorId,
+        metadata: eventMetadata,
+      });
+      linkedLicenseId = targetLicense.id;
+      emailDelivery = await sendRenewalConfirmationEmail(details.summary);
     } else if (purchaseKind === "annual_renewal") {
       details = await extendAnnualLicense({
         licenseId: targetLicense.id,

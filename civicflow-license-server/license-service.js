@@ -99,18 +99,21 @@ function parseEnvironmentArg(value, fallback = "test") {
 
 function normalizePlan(plan) {
   const value = String(plan || "").trim().toLowerCase();
+  if (value === "professional") return "Professional";
   if (value === "elite") return "Elite";
   return "Essential";
 }
 
 function parsePlanArg(plan) {
   const value = String(plan || "").trim().toLowerCase();
+  if (value === "professional") return "Professional";
   if (value === "essential") return "Essential";
   if (value === "elite") return "Elite";
-  throw new Error("Plan must be Essential or Elite");
+  throw new Error("Plan must be Professional, Essential, or Elite");
 }
 
 function seatsForPlan(plan) {
+  if (normalizePlan(plan) === "Professional") return 5;
   return normalizePlan(plan) === "Elite" ? 3 : 2;
 }
 
@@ -140,15 +143,15 @@ function normalizeStatus(status) {
 
 function normalizePurchaseKind(purchaseKind) {
   const value = String(purchaseKind || "").trim().toLowerCase();
-  if (value === "annual_renewal" || value === "maintenance_renewal") return value;
+  if (value === "annual_renewal" || value === "maintenance_renewal" || value === "seat_addon") return value;
   return "new_purchase";
 }
 
 function parsePurchaseKindArg(purchaseKind) {
   const value = String(purchaseKind || "").trim().toLowerCase();
   if (!value || value === "new_purchase") return "new_purchase";
-  if (value === "annual_renewal" || value === "maintenance_renewal") return value;
-  throw new Error("purchaseKind must be new_purchase, annual_renewal, or maintenance_renewal");
+  if (value === "annual_renewal" || value === "maintenance_renewal" || value === "seat_addon") return value;
+  throw new Error("purchaseKind must be new_purchase, annual_renewal, maintenance_renewal, or seat_addon");
 }
 
 function normalizeNullableString(value) {
@@ -1330,6 +1333,28 @@ async function finalizePurchaseRecord(purchaseId, input = {}) {
   return getAsync("SELECT * FROM purchase_events WHERE id = ?", [numericId]);
 }
 
+async function addSeatsToLicense({ licenseId, additionalSeats, actorType = "stripe", actorId = null, metadata = null }) {
+  const seatsToAdd = parsePositiveInt(additionalSeats, "additionalSeats");
+  if (!seatsToAdd) throw new Error("additionalSeats must be a positive integer");
+
+  const numericLicenseId = Number(licenseId);
+  await withImmediateTransaction(async () => {
+    const license = await getLicenseById(numericLicenseId);
+    const previousSeats = resolveSeatLimit(license);
+    const newSeats = previousSeats + seatsToAdd;
+    await runAsync("UPDATE licenses SET seats_allowed = ? WHERE id = ?", [newSeats, license.id]);
+    await recordLicenseEvent({
+      licenseId: license.id,
+      eventType: "seats_added",
+      actorType,
+      actorId,
+      metadata: { ...(metadata || {}), previousSeats, newSeats, seatsAdded: seatsToAdd },
+    });
+  });
+
+  return fetchLicenseDetails(numericLicenseId);
+}
+
 module.exports = {
   allAsync,
   getAsync,
@@ -1367,6 +1392,7 @@ module.exports = {
   extendLicense,
   extendAnnualLicense,
   extendMaintenance,
+  addSeatsToLicense,
   releaseActivation,
   reissueLicense,
   recordLicenseEvent,
