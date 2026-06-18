@@ -41,7 +41,7 @@ export default async function BillingSettingsPage({
     ["active", "trialing", "past_due"].includes(subscription?.status ?? "")
   );
 
-  const planOrder: Array<keyof typeof PLANS> = ["free", "essential", "elite"];
+  const planOrder: Array<keyof typeof PLANS> = ["essential", "elite"];
 
   return (
     <main className="space-y-6">
@@ -167,11 +167,7 @@ export default async function BillingSettingsPage({
                 </ul>
 
                 {/* Action area */}
-                {planId === "free" ? (
-                  <p className="text-center text-xs text-slate-500">
-                    {isCurrent ? "Your current plan" : "Downgrade via billing portal"}
-                  </p>
-                ) : canManageBilling && !hasActiveSubscription ? (
+                {canManageBilling && !hasActiveSubscription ? (
                   <UpgradeButton
                     plan={planId as "essential" | "elite"}
                     currentPlan={currentPlanId}

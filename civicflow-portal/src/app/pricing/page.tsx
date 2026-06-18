@@ -7,7 +7,7 @@ export const metadata = {
 };
 
 export default function PricingPage() {
-  const plans = [PLANS.free, PLANS.essential, PLANS.elite];
+  const plans = [PLANS.essential, PLANS.elite];
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -17,11 +17,11 @@ export default function PricingPage() {
             Simple, transparent pricing
           </h1>
           <p className="mt-4 text-lg text-slate-600">
-            Built for community organizations and nonprofits. Start free, upgrade when you grow.
+            Built for community organizations and nonprofits. Every plan starts with a 30-day free trial.
           </p>
         </div>
 
-        <div className="mt-12 grid gap-6 md:grid-cols-3">
+        <div className="mt-12 grid gap-6 md:grid-cols-2 max-w-2xl mx-auto">
           {plans.map((plan) => {
             const isPopular = plan.id === "essential";
 
@@ -90,7 +90,7 @@ export default function PricingPage() {
                       : "border border-slate-300 bg-white text-slate-900 hover:bg-slate-50"
                   }`}
                 >
-                  {plan.monthlyPriceCents === 0 ? "Get started free" : `Start with ${plan.name}`}
+                  Start free trial — {plan.name}
                 </Link>
               </div>
             );
