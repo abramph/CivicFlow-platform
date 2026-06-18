@@ -38,6 +38,8 @@ contextBridge.exposeInMainWorld('civicflow', {
     getSettings: () => ipcRenderer.invoke('organization:getSettings'),
     updateSettings: (data) => ipcRenderer.invoke('organization:updateSettings', data),
     completeSetup: () => ipcRenderer.invoke('organization:completeSetup'),
+    getOpeningBalance: () => ipcRenderer.invoke('organization:getOpeningBalance'),
+    setOpeningBalance: (data) => ipcRenderer.invoke('organization:setOpeningBalance', data),
   },
   payments: {
     connectStripe: (orgId, orgEmail) => ipcRenderer.invoke('payments:connectStripe', orgId, orgEmail),

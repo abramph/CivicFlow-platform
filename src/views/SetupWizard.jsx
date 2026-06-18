@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ArrowRight, ArrowLeft, Building2, Tag, Mail, Server, Check } from 'lucide-react';
+import { ArrowRight, ArrowLeft, Building2, Tag, Mail, Server, DollarSign, Check } from 'lucide-react';
 import * as moneyUtils from '../shared/money.js';
 
 const api = window.civicflow;
@@ -10,7 +10,8 @@ const STEPS = [
   { id: 2, title: 'Categories & Dues', icon: Tag },
   { id: 3, title: 'Email Identity', icon: Mail },
   { id: 4, title: 'SMTP (Optional)', icon: Server },
-  { id: 5, title: 'Finish', icon: Check },
+  { id: 5, title: 'Opening Balance', icon: DollarSign },
+  { id: 6, title: 'Finish', icon: Check },
 ];
 
 export function SetupWizard({ onComplete }) {
@@ -31,6 +32,9 @@ export function SetupWizard({ onComplete }) {
   const [categoryForm, setCategoryForm] = useState({ name: '', monthly_dues_cents: 0 });
   const [logoUploading, setLogoUploading] = useState(false);
   const [message, setMessage] = useState(null);
+  const [openingBalanceAmount, setOpeningBalanceAmount] = useState('');
+  const [openingBalanceDate, setOpeningBalanceDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [openingBalanceSaving, setOpeningBalanceSaving] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -124,6 +128,22 @@ export function SetupWizard({ onComplete }) {
       setMessage({ type: 'success', text: 'Category added.' });
     } catch (err) {
       setMessage({ type: 'error', text: err?.message || 'Failed to add category.' });
+    }
+  };
+
+  const handleSaveOpeningBalance = async () => {
+    if (!openingBalanceAmount) return;
+    setOpeningBalanceSaving(true);
+    setMessage(null);
+    try {
+      const cents = parseMoneyToCents(openingBalanceAmount) ?? 0;
+      if (cents > 0) {
+        await api.organization.setOpeningBalance({ amount_cents: cents, date: openingBalanceDate });
+      }
+    } catch (err) {
+      setMessage({ type: 'error', text: err?.message || 'Failed to save opening balance.' });
+    } finally {
+      setOpeningBalanceSaving(false);
     }
   };
 
@@ -334,6 +354,44 @@ export function SetupWizard({ onComplete }) {
 
       {step === 5 && (
         <div className="space-y-6">
+          <h3 className="text-lg font-semibold text-slate-800">Opening Balance</h3>
+          <p className="text-sm text-slate-600">
+            If you&apos;re migrating from another system, enter your current account balance so your ledger starts at the right number. Leave blank if you&apos;re starting fresh.
+          </p>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-4 space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Balance amount ($)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={openingBalanceAmount}
+                onChange={(e) => setOpeningBalanceAmount(e.target.value)}
+                placeholder="0.00"
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">As of date</label>
+              <input
+                type="date"
+                value={openingBalanceDate}
+                onChange={(e) => setOpeningBalanceDate(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+            {openingBalanceAmount && Number(openingBalanceAmount) > 0 && (
+              <p className="text-xs text-emerald-700">
+                This will add an &quot;Opening Balance&quot; entry of {formatMoneyFromCents(Math.round(Number(openingBalanceAmount) * 100))} to your ledger, dated {openingBalanceDate}.
+              </p>
+            )}
+          </div>
+          <p className="text-xs text-slate-500">You can update this later from Settings → Opening Balance.</p>
+        </div>
+      )}
+
+      {step === 6 && (
+        <div className="space-y-6">
           <h3 className="text-lg font-semibold text-slate-800">You&apos;re all set</h3>
           <p className="text-slate-600">Click Finish to save your settings and go to the dashboard.</p>
         </div>
@@ -349,13 +407,18 @@ export function SetupWizard({ onComplete }) {
           <ArrowLeft size={18} />
           Back
         </button>
-        {step < 5 ? (
+        {step < 6 ? (
           <button
             type="button"
-            onClick={() => { handleSaveStep(); setStep((s) => Math.min(5, s + 1)); }}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700"
+            onClick={async () => {
+              if (step === 5) await handleSaveOpeningBalance();
+              else handleSaveStep();
+              setStep((s) => Math.min(6, s + 1));
+            }}
+            disabled={openingBalanceSaving}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-60"
           >
-            Next
+            {openingBalanceSaving ? 'Saving…' : 'Next'}
             <ArrowRight size={18} />
           </button>
         ) : (

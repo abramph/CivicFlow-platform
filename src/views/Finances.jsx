@@ -45,6 +45,7 @@ export function Finances() {
       CAMPAIGN_CONTRIBUTION: 'Campaign Contribution',
       EVENT_REVENUE: 'Event Revenue',
       OTHER_INCOME: 'Other Income',
+      OPENING_BALANCE: 'Opening Balance',
     };
     if (t === 'CAMPAIGN_CONTRIBUTION' && txn?.campaign_name) return `Campaign Contribution (${txn.campaign_name})`;
     if (t === 'EVENT_REVENUE' && txn?.event_name) return `Event Revenue (${txn.event_name})`;

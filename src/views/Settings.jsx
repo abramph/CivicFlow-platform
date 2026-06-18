@@ -56,6 +56,10 @@ export function Settings({ onNavigate, onOpenActivation }) {
   const [restoring, setRestoring] = useState(false);
   const [migrationExporting, setMigrationExporting] = useState(false);
   const [migrationMessage, setMigrationMessage] = useState(null);
+  const [openingBalanceAmount, setOpeningBalanceAmount] = useState('');
+  const [openingBalanceDate, setOpeningBalanceDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [openingBalanceSaving, setOpeningBalanceSaving] = useState(false);
+  const [openingBalanceMessage, setOpeningBalanceMessage] = useState(null);
   const [categories, setCategories] = useState([]);
   const [categoryForm, setCategoryForm] = useState({ name: '', monthly_dues_cents: 0 });
   const [editingCategoryId, setEditingCategoryId] = useState(null);
@@ -121,6 +125,12 @@ export function Settings({ onNavigate, onOpenActivation }) {
     }).catch(() => {});
     api?.license?.getConfig?.().then((config) => {
       if (!cancelled) setLicenseConfig(config || null);
+    }).catch(() => {});
+    api?.organization?.getOpeningBalance?.().then((row) => {
+      if (!cancelled && row) {
+        setOpeningBalanceAmount(row.amount_cents > 0 ? String(row.amount_cents / 100) : '');
+        setOpeningBalanceDate(row.occurred_on || new Date().toISOString().slice(0, 10));
+      }
     }).catch(() => {});
     api?.email?.getSettings?.().then((s) => {
       if (!cancelled && s) {
@@ -448,6 +458,20 @@ export function Settings({ onNavigate, onOpenActivation }) {
     }
   };
 
+  const handleSaveOpeningBalance = async () => {
+    setOpeningBalanceSaving(true);
+    setOpeningBalanceMessage(null);
+    try {
+      const cents = parseMoneyToCents(openingBalanceAmount) ?? 0;
+      await api.organization.setOpeningBalance({ amount_cents: cents, date: openingBalanceDate });
+      setOpeningBalanceMessage({ type: 'success', text: 'Opening balance saved.' });
+    } catch (err) {
+      setOpeningBalanceMessage({ type: 'error', text: err?.message || 'Failed to save opening balance.' });
+    } finally {
+      setOpeningBalanceSaving(false);
+    }
+  };
+
   const handleMigrationExport = async () => {
     setMigrationMessage(null);
     setMigrationExporting(true);
@@ -750,6 +774,55 @@ export function Settings({ onNavigate, onOpenActivation }) {
           {restoreMessage && (
             <div className={`rounded-lg px-4 py-3 ${restoreMessage.type === 'success' ? 'bg-emerald-50 text-emerald-800' : restoreMessage.type === 'info' ? 'bg-slate-100 text-slate-800' : 'bg-red-50 text-red-800'}`}>
               {restoreMessage.text}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Opening Balance */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-2xl mb-8">
+        <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
+          <DollarSign className="h-5 w-5 text-slate-500" />
+          <h3 className="text-lg font-semibold text-slate-800">Opening Balance</h3>
+        </div>
+        <div className="p-6 space-y-4">
+          <p className="text-sm text-slate-600">
+            Set a one-time opening balance to carry forward your financial position from a previous system. This appears as a pinned entry in your ledger so all future totals start from the correct number.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Balance amount ($)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={openingBalanceAmount}
+                onChange={(e) => setOpeningBalanceAmount(e.target.value)}
+                placeholder="0.00"
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">As of date</label>
+              <input
+                type="date"
+                value={openingBalanceDate}
+                onChange={(e) => setOpeningBalanceDate(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleSaveOpeningBalance}
+            disabled={openingBalanceSaving}
+            className="px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-60"
+          >
+            {openingBalanceSaving ? 'Saving…' : 'Save Opening Balance'}
+          </button>
+          {openingBalanceMessage && (
+            <div className={`rounded-lg px-4 py-3 text-sm ${openingBalanceMessage.type === 'success' ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-800'}`}>
+              {openingBalanceMessage.text}
             </div>
           )}
         </div>

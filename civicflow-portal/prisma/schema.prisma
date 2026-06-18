@@ -725,6 +725,8 @@ model OrgSettings {
   autoSuspendAfterMonths Int?
   autoDeactivateAfterMonths Int?
   reminderFrequencyDays Int?
+  openingBalanceCents Int      @default(0)
+  openingBalanceDate  DateTime?
   updatedAt       DateTime @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)

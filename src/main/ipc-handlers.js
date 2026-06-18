@@ -194,6 +194,8 @@ const ALL_PRELOAD_CHANNELS = [
   "membership:terminate",
   "organization:completeSetup",
   "organization:get",
+  "organization:getOpeningBalance",
+  "organization:setOpeningBalance",
   "organization:getSettings",
   "organization:getSetupStatus",
   "organization:set",
@@ -405,6 +407,7 @@ function normalizeTransactionType(value) {
   if (t === "CAMPAIGN_CONTRIBUTION" || t === "CAMPAIGN_REVENUE") return "CAMPAIGN_CONTRIBUTION";
   if (t === "EVENT_REVENUE") return "EVENT_REVENUE";
   if (t === "OTHER_INCOME") return "OTHER_INCOME";
+  if (t === "OPENING_BALANCE") return "OPENING_BALANCE";
   return "DONATION";
 }
 
@@ -414,6 +417,7 @@ function mapTxnTypeToLedgerType(transactionType) {
   if (t === "EVENT_REVENUE") return "donation";
   if (t === "CAMPAIGN_CONTRIBUTION") return "donation";
   if (t === "OTHER_INCOME") return "donation";
+  if (t === "OPENING_BALANCE") return "donation";
   return "donation";
 }
 
@@ -1779,6 +1783,32 @@ function registerIpcHandlers() {
     return { success: true };
   });
 
+  register(registry, "organization:getOpeningBalance", () => {
+    return database.prepare(
+      "SELECT * FROM transactions WHERE UPPER(COALESCE(transaction_type, '')) = 'OPENING_BALANCE' AND COALESCE(is_deleted, 0) = 0 LIMIT 1"
+    ).get() || null;
+  });
+
+  register(registry, "organization:setOpeningBalance", (data = {}) => {
+    const amount = resolveInputAmountCents(data.amount_cents, data.amount);
+    if (!Number.isFinite(amount) || amount < 0) throw new Error("Amount must be zero or greater.");
+    const date = String(data.date || new Date().toISOString().slice(0, 10)).trim();
+    const note = "Opening balance brought forward from previous system";
+    const existing = database.prepare(
+      "SELECT id FROM transactions WHERE UPPER(COALESCE(transaction_type, '')) = 'OPENING_BALANCE' LIMIT 1"
+    ).get();
+    if (existing) {
+      database.prepare(
+        "UPDATE transactions SET amount_cents = ?, occurred_on = ?, note = ?, is_deleted = 0 WHERE id = ?"
+      ).run(amount, date, note, existing.id);
+      return { success: true, id: existing.id };
+    }
+    const result = database.prepare(
+      "INSERT INTO transactions (type, transaction_type, amount_cents, occurred_on, note, is_deleted) VALUES ('donation', 'OPENING_BALANCE', ?, ?, ?, 0)"
+    ).run(amount, date, note);
+    return { success: true, id: result.lastInsertRowid };
+  });
+
   register(registry, "organization:upload-logo", (base64OrPath) => {
     if (!base64OrPath) return { success: false, error: "No logo payload provided" };
     const logoPath = persistLogo(base64OrPath);
@@ -2590,7 +2620,7 @@ function registerIpcHandlers() {
       "COALESCE(t.is_deleted, 0) = 0",
       "UPPER(COALESCE(t.transaction_type, '')) <> 'GENERAL_CONTRIBUTION'",
       "UPPER(COALESCE(t.type, '')) <> 'GENERAL_CONTRIBUTION'",
-      "(t.member_id IS NOT NULL OR t.event_id IS NOT NULL OR t.campaign_id IS NOT NULL OR UPPER(COALESCE(t.contributor_type, '')) = 'NON_MEMBER')",
+      "(t.member_id IS NOT NULL OR t.event_id IS NOT NULL OR t.campaign_id IS NOT NULL OR UPPER(COALESCE(t.contributor_type, '')) = 'NON_MEMBER' OR UPPER(COALESCE(t.transaction_type, '')) = 'OPENING_BALANCE')",
     ];
     const params = [];
     if (filters.startDate) {
