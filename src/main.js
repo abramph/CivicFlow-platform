@@ -4,6 +4,7 @@ const os = require("os");
 const http = require("http");
 const fs = require("fs");
 const logger = require("./main/logger");
+const { initAutoUpdater } = require("./main/updater");
 const { APP_PRODUCT_NAME } = require("./shared/appConfig");
 const { getDatabase, initializeDatabase } = require("./main/db");
 const { persistLogo } = require("./main/logoStorage");
@@ -531,7 +532,9 @@ app.whenReady().then(() => {
     console.warn("⚠️ Failed to initialize license state:", err?.message || err);
   }
 
-  createWindow();
+  createWindow().then(() => {
+    initAutoUpdater(mainWindowRef);
+  });
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
