@@ -398,7 +398,7 @@ export default async function DashboardPage() {
             { href: "/contributions", label: "Contributions", sub: "View all income",     icon: DollarSign, color: "emerald" as Color },
             { href: "/dues",          label: "Dues",          sub: "Billing & payments",  icon: Receipt,    color: "amber"   as Color },
             { href: "/expenditures",  label: "Expenditures",  sub: "Track spending",      icon: TrendingDown, color: "red"  as Color },
-            { href: "/payments",      label: "Reports",       sub: "Financial overview",  icon: FileText,   color: "sky"     as Color },
+            { href: "/reports",       label: "Reports",       sub: "Financial overview",  icon: FileText,   color: "sky"     as Color },
           ].map(({ href, label, sub, icon: Icon, color }) => {
             const c = colorMap[color];
             return (

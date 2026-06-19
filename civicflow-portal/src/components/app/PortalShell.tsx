@@ -61,11 +61,15 @@ export function PortalShell({ children }: { children: ReactNode }) {
     { href: "/reminders", label: "Reminders" },
     { href: "/payments/imports", label: "Payment Imports" },
     { href: "/payments/reconciliation", label: "Reconciliation" },
+    { href: "/audit-logs", label: "Audit Logs" },
+    { href: "/payment-links", label: "Payment Links" },
     { href: "/settings", label: "Settings" },
+    { href: "/settings/organization", label: "Organization" },
     { href: "/settings/categories", label: "Categories" },
     { href: "/settings/dues", label: "Dues Setup" },
     { href: "/settings/payment-methods", label: "Payment Methods" },
     { href: "/settings/users", label: "Users & Roles" },
+    { href: "/settings/security", label: "Security" },
     { href: "/settings/billing", label: "Billing" },
     { href: "/onboarding/organization", label: "Onboarding" },
     { href: "/migration", label: "Migration" },
@@ -84,6 +88,9 @@ export function PortalShell({ children }: { children: ReactNode }) {
 
   const visibleNavItems = hasSaasSession
     ? navItems.filter((item) => {
+        if (item.href.startsWith("/settings/organization")) {
+          return canDo(session?.role ?? "READ_ONLY", "org_settings:read");
+        }
         if (item.href.startsWith("/settings/categories")) {
           return canDo(session?.role ?? "READ_ONLY", "org_settings:read");
         }
@@ -104,6 +111,12 @@ export function PortalShell({ children }: { children: ReactNode }) {
         }
         if (item.href.startsWith("/payments/imports") || item.href.startsWith("/payments/reconciliation")) {
           return canDo(session?.role ?? "READ_ONLY", "dues:read");
+        }
+        if (item.href === "/audit-logs") {
+          return canDo(session?.role ?? "READ_ONLY", "audit_logs:read");
+        }
+        if (item.href === "/payment-links") {
+          return canDo(session?.role ?? "READ_ONLY", "contributions:read");
         }
         if (item.href === "/import") {
           return canDo(session?.role ?? "READ_ONLY", "members:write");
