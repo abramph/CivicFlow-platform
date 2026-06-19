@@ -61,6 +61,22 @@ function getPriceCatalog() {
       envName: "STRIPE_PRICE_ID_ANNUAL_MAINTENANCE",
       config: { plan: "Professional", licenseType: "maintenance_renewal", supportDays: 365 },
     },
+    {
+      envName: "STRIPE_PRICE_ID_ANNUAL_ESSENTIAL",
+      config: { plan: "Essential", licenseType: "annual", seatsAllowed: 5, durationDays: 365 },
+    },
+    {
+      envName: "STRIPE_PRICE_ID_ANNUAL_ELITE",
+      config: { plan: "Elite", licenseType: "annual", seatsAllowed: 5, durationDays: 365 },
+    },
+    {
+      envName: "STRIPE_PRICE_ID_PERPETUAL_ESSENTIAL",
+      config: { plan: "Essential", licenseType: "perpetual", seatsAllowed: 5, supportDays: 365 },
+    },
+    {
+      envName: "STRIPE_PRICE_ID_PERPETUAL_ELITE",
+      config: { plan: "Elite", licenseType: "perpetual", seatsAllowed: 5, supportDays: 365 },
+    },
   ];
 
   entries.forEach(({ envName, config }) => {
@@ -111,8 +127,15 @@ function resolvePriceConfigForPurchase({ priceId, purchaseKind, targetLicense = 
   const licenseType = priceConfig.licenseType;
 
   if (licenseType === "perpetual") {
-    if (normalizedPurchaseKind !== "new_purchase") {
-      throw new Error("Professional license price can only be used for new purchases.");
+    if (normalizedPurchaseKind !== "new_purchase" && normalizedPurchaseKind !== "maintenance_renewal") {
+      throw new Error("Perpetual license price can only be used for new purchases or maintenance renewals.");
+    }
+    return priceConfig;
+  }
+
+  if (licenseType === "annual") {
+    if (normalizedPurchaseKind !== "new_purchase" && normalizedPurchaseKind !== "annual_renewal") {
+      throw new Error("Annual license price can only be used for new purchases or annual renewals.");
     }
     return priceConfig;
   }

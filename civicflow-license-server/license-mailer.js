@@ -241,11 +241,16 @@ async function sendMail(to, message) {
     html: message.html,
   };
 
-  const result = await getTransport().sendMail(mail);
-  return {
-    success: true,
-    messageId: result?.messageId || null,
-  };
+  try {
+    const result = await getTransport().sendMail(mail);
+    return {
+      success: true,
+      messageId: result?.messageId || null,
+    };
+  } catch (err) {
+    console.error("Stripe webhook error:", err?.message || err);
+    return { skipped: true, reason: "smtp-error", error: err?.message || String(err) };
+  }
 }
 
 async function sendNewLicenseEmail(license) {
