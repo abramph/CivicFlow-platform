@@ -32,7 +32,7 @@ function buildExportFromSqlite(buffer: Buffer): DesktopExport {
 
     const members = readTable<DesktopExport["members"][number]>(
       db, "members",
-      "SELECT id, first_name, last_name, email, phone, status, join_date, city, state, zip, dob, category_id FROM members"
+      "SELECT id, first_name, last_name, email, phone, address, status, join_date, city, state, zip, dob, category_id FROM members"
     );
     const categories = readTable<DesktopExport["categories"][number]>(
       db, "categories",
@@ -63,6 +63,11 @@ function buildExportFromSqlite(buffer: Buffer): DesktopExport {
       "SELECT id, date, amount, category, description, payment_method FROM expenditures"
     );
 
+    const financialTransactions = readTable<NonNullable<DesktopExport["financialTransactions"]>[number]>(
+      db, "financial_transactions",
+      "SELECT id, member_id, membership_period_id, txn_type, amount, txn_date, reference, notes, campaign_id, event_id FROM financial_transactions"
+    );
+
     db.close();
 
     return {
@@ -76,6 +81,7 @@ function buildExportFromSqlite(buffer: Buffer): DesktopExport {
       meetings,
       attendance,
       transactions,
+      financialTransactions,
       expenditures,
     };
   } finally {

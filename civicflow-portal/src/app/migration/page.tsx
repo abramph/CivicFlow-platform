@@ -60,16 +60,25 @@ export default function MigrationPage() {
       const form = new FormData();
       form.append("file", file);
       const res = await fetch("/api/migration/upload", { method: "POST", body: form });
-      const json = await res.json();
+      let json: Record<string, unknown>;
+      try {
+        json = await res.json();
+      } catch {
+        setResult({ ok: false, error: `Server returned status ${res.status}. Check that the file is a valid CivicFlow export.` });
+        return;
+      }
       if (res.ok && json.ok) {
-        setResult({ ok: true, counts: json.counts, fileType: json.fileType });
+        setResult({ ok: true, counts: json.counts as ImportCounts, fileType: json.fileType as string });
         setFile(null);
         if (fileRef.current) fileRef.current.value = "";
       } else {
-        setResult({ ok: false, error: json.error ?? "Import failed. Please try again." });
+        const msg = typeof json.error === "string"
+          ? json.error
+          : `Import failed (HTTP ${res.status}). Make sure the file was exported from CivicFlow desktop via Settings → Export for Cloud Migration.`;
+        setResult({ ok: false, error: msg });
       }
     } catch {
-      setResult({ ok: false, error: "Network error. Please try again." });
+      setResult({ ok: false, error: "Network error — check your connection and try again." });
     } finally {
       setUploading(false);
     }

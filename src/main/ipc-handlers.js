@@ -4388,7 +4388,22 @@ function registerIpcHandlers() {
       const where = cols.includes("is_deleted") ? "WHERE COALESCE(is_deleted, 0) = 0" : "";
       return database.prepare(`SELECT * FROM transactions ${where}`).all();
     })();
-    const expenditures = database.prepare("SELECT * FROM expenditures").all();
+    const financialTransactions = (() => {
+      const tableExists = database.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='financial_transactions'"
+      ).get();
+      if (!tableExists) return [];
+      return database.prepare(
+        "SELECT id, member_id, membership_period_id, txn_type, amount, txn_date, reference, notes, campaign_id, event_id FROM financial_transactions WHERE COALESCE(status, 'POSTED') = 'POSTED'"
+      ).all();
+    })();
+    const expenditures = (() => {
+      const tableExists = database.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='expenditures'"
+      ).get();
+      if (!tableExists) return [];
+      return database.prepare("SELECT * FROM expenditures").all();
+    })();
 
     return {
       ok: true,
@@ -4404,6 +4419,7 @@ function registerIpcHandlers() {
         meetings,
         attendance,
         transactions,
+        financialTransactions,
         expenditures,
       },
     };
