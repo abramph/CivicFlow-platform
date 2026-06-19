@@ -4393,9 +4393,10 @@ function registerIpcHandlers() {
         "SELECT name FROM sqlite_master WHERE type='table' AND name='financial_transactions'"
       ).get();
       if (!tableExists) return [];
-      return database.prepare(
-        "SELECT id, member_id, membership_period_id, txn_type, amount, txn_date, reference, notes, campaign_id, event_id FROM financial_transactions WHERE COALESCE(status, 'POSTED') = 'POSTED'"
-      ).all();
+      const ftCols = database.prepare('PRAGMA table_info(financial_transactions)').all().map((c) => c.name);
+      const pick = ['id','member_id','membership_period_id','txn_type','amount','txn_date','reference','notes','campaign_id','event_id'].filter((c) => ftCols.includes(c));
+      const statusWhere = ftCols.includes('status') ? "WHERE COALESCE(status,'POSTED')='POSTED'" : '';
+      return database.prepare(`SELECT ${pick.join(',')} FROM financial_transactions ${statusWhere}`).all();
     })();
     const expenditures = (() => {
       const tableExists = database.prepare(

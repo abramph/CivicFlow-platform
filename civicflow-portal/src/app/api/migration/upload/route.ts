@@ -63,10 +63,14 @@ function buildExportFromSqlite(buffer: Buffer): DesktopExport {
       "SELECT id, date, amount, category, description, payment_method FROM expenditures"
     );
 
-    const financialTransactions = readTable<NonNullable<DesktopExport["financialTransactions"]>[number]>(
-      db, "financial_transactions",
-      "SELECT id, member_id, membership_period_id, txn_type, amount, txn_date, reference, notes, campaign_id, event_id FROM financial_transactions"
-    );
+    const financialTransactions = (() => {
+      try {
+        const ftCols = (db.prepare("PRAGMA table_info(financial_transactions)").all() as { name: string }[]).map(c => c.name);
+        const pick = ["id","member_id","membership_period_id","txn_type","amount","txn_date","reference","notes","campaign_id","event_id"].filter(c => ftCols.includes(c));
+        const statusWhere = ftCols.includes("status") ? "WHERE COALESCE(status,'POSTED')='POSTED'" : "";
+        return db.prepare(`SELECT ${pick.join(",")} FROM financial_transactions ${statusWhere}`).all() as NonNullable<DesktopExport["financialTransactions"]>;
+      } catch { return []; }
+    })();
 
     db.close();
 
