@@ -7,6 +7,9 @@ pnpm-lock.yaml
 # Build
 dist/
 build/
+!build/icon.ico
+!build/entitlements.mac.plist
+!build/entitlements.mac.inherit.plist
 release-build/
 release-build-*/
 release/

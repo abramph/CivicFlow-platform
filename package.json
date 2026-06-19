@@ -128,8 +128,13 @@
       ],
       "icon": "assets/icons/icon.icns",
       "category": "public.app-category.business",
-      "artifactName": "${productName}-${version}-mac-${arch}.${ext}"
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.inherit.plist"
     },
+    "afterSign": "scripts/notarize.js",
     "dmg": {
       "title": "${productName} ${version}",
       "window": {
