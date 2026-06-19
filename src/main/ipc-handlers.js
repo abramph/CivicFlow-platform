@@ -2592,12 +2592,16 @@ function registerIpcHandlers() {
         "DELETE FROM transactions WHERE member_id=? OR note IN ('Sample dues','Sample donation','Sample expense')"
       ).run(memberId).changes;
 
-      // Delete any attendance for the sample member or sample event
+      // Delete any attendance for the sample member
       const hasAttendance = database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='attendance'").get();
-      if (hasAttendance) {
-        const sampleEvent = database.prepare("SELECT id FROM events WHERE name='Sample Event'").get();
-        if (sampleEvent) database.prepare("DELETE FROM attendance WHERE event_id=?").run(sampleEvent.id);
-        if (memberId !== -1) database.prepare("DELETE FROM attendance WHERE member_id=?").run(memberId);
+      if (hasAttendance && memberId !== -1) {
+        database.prepare("DELETE FROM attendance WHERE member_id=?").run(memberId);
+      }
+
+      // Delete financial_transactions for the sample member
+      const hasFinTxn = database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='financial_transactions'").get();
+      if (hasFinTxn && memberId !== -1) {
+        database.prepare("DELETE FROM financial_transactions WHERE member_id=?").run(memberId);
       }
 
       // Delete sample member
