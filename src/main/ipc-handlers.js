@@ -2566,6 +2566,73 @@ function registerIpcHandlers() {
     return { success: true, transactionId: txnId, memberId: nextMemberId };
   });
 
+  register(registry, "admin:getSampleDataCounts", () => {
+    const sampleMember = database.prepare("SELECT id FROM members WHERE email = 'sample@example.com'").get();
+    const memberId = sampleMember?.id ?? -1;
+    const members = sampleMember ? 1 : 0;
+    const transactions = database.prepare(
+      "SELECT COUNT(*) AS c FROM transactions WHERE COALESCE(is_deleted,0)=0 AND (member_id=? OR note IN ('Sample dues','Sample donation','Sample expense'))"
+    ).get(memberId)?.c ?? 0;
+    const events = database.prepare("SELECT COUNT(*) AS c FROM events WHERE name='Sample Event'").get()?.c ?? 0;
+    const campaigns = database.prepare("SELECT COUNT(*) AS c FROM campaigns WHERE name='Sample Campaign'").get()?.c ?? 0;
+    const grants = tableHasColumn(database, 'grants', 'is_sample')
+      ? (database.prepare("SELECT COUNT(*) AS c FROM grants WHERE is_sample=1").get()?.c ?? 0)
+      : 0;
+    const total = members + transactions + events + campaigns + grants;
+    return { members, transactions, events, campaigns, expenditures: 0, grants, total };
+  });
+
+  register(registry, "admin:deleteSampleData", () => {
+    const sampleMember = database.prepare("SELECT id, first_name, last_name FROM members WHERE email = 'sample@example.com'").get();
+    const memberId = sampleMember?.id ?? -1;
+
+    const runDelete = database.transaction(() => {
+      // Delete transactions linked to sample member or seeded by note
+      const transactionsDeleted = database.prepare(
+        "DELETE FROM transactions WHERE member_id=? OR note IN ('Sample dues','Sample donation','Sample expense')"
+      ).run(memberId).changes;
+
+      // Delete any attendance for the sample member or sample event
+      const hasAttendance = database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='attendance'").get();
+      if (hasAttendance) {
+        const sampleEvent = database.prepare("SELECT id FROM events WHERE name='Sample Event'").get();
+        if (sampleEvent) database.prepare("DELETE FROM attendance WHERE event_id=?").run(sampleEvent.id);
+        if (memberId !== -1) database.prepare("DELETE FROM attendance WHERE member_id=?").run(memberId);
+      }
+
+      // Delete sample member
+      const membersDeleted = memberId !== -1
+        ? database.prepare("DELETE FROM members WHERE id=?").run(memberId).changes
+        : 0;
+
+      // Delete sample event
+      const eventsDeleted = database.prepare("DELETE FROM events WHERE name='Sample Event'").run().changes;
+
+      // Delete sample campaign
+      const campaignsDeleted = database.prepare("DELETE FROM campaigns WHERE name='Sample Campaign'").run().changes;
+
+      // Delete sample grants and their reports
+      let grantsDeleted = 0;
+      if (tableHasColumn(database, 'grants', 'is_sample')) {
+        const sampleGrantIds = database.prepare("SELECT id FROM grants WHERE is_sample=1").all().map((g) => g.id);
+        if (sampleGrantIds.length > 0) {
+          const placeholders = sampleGrantIds.map(() => '?').join(',');
+          database.prepare(`DELETE FROM grant_reports WHERE grant_id IN (${placeholders})`).run(...sampleGrantIds);
+        }
+        grantsDeleted = database.prepare("DELETE FROM grants WHERE is_sample=1").run().changes;
+      }
+
+      return { transactionsDeleted, membersDeleted, eventsDeleted, campaignsDeleted, grantsDeleted, expendituresDeleted: 0 };
+    });
+
+    try {
+      const counts = runDelete();
+      return { success: true, ...counts };
+    } catch (err) {
+      return { success: false, error: String(err?.message || 'Delete failed') };
+    }
+  });
+
   register(registry, "db:events:list", () => {
     if (tableHasColumn(database, "events", "is_active")) {
       return database.prepare("SELECT * FROM events WHERE COALESCE(is_active, 1) = 1 ORDER BY date DESC, id DESC").all();
