@@ -151,7 +151,7 @@ export function Sidebar({ activeView, onNavigate }) {
       </nav>
 
       <div className="p-3 border-t border-slate-700">
-        <p className="text-xs text-slate-500 px-3">Civicflow v1.0.0</p>
+        <p className="text-xs text-slate-500 px-3">Civicflow v1.0.3</p>
       </div>
     </aside>
   );
