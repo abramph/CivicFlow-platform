@@ -69,6 +69,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Generate macOS icon
+        run: |
+          mkdir -p build/icon.iconset
+          sips -z 16 16     assets/icons/icon.png --out build/icon.iconset/icon_16x16.png
+          sips -z 32 32     assets/icons/icon.png --out build/icon.iconset/icon_16x16@2x.png
+          sips -z 32 32     assets/icons/icon.png --out build/icon.iconset/icon_32x32.png
+          sips -z 64 64     assets/icons/icon.png --out build/icon.iconset/icon_32x32@2x.png
+          sips -z 128 128   assets/icons/icon.png --out build/icon.iconset/icon_128x128.png
+          sips -z 256 256   assets/icons/icon.png --out build/icon.iconset/icon_128x128@2x.png
+          sips -z 256 256   assets/icons/icon.png --out build/icon.iconset/icon_256x256.png
+          sips -z 512 512   assets/icons/icon.png --out build/icon.iconset/icon_256x256@2x.png
+          sips -z 512 512   assets/icons/icon.png --out build/icon.iconset/icon_512x512.png
+          sips -z 1024 1024 assets/icons/icon.png --out build/icon.iconset/icon_512x512@2x.png
+          iconutil -c icns build/icon.iconset -o assets/icons/icon.icns
+          ls -la assets/icons/icon.icns
+
       - name: Create GitHub release (idempotent)
         if: startsWith(github.ref, 'refs/tags/')
         env:
@@ -89,7 +105,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           npm run build:app
-          npx electron-builder --mac dmg --publish ${{ startsWith(github.ref, 'refs/tags/') && 'always' || 'never' }}
+          npx electron-builder --mac dmg --publish ${{ startsWith(github.ref, 'refs/tags/') && 'always' || 'never' }} 2>&1 || { echo "::error::electron-builder failed"; exit 1; }
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
