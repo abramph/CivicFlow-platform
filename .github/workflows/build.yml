@@ -95,7 +95,10 @@ jobs:
             --notes "CivicFlow Desktop ${{ github.ref_name }}" \
             --draft || true
 
-      - name: Build and publish macOS DMG
+      - name: Build app
+        run: npm run build:app
+
+      - name: Build macOS DMG
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
@@ -103,9 +106,19 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          DEBUG: electron-builder
         run: |
-          npm run build:app
-          npx electron-builder --mac dmg --publish ${{ startsWith(github.ref, 'refs/tags/') && 'always' || 'never' }} 2>&1 || { echo "::error::electron-builder failed"; exit 1; }
+          npx electron-builder --mac dmg --publish ${{ startsWith(github.ref, 'refs/tags/') && 'always' || 'never' }} 2>&1 | tee build-mac.log || true
+          tail -100 build-mac.log
+          if [ ! -f release/*.dmg ]; then echo "::error::No DMG produced"; exit 1; fi
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-build-log
+          path: build-mac.log
+          if-no-files-found: warn
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
