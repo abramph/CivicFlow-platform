@@ -146,9 +146,9 @@ export function ActivationScreen({
                     <ShieldCheck className="h-4 w-4" />
                     Current Status
                   </div>
-                  <div className={`rounded-2xl border px-4 py-4 text-sm ${toneClasses(presentation.tone).replace('text-emerald-800', 'text-emerald-100').replace('text-red-800', 'text-rose-100').replace('text-amber-800', 'text-amber-100')}`}>
-                    <p className="font-semibold">{presentation.title}</p>
-                    <p className="mt-1 leading-6 text-inherit/90">{welcomeBody}</p>
+                  <div className={`rounded-2xl border border-white/20 bg-white/10 px-4 py-4 text-sm text-slate-100`}>
+                    <p className="font-semibold text-white">{presentation.title}</p>
+                    <p className="mt-1 leading-6 text-slate-200">{welcomeBody}</p>
                     {trialIsActive && (
                       <p className="mt-3 text-xs uppercase tracking-[0.16em] text-amber-100/80">{`${trialDaysRemaining} day${trialDaysRemaining === 1 ? '' : 's'} remaining in trial mode`}</p>
                     )}
