@@ -2583,26 +2583,33 @@ function registerIpcHandlers() {
   });
 
   register(registry, "admin:deleteSampleData", () => {
-    const sampleMember = database.prepare("SELECT id, first_name, last_name FROM members WHERE email = 'sample@example.com'").get();
+    const sampleMember = database.prepare("SELECT id FROM members WHERE email = 'sample@example.com'").get();
     const memberId = sampleMember?.id ?? -1;
+    const sampleEvent = database.prepare("SELECT id FROM events WHERE name='Sample Event'").get();
+    const sampleEventId = sampleEvent?.id ?? -1;
+    const sampleCampaign = database.prepare("SELECT id FROM campaigns WHERE name='Sample Campaign'").get();
+    const sampleCampaignId = sampleCampaign?.id ?? -1;
+
+    const tableExists = (name) => !!database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(name);
+    const safeDelete = (table, where, params) => {
+      if (!tableExists(table)) return 0;
+      return database.prepare(`DELETE FROM ${table} WHERE ${where}`).run(...params).changes;
+    };
 
     const runDelete = database.transaction(() => {
-      // Delete transactions linked to sample member or seeded by note
+      // Delete all transactions referencing sample member, event, campaign, or seeded notes
       const transactionsDeleted = database.prepare(
-        "DELETE FROM transactions WHERE member_id=? OR note IN ('Sample dues','Sample donation','Sample expense')"
-      ).run(memberId).changes;
+        "DELETE FROM transactions WHERE member_id=? OR event_id=? OR campaign_id=? OR note IN ('Sample dues','Sample donation','Sample expense')"
+      ).run(memberId, sampleEventId, sampleCampaignId).changes;
 
-      // Delete any attendance for the sample member
-      const hasAttendance = database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='attendance'").get();
-      if (hasAttendance && memberId !== -1) {
-        database.prepare("DELETE FROM attendance WHERE member_id=?").run(memberId);
-      }
+      // Clean up payment_submissions referencing the sample member
+      safeDelete("payment_submissions", "member_id=?", [memberId]);
+
+      // Delete attendance for the sample member
+      safeDelete("attendance", "member_id=?", [memberId]);
 
       // Delete financial_transactions for the sample member
-      const hasFinTxn = database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='financial_transactions'").get();
-      if (hasFinTxn && memberId !== -1) {
-        database.prepare("DELETE FROM financial_transactions WHERE member_id=?").run(memberId);
-      }
+      safeDelete("financial_transactions", "member_id=?", [memberId]);
 
       // Delete sample member
       const membersDeleted = memberId !== -1
@@ -2610,10 +2617,14 @@ function registerIpcHandlers() {
         : 0;
 
       // Delete sample event
-      const eventsDeleted = database.prepare("DELETE FROM events WHERE name='Sample Event'").run().changes;
+      const eventsDeleted = sampleEventId !== -1
+        ? database.prepare("DELETE FROM events WHERE id=?").run(sampleEventId).changes
+        : 0;
 
       // Delete sample campaign
-      const campaignsDeleted = database.prepare("DELETE FROM campaigns WHERE name='Sample Campaign'").run().changes;
+      const campaignsDeleted = sampleCampaignId !== -1
+        ? database.prepare("DELETE FROM campaigns WHERE id=?").run(sampleCampaignId).changes
+        : 0;
 
       // Delete sample grants and their reports
       let grantsDeleted = 0;

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require("electron");
+const { app, BrowserWindow, ipcMain, Menu } = require("electron");
 const path = require("path");
 const os = require("os");
 const http = require("http");
@@ -393,6 +393,23 @@ async function createWindow() {
   mainWindowRef = mainWindow;
   mainWindow.on("closed", () => {
     if (mainWindowRef === mainWindow) mainWindowRef = null;
+  });
+
+  mainWindow.webContents.on("context-menu", (_event, params) => {
+    const menuItems = [];
+    if (params.isEditable || params.selectionText) {
+      if (params.selectionText) {
+        menuItems.push({ label: "Cut", role: "cut", enabled: params.isEditable });
+        menuItems.push({ label: "Copy", role: "copy" });
+      }
+      if (params.isEditable) {
+        menuItems.push({ label: "Paste", role: "paste" });
+        menuItems.push({ label: "Select All", role: "selectAll" });
+      }
+    }
+    if (menuItems.length > 0) {
+      Menu.buildFromTemplate(menuItems).popup({ window: mainWindow });
+    }
   });
 
   mainWindow.webContents.on("did-fail-load", (_event, code, desc, url) => {
