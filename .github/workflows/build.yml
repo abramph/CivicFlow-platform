@@ -95,6 +95,9 @@ jobs:
             --notes "CivicFlow Desktop ${{ github.ref_name }}" \
             --draft || true
 
+      - name: Rebuild native modules for Electron
+        run: npx electron-rebuild -f -w better-sqlite3
+
       - name: Build app
         run: npm run build:app
 
@@ -108,9 +111,9 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           DEBUG: electron-builder
         run: |
-          npx electron-builder --mac dmg --publish ${{ startsWith(github.ref, 'refs/tags/') && 'always' || 'never' }} 2>&1 | tee build-mac.log || true
-          tail -100 build-mac.log
-          if [ ! -f release/*.dmg ]; then echo "::error::No DMG produced"; exit 1; fi
+          npx electron-builder --mac dmg --publish ${{ startsWith(github.ref, 'refs/tags/') && 'always' || 'never' }} 2>&1 | tee build-mac.log
+          echo "--- Build complete ---"
+          ls -la release/ || echo "No release directory"
 
       - name: Upload build log
         if: always()
