@@ -44,7 +44,6 @@ jobs:
           npx electron-builder --win nsis --publish never
 
       - name: Sign with Azure Trusted Signing
-        continue-on-error: true
         uses: azure/trusted-signing-action@v0.5.0
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -135,8 +134,10 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
           DEBUG: electron-builder
         run: |
+          set -o pipefail
           npx electron-builder --mac dmg --publish never 2>&1 | tee build-mac.log
           echo "--- Build complete ---"
           ls -la release/ || echo "No release directory"
