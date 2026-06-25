@@ -36,12 +36,24 @@ jobs:
             --notes "CivicFlow Desktop ${{ github.ref_name }}" \
             --draft || true
 
+      - name: Verify Azure Trusted Signing access
+        shell: pwsh
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: |
+          az login --service-principal -u $env:AZURE_CLIENT_ID -p $env:AZURE_CLIENT_SECRET --tenant $env:AZURE_TENANT_ID
+          az account show
+          az rest --method GET --url "https://eus.codesigning.azure.net/codesigningaccounts/civicflow-signing/certificateprofiles/CivicFlow?api-version=2022-06-15-preview" --resource "https://codesigning.azure.net" 2>&1 || echo "API call failed — check account name, profile name, and permissions"
+
       - name: Build and publish Windows installer
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          DEBUG: electron-builder
         run: |
           npm run build:app
           npx electron-builder --win nsis --publish ${{ startsWith(github.ref, 'refs/tags/') && 'always' || 'never' }}
