@@ -88,7 +88,7 @@
     "appId": "com.civicflow.app",
     "productName": "CivicFlow",
     "executableName": "CivicFlow",
-    "artifactName": "${productName} Setup ${version}.${ext}",
+    "artifactName": "${productName}-Setup-${version}.${ext}",
     "directories": {
       "output": "release",
       "buildResources": "build"
