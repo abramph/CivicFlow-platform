@@ -36,11 +36,15 @@ jobs:
             --notes "CivicFlow Desktop ${{ github.ref_name }}" \
             --draft || true
 
+      - name: Install Azure Trusted Signing CLI
+        run: dotnet tool install --global Azure.CodeSigning.Dlib --prerelease
+
       - name: Build and publish Windows installer
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
         run: |
           npm run build:app
           npx electron-builder --win nsis --publish ${{ startsWith(github.ref, 'refs/tags/') && 'always' || 'never' }}

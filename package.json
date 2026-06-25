@@ -107,7 +107,12 @@
       "target": [
         "nsis"
       ],
-      "icon": "build/icon.ico"
+      "icon": "build/icon.ico",
+      "azureSignOptions": {
+        "endpoint": "https://eus.codesigning.azure.net",
+        "codeSigningAccountName": "civicflow-signing",
+        "certificateProfileName": "CivicFlow"
+      }
     },
     "nsis": {
       "oneClick": false,
