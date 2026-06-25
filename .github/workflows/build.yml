@@ -44,6 +44,7 @@ jobs:
           npx electron-builder --win nsis --publish never
 
       - name: Sign with Azure Trusted Signing
+        continue-on-error: true
         uses: azure/trusted-signing-action@v0.5.0
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
