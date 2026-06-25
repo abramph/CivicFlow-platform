@@ -59,17 +59,17 @@ jobs:
           timestamp-digest: SHA256
 
       - name: Publish to GitHub release
-        if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v${VERSION}"
+          echo "Uploading assets to release ${TAG}"
           for f in release/*.exe; do
-            gh release upload "${{ github.ref_name }}" "$f" --clobber
+            [ -f "$f" ] && gh release upload "$TAG" "$f" --clobber
           done
-          if [ -f release/latest.yml ]; then
-            gh release upload "${{ github.ref_name }}" release/latest.yml --clobber
-          fi
+          [ -f release/latest.yml ] && gh release upload "$TAG" release/latest.yml --clobber
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
@@ -140,6 +140,18 @@ jobs:
           npx electron-builder --mac dmg --publish ${{ startsWith(github.ref, 'refs/tags/') && 'always' || 'never' }} 2>&1 | tee build-mac.log
           echo "--- Build complete ---"
           ls -la release/ || echo "No release directory"
+
+      - name: Publish macOS DMG to GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v${VERSION}"
+          echo "Uploading macOS assets to release ${TAG}"
+          for f in release/*.dmg; do
+            [ -f "$f" ] && gh release upload "$TAG" "$f" --clobber
+          done
+          [ -f release/latest-mac.yml ] && gh release upload "$TAG" release/latest-mac.yml --clobber
 
       - name: Upload build log
         if: always()
