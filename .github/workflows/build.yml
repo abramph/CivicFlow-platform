@@ -36,9 +36,6 @@ jobs:
             --notes "CivicFlow Desktop ${{ github.ref_name }}" \
             --draft || true
 
-      - name: Install Azure Trusted Signing CLI
-        run: dotnet tool install --global Azure.CodeSigning.Dlib --prerelease
-
       - name: Build and publish Windows installer
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
