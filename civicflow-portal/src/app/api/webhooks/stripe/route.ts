@@ -148,13 +148,50 @@ export async function POST(request: Request) {
           await upsertSubscriptionFromStripe(sub, orgId ?? undefined);
         }
 
+        // Record a Contribution when a payment link checkout completes
+        const paymentLinkId = session.metadata?.paymentLinkId;
+        if (paymentLinkId && orgId && session.payment_status === "paid") {
+          const amountTotal = session.amount_total ?? 0;
+          const amountDollars = amountTotal / 100;
+
+          const campaignId = session.metadata?.campaignId || null;
+          const eventId = session.metadata?.eventId || null;
+          const contributorName = session.metadata?.contributorName || null;
+          const contributorEmail =
+            typeof session.customer_details?.email === "string"
+              ? session.customer_details.email
+              : null;
+
+          await prisma.contribution.create({
+            data: {
+              organizationId: orgId,
+              amount: amountDollars,
+              contributionDate: new Date(),
+              paymentMethod: "STRIPE",
+              source: "CAMPAIGN_PAGE",
+              campaignId: campaignId || null,
+              eventId: eventId || null,
+              contributorName:
+                contributorName ||
+                (contributorEmail ? contributorEmail : null),
+              notes: `Payment link: ${paymentLinkId}`,
+              receiptRequested: Boolean(contributorEmail),
+            },
+          });
+
+          await prisma.paymentLink.update({
+            where: { id: paymentLinkId },
+            data: { useCount: { increment: 1 } },
+          });
+        }
+
         if (orgId) {
           await createAuditEvent({
             organizationId: orgId,
             action: "update",
             entityType: "stripe_webhook",
             entityId: session.id,
-            metadata: { eventType: event.type },
+            metadata: { eventType: event.type, paymentLinkId: paymentLinkId ?? null },
           });
         }
         break;

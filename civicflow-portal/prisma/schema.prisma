@@ -254,6 +254,19 @@ enum AttachmentEntityType {
   OTHER
 }
 
+enum PaymentLinkType {
+  GENERAL
+  CAMPAIGN
+  EVENT
+  DUES
+}
+
+enum PaymentLinkStatus {
+  active
+  inactive
+  archived
+}
+
 // ─── SaaS Core Models ────────────────────────────────────────────────────────
 
 /// A tenant organization on the CivicFlow SaaS platform.
@@ -292,6 +305,7 @@ model Organization {
   expenditures Expenditure[]
   categories  Category[]
   settings    OrgSettings?
+  paymentLinks PaymentLink[]
   duesAccounts          DuesAccount[]
   duesCharges           DuesCharge[]
   duesPayments          DuesPayment[]
@@ -333,6 +347,7 @@ model User {
   verificationTokens   AccountVerificationToken[]
   mfaChallengeTokens   MfaChallengeToken[]
   createdContributions Contribution[] @relation("ContributionCreatedBy")
+  createdPaymentLinks  PaymentLink[] @relation("PaymentLinkCreatedBy")
   communicationLogs    CommunicationLog[] @relation("CommunicationCreatedBy")
   communicationCampaigns CommunicationCampaign[] @relation("CommunicationCampaignCreatedBy")
   attendanceRecords    AttendanceRecord[] @relation("AttendanceRecordedBy")
@@ -525,6 +540,7 @@ model Campaign {
   communicationLogs CommunicationLog[]
   expenditures Expenditure[]
   paymentImportItems PaymentImportItem[]
+  paymentLinks PaymentLink[]
 
   @@index([organizationId])
   @@index([organizationId, status])
@@ -550,6 +566,7 @@ model Event {
   attendanceRecords AttendanceRecord[]
   expenditures Expenditure[]
   paymentImportItems PaymentImportItem[]
+  paymentLinks PaymentLink[]
 
   @@index([organizationId])
   @@index([organizationId, startAt])
@@ -1211,4 +1228,35 @@ model Attachment {
   @@index([organizationId, purpose])
   @@index([uploadedByUserId])
   @@index([deletedAt])
+}
+
+/// A shareable payment link that lets non-portal users pay via Stripe Checkout.
+model PaymentLink {
+  id             String            @id @default(cuid())
+  organizationId String
+  slug           String            @unique
+  title          String
+  description    String?
+  linkType       PaymentLinkType   @default(GENERAL)
+  amount         Decimal?          @db.Decimal(12, 2)
+  minAmount      Decimal?          @db.Decimal(12, 2)
+  campaignId     String?
+  eventId        String?
+  status         PaymentLinkStatus @default(active)
+  expiresAt      DateTime?
+  useCount       Int               @default(0)
+  createdByUserId String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  campaign      Campaign?    @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  event         Event?       @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  createdByUser User?        @relation("PaymentLinkCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([slug])
+  @@index([organizationId, status])
+  @@index([campaignId])
+  @@index([eventId])
 }

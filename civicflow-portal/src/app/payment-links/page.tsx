@@ -3,150 +3,123 @@ import { requirePermission } from "@/lib/auth-guards";
 import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { formatCurrency, formatDate, formatEnumLabel } from "@/lib/formatting";
 import { prisma } from "@/lib/prisma";
-import { canDo } from "@/lib/rbac";
+import { getServerEnv } from "@/lib/env";
 
 export default async function PaymentLinksPage() {
-  const { organizationId, role } = await requirePermission("contributions:read");
+  const { organizationId } = await requirePermission("contributions:read");
+  const env = getServerEnv();
+  const baseUrl = env.NEXTAUTH_URL.replace(/\/$/, "");
 
-  const [organization, subscription, contributionSummary, recentContributions] = await Promise.all([
-    prisma.organization.findUnique({
-      where: { id: organizationId },
-      select: {
-        id: true,
-        name: true,
-        plan: true,
-        status: true,
-        createdAt: true,
-        _count: {
-          select: {
-            members: true,
-            campaigns: true,
-            events: true,
-            contributions: true,
-          },
-        },
-      },
-    }),
-    prisma.subscription.findFirst({
-      where: { organizationId },
-      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
-    }),
-    prisma.contribution.aggregate({
-      where: { organizationId },
-      _sum: { amount: true },
-      _count: { id: true },
-    }),
-    prisma.contribution.findMany({
-      where: { organizationId },
-      orderBy: [{ contributionDate: "desc" }, { createdAt: "desc" }],
-      include: {
-        member: true,
-        campaign: true,
-        event: true,
-      },
-      take: 5,
-    }),
-  ]);
+  const links = await prisma.paymentLink.findMany({
+    where: { organizationId },
+    orderBy: { createdAt: "desc" },
+    take: 200,
+    include: {
+      campaign: { select: { id: true, name: true } },
+      event: { select: { id: true, title: true } },
+    },
+  });
 
-  const actions = [
-    { href: "/dashboard", label: "Back to Dashboard" },
-    { href: "/contributions", label: "Contributions" },
-    { href: "/payments", label: "Pending Payments" },
-  ];
-
-  if (canDo(role, "billing:read")) {
-    actions.push({ href: "/settings/billing", label: "Billing Settings" });
-  }
-
-  if (!organization) {
-    return (
-      <main className="space-y-6">
-        <PageHeader
-          title="Payment Links"
-          description="Your organization record could not be loaded, so payment-link setup details are unavailable."
-          actions={actions}
-        />
-      </main>
-    );
-  }
+  const active = links.filter((l) => l.status === "active").length;
+  const totalUses = links.reduce((sum, l) => sum + l.useCount, 0);
 
   return (
     <main className="space-y-6">
       <PageHeader
         title="Payment Links"
-        description="Current payment-link setup view for this organization, including plan, collection destinations, and related payment workflows."
-        actions={actions}
+        description="Shareable links that let anyone pay your organization via Stripe without logging in."
+        actions={[
+          { href: "/payment-links/new", label: "New Payment Link", tone: "primary" },
+          { href: "/contributions", label: "Contributions" },
+          { href: "/dashboard", label: "Back to Dashboard" },
+        ]}
       />
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Organization Plan" value={formatEnumLabel(organization.plan)} />
-        <StatCard
-          label="Subscription Status"
-          value={subscription ? formatEnumLabel(subscription.status) : "No subscription record"}
-        />
-        <StatCard
-          label="Contribution Volume"
-          value={formatCurrency(contributionSummary._sum.amount)}
-          helper={`${contributionSummary._count.id} recorded contributions`}
-        />
-        <StatCard
-          label="Link Destinations"
-          value={`${organization._count.campaigns} campaigns / ${organization._count.events} events`}
-          helper={`${organization._count.members} members in the org`}
-        />
+      <div className="grid gap-4 md:grid-cols-3">
+        <StatCard label="Total Links" value={links.length} />
+        <StatCard label="Active Links" value={active} />
+        <StatCard label="Total Uses" value={totalUses} />
       </div>
 
-      <SectionCard title="Current Setup" description="This workspace does not yet store dedicated payment-link rows, so this page focuses on the live SaaS data that supports link-based collection today.">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <StatCard label="Organization Status" value={formatEnumLabel(organization.status)} />
-          <StatCard label="Portal Access Since" value={formatDate(organization.createdAt)} />
-          <StatCard label="Campaign Destinations" value={organization._count.campaigns} />
-          <StatCard label="Event Destinations" value={organization._count.events} />
-        </div>
-        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-800">
-          <p className="font-semibold text-slate-950">What this page confirms now</p>
-          <ul className="mt-2 list-disc space-y-1 pl-5">
-            <li>Contribution collection is active in the SaaS data model for this organization.</li>
-            <li>Campaign and event records exist as attribution targets for future hosted payment links.</li>
-            <li>The legacy cloud payment approval queue remains available from <Link href="/payments" className="font-semibold text-emerald-700 hover:underline">/payments</Link>.</li>
-            <li>Billing controls remain under <Link href="/settings/billing" className="font-semibold text-emerald-700 hover:underline">/settings/billing</Link> when your role allows it.</li>
-          </ul>
-        </div>
-      </SectionCard>
-
-      <SectionCard title="Recent Revenue Activity" description="Recent contributions that would be natural destinations for payment-link traffic once managed links are introduced.">
+      <SectionCard title="Payment Links" description="Each link generates a public Stripe Checkout page. Copy the URL to share it.">
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="bg-slate-50 text-left text-slate-700">
               <tr>
-                <th className="px-4 py-3">Date</th>
-                <th className="px-4 py-3">Member</th>
-                <th className="px-4 py-3">Destination</th>
-                <th className="px-4 py-3">Source</th>
+                <th className="px-4 py-3">Title</th>
+                <th className="px-4 py-3">Type</th>
                 <th className="px-4 py-3">Amount</th>
+                <th className="px-4 py-3">Attribution</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Uses</th>
+                <th className="px-4 py-3">Expires</th>
+                <th className="px-4 py-3">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {recentContributions.length === 0 ? (
+              {links.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-6 text-center text-slate-600">
-                    No contribution activity has been recorded yet.
+                  <td colSpan={8} className="px-4 py-6 text-center text-slate-600">
+                    No payment links yet.{" "}
+                    <Link href="/payment-links/new" className="font-semibold text-emerald-700 hover:underline">
+                      Create your first one.
+                    </Link>
                   </td>
                 </tr>
               ) : (
-                recentContributions.map((contribution) => (
-                  <tr key={contribution.id} className="border-t border-slate-100">
-                    <td className="px-4 py-3 text-slate-900">{formatDate(contribution.contributionDate)}</td>
+                links.map((link) => (
+                  <tr key={link.id} className="border-t border-slate-100">
+                    <td className="px-4 py-3">
+                      <Link
+                        href={`/payment-links/${link.id}`}
+                        className="font-semibold text-emerald-700 hover:underline"
+                      >
+                        {link.title}
+                      </Link>
+                      <p className="mt-0.5 font-mono text-xs text-slate-500">
+                        {baseUrl}/pay/{link.slug}
+                      </p>
+                    </td>
+                    <td className="px-4 py-3 text-slate-900">{formatEnumLabel(link.linkType)}</td>
                     <td className="px-4 py-3 text-slate-900">
-                      {contribution.member
-                        ? `${contribution.member.lastName}, ${contribution.member.firstName}`
-                        : (contribution.contributorName || "Non-member")}
+                      {link.amount ? formatCurrency(link.amount) : "Flexible"}
                     </td>
                     <td className="px-4 py-3 text-slate-900">
-                      {contribution.campaign?.name || contribution.event?.title || "Direct contribution"}
+                      {link.campaign?.name ?? link.event?.title ?? "—"}
                     </td>
-                    <td className="px-4 py-3 text-slate-900">{formatEnumLabel(contribution.source)}</td>
-                    <td className="px-4 py-3 text-slate-900">{formatCurrency(contribution.amount)}</td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${
+                          link.status === "active"
+                            ? "bg-emerald-100 text-emerald-800"
+                            : link.status === "inactive"
+                              ? "bg-yellow-100 text-yellow-800"
+                              : "bg-slate-100 text-slate-600"
+                        }`}
+                      >
+                        {formatEnumLabel(link.status)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-slate-900">{link.useCount}</td>
+                    <td className="px-4 py-3 text-slate-900">
+                      {link.expiresAt ? formatDate(link.expiresAt) : "—"}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-wrap gap-2">
+                        <Link
+                          href={`/payment-links/${link.id}`}
+                          className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium hover:bg-slate-50"
+                        >
+                          View
+                        </Link>
+                        <Link
+                          href={`/payment-links/${link.id}/edit`}
+                          className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium hover:bg-slate-50"
+                        >
+                          Edit
+                        </Link>
+                      </div>
+                    </td>
                   </tr>
                 ))
               )}

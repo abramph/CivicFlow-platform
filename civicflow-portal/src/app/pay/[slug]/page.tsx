@@ -1,0 +1,59 @@
+import { notFound } from "next/navigation";
+import { prisma } from "@/lib/prisma";
+import { PublicPaymentForm } from "@/components/public/PublicPaymentForm";
+
+export default async function PublicPayPage({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}) {
+  const { slug } = await params;
+
+  const link = await prisma.paymentLink.findUnique({
+    where: { slug },
+    include: {
+      organization: { select: { name: true, logoUrl: true } },
+      campaign: { select: { name: true } },
+      event: { select: { title: true } },
+    },
+  });
+
+  if (!link || link.status === "archived") notFound();
+
+  const expired = link.expiresAt && link.expiresAt < new Date();
+
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center bg-slate-50 px-4 py-12">
+      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+        <div className="mb-6 text-center">
+          <p className="text-sm font-medium text-slate-500">{link.organization.name}</p>
+          <h1 className="mt-1 text-2xl font-bold text-slate-950">{link.title}</h1>
+          {(link.campaign?.name ?? link.event?.title) && (
+            <p className="mt-1 text-sm text-slate-600">
+              {link.campaign?.name ?? link.event?.title}
+            </p>
+          )}
+          {link.description && (
+            <p className="mt-3 text-sm leading-6 text-slate-700">{link.description}</p>
+          )}
+        </div>
+
+        {link.status === "inactive" || expired ? (
+          <div className="rounded-xl border border-yellow-200 bg-yellow-50 px-4 py-6 text-center text-sm text-yellow-800">
+            {expired ? "This payment link has expired." : "This payment link is not currently active."}
+          </div>
+        ) : (
+          <PublicPaymentForm
+            slug={slug}
+            fixedAmount={link.amount ? Number(link.amount) : null}
+            minAmount={link.minAmount ? Number(link.minAmount) : 1}
+          />
+        )}
+
+        <p className="mt-6 text-center text-xs text-slate-400">
+          Payments processed securely by Stripe
+        </p>
+      </div>
+    </div>
+  );
+}
