@@ -58,6 +58,7 @@ jobs:
           files-folder-filter: exe
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
+          trace: true
 
       - name: Warn if signing failed
         if: steps.signing.outcome == 'failure'
