@@ -43,6 +43,90 @@ jobs:
           npm run build:app
           npx electron-builder --win nsis --publish never
 
+      - name: Diagnose Artifact Signing account
+        continue-on-error: true
+        shell: pwsh
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          # Get management-plane token
+          $mgmtBody = "client_id=$env:AZURE_CLIENT_ID&client_secret=$env:AZURE_CLIENT_SECRET" +
+                      "&scope=https://management.azure.com/.default&grant_type=client_credentials"
+          $mgmtToken = (Invoke-RestMethod -Method POST `
+            -Uri "https://login.microsoftonline.com/$env:AZURE_TENANT_ID/oauth2/v2.0/token" `
+            -Body $mgmtBody -ContentType "application/x-www-form-urlencoded").access_token
+          Write-Host "--- Management plane token: OK ---"
+
+          # List all CodeSigning accounts in subscription to find the resource group
+          $accounts = Invoke-RestMethod -Method GET `
+            -Uri "https://management.azure.com/subscriptions/$env:AZURE_SUBSCRIPTION_ID/providers/Microsoft.CodeSigning/codeSigningAccounts?api-version=2024-09-30-preview" `
+            -Headers @{ Authorization = "Bearer $mgmtToken" }
+          Write-Host "--- Signing accounts in subscription ---"
+          $accounts.value | ForEach-Object { Write-Host "  $($_.name) | RG: $($_.id -replace '.*/resourceGroups/([^/]+)/.*','$1') | State: $($_.properties.provisioningState) | Sku: $($_.sku.name)" }
+
+          # Get the specific account details
+          $account = $accounts.value | Where-Object { $_.name -eq 'civicflow-signing' } | Select-Object -First 1
+          if ($account) {
+            $rg = $account.id -replace '.*/resourceGroups/([^/]+)/.*','$1'
+            Write-Host "--- Account: civicflow-signing | RG: $rg ---"
+            Write-Host "  ProvisioningState : $($account.properties.provisioningState)"
+            Write-Host "  Location          : $($account.location)"
+            Write-Host "  Sku               : $($account.sku.name)"
+            Write-Host "  AccountUri        : $($account.properties.accountUri)"
+
+            # Get certificate profile details from management plane
+            $profileUri = "https://management.azure.com$($account.id)/certificateProfiles/CivicFlow?api-version=2024-09-30-preview"
+            try {
+              $profile = Invoke-RestMethod -Method GET -Uri $profileUri -Headers @{ Authorization = "Bearer $mgmtToken" }
+              Write-Host "--- Certificate profile: CivicFlow ---"
+              Write-Host "  ProvisioningState       : $($profile.properties.provisioningState)"
+              Write-Host "  ProfileType             : $($profile.properties.profileType)"
+              Write-Host "  IdentityValidationId    : $($profile.properties.identityValidationId)"
+              Write-Host "  Status                  : $($profile.properties.status)"
+              Write-Host "  Certificates count      : $($profile.properties.certificates.Count)"
+              if ($profile.properties.certificates.Count -gt 0) {
+                $profile.properties.certificates | ForEach-Object { Write-Host "    Cert: thumbprint=$($_.thumbprint) status=$($_.status) expiry=$($_.expiresOn)" }
+              }
+            } catch {
+              Write-Host "  Profile fetch error: $($_.Exception.Message)"
+            }
+          } else {
+            Write-Host "  civicflow-signing NOT FOUND in subscription"
+          }
+
+          # Get data-plane token and probe the CORRECT URL (no /api/ segment)
+          $dpBody = "client_id=$env:AZURE_CLIENT_ID&client_secret=$env:AZURE_CLIENT_SECRET" +
+                    "&scope=https://codesigning.azure.net/.default&grant_type=client_credentials"
+          $dpToken = (Invoke-RestMethod -Method POST `
+            -Uri "https://login.microsoftonline.com/$env:AZURE_TENANT_ID/oauth2/v2.0/token" `
+            -Body $dpBody -ContentType "application/x-www-form-urlencoded").access_token
+          $dpJwt = $dpToken -split '\.' | Select-Object -Index 1
+          $dpPadded = $dpJwt.PadRight($dpJwt.Length + (4 - $dpJwt.Length % 4) % 4, '=')
+          $dpClaims = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($dpPadded)) | ConvertFrom-Json
+          Write-Host "--- Data-plane token claims ---"
+          Write-Host "  aud : $($dpClaims.aud)"
+          Write-Host "  oid : $($dpClaims.oid)"
+          Write-Host "  appid: $($dpClaims.appid)"
+
+          $corrId = [Guid]::NewGuid().ToString()
+          try {
+            $r = Invoke-WebRequest -Method GET `
+              -Uri "https://eus.codesigning.azure.net/codesigning/civicflow-signing/certificateProfiles/CivicFlow?api-version=2024-09-30-preview" `
+              -Headers @{ Authorization = "Bearer $dpToken"; "x-ms-client-request-id" = $corrId } `
+              -UseBasicParsing -ErrorAction Stop
+            Write-Host "--- Data-plane GET profile: $($r.StatusCode) ---"
+            Write-Host $r.Content
+          } catch {
+            $resp = $_.Exception.Response
+            Write-Host "--- Data-plane GET profile: $([int]$resp.StatusCode) ---"
+            Write-Host "  x-ms-request-id  : $($resp.Headers['x-ms-request-id'])"
+            Write-Host "  x-correlation-id : $($resp.Headers['x-correlation-id'])"
+            try { $reader = New-Object System.IO.StreamReader($resp.GetResponseStream()); Write-Host "  body: $($reader.ReadToEnd())" } catch {}
+          }
+
       - name: Sign with Artifact Signing
         id: signing
         continue-on-error: true
