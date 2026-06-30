@@ -72,21 +72,34 @@ jobs:
           Write-Host "tenant_id (tid)    : $($claims.tid)"
           Write-Host "token audience     : $($claims.aud)"
 
-          # Probe the certificate profile via the management plane to confirm the SP
-          # can reach the Artifact Signing account and profile.
-          $armToken = (Invoke-RestMethod -Method POST `
-            -Uri "https://login.microsoftonline.com/$env:AZURE_TENANT_ID/oauth2/v2.0/token" `
-            -Body ($body -replace 'codesigning\.azure\.net', 'management\.azure\.com') `
-            -ContentType "application/x-www-form-urlencoded").access_token
-          $profileUrl = "https://management.azure.com/subscriptions/bdb68447-595d-41e5-b478-aa177b385dbf" +
-            "/providers/Microsoft.CodeSigning/codeSigningAccounts/civicflow-signing" +
-            "/certificateProfiles/CivicFlow?api-version=2024-09-30-preview"
+          # ARM plane probe — needs Reader role on the resource (separate from signing role).
+          # Using .Replace() so the replacement string is treated literally, not as regex.
+          $armBody = $body.Replace('codesigning.azure.net', 'management.azure.com')
           try {
+            $armToken = (Invoke-RestMethod -Method POST `
+              -Uri "https://login.microsoftonline.com/$env:AZURE_TENANT_ID/oauth2/v2.0/token" `
+              -Body $armBody -ContentType "application/x-www-form-urlencoded").access_token
+            $profileUrl = "https://management.azure.com/subscriptions/bdb68447-595d-41e5-b478-aa177b385dbf" +
+              "/providers/Microsoft.CodeSigning/codeSigningAccounts/civicflow-signing" +
+              "/certificateProfiles/CivicFlow?api-version=2024-09-30-preview"
             $profile = Invoke-RestMethod -Method GET -Uri $profileUrl `
               -Headers @{ Authorization = "Bearer $armToken" }
-            Write-Host "Certificate profile status : $($profile.properties.provisioningState)"
+            Write-Host "ARM probe: profile state = $($profile.properties.provisioningState)"
           } catch {
-            Write-Host "Certificate profile probe failed: $($_.Exception.Response.StatusCode) — $($_.Exception.Message)"
+            Write-Host "ARM probe: $($_.Exception.Response.StatusCode) — $($_.Exception.Message)"
+          }
+
+          # Data plane probe — same token audience as the actual signing call.
+          # A 403 here means the role is not yet effective for this SP.
+          try {
+            $dpUrl = "https://eus.codesigning.azure.net/codesigning/api/civicflow-signing" +
+              "/certificateProfiles?api-version=2024-09-30-preview"
+            $dpResult = Invoke-RestMethod -Method GET -Uri $dpUrl `
+              -Headers @{ Authorization = "Bearer $($resp.access_token)" }
+            Write-Host "Data plane probe: 200 OK — $($dpResult | ConvertTo-Json -Compress)"
+          } catch {
+            $dpStatus = [int]$_.Exception.Response.StatusCode
+            Write-Host "Data plane probe: $dpStatus — $($_.Exception.Message)"
           }
 
       - name: Sign with Artifact Signing
