@@ -56,7 +56,7 @@ jobs:
           Install-Module -Name TrustedSigning -Force -Scope CurrentUser -AllowClobber
           Import-Module TrustedSigning
           Invoke-TrustedSigning `
-            -Endpoint "https://eus.codesigning.azure.net" `
+            -Endpoint "https://eus.codesigning.azure.net/" `
             -CodeSigningAccountName "civicflow-signing" `
             -CertificateProfileName "CivicFlow" `
             -FilesFolder "${{ github.workspace }}\release" `
