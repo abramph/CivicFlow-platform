@@ -44,6 +44,8 @@ jobs:
           npx electron-builder --win nsis --publish never
 
       - name: Sign with Azure Trusted Signing
+        id: signing
+        continue-on-error: true
         uses: azure/trusted-signing-action@v0.5.0
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -56,6 +58,12 @@ jobs:
           files-folder-filter: exe
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
+
+      - name: Warn if signing failed
+        if: steps.signing.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Azure Trusted Signing failed — installer will be uploaded UNSIGNED. Check the Azure portal for signing account status."
 
       - name: Publish to GitHub release
         env:
