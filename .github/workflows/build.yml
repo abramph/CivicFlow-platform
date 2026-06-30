@@ -44,6 +44,7 @@ jobs:
           npx electron-builder --win nsis --publish never
 
       - name: Diagnose Artifact Signing permissions
+        continue-on-error: true
         shell: pwsh
         env:
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
