@@ -25,8 +25,11 @@ const reportTypes = [
   ["CAMPAIGNS", "Campaign report"],
   ["EVENTS", "Event report"],
   ["MONTHLY_DUES_COLLECTION", "Monthly dues collection"],
+  ["DUES_PAYMENT_DETAIL", "Dues payment detail"],
   ["OUTSTANDING_DUES", "Outstanding dues"],
+  ["DUES_CURRENT_MEMBERS", "Members current on dues"],
   ["DELINQUENT_MEMBERS", "Delinquent members"],
+  ["CAMPAIGN_PAYERS", "Campaign / event payer report"],
   ["EXPENDITURES", "Expenditures"],
   ["ATTENDANCE", "Attendance"],
   ["MEETING_ATTENDANCE", "Meeting attendance"],
@@ -74,6 +77,7 @@ export function ReportsManager({
     format: "pdf",
     deliveryAction: "preview",
     memberId: "",
+    categoryId: "",
     campaignId: "",
     eventId: "",
     meetingId: "",
@@ -91,7 +95,7 @@ export function ReportsManager({
   const filterObject = useMemo(() => {
     return {
       memberId: form.memberId,
-      categoryId: recipient.categoryId,
+      categoryId: form.categoryId || recipient.categoryId,
       campaignId: form.campaignId,
       eventId: recipient.eventId || form.eventId,
       meetingId: recipient.meetingId || form.meetingId,
@@ -186,6 +190,20 @@ export function ReportsManager({
 
       <div className="grid gap-4 md:grid-cols-4">
         <label className="space-y-2 text-sm font-medium text-slate-900">
+          <span>Member</span>
+          <select value={form.memberId} onChange={(event) => setForm((current) => ({ ...current, memberId: event.target.value }))} className={fieldClassName}>
+            <option value="">Any member</option>
+            {members.map((member) => <option key={member.id} value={member.id}>{member.label}</option>)}
+          </select>
+        </label>
+        <label className="space-y-2 text-sm font-medium text-slate-900">
+          <span>Membership category</span>
+          <select value={form.categoryId} onChange={(event) => setForm((current) => ({ ...current, categoryId: event.target.value }))} className={fieldClassName}>
+            <option value="">Any category</option>
+            {categories.map((category) => <option key={category.id} value={category.id}>{category.label}</option>)}
+          </select>
+        </label>
+        <label className="space-y-2 text-sm font-medium text-slate-900">
           <span>Campaign</span>
           <select value={form.campaignId} onChange={(event) => setForm((current) => ({ ...current, campaignId: event.target.value }))} className={fieldClassName}>
             <option value="">Any campaign</option>
@@ -199,6 +217,9 @@ export function ReportsManager({
             {events.map((event) => <option key={event.id} value={event.id}>{event.label}</option>)}
           </select>
         </label>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-4">
         <label className="space-y-2 text-sm font-medium text-slate-900">
           <span>Meeting</span>
           <select value={form.meetingId} onChange={(event) => setForm((current) => ({ ...current, meetingId: event.target.value }))} className={fieldClassName}>

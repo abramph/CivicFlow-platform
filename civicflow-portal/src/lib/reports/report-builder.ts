@@ -9,8 +9,11 @@ export const reportTypeOptions = [
   { value: "CAMPAIGNS", label: "Campaign report" },
   { value: "EVENTS", label: "Event report" },
   { value: "MONTHLY_DUES_COLLECTION", label: "Monthly dues collection" },
+  { value: "DUES_PAYMENT_DETAIL", label: "Dues payment detail" },
   { value: "OUTSTANDING_DUES", label: "Outstanding dues" },
+  { value: "DUES_CURRENT_MEMBERS", label: "Members current on dues" },
   { value: "DELINQUENT_MEMBERS", label: "Delinquent members" },
+  { value: "CAMPAIGN_PAYERS", label: "Campaign / event payer report" },
   { value: "EXPENDITURES", label: "Expenditures" },
   { value: "ATTENDANCE", label: "Attendance" },
   { value: "MEETING_ATTENDANCE", label: "Meeting attendance" },
@@ -123,6 +126,7 @@ export async function buildReport(input: BuildReportInput): Promise<ReportData> 
   const take = rowLimit(input.limit);
   const range = dateWhere(start, end);
   const memberId = filterValue(input.filters, "memberId");
+  const categoryId = filterValue(input.filters, "categoryId");
   const campaignId = filterValue(input.filters, "campaignId");
   const eventId = filterValue(input.filters, "eventId");
   const meetingId = filterValue(input.filters, "meetingId");
@@ -276,6 +280,116 @@ export async function buildReport(input: BuildReportInput): Promise<ReportData> 
     case "PAYMENT_RECONCILIATION": {
       const rows = await prisma.paymentImportItem.findMany({ where: { organizationId, ...(range ? { transactionDate: range } : {}), ...(memberId ? { matchedMemberId: memberId } : {}), ...(campaignId ? { matchedCampaignId: campaignId } : {}), ...(eventId ? { matchedEventId: eventId } : {}), ...(status ? { verificationStatus: status as never } : {}) }, include: { matchedMember: true, matchedCampaign: true, matchedEvent: true, batch: true }, orderBy: { transactionDate: "desc" }, take });
       return baseReport(input, ["Date", "Source", "Payer", "Member", "Amount", "Verification", "Posted As", "Transaction ID", "Memo"], rows.map((row) => ({ Date: formatDate(row.transactionDate), Source: formatEnumLabel(row.sourceType), Payer: row.payerName ?? row.payerEmail ?? row.payerPhone ?? "", Member: fullName(row.matchedMember), Amount: money(row.amount), Verification: formatEnumLabel(row.verificationStatus), "Posted As": formatEnumLabel(row.postedAs, ""), "Transaction ID": row.externalTransactionId ?? "", Memo: row.memo ?? "" })), [{ label: "Imported payments", value: rows.length }, { label: "Total imported amount", value: money(total(rows)) }]);
+    }
+    case "DUES_CURRENT_MEMBERS": {
+      const rows = await prisma.orgMember.findMany({
+        where: {
+          organizationId,
+          membershipStatus: "active",
+          isDelinquent: false,
+          ...(categoryId ? { membershipCategoryId: categoryId } : {}),
+        },
+        include: {
+          membershipCategory: { select: { name: true } },
+          duesPayments: {
+            orderBy: { paymentDate: "desc" },
+            take: 1,
+            select: { paymentDate: true, amount: true, method: true },
+          },
+        },
+        orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+        take,
+      });
+      return baseReport(
+        input,
+        ["Name", "Email", "Phone", "Category", "Join Date", "Last Payment Date", "Last Payment Amount", "Last Payment Method"],
+        rows.map((row) => ({
+          Name: fullName(row),
+          Email: row.email ?? "",
+          Phone: row.phone ?? "",
+          Category: row.membershipCategory?.name ?? "",
+          "Join Date": formatDate(row.joinDate),
+          "Last Payment Date": row.duesPayments[0] ? formatDate(row.duesPayments[0].paymentDate) : "",
+          "Last Payment Amount": row.duesPayments[0] ? money(row.duesPayments[0].amount) : "",
+          "Last Payment Method": row.duesPayments[0] ? formatEnumLabel(row.duesPayments[0].method) : "",
+        })),
+        [{ label: "Members current on dues", value: rows.length }],
+      );
+    }
+    case "DUES_PAYMENT_DETAIL": {
+      const rows = await prisma.duesPayment.findMany({
+        where: {
+          organizationId,
+          ...(range ? { paymentDate: range } : {}),
+          ...(memberId ? { memberId } : {}),
+        },
+        include: {
+          member: { select: { firstName: true, lastName: true, preferredName: true, email: true, phone: true } },
+          duesCharge: { select: { amountDue: true, amountPaid: true, status: true, periodStart: true, periodEnd: true } },
+          duesAccount: { select: { name: true } },
+        },
+        orderBy: { paymentDate: "desc" },
+        take,
+      });
+      return baseReport(
+        input,
+        ["Payment Date", "Member", "Email", "Phone", "Amount", "Method", "Account", "Period Start", "Period End", "Charge Amount", "Charge Status", "Reference"],
+        rows.map((row) => ({
+          "Payment Date": formatDate(row.paymentDate),
+          Member: fullName(row.member),
+          Email: row.member.email ?? "",
+          Phone: row.member.phone ?? "",
+          Amount: money(row.amount),
+          Method: formatEnumLabel(row.method),
+          Account: row.duesAccount?.name ?? "",
+          "Period Start": formatDate(row.duesCharge?.periodStart),
+          "Period End": formatDate(row.duesCharge?.periodEnd),
+          "Charge Amount": row.duesCharge ? money(row.duesCharge.amountDue) : "",
+          "Charge Status": row.duesCharge ? formatEnumLabel(row.duesCharge.status) : "",
+          Reference: row.reference ?? "",
+        })),
+        [
+          { label: "Total collected", value: money(total(rows)) },
+          { label: "Payments", value: rows.length },
+        ],
+      );
+    }
+    case "CAMPAIGN_PAYERS": {
+      const rows = await prisma.contribution.findMany({
+        where: {
+          organizationId,
+          ...(campaignId ? { campaignId } : {}),
+          ...(eventId ? { eventId } : {}),
+          ...(range ? { contributionDate: range } : {}),
+        },
+        include: {
+          member: { select: { firstName: true, lastName: true, preferredName: true, email: true, phone: true } },
+          campaign: { select: { name: true } },
+          event: { select: { title: true } },
+        },
+        orderBy: { contributionDate: "desc" },
+        take,
+      });
+      return baseReport(
+        input,
+        ["Date", "Member / Contributor", "Email", "Phone", "Amount", "Payment Method", "Campaign", "Event", "Source"],
+        rows.map((row) => ({
+          Date: formatDate(row.contributionDate),
+          "Member / Contributor": fullName(row.member) || (row.contributorName ?? "Anonymous"),
+          Email: row.member?.email ?? "",
+          Phone: row.member?.phone ?? "",
+          Amount: money(row.amount),
+          "Payment Method": formatEnumLabel(row.paymentMethod),
+          Campaign: row.campaign?.name ?? "",
+          Event: row.event?.title ?? "",
+          Source: formatEnumLabel(row.source),
+        })),
+        [
+          { label: "Total raised", value: money(total(rows)) },
+          { label: "Contributions", value: rows.length },
+          { label: "Unique contributors", value: new Set(rows.map((r) => r.memberId ?? r.contributorName ?? "anon")).size },
+        ],
+      );
     }
     default:
       return baseReport(input, ["Message"], [{ Message: "Unsupported report type" }], []);
