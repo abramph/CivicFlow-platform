@@ -43,16 +43,54 @@ jobs:
           npm run build:app
           npx electron-builder --win nsis --publish never
 
-      - name: Print Artifact Signing config (non-secret)
-        shell: bash
+      - name: Probe Artifact Signing API (raw HTTP)
+        continue-on-error: true
+        shell: pwsh
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
         run: |
-          echo "Tenant ID    : 6da094ae-ae57-4674-b36e-645fa45e1c4a"
-          echo "Sub ID       : bdb68447-595d-41e5-b478-aa177b385dbf"
-          echo "Client ID    : 2ccf8c43-83d3-44e2-a6f6-124e81b84183"
-          echo "Account      : civicflow-signing"
-          echo "Profile      : CivicFlow"
-          echo "Endpoint     : https://eus.codesigning.azure.net/"
-          echo "Secrets set  : AZURE_CLIENT_SECRET=${{ secrets.AZURE_CLIENT_SECRET != '' }}"
+          Write-Host "Tenant ID  : 6da094ae-ae57-4674-b36e-645fa45e1c4a"
+          Write-Host "Sub ID     : bdb68447-595d-41e5-b478-aa177b385dbf"
+          Write-Host "Client ID  : 2ccf8c43-83d3-44e2-a6f6-124e81b84183"
+          Write-Host "Account    : civicflow-signing"
+          Write-Host "Profile    : CivicFlow"
+          Write-Host "Endpoint   : https://eus.codesigning.azure.net/"
+
+          $body = "client_id=$env:AZURE_CLIENT_ID&client_secret=$env:AZURE_CLIENT_SECRET" +
+                  "&scope=https://codesigning.azure.net/.default&grant_type=client_credentials"
+          $token = (Invoke-RestMethod -Method POST `
+            -Uri "https://login.microsoftonline.com/$env:AZURE_TENANT_ID/oauth2/v2.0/token" `
+            -Body $body -ContentType "application/x-www-form-urlencoded").access_token
+
+          $correlationId = [Guid]::NewGuid().ToString()
+          $headers = @{
+            Authorization       = "Bearer $token"
+            "x-ms-client-request-id" = $correlationId
+          }
+          Write-Host "Correlation ID sent: $correlationId"
+
+          try {
+            $r = Invoke-WebRequest -Method GET `
+              -Uri "https://eus.codesigning.azure.net/codesigning/api/civicflow-signing/certificateProfiles/CivicFlow?api-version=2024-09-30-preview" `
+              -Headers $headers -UseBasicParsing -ErrorAction Stop
+            Write-Host "Response: $($r.StatusCode)"
+            Write-Host "Body: $($r.Content)"
+          } catch {
+            $resp = $_.Exception.Response
+            $statusCode = [int]$resp.StatusCode
+            Write-Host "Response status: $statusCode"
+            $rqId = $resp.Headers["x-ms-request-id"]
+            $corrId = $resp.Headers["x-correlation-id"]
+            Write-Host "x-ms-request-id   : $rqId"
+            Write-Host "x-correlation-id  : $corrId"
+            try {
+              $reader = New-Object System.IO.StreamReader($resp.GetResponseStream())
+              $respBody = $reader.ReadToEnd()
+              Write-Host "Response body: $respBody"
+            } catch { Write-Host "Response body: (empty)" }
+          }
 
       - name: Sign with Artifact Signing
         id: signing
@@ -72,6 +110,7 @@ jobs:
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
+          trace: true
 
       - name: Warn if Artifact Signing failed
         if: steps.signing.outcome == 'failure'
