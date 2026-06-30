@@ -43,98 +43,41 @@ jobs:
           npm run build:app
           npx electron-builder --win nsis --publish never
 
-      - name: Diagnose Artifact Signing permissions
-        continue-on-error: true
-        shell: pwsh
-        env:
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          AZURE_LOG_LEVEL: verbose
+      - name: Print Artifact Signing config (non-secret)
+        shell: bash
         run: |
-          Write-Host "=== Artifact Signing config ==="
-          Write-Host "Account  : civicflow-signing"
-          Write-Host "Profile  : CivicFlow"
-          Write-Host "Endpoint : https://eus.codesigning.azure.net/"
-          Write-Host "Client ID secret set: $($env:AZURE_CLIENT_ID -ne '')"
-          Write-Host "Client secret set   : $($env:AZURE_CLIENT_SECRET -ne '')"
-          Write-Host "Tenant ID secret set: $($env:AZURE_TENANT_ID -ne '')"
-
-          $body = "client_id=$env:AZURE_CLIENT_ID" +
-                  "&client_secret=$env:AZURE_CLIENT_SECRET" +
-                  "&scope=https://codesigning.azure.net/.default" +
-                  "&grant_type=client_credentials"
-          $resp = Invoke-RestMethod -Method POST `
-            -Uri "https://login.microsoftonline.com/$env:AZURE_TENANT_ID/oauth2/v2.0/token" `
-            -Body $body -ContentType "application/x-www-form-urlencoded"
-          $payload = $resp.access_token.Split('.')[1]
-          $pad = 4 - ($payload.Length % 4); if ($pad -ne 4) { $payload += '=' * $pad }
-          $claims = [System.Text.Encoding]::UTF8.GetString(
-            [Convert]::FromBase64String($payload.Replace('-','+').Replace('_','/'))) |
-            ConvertFrom-Json
-          Write-Host "=== Token claims ==="
-          Write-Host "app_id (client ID) : $($claims.appid)"
-          Write-Host "object_id (oid)    : $($claims.oid)"
-          Write-Host "tenant_id (tid)    : $($claims.tid)"
-          Write-Host "token audience     : $($claims.aud)"
-          Write-Host "token expires      : $(([System.DateTimeOffset]::FromUnixTimeSeconds($claims.exp)).ToString('o'))"
-
-          $armBody = $body.Replace('codesigning.azure.net', 'management.azure.com')
-          try {
-            $armToken = (Invoke-RestMethod -Method POST `
-              -Uri "https://login.microsoftonline.com/$env:AZURE_TENANT_ID/oauth2/v2.0/token" `
-              -Body $armBody -ContentType "application/x-www-form-urlencoded").access_token
-            $profileUrl = "https://management.azure.com/subscriptions/bdb68447-595d-41e5-b478-aa177b385dbf" +
-              "/providers/Microsoft.CodeSigning/codeSigningAccounts/civicflow-signing" +
-              "/certificateProfiles/CivicFlow?api-version=2024-09-30-preview"
-            $profile = Invoke-RestMethod -Method GET -Uri $profileUrl `
-              -Headers @{ Authorization = "Bearer $armToken" }
-            Write-Host "ARM probe: profile state = $($profile.properties.provisioningState)"
-          } catch {
-            Write-Host "ARM probe: $($_.Exception.Response.StatusCode) — $($_.Exception.Message)"
-          }
-
-          try {
-            $dpUrl = "https://eus.codesigning.azure.net/codesigning/api/civicflow-signing" +
-              "/certificateProfiles/CivicFlow?api-version=2024-09-30-preview"
-            $dpResult = Invoke-RestMethod -Method GET -Uri $dpUrl `
-              -Headers @{ Authorization = "Bearer $($resp.access_token)" }
-            Write-Host "Data plane probe: 200 OK — $($dpResult | ConvertTo-Json -Compress)"
-          } catch {
-            $dpStatus = [int]$_.Exception.Response.StatusCode
-            $dpBody = $null
-            try { $dpBody = $_.Exception.Response.Content.ReadAsStringAsync().Result } catch {}
-            Write-Host "Data plane probe: $dpStatus — body: $dpBody — $($_.Exception.Message)"
-          }
+          echo "Tenant ID    : 6da094ae-ae57-4674-b36e-645fa45e1c4a"
+          echo "Sub ID       : bdb68447-595d-41e5-b478-aa177b385dbf"
+          echo "Client ID    : 2ccf8c43-83d3-44e2-a6f6-124e81b84183"
+          echo "Account      : civicflow-signing"
+          echo "Profile      : CivicFlow"
+          echo "Endpoint     : https://eus.codesigning.azure.net/"
+          echo "Secrets set  : AZURE_CLIENT_SECRET=${{ secrets.AZURE_CLIENT_SECRET != '' }}"
 
       - name: Sign with Artifact Signing
         id: signing
         continue-on-error: true
-        shell: pwsh
+        uses: azure/trusted-signing-action@v0.5.0
         env:
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           AZURE_LOG_LEVEL: verbose
-        run: |
-          $ErrorActionPreference = 'Stop'
-          Install-Module -Name TrustedSigning -Force -Scope CurrentUser -AllowClobber
-          Import-Module TrustedSigning
-          Invoke-TrustedSigning `
-            -Endpoint "https://eus.codesigning.azure.net/" `
-            -CodeSigningAccountName "civicflow-signing" `
-            -CertificateProfileName "CivicFlow" `
-            -FilesFolder "${{ github.workspace }}\release" `
-            -FilesFolderFilter "exe" `
-            -TimestampRfc3161 "http://timestamp.acs.microsoft.com" `
-            -TimestampDigest SHA256 `
-            -FileDigest SHA256
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.TRUSTED_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.TRUSTED_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
+          files-folder: ${{ github.workspace }}\release
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
 
       - name: Warn if Artifact Signing failed
         if: steps.signing.outcome == 'failure'
         shell: bash
         run: |
-          echo "::warning::Artifact Signing failed — installer will be uploaded UNSIGNED. Check the Artifact Signing account 'civicflow-signing' in the Azure portal: verify the service principal has the Artifact Signing Certificate Profile Signer role assigned directly on the account or certificate profile resource."
+          echo "::warning::Artifact Signing failed — installer will be uploaded UNSIGNED. Account: civicflow-signing, Profile: CivicFlow, Endpoint: https://eus.codesigning.azure.net/"
 
       - name: Publish to GitHub release
         env:
