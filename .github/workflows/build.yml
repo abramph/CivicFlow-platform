@@ -50,10 +50,16 @@ jobs:
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_LOG_LEVEL: verbose
         run: |
-          # Fetch a token and surface the service principal Object ID (oid) and app ID.
-          # The oid is what Azure RBAC evaluates — it must match the service principal
-          # that holds the Artifact Signing Certificate Profile Signer role.
+          Write-Host "=== Artifact Signing config ==="
+          Write-Host "Account  : civicflow-signing"
+          Write-Host "Profile  : CivicFlow"
+          Write-Host "Endpoint : https://eus.codesigning.azure.net/"
+          Write-Host "Client ID secret set: $($env:AZURE_CLIENT_ID -ne '')"
+          Write-Host "Client secret set   : $($env:AZURE_CLIENT_SECRET -ne '')"
+          Write-Host "Tenant ID secret set: $($env:AZURE_TENANT_ID -ne '')"
+
           $body = "client_id=$env:AZURE_CLIENT_ID" +
                   "&client_secret=$env:AZURE_CLIENT_SECRET" +
                   "&scope=https://codesigning.azure.net/.default" +
@@ -64,16 +70,15 @@ jobs:
           $payload = $resp.access_token.Split('.')[1]
           $pad = 4 - ($payload.Length % 4); if ($pad -ne 4) { $payload += '=' * $pad }
           $claims = [System.Text.Encoding]::UTF8.GetString(
-            [Convert]::FromBase64String($payload.Replace('-','+').Replace('_','/')))  |
+            [Convert]::FromBase64String($payload.Replace('-','+').Replace('_','/'))) |
             ConvertFrom-Json
-          Write-Host "=== Artifact Signing auth diagnostics ==="
+          Write-Host "=== Token claims ==="
           Write-Host "app_id (client ID) : $($claims.appid)"
           Write-Host "object_id (oid)    : $($claims.oid)"
           Write-Host "tenant_id (tid)    : $($claims.tid)"
           Write-Host "token audience     : $($claims.aud)"
+          Write-Host "token expires      : $(([System.DateTimeOffset]::FromUnixTimeSeconds($claims.exp)).ToString('o'))"
 
-          # ARM plane probe — needs Reader role on the resource (separate from signing role).
-          # Using .Replace() so the replacement string is treated literally, not as regex.
           $armBody = $body.Replace('codesigning.azure.net', 'management.azure.com')
           try {
             $armToken = (Invoke-RestMethod -Method POST `
@@ -89,17 +94,17 @@ jobs:
             Write-Host "ARM probe: $($_.Exception.Response.StatusCode) — $($_.Exception.Message)"
           }
 
-          # Data plane probe — same token audience as the actual signing call.
-          # A 403 here means the role is not yet effective for this SP.
           try {
             $dpUrl = "https://eus.codesigning.azure.net/codesigning/api/civicflow-signing" +
-              "/certificateProfiles?api-version=2024-09-30-preview"
+              "/certificateProfiles/CivicFlow?api-version=2024-09-30-preview"
             $dpResult = Invoke-RestMethod -Method GET -Uri $dpUrl `
               -Headers @{ Authorization = "Bearer $($resp.access_token)" }
             Write-Host "Data plane probe: 200 OK — $($dpResult | ConvertTo-Json -Compress)"
           } catch {
             $dpStatus = [int]$_.Exception.Response.StatusCode
-            Write-Host "Data plane probe: $dpStatus — $($_.Exception.Message)"
+            $dpBody = $null
+            try { $dpBody = $_.Exception.Response.Content.ReadAsStringAsync().Result } catch {}
+            Write-Host "Data plane probe: $dpStatus — body: $dpBody — $($_.Exception.Message)"
           }
 
       - name: Sign with Artifact Signing
@@ -110,6 +115,7 @@ jobs:
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_LOG_LEVEL: verbose
         run: |
           $ErrorActionPreference = 'Stop'
           Install-Module -Name TrustedSigning -Force -Scope CurrentUser -AllowClobber
