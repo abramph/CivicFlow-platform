@@ -43,7 +43,52 @@ jobs:
           npm run build:app
           npx electron-builder --win nsis --publish never
 
-      - name: Sign with Azure Trusted Signing
+      - name: Diagnose Artifact Signing permissions
+        shell: pwsh
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: |
+          # Fetch a token and surface the service principal Object ID (oid) and app ID.
+          # The oid is what Azure RBAC evaluates — it must match the service principal
+          # that holds the Artifact Signing Certificate Profile Signer role.
+          $body = "client_id=$env:AZURE_CLIENT_ID" +
+                  "&client_secret=$env:AZURE_CLIENT_SECRET" +
+                  "&scope=https://codesigning.azure.net/.default" +
+                  "&grant_type=client_credentials"
+          $resp = Invoke-RestMethod -Method POST `
+            -Uri "https://login.microsoftonline.com/$env:AZURE_TENANT_ID/oauth2/v2.0/token" `
+            -Body $body -ContentType "application/x-www-form-urlencoded"
+          $payload = $resp.access_token.Split('.')[1]
+          $pad = 4 - ($payload.Length % 4); if ($pad -ne 4) { $payload += '=' * $pad }
+          $claims = [System.Text.Encoding]::UTF8.GetString(
+            [Convert]::FromBase64String($payload.Replace('-','+').Replace('_','/')))  |
+            ConvertFrom-Json
+          Write-Host "=== Artifact Signing auth diagnostics ==="
+          Write-Host "app_id (client ID) : $($claims.appid)"
+          Write-Host "object_id (oid)    : $($claims.oid)"
+          Write-Host "tenant_id (tid)    : $($claims.tid)"
+          Write-Host "token audience     : $($claims.aud)"
+
+          # Probe the certificate profile via the management plane to confirm the SP
+          # can reach the Artifact Signing account and profile.
+          $armToken = (Invoke-RestMethod -Method POST `
+            -Uri "https://login.microsoftonline.com/$env:AZURE_TENANT_ID/oauth2/v2.0/token" `
+            -Body ($body -replace 'codesigning\.azure\.net', 'management\.azure\.com') `
+            -ContentType "application/x-www-form-urlencoded").access_token
+          $profileUrl = "https://management.azure.com/subscriptions/bdb68447-595d-41e5-b478-aa177b385dbf" +
+            "/providers/Microsoft.CodeSigning/codeSigningAccounts/civicflow-signing" +
+            "/certificateProfiles/CivicFlow?api-version=2024-09-30-preview"
+          try {
+            $profile = Invoke-RestMethod -Method GET -Uri $profileUrl `
+              -Headers @{ Authorization = "Bearer $armToken" }
+            Write-Host "Certificate profile status : $($profile.properties.provisioningState)"
+          } catch {
+            Write-Host "Certificate profile probe failed: $($_.Exception.Response.StatusCode) — $($_.Exception.Message)"
+          }
+
+      - name: Sign with Artifact Signing
         id: signing
         continue-on-error: true
         shell: pwsh
@@ -51,7 +96,6 @@ jobs:
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          AZURE_LOG_LEVEL: verbose
         run: |
           $ErrorActionPreference = 'Stop'
           Install-Module -Name TrustedSigning -Force -Scope CurrentUser -AllowClobber
@@ -66,11 +110,11 @@ jobs:
             -TimestampDigest SHA256 `
             -FileDigest SHA256
 
-      - name: Warn if signing failed
+      - name: Warn if Artifact Signing failed
         if: steps.signing.outcome == 'failure'
         shell: bash
         run: |
-          echo "::warning::Azure Trusted Signing failed — installer will be uploaded UNSIGNED. Check the Azure portal for signing account status."
+          echo "::warning::Artifact Signing failed — installer will be uploaded UNSIGNED. Check the Artifact Signing account 'civicflow-signing' in the Azure portal: verify the service principal has the Artifact Signing Certificate Profile Signer role assigned directly on the account or certificate profile resource."
 
       - name: Publish to GitHub release
         env:
