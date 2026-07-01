@@ -240,6 +240,18 @@ const ALL_PRELOAD_CHANNELS = [
   "reports:roster-combined-pdf",
   "reports:roster-inactive-csv",
   "reports:roster-inactive-pdf",
+  "reports:roster-by-city-csv",
+  "reports:roster-by-city-pdf",
+  "reports:roster-by-zip-csv",
+  "reports:roster-by-zip-pdf",
+  "reports:dues-current-csv",
+  "reports:dues-current-pdf",
+  "reports:dues-paid-full-year-csv",
+  "reports:dues-paid-full-year-pdf",
+  "reports:event-contributors-roster-csv",
+  "reports:event-contributors-roster-pdf",
+  "reports:campaign-contributors-roster-csv",
+  "reports:campaign-contributors-roster-pdf",
   "reports:timeseries",
   "restore:db",
   "roles:getCurrent",
@@ -470,60 +482,41 @@ function buildPdfReportRequest(reportType, params = {}) {
   const memberId = toOptionalPositiveId(params.memberId);
   const eventId = toOptionalPositiveId(params.eventId);
   const campaignId = toOptionalPositiveId(params.campaignId);
+  const city = String(params.city || "").trim() || null;
+  const zip = String(params.zip || "").trim() || null;
+  const year = String(params.year || "").trim() || null;
 
   switch (normalizedType) {
     case "member_monthly":
-      return {
-        reportType: normalizedType,
-        title: "Member Monthly Statement",
-        memberId,
-      };
+      return { reportType: normalizedType, title: "Member Monthly Statement", memberId };
     case "member_contribution":
-      return {
-        reportType: normalizedType,
-        title: "Member Contribution Report",
-        memberId,
-      };
+      return { reportType: normalizedType, title: "Member Contribution Report", memberId };
     case "event_contribution":
-      return {
-        reportType: normalizedType,
-        title: "Event Financial Report",
-        eventId,
-      };
+      return { reportType: normalizedType, title: "Event Financial Report", eventId };
     case "campaign_contribution":
-      return {
-        reportType: normalizedType,
-        title: "Campaign Financial Report",
-        campaignId,
-      };
+      return { reportType: normalizedType, title: "Campaign Financial Report", campaignId };
     case "org_financial":
-      return {
-        reportType: normalizedType,
-        title: "Organization Financial Report",
-      };
+      return { reportType: normalizedType, title: "Organization Financial Report" };
     case "roster_active":
-      return {
-        reportType: normalizedType,
-        title: "Active Roster Report",
-      };
+      return { reportType: normalizedType, title: "Active Roster" };
     case "roster_inactive":
-      return {
-        reportType: normalizedType,
-        title: "Inactive Roster Report",
-      };
+      return { reportType: normalizedType, title: "Inactive Roster" };
     case "roster_combined":
-      return {
-        reportType: normalizedType,
-        title: "Active + Inactive Combined Roster",
-      };
+      return { reportType: normalizedType, title: "Full Roster — Active & Inactive" };
+    case "roster_by_city":
+      return { reportType: normalizedType, title: city ? `Roster — ${city}` : "Roster by City", city };
+    case "roster_by_zip":
+      return { reportType: normalizedType, title: zip ? `Roster — ZIP ${zip}` : "Roster by ZIP Code", zip };
+    case "dues_current":
+      return { reportType: normalizedType, title: "Members Current on Dues" };
+    case "dues_paid_full_year":
+      return { reportType: normalizedType, title: year ? `Full Year Dues Paid — ${year}` : "Full Year Dues Paid", year };
+    case "event_contributors_roster":
+      return { reportType: normalizedType, title: "Event Contributors", eventId };
+    case "campaign_contributors_roster":
+      return { reportType: normalizedType, title: "Campaign Contributors", campaignId };
     default:
-      return {
-        reportType: normalizedType || "report",
-        title: normalizedType || "Report",
-        memberId,
-        eventId,
-        campaignId,
-      };
+      return { reportType: normalizedType || "report", title: normalizedType || "Report", memberId, eventId, campaignId, city, zip, year };
   }
 }
 
@@ -4301,19 +4294,150 @@ function registerIpcHandlers() {
     return { success: true, csv: toCsv(rows), filename: `Member_Monthly_${memberId}_${opts.month}.csv` };
   });
 
+  const ROSTER_SELECT = `SELECT m.id, m.first_name, m.last_name, m.email, m.phone,
+    m.address, m.city, m.state, m.zip, m.join_date, c.name AS category_name`;
+  const ROSTER_FROM = `FROM members m LEFT JOIN categories c ON c.id = m.category_id`;
+
+  const DUES_TXN_FILTER = `(
+    LOWER(COALESCE(type,'')) IN ('dues','dues_payment','invoice','receipt')
+    OR UPPER(COALESCE(transaction_type,'')) = 'DUES'
+  ) AND COALESCE(is_deleted,0) = 0
+    AND UPPER(COALESCE(status,'COMPLETED')) = 'COMPLETED'
+    AND date(COALESCE(occurred_on, created_at)) <= date('now')`;
+
   register(registry, "reports:roster-active-csv", () => {
-    const rows = database.prepare("SELECT m.id, m.first_name, m.last_name, m.email, m.phone, c.name AS category_name, m.join_date FROM members m LEFT JOIN categories c ON c.id = m.category_id WHERE LOWER(COALESCE(m.status, 'active')) = 'active' ORDER BY m.last_name, m.first_name").all();
+    const rows = database.prepare(`${ROSTER_SELECT} ${ROSTER_FROM}
+      WHERE LOWER(COALESCE(m.status,'active')) = 'active' ORDER BY m.last_name, m.first_name`).all();
     return { success: true, csv: toCsv(rows), filename: "Roster_Active.csv" };
   });
 
   register(registry, "reports:roster-inactive-csv", () => {
-    const rows = database.prepare("SELECT m.id, m.first_name, m.last_name, m.email, m.phone, c.name AS category_name, m.join_date FROM members m LEFT JOIN categories c ON c.id = m.category_id WHERE LOWER(COALESCE(m.status, 'inactive')) = 'inactive' ORDER BY m.last_name, m.first_name").all();
+    const rows = database.prepare(`${ROSTER_SELECT} ${ROSTER_FROM}
+      WHERE LOWER(COALESCE(m.status,'inactive')) = 'inactive' ORDER BY m.last_name, m.first_name`).all();
     return { success: true, csv: toCsv(rows), filename: "Roster_Inactive.csv" };
   });
 
   register(registry, "reports:roster-combined-csv", () => {
-    const rows = database.prepare("SELECT m.id, m.first_name, m.last_name, m.email, m.phone, m.status, c.name AS category_name, m.join_date FROM members m LEFT JOIN categories c ON c.id = m.category_id ORDER BY m.last_name, m.first_name").all();
+    const rows = database.prepare(`${ROSTER_SELECT}, m.status ${ROSTER_FROM}
+      ORDER BY m.last_name, m.first_name`).all();
     return { success: true, csv: toCsv(rows), filename: "Roster_Combined.csv" };
+  });
+
+  register(registry, "reports:roster-by-city-csv", (opts = {}) => {
+    const city = String(opts.city || "").trim();
+    if (!city) return { success: false, error: "City is required." };
+    const rows = database.prepare(`${ROSTER_SELECT} ${ROSTER_FROM}
+      WHERE LOWER(COALESCE(m.status,'active')) = 'active'
+        AND LOWER(TRIM(COALESCE(m.city,''))) = LOWER(TRIM(?))
+      ORDER BY m.last_name, m.first_name`).all(city);
+    const safeName = city.replace(/[^a-z0-9]/gi, "_");
+    return { success: true, csv: toCsv(rows), filename: `Roster_City_${safeName}.csv` };
+  });
+
+  register(registry, "reports:roster-by-zip-csv", (opts = {}) => {
+    const zip = String(opts.zip || "").trim();
+    if (!zip) return { success: false, error: "ZIP code is required." };
+    const rows = database.prepare(`${ROSTER_SELECT} ${ROSTER_FROM}
+      WHERE LOWER(COALESCE(m.status,'active')) = 'active'
+        AND TRIM(COALESCE(m.zip,'')) = TRIM(?)
+      ORDER BY m.last_name, m.first_name`).all(zip);
+    return { success: true, csv: toCsv(rows), filename: `Roster_ZIP_${zip}.csv` };
+  });
+
+  register(registry, "reports:dues-current-csv", () => {
+    const rows = database.prepare(`
+      WITH dues_paid AS (
+        SELECT member_id, COALESCE(SUM(amount_cents),0) AS paid_cents
+        FROM transactions WHERE ${DUES_TXN_FILTER} GROUP BY member_id
+      ),
+      join_info AS (
+        SELECT m.id,
+          CASE WHEN ((CAST(strftime('%Y','now') AS INTEGER) - CAST(strftime('%Y', COALESCE(m.join_date, m.created_at, date('now'))) AS INTEGER)) * 12 +
+                     (CAST(strftime('%m','now') AS INTEGER) - CAST(strftime('%m', COALESCE(m.join_date, m.created_at, date('now'))) AS INTEGER))) > 0
+               THEN ((CAST(strftime('%Y','now') AS INTEGER) - CAST(strftime('%Y', COALESCE(m.join_date, m.created_at, date('now'))) AS INTEGER)) * 12 +
+                     (CAST(strftime('%m','now') AS INTEGER) - CAST(strftime('%m', COALESCE(m.join_date, m.created_at, date('now'))) AS INTEGER))) * COALESCE(c.monthly_dues_cents,0)
+               ELSE 0 END AS expected_cents
+        FROM members m LEFT JOIN categories c ON c.id = m.category_id
+        WHERE LOWER(COALESCE(m.status,'active')) = 'active'
+      )
+      SELECT m.id, m.first_name, m.last_name, m.email, m.phone, m.city, m.state, m.zip,
+             m.join_date, c.name AS category_name,
+             COALESCE(dp.paid_cents,0) AS total_paid_cents,
+             ji.expected_cents AS total_expected_cents,
+             ROUND(CAST(COALESCE(dp.paid_cents,0) - ji.expected_cents AS REAL)/100,2) AS balance
+      FROM members m
+      LEFT JOIN categories c ON c.id = m.category_id
+      JOIN join_info ji ON ji.id = m.id
+      LEFT JOIN dues_paid dp ON dp.member_id = m.id
+      WHERE LOWER(COALESCE(m.status,'active')) = 'active'
+        AND COALESCE(dp.paid_cents,0) >= ji.expected_cents
+      ORDER BY m.last_name, m.first_name
+    `).all();
+    return { success: true, csv: toCsv(rows), filename: "Members_Current_on_Dues.csv" };
+  });
+
+  register(registry, "reports:dues-paid-full-year-csv", (opts = {}) => {
+    const year = String(opts.year || new Date().getFullYear());
+    if (!/^\d{4}$/.test(year)) return { success: false, error: "Invalid year." };
+    const rows = database.prepare(`
+      WITH year_dues AS (
+        SELECT member_id, COALESCE(SUM(amount_cents),0) AS year_paid_cents
+        FROM transactions
+        WHERE (LOWER(COALESCE(type,'')) IN ('dues','dues_payment','invoice','receipt') OR UPPER(COALESCE(transaction_type,'')) = 'DUES')
+          AND COALESCE(is_deleted,0) = 0 AND UPPER(COALESCE(status,'COMPLETED')) = 'COMPLETED'
+          AND strftime('%Y', COALESCE(occurred_on, created_at)) = ?
+        GROUP BY member_id
+      )
+      SELECT m.id, m.first_name, m.last_name, m.email, m.phone, m.city, m.state, m.zip,
+             m.join_date, c.name AS category_name,
+             COALESCE(c.monthly_dues_cents,0)*12 AS annual_dues_cents,
+             COALESCE(yd.year_paid_cents,0) AS year_paid_cents
+      FROM members m
+      LEFT JOIN categories c ON c.id = m.category_id
+      LEFT JOIN year_dues yd ON yd.member_id = m.id
+      WHERE COALESCE(yd.year_paid_cents,0) >= COALESCE(c.monthly_dues_cents,0)*12
+        AND COALESCE(c.monthly_dues_cents,0) > 0
+      ORDER BY m.last_name, m.first_name
+    `).all(year);
+    return { success: true, csv: toCsv(rows), filename: `Members_Full_Year_Dues_${year}.csv` };
+  });
+
+  register(registry, "reports:event-contributors-roster-csv", (opts = {}) => {
+    const eventId = Number(opts.eventId || 0);
+    if (!eventId) return { success: false, error: "eventId is required." };
+    const ev = database.prepare("SELECT name FROM events WHERE id = ?").get(eventId);
+    const rows = database.prepare(`
+      SELECT m.id, m.first_name, m.last_name, m.email, m.phone, m.city, m.state, m.zip,
+             m.join_date, c.name AS category_name,
+             COUNT(t.id) AS contribution_count,
+             COALESCE(SUM(t.amount_cents),0) AS total_amount_cents
+      FROM members m
+      LEFT JOIN categories c ON c.id = m.category_id
+      JOIN transactions t ON t.member_id = m.id AND t.event_id = ?
+        AND COALESCE(t.is_deleted,0) = 0 AND UPPER(COALESCE(t.status,'COMPLETED')) = 'COMPLETED'
+      GROUP BY m.id ORDER BY m.last_name, m.first_name
+    `).all(eventId);
+    const safeName = (ev?.name || String(eventId)).replace(/[^a-z0-9]/gi, "_");
+    return { success: true, csv: toCsv(rows), filename: `Event_Contributors_${safeName}.csv` };
+  });
+
+  register(registry, "reports:campaign-contributors-roster-csv", (opts = {}) => {
+    const campaignId = Number(opts.campaignId || 0);
+    if (!campaignId) return { success: false, error: "campaignId is required." };
+    const camp = database.prepare("SELECT name FROM campaigns WHERE id = ?").get(campaignId);
+    const rows = database.prepare(`
+      SELECT m.id, m.first_name, m.last_name, m.email, m.phone, m.city, m.state, m.zip,
+             m.join_date, c.name AS category_name,
+             COUNT(t.id) AS contribution_count,
+             COALESCE(SUM(t.amount_cents),0) AS total_amount_cents
+      FROM members m
+      LEFT JOIN categories c ON c.id = m.category_id
+      JOIN transactions t ON t.member_id = m.id AND t.campaign_id = ?
+        AND COALESCE(t.is_deleted,0) = 0 AND UPPER(COALESCE(t.status,'COMPLETED')) = 'COMPLETED'
+      GROUP BY m.id ORDER BY m.last_name, m.first_name
+    `).all(campaignId);
+    const safeName = (camp?.name || String(campaignId)).replace(/[^a-z0-9]/gi, "_");
+    return { success: true, csv: toCsv(rows), filename: `Campaign_Contributors_${safeName}.csv` };
   });
 
   register(registry, "reports:org-financial-pdf", async (opts = {}) => {
@@ -4405,31 +4529,79 @@ function registerIpcHandlers() {
     return savePdfDialog(pdf, "Roster_Combined.pdf");
   });
 
+  register(registry, "reports:roster-by-city-pdf", async (opts = {}) => {
+    const city = String(opts.city || "").trim();
+    if (!city) return { ok: false, error: "City is required." };
+    const pdf = await buildPeriodReportPDF(database, "1970-01-01", new Date().toISOString().slice(0, 10),
+      buildPdfReportRequest("roster_by_city", opts));
+    const safe = city.replace(/[^a-z0-9]/gi, "_");
+    return savePdfDialog(pdf, `Roster_City_${safe}.pdf`);
+  });
+
+  register(registry, "reports:roster-by-zip-pdf", async (opts = {}) => {
+    const zip = String(opts.zip || "").trim();
+    if (!zip) return { ok: false, error: "ZIP code is required." };
+    const pdf = await buildPeriodReportPDF(database, "1970-01-01", new Date().toISOString().slice(0, 10),
+      buildPdfReportRequest("roster_by_zip", opts));
+    return savePdfDialog(pdf, `Roster_ZIP_${zip}.pdf`);
+  });
+
+  register(registry, "reports:dues-current-pdf", async () => {
+    const now = new Date().toISOString().slice(0, 10);
+    const pdf = await buildPeriodReportPDF(database, now, now, buildPdfReportRequest("dues_current"));
+    return savePdfDialog(pdf, "Members_Current_on_Dues.pdf");
+  });
+
+  register(registry, "reports:dues-paid-full-year-pdf", async (opts = {}) => {
+    const year = String(opts.year || new Date().getFullYear());
+    const pdf = await buildPeriodReportPDF(database, `${year}-01-01`, `${year}-12-31`,
+      buildPdfReportRequest("dues_paid_full_year", opts));
+    return savePdfDialog(pdf, `Members_Full_Year_Dues_${year}.pdf`);
+  });
+
+  register(registry, "reports:event-contributors-roster-pdf", async (opts = {}) => {
+    const now = new Date().toISOString().slice(0, 10);
+    const pdf = await buildPeriodReportPDF(database, "1970-01-01", now,
+      buildPdfReportRequest("event_contributors_roster", opts));
+    return savePdfDialog(pdf, `Event_Contributors_${opts.eventId || "event"}.pdf`);
+  });
+
+  register(registry, "reports:campaign-contributors-roster-pdf", async (opts = {}) => {
+    const now = new Date().toISOString().slice(0, 10);
+    const pdf = await buildPeriodReportPDF(database, "1970-01-01", now,
+      buildPdfReportRequest("campaign_contributors_roster", opts));
+    return savePdfDialog(pdf, `Campaign_Contributors_${opts.campaignId || "campaign"}.pdf`);
+  });
+
   register(registry, "reports:generateReportBuffer", async ({ reportType, params } = {}) => {
     const p = params || {};
+    const rType = String(reportType || "report");
     let startDate = p.startDate;
     let endDate = p.endDate;
+
+    // Resolve date range from report type when not provided
     if (!startDate || !endDate) {
-      if (reportType === "member_monthly" && p.month) {
+      const now = new Date().toISOString().slice(0, 10);
+      if (rType === "member_monthly" && p.month) {
         const range = monthToRange(p.month);
-        if (range) {
-          startDate = range.startDate;
-          endDate = range.endDate;
-        }
+        if (range) { startDate = range.startDate; endDate = range.endDate; }
+      } else if (rType === "dues_paid_full_year") {
+        const yr = String(p.year || new Date().getFullYear());
+        startDate = `${yr}-01-01`;
+        endDate = `${yr}-12-31`;
+      } else if (rType === "dues_current" || rType.startsWith("roster") || rType.endsWith("roster")) {
+        startDate = "1970-01-01"; endDate = now;
       }
     }
+
     const range = normalizeDateRange(startDate, endDate);
     try {
-      const pdf = await buildPeriodReportPDF(
-        database,
-        range.startDate,
-        range.endDate,
-        buildPdfReportRequest(String(reportType || "report"), p)
-      );
+      const pdf = await buildPeriodReportPDF(database, range.startDate, range.endDate,
+        buildPdfReportRequest(rType, p));
       return {
         ok: true,
         pdfBase64: pdf.toString("base64"),
-        filename: `${String(reportType || "report")}_${range.startDate}_to_${range.endDate}.pdf`,
+        filename: `${rType}_${range.startDate}_to_${range.endDate}.pdf`,
       };
     } catch (err) {
       return { ok: false, error: err?.message || "Failed to generate report buffer." };
