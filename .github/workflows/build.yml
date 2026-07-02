@@ -104,11 +104,15 @@ jobs:
         run: npm ci
 
       - name: Import Apple Developer certificate
-        if: ${{ secrets.APPLE_CERTIFICATE != '' }}
+        continue-on-error: true
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
+          if [ -z "$APPLE_CERTIFICATE" ]; then
+            echo "No Apple certificate configured — skipping keychain import"
+            exit 0
+          fi
           KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain
           CERT_PATH=$RUNNER_TEMP/cert.p12
           echo "$APPLE_CERTIFICATE" | base64 --decode > "$CERT_PATH"
@@ -127,6 +131,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           CSC_LINK: ${{ secrets.APPLE_CERTIFICATE }}
           CSC_KEY_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.APPLE_CERTIFICATE != '' }}
         run: |
           npm run build:app
           npx electron-builder --mac dmg --publish never
