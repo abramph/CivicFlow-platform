@@ -108,7 +108,9 @@ export function App() {
   const [licenseStatus, setLicenseStatus] = useState(null);
   const [licenseCheckComplete, setLicenseCheckComplete] = useState(false);
   const [licenseValidationWarning, setLicenseValidationWarning] = useState(null);
-  const [onboardingDismissed, setOnboardingDismissed] = useState(false);
+  const [onboardingDismissed, setOnboardingDismissed] = useState(
+    () => localStorage.getItem('civicflow_trial_dismissed') === 'true'
+  );
   const searchParams = new URLSearchParams(window.location.search);
   const isActivationMode = searchParams.get('mode') === 'activation';
   const activationReason = searchParams.get('reason');
@@ -140,6 +142,7 @@ export function App() {
     } else {
       setLicenseStatus(await window.civicflow.license.getStatus());
     }
+    localStorage.removeItem('civicflow_trial_dismissed');
     setOnboardingDismissed(false);
     if (isActivationMode) {
       exitActivationMode();
@@ -147,6 +150,7 @@ export function App() {
   };
 
   const handleContinueTrial = async () => {
+    localStorage.setItem('civicflow_trial_dismissed', 'true');
     setOnboardingDismissed(true);
     if (isActivationMode) {
       exitActivationMode();
