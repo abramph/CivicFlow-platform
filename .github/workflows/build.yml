@@ -129,9 +129,18 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          CSC_IDENTITY_AUTO_DISCOVERY: false
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
         run: |
           npm run build:app
+          # Only force-disable identity auto-discovery when no certificate was
+          # imported into the keychain — otherwise let electron-builder find
+          # and use it, so the DMG actually gets signed (and then notarized).
+          # Signing unconditionally off here is why past DMGs shipped
+          # completely unsigned and macOS Gatekeeper reported them as damaged.
+          if [ -z "$APPLE_CERTIFICATE" ]; then
+            echo "::warning::No Apple Developer certificate configured (APPLE_CERTIFICATE secret) — building an UNSIGNED, unnotarized DMG. macOS Gatekeeper will refuse to open this on other machines (\"is damaged and can't be opened\"). See project memory / windows_signing.md-style docs for the Apple equivalent of the Azure signing setup."
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+          fi
           npx electron-builder --mac dmg --publish never
 
       - name: Publish DMG to GitHub release
