@@ -264,6 +264,8 @@ export function ReportsDashboard({ initialTypes }) {
               net_total: Number(kpiRes.net_total ?? kpiRes.net_cents ?? 0),
               dues_collected: Number(kpiRes.dues_collected ?? 0),
               outstanding_dues: Number(kpiRes.outstanding_dues ?? 0),
+              total_expenditures_cents: Number(kpiRes.total_expenditures_cents ?? 0),
+              total_events: Number(kpiRes.total_events ?? 0),
             }
           : null;
 
@@ -468,7 +470,7 @@ export function ReportsDashboard({ initialTypes }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
         <div className="bg-white rounded-xl border border-slate-200 p-4">
           <p className="text-xs text-slate-500">Total Income</p>
           <p className="text-xl font-semibold text-emerald-700">{formatCurrency(kpis?.total_income)}</p>
@@ -488,6 +490,14 @@ export function ReportsDashboard({ initialTypes }) {
         <div className="bg-white rounded-xl border border-slate-200 p-4">
           <p className="text-xs text-slate-500">Outstanding Dues</p>
           <p className="text-xl font-semibold text-amber-700">{formatCurrency(kpis?.outstanding_dues)}</p>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <p className="text-xs text-slate-500">Expenditures</p>
+          <p className="text-xl font-semibold text-red-600">{formatCurrency(kpis?.total_expenditures_cents)}</p>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <p className="text-xs text-slate-500">Events</p>
+          <p className="text-xl font-semibold text-slate-800">{kpis?.total_events ?? 0}</p>
         </div>
       </div>
 

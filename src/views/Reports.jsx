@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { FileText, Download, Send } from 'lucide-react';
+import { FileText, Download, Eye, Send } from 'lucide-react';
 import EmailReportModal from '../components/EmailReportModal';
 
 const api = window.civicflow;
@@ -19,6 +19,7 @@ const REPORT_GROUPS = [
     label: 'Dues Reports',
     types: [
       { id: 'dues_current',        label: 'Members Current on Dues' },
+      { id: 'dues_delinquent',     label: 'Delinquent Members (2+ Months Behind)' },
       { id: 'dues_paid_full_year', label: 'Members with Full Year Dues Paid', requiresYear: true },
     ],
   },
@@ -146,6 +147,8 @@ export function Reports({ initialReportType, initialMemberId, initialCampaignId,
           result = await api.reports.generateRosterByZip({ zip: selectedZip }); break;
         case 'dues_current':
           result = await api.reports.generateDuesCurrent(); break;
+        case 'dues_delinquent':
+          result = await api.reports.generateDuesDelinquent(); break;
         case 'dues_paid_full_year':
           result = await api.reports.generateDuesPaidFullYear({ year: selectedYear }); break;
         case 'event_contributors_roster':
@@ -170,7 +173,8 @@ export function Reports({ initialReportType, initialMemberId, initialCampaignId,
           result = await api.reports.generateOrgFinancial({ startDate, endDate }); break;
         default: setError('Unknown report type'); return;
       }
-      if (result?.ok && result.path) setSuccess(`Report saved to ${result.path}`);
+      if (result?.ok && result.previewed) setSuccess('Report opened in a preview window — use its download button to save a copy.');
+      else if (result?.ok && result.path) setSuccess(`Report saved to ${result.path}`);
       else if (result?.canceled) { /* dismissed */ }
       else setError((result?.error || 'Failed to generate report') + (result?.stack ? `\n\n${result.stack}` : ''));
     } catch (err) {
@@ -194,6 +198,8 @@ export function Reports({ initialReportType, initialMemberId, initialCampaignId,
           result = await api.reports.exportRosterByZipCsv({ zip: selectedZip }); break;
         case 'dues_current':
           result = await api.reports.exportDuesCurrentCsv(); break;
+        case 'dues_delinquent':
+          result = await api.reports.exportDuesDelinquentCsv(); break;
         case 'dues_paid_full_year':
           result = await api.reports.exportDuesPaidFullYearCsv({ year: selectedYear }); break;
         case 'event_contributors_roster':
@@ -229,7 +235,7 @@ export function Reports({ initialReportType, initialMemberId, initialCampaignId,
     } finally { setGenerating(false); }
   };
 
-  const needsDateRange   = !reportConfig.requiresMonth && !['roster_active','roster_inactive','roster_combined','roster_by_city','roster_by_zip','dues_current','dues_paid_full_year','event_contributors_roster','campaign_contributors_roster'].includes(reportType);
+  const needsDateRange   = !reportConfig.requiresMonth && !['roster_active','roster_inactive','roster_combined','roster_by_city','roster_by_zip','dues_current','dues_delinquent','dues_paid_full_year','event_contributors_roster','campaign_contributors_roster'].includes(reportType);
   const isRosterVariant  = ['roster_active','roster_inactive','roster_combined','roster_by_city','roster_by_zip'].includes(reportType);
 
   return (
@@ -417,8 +423,8 @@ export function Reports({ initialReportType, initialMemberId, initialCampaignId,
           <div className="flex flex-wrap gap-2 pt-4 border-t border-slate-200">
             <button type="button" onClick={handleGeneratePdf} disabled={generating}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-60">
-              <Download className="h-4 w-4" />
-              {generating ? 'Generating…' : 'Download PDF'}
+              <Eye className="h-4 w-4" />
+              {generating ? 'Generating…' : 'Preview Report'}
             </button>
             <button type="button" onClick={handleExportCsv} disabled={generating}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-60">

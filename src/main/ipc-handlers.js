@@ -1,9 +1,10 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 const nodemailer = require("nodemailer");
-const { app, dialog, ipcMain } = require("electron");
+const { app, dialog, ipcMain, BrowserWindow } = require("electron");
 const { initializeDatabase, getDatabase, closeDatabase, getDbPath } = require("./db");
-const { calculateMemberDuesStatus } = require("./dues");
+const { calculateMemberDuesStatus, calculateOrgDuesSummary } = require("./dues");
 const { getDeviceId } = require("./device");
 const branding = require("./branding");
 const licenseService = require("./licenseService");
@@ -16,7 +17,7 @@ const { buildPeriodReportPDF } = require("./pdf-service");
 const { createCheckoutSession } = require("./stripe-payments");
 const { persistLogo } = require("./logoStorage");
 const { upsertOrganization } = require("./organization-persistence");
-const { formatMoneyInputFromCents, parseMoneyValue, parseMoneyToCents, resolveAmountCents } = require("../shared/money.cjs");
+const { formatMoneyInputFromCents, formatMoneyFromCents, formatMoneyValue, parseMoneyValue, parseMoneyToCents, resolveAmountCents } = require("../shared/money.cjs");
 const {
   PRODUCTION_REPORT_PAYMENT_URL,
   CIVICFLOW_DEEP_LINK_URL,
@@ -246,6 +247,8 @@ const ALL_PRELOAD_CHANNELS = [
   "reports:roster-by-zip-pdf",
   "reports:dues-current-csv",
   "reports:dues-current-pdf",
+  "reports:dues-delinquent-csv",
+  "reports:dues-delinquent-pdf",
   "reports:dues-paid-full-year-csv",
   "reports:dues-paid-full-year-pdf",
   "reports:event-contributors-roster-csv",
@@ -433,9 +436,30 @@ function mapTxnTypeToLedgerType(transactionType) {
   return "donation";
 }
 
+// Report CSVs carry money either as `*_cents` integers or (for balances) a
+// pre-divided dollar figure under the key `balance`. Format both as currency
+// strings ("$150.00") so exported CSVs read the same as the PDFs, and drop
+// the "_cents" suffix from the header since the value is no longer raw cents.
+function formatCsvMoneyFields(rows) {
+  return rows.map((row) => {
+    const out = {};
+    for (const [key, value] of Object.entries(row)) {
+      if (/_cents$/i.test(key)) {
+        out[key.replace(/_cents$/i, "")] = formatMoneyFromCents(value);
+      } else if (key === "balance") {
+        out[key] = formatMoneyValue(value);
+      } else {
+        out[key] = value;
+      }
+    }
+    return out;
+  });
+}
+
 function toCsv(rows = []) {
   if (!Array.isArray(rows) || rows.length === 0) return "";
-  const headers = Object.keys(rows[0]);
+  const formatted = formatCsvMoneyFields(rows);
+  const headers = Object.keys(formatted[0]);
   const escape = (value) => {
     const str = String(value ?? "");
     if (str.includes(",") || str.includes("\n") || str.includes('"')) {
@@ -444,7 +468,7 @@ function toCsv(rows = []) {
     return str;
   };
   const lines = [headers.join(",")];
-  for (const row of rows) {
+  for (const row of formatted) {
     lines.push(headers.map((header) => escape(row[header])).join(","));
   }
   return lines.join("\n");
@@ -509,6 +533,8 @@ function buildPdfReportRequest(reportType, params = {}) {
       return { reportType: normalizedType, title: zip ? `Roster — ZIP ${zip}` : "Roster by ZIP Code", zip };
     case "dues_current":
       return { reportType: normalizedType, title: "Members Current on Dues" };
+    case "dues_delinquent":
+      return { reportType: normalizedType, title: "Delinquent Members (2+ Months Behind)" };
     case "dues_paid_full_year":
       return { reportType: normalizedType, title: year ? `Full Year Dues Paid — ${year}` : "Full Year Dues Paid", year };
     case "event_contributors_roster":
@@ -1421,41 +1447,14 @@ function registerIpcHandlers() {
       }
     };
 
-    const activeMemberRows = (() => {
+    const duesSummary = (() => {
       try {
-        return database.prepare("SELECT id FROM members WHERE LOWER(COALESCE(status, 'active')) = 'active' ORDER BY id ASC").all();
+        return calculateOrgDuesSummary();
       } catch {
-        return [];
+        return { totalMembers: 0, currentMembers: 0, pastDueMembers: 0, delinquentMembers: 0, totalDuesOutstandingCents: 0 };
       }
     })();
-
-    let currentMembers = 0;
-    let pastDueMembers = 0;
-    let delinquentMembers = 0;
-    let totalDuesOutstandingCents = 0;
-
-    for (const row of activeMemberRows) {
-      const memberId = Number(row?.id || 0);
-      if (!memberId) continue;
-      const dues = calculateMemberDuesStatus(memberId);
-      const balanceCents = Number(dues?.balanceCents || 0);
-      const status = String(dues?.status || "").toLowerCase();
-
-      if (balanceCents < 0) {
-        totalDuesOutstandingCents += Math.abs(balanceCents);
-        pastDueMembers += 1;
-      }
-
-      if (status === "delinquent") {
-        delinquentMembers += 1;
-      }
-
-      if (balanceCents >= 0) {
-        currentMembers += 1;
-      }
-    }
-
-    const totalMembers = activeMemberRows.length;
+    const { totalMembers, currentMembers, pastDueMembers, delinquentMembers, totalDuesOutstandingCents } = duesSummary;
     const upcomingEventsCount = scalar("SELECT COUNT(*) AS c FROM events WHERE date(date) BETWEEN date('now') AND date('now', '+30 day')");
 
     const txnTypeExpr = "CASE WHEN LOWER(COALESCE(type, '')) IN ('dues','dues_payment','invoice','receipt') THEN 'DUES' ELSE UPPER(COALESCE(transaction_type, type, '')) END";
@@ -4148,6 +4147,25 @@ function registerIpcHandlers() {
       FROM transactions t
       WHERE ${whereSql}
     `).get(...params)?.s ?? 0;
+
+    const outstandingDues = (() => {
+      try {
+        return calculateOrgDuesSummary().totalDuesOutstandingCents;
+      } catch {
+        return 0;
+      }
+    })();
+
+    const rangeStart = String(filters?.startDate || "").trim();
+    const rangeEnd = String(filters?.endDate || "").trim();
+    const dateWhere = rangeStart && rangeEnd ? "WHERE date(date) BETWEEN date(?) AND date(?)" : "";
+    const dateParams = rangeStart && rangeEnd ? [rangeStart, rangeEnd] : [];
+
+    const totalEvents = database.prepare(`SELECT COUNT(*) AS c FROM events ${dateWhere}`).get(...dateParams)?.c ?? 0;
+
+    // The expenditures table stores dollars (`amount`), not cents.
+    const totalExpendituresCents = Math.round((database.prepare(`SELECT COALESCE(SUM(amount), 0) AS c FROM expenditures ${dateWhere}`).get(...dateParams)?.c ?? 0) * 100);
+
     return {
       members,
       transactions,
@@ -4155,6 +4173,9 @@ function registerIpcHandlers() {
       expenses_cents: Math.abs(expenses),
       net_cents: revenue + expenses,
       dues_collected: duesCollected,
+      outstanding_dues: outstandingDues,
+      total_events: totalEvents,
+      total_expenditures_cents: totalExpendituresCents,
     };
   });
 
@@ -4248,15 +4269,27 @@ function registerIpcHandlers() {
     `).all(...params);
   };
 
-  const savePdfDialog = async (buffer, defaultPath) => {
-    const choice = await dialog.showSaveDialog({
-      title: "Save Report PDF",
-      defaultPath,
-      filters: [{ name: "PDF", extensions: ["pdf"] }],
+  // Opens the generated PDF in a preview window (Chromium's built-in PDF
+  // viewer, which has its own zoom/print/download controls) so the user can
+  // look it over before deciding whether to save it — rather than
+  // immediately prompting an OS save dialog.
+  const previewGeneratedPdf = async (buffer, defaultPath) => {
+    const previewDir = path.join(app.getPath("temp"), "CivicFlowReportPreviews");
+    fs.mkdirSync(previewDir, { recursive: true });
+    const safeName = String(defaultPath || "report.pdf").replace(/[^a-z0-9._-]/gi, "_");
+    const filePath = path.join(previewDir, `${Date.now()}_${safeName}`);
+    fs.writeFileSync(filePath, buffer);
+
+    const win = new BrowserWindow({
+      width: 900,
+      height: 1000,
+      title: defaultPath || "Report Preview",
+      webPreferences: { plugins: true, contextIsolation: true, nodeIntegration: false, sandbox: true },
     });
-    if (choice.canceled || !choice.filePath) return { canceled: true };
-    fs.writeFileSync(choice.filePath, buffer);
-    return { ok: true, path: choice.filePath };
+    win.setMenuBarVisibility(false);
+    await win.loadURL(pathToFileURL(filePath).toString());
+    win.show();
+    return { ok: true, previewed: true, path: filePath };
   };
 
   register(registry, "reports:org-financial-csv", (opts = {}) => {
@@ -4376,6 +4409,41 @@ function registerIpcHandlers() {
     return { success: true, csv: toCsv(rows), filename: "Members_Current_on_Dues.csv" };
   });
 
+  register(registry, "reports:dues-delinquent-csv", () => {
+    const rows = database.prepare(`
+      WITH dues_paid AS (
+        SELECT member_id, COALESCE(SUM(amount_cents),0) AS paid_cents
+        FROM transactions WHERE ${DUES_TXN_FILTER} GROUP BY member_id
+      ),
+      join_info AS (
+        SELECT m.id,
+          CASE WHEN ((CAST(strftime('%Y','now') AS INTEGER) - CAST(strftime('%Y', COALESCE(m.join_date, m.created_at, date('now'))) AS INTEGER)) * 12 +
+                     (CAST(strftime('%m','now') AS INTEGER) - CAST(strftime('%m', COALESCE(m.join_date, m.created_at, date('now'))) AS INTEGER))) > 0
+               THEN ((CAST(strftime('%Y','now') AS INTEGER) - CAST(strftime('%Y', COALESCE(m.join_date, m.created_at, date('now'))) AS INTEGER)) * 12 +
+                     (CAST(strftime('%m','now') AS INTEGER) - CAST(strftime('%m', COALESCE(m.join_date, m.created_at, date('now'))) AS INTEGER))) * COALESCE(c.monthly_dues_cents,0)
+               ELSE 0 END AS expected_cents,
+          COALESCE(c.monthly_dues_cents,0) AS monthly_cents
+        FROM members m LEFT JOIN categories c ON c.id = m.category_id
+        WHERE LOWER(COALESCE(m.status,'active')) = 'active'
+      )
+      SELECT m.id, m.first_name, m.last_name, m.email, m.phone, m.city, m.state, m.zip,
+             m.join_date, c.name AS category_name,
+             COALESCE(dp.paid_cents,0) AS total_paid_cents,
+             ji.expected_cents AS total_expected_cents,
+             ROUND(CAST(COALESCE(dp.paid_cents,0) - ji.expected_cents AS REAL)/100,2) AS balance,
+             'Delinquent' AS status
+      FROM members m
+      LEFT JOIN categories c ON c.id = m.category_id
+      JOIN join_info ji ON ji.id = m.id
+      LEFT JOIN dues_paid dp ON dp.member_id = m.id
+      WHERE LOWER(COALESCE(m.status,'active')) = 'active'
+        AND ji.monthly_cents > 0
+        AND COALESCE(dp.paid_cents,0) <= ji.expected_cents - (2 * ji.monthly_cents)
+      ORDER BY balance ASC
+    `).all();
+    return { success: true, csv: toCsv(rows), filename: "Delinquent_Members.csv" };
+  });
+
   register(registry, "reports:dues-paid-full-year-csv", (opts = {}) => {
     const year = String(opts.year || new Date().getFullYear());
     if (!/^\d{4}$/.test(year)) return { success: false, error: "Invalid year." };
@@ -4448,7 +4516,7 @@ function registerIpcHandlers() {
       endDate,
       buildPdfReportRequest("org_financial", opts)
     );
-    return savePdfDialog(pdf, `Org_Financial_${startDate}_to_${endDate}.pdf`);
+    return previewGeneratedPdf(pdf, `Org_Financial_${startDate}_to_${endDate}.pdf`);
   });
 
   register(registry, "reports:member-contribution-pdf", async (opts = {}) => {
@@ -4459,7 +4527,7 @@ function registerIpcHandlers() {
       endDate,
       buildPdfReportRequest("member_contribution", opts)
     );
-    return savePdfDialog(pdf, `Member_Contribution_${opts.memberId || 'member'}_${startDate}_to_${endDate}.pdf`);
+    return previewGeneratedPdf(pdf, `Member_Contribution_${opts.memberId || 'member'}_${startDate}_to_${endDate}.pdf`);
   });
 
   register(registry, "reports:event-contribution-pdf", async (opts = {}) => {
@@ -4470,7 +4538,7 @@ function registerIpcHandlers() {
       endDate,
       buildPdfReportRequest("event_contribution", opts)
     );
-    return savePdfDialog(pdf, `Event_Contribution_${opts.eventId || 'event'}_${startDate}_to_${endDate}.pdf`);
+    return previewGeneratedPdf(pdf, `Event_Contribution_${opts.eventId || 'event'}_${startDate}_to_${endDate}.pdf`);
   });
 
   register(registry, "reports:campaign-contribution-pdf", async (opts = {}) => {
@@ -4481,7 +4549,7 @@ function registerIpcHandlers() {
       endDate,
       buildPdfReportRequest("campaign_contribution", opts)
     );
-    return savePdfDialog(pdf, `Campaign_Contribution_${opts.campaignId || 'campaign'}_${startDate}_to_${endDate}.pdf`);
+    return previewGeneratedPdf(pdf, `Campaign_Contribution_${opts.campaignId || 'campaign'}_${startDate}_to_${endDate}.pdf`);
   });
 
   register(registry, "reports:member-monthly-pdf", async (opts = {}) => {
@@ -4493,7 +4561,7 @@ function registerIpcHandlers() {
       range.endDate,
       buildPdfReportRequest("member_monthly", opts)
     );
-    return savePdfDialog(pdf, `Member_Monthly_${opts.memberId || 'member'}_${opts.month || ''}.pdf`);
+    return previewGeneratedPdf(pdf, `Member_Monthly_${opts.memberId || 'member'}_${opts.month || ''}.pdf`);
   });
 
   register(registry, "reports:roster-active-pdf", async () => {
@@ -4504,7 +4572,7 @@ function registerIpcHandlers() {
       now,
       buildPdfReportRequest("roster_active")
     );
-    return savePdfDialog(pdf, "Roster_Active.pdf");
+    return previewGeneratedPdf(pdf, "Roster_Active.pdf");
   });
 
   register(registry, "reports:roster-inactive-pdf", async () => {
@@ -4515,7 +4583,7 @@ function registerIpcHandlers() {
       now,
       buildPdfReportRequest("roster_inactive")
     );
-    return savePdfDialog(pdf, "Roster_Inactive.pdf");
+    return previewGeneratedPdf(pdf, "Roster_Inactive.pdf");
   });
 
   register(registry, "reports:roster-combined-pdf", async () => {
@@ -4526,7 +4594,7 @@ function registerIpcHandlers() {
       now,
       buildPdfReportRequest("roster_combined")
     );
-    return savePdfDialog(pdf, "Roster_Combined.pdf");
+    return previewGeneratedPdf(pdf, "Roster_Combined.pdf");
   });
 
   register(registry, "reports:roster-by-city-pdf", async (opts = {}) => {
@@ -4535,7 +4603,7 @@ function registerIpcHandlers() {
     const pdf = await buildPeriodReportPDF(database, "1970-01-01", new Date().toISOString().slice(0, 10),
       buildPdfReportRequest("roster_by_city", opts));
     const safe = city.replace(/[^a-z0-9]/gi, "_");
-    return savePdfDialog(pdf, `Roster_City_${safe}.pdf`);
+    return previewGeneratedPdf(pdf, `Roster_City_${safe}.pdf`);
   });
 
   register(registry, "reports:roster-by-zip-pdf", async (opts = {}) => {
@@ -4543,34 +4611,40 @@ function registerIpcHandlers() {
     if (!zip) return { ok: false, error: "ZIP code is required." };
     const pdf = await buildPeriodReportPDF(database, "1970-01-01", new Date().toISOString().slice(0, 10),
       buildPdfReportRequest("roster_by_zip", opts));
-    return savePdfDialog(pdf, `Roster_ZIP_${zip}.pdf`);
+    return previewGeneratedPdf(pdf, `Roster_ZIP_${zip}.pdf`);
   });
 
   register(registry, "reports:dues-current-pdf", async () => {
     const now = new Date().toISOString().slice(0, 10);
     const pdf = await buildPeriodReportPDF(database, now, now, buildPdfReportRequest("dues_current"));
-    return savePdfDialog(pdf, "Members_Current_on_Dues.pdf");
+    return previewGeneratedPdf(pdf, "Members_Current_on_Dues.pdf");
+  });
+
+  register(registry, "reports:dues-delinquent-pdf", async () => {
+    const now = new Date().toISOString().slice(0, 10);
+    const pdf = await buildPeriodReportPDF(database, now, now, buildPdfReportRequest("dues_delinquent"));
+    return previewGeneratedPdf(pdf, "Delinquent_Members.pdf");
   });
 
   register(registry, "reports:dues-paid-full-year-pdf", async (opts = {}) => {
     const year = String(opts.year || new Date().getFullYear());
     const pdf = await buildPeriodReportPDF(database, `${year}-01-01`, `${year}-12-31`,
       buildPdfReportRequest("dues_paid_full_year", opts));
-    return savePdfDialog(pdf, `Members_Full_Year_Dues_${year}.pdf`);
+    return previewGeneratedPdf(pdf, `Members_Full_Year_Dues_${year}.pdf`);
   });
 
   register(registry, "reports:event-contributors-roster-pdf", async (opts = {}) => {
     const now = new Date().toISOString().slice(0, 10);
     const pdf = await buildPeriodReportPDF(database, "1970-01-01", now,
       buildPdfReportRequest("event_contributors_roster", opts));
-    return savePdfDialog(pdf, `Event_Contributors_${opts.eventId || "event"}.pdf`);
+    return previewGeneratedPdf(pdf, `Event_Contributors_${opts.eventId || "event"}.pdf`);
   });
 
   register(registry, "reports:campaign-contributors-roster-pdf", async (opts = {}) => {
     const now = new Date().toISOString().slice(0, 10);
     const pdf = await buildPeriodReportPDF(database, "1970-01-01", now,
       buildPdfReportRequest("campaign_contributors_roster", opts));
-    return savePdfDialog(pdf, `Campaign_Contributors_${opts.campaignId || "campaign"}.pdf`);
+    return previewGeneratedPdf(pdf, `Campaign_Contributors_${opts.campaignId || "campaign"}.pdf`);
   });
 
   register(registry, "reports:generateReportBuffer", async ({ reportType, params } = {}) => {
@@ -4589,7 +4663,7 @@ function registerIpcHandlers() {
         const yr = String(p.year || new Date().getFullYear());
         startDate = `${yr}-01-01`;
         endDate = `${yr}-12-31`;
-      } else if (rType === "dues_current" || rType.startsWith("roster") || rType.endsWith("roster")) {
+      } else if (rType === "dues_current" || rType === "dues_delinquent" || rType.startsWith("roster") || rType.endsWith("roster")) {
         startDate = "1970-01-01"; endDate = now;
       }
     }

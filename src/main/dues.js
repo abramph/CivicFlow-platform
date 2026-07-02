@@ -88,4 +88,45 @@ function calculateMemberDuesStatus(memberId) {
   };
 }
 
-module.exports = { calculateMemberDuesStatus };
+/**
+ * Org-wide rollup of calculateMemberDuesStatus() across all active members.
+ * @returns {{ totalMembers, currentMembers, pastDueMembers, delinquentMembers, totalDuesOutstandingCents }}
+ */
+function calculateOrgDuesSummary() {
+  const db = getDatabase();
+  if (!db) throw new Error('Database not initialized');
+
+  const activeMemberRows = db
+    .prepare("SELECT id FROM members WHERE LOWER(COALESCE(status, 'active')) = 'active' ORDER BY id ASC")
+    .all();
+
+  let currentMembers = 0;
+  let pastDueMembers = 0;
+  let delinquentMembers = 0;
+  let totalDuesOutstandingCents = 0;
+
+  for (const row of activeMemberRows) {
+    const memberId = Number(row?.id || 0);
+    if (!memberId) continue;
+    const dues = calculateMemberDuesStatus(memberId);
+    const balanceCents = Number(dues?.balanceCents || 0);
+    const status = String(dues?.status || '').toLowerCase();
+
+    if (balanceCents < 0) {
+      totalDuesOutstandingCents += Math.abs(balanceCents);
+      pastDueMembers += 1;
+    }
+    if (status === 'delinquent') delinquentMembers += 1;
+    if (balanceCents >= 0) currentMembers += 1;
+  }
+
+  return {
+    totalMembers: activeMemberRows.length,
+    currentMembers,
+    pastDueMembers,
+    delinquentMembers,
+    totalDuesOutstandingCents,
+  };
+}
+
+module.exports = { calculateMemberDuesStatus, calculateOrgDuesSummary };

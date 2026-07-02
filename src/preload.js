@@ -148,6 +148,8 @@ contextBridge.exposeInMainWorld('civicflow', {
     exportRosterByZipCsv: (opts) => ipcRenderer.invoke('reports:roster-by-zip-csv', opts),
     generateDuesCurrent: () => ipcRenderer.invoke('reports:dues-current-pdf'),
     exportDuesCurrentCsv: () => ipcRenderer.invoke('reports:dues-current-csv'),
+    generateDuesDelinquent: () => ipcRenderer.invoke('reports:dues-delinquent-pdf'),
+    exportDuesDelinquentCsv: () => ipcRenderer.invoke('reports:dues-delinquent-csv'),
     generateDuesPaidFullYear: (opts) => ipcRenderer.invoke('reports:dues-paid-full-year-pdf', opts),
     exportDuesPaidFullYearCsv: (opts) => ipcRenderer.invoke('reports:dues-paid-full-year-csv', opts),
     generateEventContributorsRoster: (opts) => ipcRenderer.invoke('reports:event-contributors-roster-pdf', opts),

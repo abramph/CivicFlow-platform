@@ -4,6 +4,7 @@ const { getBranding } = require('./branding.js');
 const { APP_NAME } = require('../shared/appConfig.js');
 const { formatMoneyFromCents } = require('../shared/money.cjs');
 const { getInterFontPath, getInterBoldFontPath } = require('./fonts.js');
+const { calculateOrgDuesSummary } = require('./dues.js');
 
 const MARGIN = 50;
 const HEADER_HEIGHT = 80;
@@ -64,6 +65,29 @@ function drawRule(doc, { color = '#e2e8f0', thickness = 0.5, before = 0, after =
   doc.y = y + after;
 }
 
+// Truncate `text` (at the doc's *currently set* font/fontSize) to fit within
+// maxWidth, appending an ellipsis. pdfkit's own `ellipsis: true` + `lineBreak:
+// false` combo does not reliably suppress wrapping with the embedded Inter
+// fonts — a too-long string can still wrap to a second line and collide with
+// content below it — so callers must pre-truncate with this before drawing
+// single-line, fixed-height rows.
+function fitText(doc, text, maxWidth) {
+  const str = String(text ?? '');
+  if (maxWidth <= 0) return '';
+  if (doc.widthOfString(str) <= maxWidth) return str;
+  const ELLIPSIS = '…';
+  const ellipsisW = doc.widthOfString(ELLIPSIS);
+  if (ellipsisW > maxWidth) return '';
+  let lo = 0;
+  let hi = str.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    const candidate = str.slice(0, mid).replace(/\s+$/, '');
+    if (doc.widthOfString(candidate) + ellipsisW <= maxWidth) lo = mid; else hi = mid - 1;
+  }
+  return lo > 0 ? str.slice(0, lo).replace(/\s+$/, '') + ELLIPSIS : ELLIPSIS;
+}
+
 function writeSectionHeading(doc, title) {
   doc.moveDown(0.75);
   doc.fontSize(10).font(bFont()).fillColor('#0f766e').text(title.toUpperCase(), { characterSpacing: 0.3 });
@@ -76,26 +100,32 @@ function writeSummaryBlock(doc, items) {
   // items: [{ label, value }]
   const PAD = 10;
   const LINE_H = 16;
+  const LABEL_W = 130;
   const startY = doc.y;
-  const boxH = items.length * LINE_H + PAD * 2;
+  const colW = USABLE_WIDTH / 2;
+  const valueW = colW - PAD * 2 - LABEL_W;
+
+  const leftCol = [];
+  const rightCol = [];
+  items.forEach((it, i) => (i % 2 === 0 ? leftCol : rightCol).push(it));
+  const maxRows = Math.max(leftCol.length, rightCol.length, 1);
+  const boxH = maxRows * LINE_H + PAD * 2;
 
   doc.save().rect(MARGIN, startY, USABLE_WIDTH, boxH).fill('#f8fafc').restore();
   doc.save().rect(MARGIN, startY, USABLE_WIDTH, boxH).strokeColor('#e2e8f0').lineWidth(0.5).stroke().restore();
 
-  let y = startY + PAD;
-  const colW = USABLE_WIDTH / 2;
-  const leftCol = [];
-  const rightCol = [];
-  items.forEach((it, i) => (i % 2 === 0 ? leftCol : rightCol).push(it));
-
-  const maxRows = Math.max(leftCol.length, rightCol.length);
   for (let row = 0; row < maxRows; row++) {
     const renderItem = (col, x) => {
       if (!col[row]) return;
       const { label, value } = col[row];
-      doc.fontSize(9).font(bFont()).fillColor('#64748b')
-        .text(label + ': ', x + PAD, y + row * LINE_H, { continued: true, width: 110, lineBreak: false });
-      doc.fontSize(9).font('Inter').fillColor('#1e293b').text(String(value ?? '—'), { continued: false, lineBreak: false });
+      const rowY = startY + PAD + row * LINE_H;
+      // Bounded widths + manual pre-truncation on both label and value keep
+      // long strings (long emails, long campaign names) from wrapping into a
+      // second line and colliding with the row below.
+      doc.fontSize(9).font(bFont()).fillColor('#64748b');
+      doc.text(fitText(doc, label + ':', LABEL_W), x + PAD, rowY, { width: LABEL_W, lineBreak: false });
+      doc.fontSize(9).font('Inter').fillColor('#1e293b');
+      doc.text(fitText(doc, value ?? '—', valueW), x + PAD + LABEL_W, rowY, { width: valueW, lineBreak: false });
     };
     renderItem(leftCol, MARGIN);
     renderItem(rightCol, MARGIN + colW);
@@ -115,8 +145,8 @@ function drawTable(doc, branding, { columns, rows }) {
     doc.save().rect(MARGIN, y, tableW, HEADER_H).fill('#f1f5f9').restore();
     let x = MARGIN;
     columns.forEach((col) => {
-      doc.fontSize(8.5).font(bFont()).fillColor('#475569')
-        .text(col.header, x + 3, y + 6, { width: col.width - 6, align: col.align || 'left', lineBreak: false });
+      doc.fontSize(8.5).font(bFont()).fillColor('#475569');
+      doc.text(fitText(doc, col.header, col.width - 6), x + 3, y + 6, { width: col.width - 6, align: col.align || 'left', lineBreak: false });
       x += col.width;
     });
     const lineY = y + HEADER_H;
@@ -143,8 +173,8 @@ function drawTable(doc, branding, { columns, rows }) {
     columns.forEach((col) => {
       const val = row[col.key];
       const text = val == null || val === '' ? '—' : String(val);
-      doc.fontSize(9).font('Inter').fillColor('#334155')
-        .text(text, x + 3, y + 4, { width: col.width - 6, align: col.align || 'left', lineBreak: false, ellipsis: true });
+      doc.fontSize(9).font('Inter').fillColor('#334155');
+      doc.text(fitText(doc, text, col.width - 6), x + 3, y + 4, { width: col.width - 6, align: col.align || 'left', lineBreak: false });
       x += col.width;
     });
     y += ROW_H;
@@ -152,6 +182,39 @@ function drawTable(doc, branding, { columns, rows }) {
 
   doc.save().moveTo(MARGIN, y).lineTo(MARGIN + tableW, y).strokeColor('#cbd5e1').lineWidth(0.5).stroke().restore();
   doc.y = y + 14;
+}
+
+// Simple horizontal bar chart (single hue, magnitude-only comparison — no
+// categorical identity to distinguish, so one brand hue is sufficient).
+function drawBarChart(doc, { title, items }) {
+  if (!Array.isArray(items) || items.length === 0) return;
+
+  const LABEL_W = 150;
+  const VALUE_W = 85;
+  const BAR_H = 14;
+  const ROW_GAP = 10;
+  const barAreaW = USABLE_WIDTH - LABEL_W - VALUE_W;
+  const maxVal = Math.max(...items.map((it) => Math.abs(it.cents || 0)), 1);
+
+  writeSectionHeading(doc, title);
+
+  items.forEach((it) => {
+    const rowY = doc.y;
+    const barW = Math.max(2, Math.round((Math.abs(it.cents || 0) / maxVal) * barAreaW));
+
+    doc.fontSize(9).font('Inter').fillColor('#334155');
+    doc.text(fitText(doc, it.label, LABEL_W - 8), MARGIN, rowY + 3, { width: LABEL_W - 8, lineBreak: false });
+
+    doc.save().rect(MARGIN + LABEL_W, rowY, barAreaW, BAR_H).fill('#f1f5f9').restore();
+    if (barW > 0) doc.save().rect(MARGIN + LABEL_W, rowY, barW, BAR_H).fill('#0f766e').restore();
+
+    doc.fontSize(9).font(bFont()).fillColor('#1e293b');
+    doc.text(fitText(doc, formatMoneyFromCents(it.cents || 0), VALUE_W - 6), MARGIN + LABEL_W + barAreaW + 6, rowY + 3, { width: VALUE_W - 6, align: 'right', lineBreak: false });
+
+    doc.y = rowY + BAR_H + ROW_GAP;
+  });
+
+  doc.moveDown(0.5);
 }
 
 // ── Column presets ────────────────────────────────────────────────────────────
@@ -174,28 +237,23 @@ const ROSTER_COMBINED_COLS = [
 ];
 
 const DUES_CURRENT_COLS = [
-  { key: '_name',         header: 'Name',          width: 130 },
-  { key: 'email',         header: 'Email',         width: 145 },
-  { key: 'phone',         header: 'Phone',         width: 75  },
-  { key: '_cityzip',      header: 'City / ZIP',    width: 70  },
-  { key: 'category_name', header: 'Category',      width: 57  },
-  { key: '_balance',      header: 'Balance',       width: 35, align: 'right' },
+  { key: '_name',          header: 'Name',          width: 340 },
+  { key: '_total_paid',    header: 'Total Paid',    width: 172, align: 'right' },
 ];
 
 const CONTRIBUTORS_COLS = [
-  { key: '_name',          header: 'Name',          width: 140 },
-  { key: 'email',          header: 'Email',         width: 155 },
-  { key: 'phone',          header: 'Phone',         width: 75  },
-  { key: '_cityzip',       header: 'City / ZIP',    width: 72  },
-  { key: '_total_paid',    header: 'Total Paid',    width: 70, align: 'right' },
+  { key: '_name',          header: 'Name',          width: 340 },
+  { key: '_total_paid',    header: 'Total Paid',    width: 172, align: 'right' },
 ];
 
 const DUES_FULL_YEAR_COLS = [
-  { key: '_name',          header: 'Name',          width: 145 },
-  { key: 'email',          header: 'Email',         width: 155 },
-  { key: 'phone',          header: 'Phone',         width: 75  },
-  { key: 'category_name',  header: 'Category',      width: 70  },
-  { key: '_year_paid',     header: 'Paid in Year',  width: 67, align: 'right' },
+  { key: '_name',          header: 'Name',          width: 340 },
+  { key: '_year_paid',     header: 'Paid in Year',  width: 172, align: 'right' },
+];
+
+const DUES_DELINQUENT_COLS = [
+  { key: '_name',          header: 'Name',          width: 340 },
+  { key: '_amount_owed',   header: 'Amount Owed',   width: 172, align: 'right' },
 ];
 
 const TXN_COLS = [
@@ -330,6 +388,7 @@ function buildPeriodReportPDF(db, startDate, endDate, reportRequest) {
     const isRosterReport   = isRosterActive || isRosterInactive || isRosterCombined || isRosterByCity || isRosterByZip;
 
     const isDuesCurrent    = id === 'dues_current';
+    const isDuesDelinquent = id === 'dues_delinquent';
     const isDuesFullYear   = id === 'dues_paid_full_year';
 
     const isEventContrib       = id === 'event_contribution';
@@ -340,7 +399,7 @@ function buildPeriodReportPDF(db, startDate, endDate, reportRequest) {
 
     // ── Report title ─────────────────────────────────────────────────────────
     doc.fontSize(14).font(bFont()).fillColor('#0f172a').text(report.title, { align: 'left' });
-    if (!isRosterReport && !isDuesCurrent && !isDuesFullYear && !isEventContribRoster && !isCampaignContribRoster) {
+    if (!isRosterReport && !isDuesCurrent && !isDuesDelinquent && !isDuesFullYear && !isEventContribRoster && !isCampaignContribRoster) {
       doc.fontSize(10).font('Inter').fillColor('#64748b').text(`Period: ${startDate} to ${endDate}`);
     }
     doc.moveDown(0.5);
@@ -438,10 +497,69 @@ function buildPeriodReportPDF(db, startDate, endDate, reportRequest) {
       const tableRows = rows.map((r) => ({
         ...r,
         _name: [`${r.last_name || ''}`, `${r.first_name || ''}`].filter(Boolean).join(', ').replace(/^,\s*/, '').trim() || '—',
-        _cityzip: fmtCityZip(r),
-        _balance: fmtBalance(r.balance_cents),
+        _total_paid: formatMoneyFromCents(r.total_paid_cents),
       }));
       drawTable(doc, branding, { columns: DUES_CURRENT_COLS, rows: tableRows });
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // DUES DELINQUENT (2+ months behind)
+    // ══════════════════════════════════════════════════════════════════════════
+    } else if (isDuesDelinquent) {
+      const rows = db.prepare(`
+        WITH dues_paid AS (
+          SELECT member_id, COALESCE(SUM(amount_cents), 0) AS paid_cents
+          FROM transactions
+          WHERE ${DUES_TXN_WHERE}
+          GROUP BY member_id
+        ),
+        join_info AS (
+          SELECT m.id,
+            CASE
+              WHEN ((CAST(strftime('%Y','now') AS INTEGER) - CAST(strftime('%Y', COALESCE(m.join_date, m.created_at, date('now'))) AS INTEGER)) * 12 +
+                    (CAST(strftime('%m','now') AS INTEGER) - CAST(strftime('%m', COALESCE(m.join_date, m.created_at, date('now'))) AS INTEGER))) > 0
+              THEN ((CAST(strftime('%Y','now') AS INTEGER) - CAST(strftime('%Y', COALESCE(m.join_date, m.created_at, date('now'))) AS INTEGER)) * 12 +
+                    (CAST(strftime('%m','now') AS INTEGER) - CAST(strftime('%m', COALESCE(m.join_date, m.created_at, date('now'))) AS INTEGER))) * COALESCE(c.monthly_dues_cents, 0)
+              ELSE 0
+            END AS expected_cents,
+            COALESCE(c.monthly_dues_cents, 0) AS monthly_cents
+          FROM members m
+          LEFT JOIN categories c ON c.id = m.category_id
+          WHERE LOWER(COALESCE(m.status,'active')) = 'active'
+        )
+        SELECT m.id, m.first_name, m.last_name, m.email, m.phone, m.city, m.state, m.zip,
+               m.join_date, c.name AS category_name,
+               ji.monthly_cents AS monthly_dues_cents,
+               COALESCE(dp.paid_cents, 0) AS total_paid_cents,
+               ji.expected_cents AS total_expected_cents,
+               COALESCE(dp.paid_cents, 0) - ji.expected_cents AS balance_cents
+        FROM members m
+        LEFT JOIN categories c ON c.id = m.category_id
+        JOIN join_info ji ON ji.id = m.id
+        LEFT JOIN dues_paid dp ON dp.member_id = m.id
+        WHERE LOWER(COALESCE(m.status,'active')) = 'active'
+          AND ji.monthly_cents > 0
+          AND COALESCE(dp.paid_cents, 0) <= ji.expected_cents - (2 * ji.monthly_cents)
+        ORDER BY (COALESCE(dp.paid_cents, 0) - ji.expected_cents) ASC
+      `).all();
+
+      const totalActive = db.prepare("SELECT COUNT(*) AS cnt FROM members WHERE LOWER(COALESCE(status,'active')) = 'active'").get()?.cnt || 0;
+      const totalOwedCents = rows.reduce((s, r) => s + Math.abs(r.balance_cents || 0), 0);
+
+      writeSummaryBlock(doc, [
+        { label: 'Generated', value: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) },
+        { label: 'Total active members', value: totalActive },
+        { label: 'Members delinquent', value: rows.length },
+        { label: 'Total amount owed', value: formatMoneyFromCents(totalOwedCents) },
+      ]);
+
+      writeSectionHeading(doc, 'Delinquent Members (2+ Months Behind)');
+
+      const tableRows = rows.map((r) => ({
+        ...r,
+        _name: [`${r.last_name || ''}`, `${r.first_name || ''}`].filter(Boolean).join(', ').replace(/^,\s*/, '').trim() || '—',
+        _amount_owed: formatMoneyFromCents(Math.abs(r.balance_cents)),
+      }));
+      drawTable(doc, branding, { columns: DUES_DELINQUENT_COLS, rows: tableRows });
 
     // ══════════════════════════════════════════════════════════════════════════
     // DUES PAID FULL YEAR
@@ -684,23 +802,74 @@ function buildPeriodReportPDF(db, startDate, endDate, reportRequest) {
         ORDER BY start_date DESC
       `).all(endDate, startDate);
 
+      // Income breakdown by category, for the period — powers both the
+      // summary figures below and the bar chart.
+      const incomeTypeExpr = `CASE WHEN LOWER(COALESCE(type, '')) IN ('dues','dues_payment','invoice','receipt') THEN 'DUES' ELSE UPPER(COALESCE(transaction_type, type, '')) END`;
+      const incomeByType = db.prepare(`
+        SELECT ${incomeTypeExpr} AS category, COALESCE(SUM(amount_cents), 0) AS total_cents
+        FROM transactions
+        WHERE COALESCE(is_deleted, 0) = 0
+          AND UPPER(COALESCE(status,'COMPLETED')) = 'COMPLETED'
+          AND amount_cents > 0
+          AND date(occurred_on) BETWEEN date(?) AND date(?)
+        GROUP BY ${incomeTypeExpr}
+      `).all(startDate, endDate);
+      const incomeCentsFor = (cat) => incomeByType.find((r) => r.category === cat)?.total_cents || 0;
+      const duesCollected   = incomeCentsFor('DUES');
+      const donations       = incomeCentsFor('DONATION');
+      const campaignRevenue = incomeCentsFor('CAMPAIGN_CONTRIBUTION');
+      const eventRevenue    = incomeCentsFor('EVENT_REVENUE');
+
+      // Organizational expenditures for the period (separate from the
+      // transaction-level "Expenses" above, which covers refunds/misc negatives).
+      // The expenditures table stores dollars (`amount`), not cents.
+      const expendituresPeriodCents = Math.round((db.prepare(`SELECT COALESCE(SUM(amount), 0) AS c FROM expenditures WHERE date(date) BETWEEN date(?) AND date(?)`).get(startDate, endDate)?.c || 0) * 100);
+
+      const eventsInPeriod = db.prepare(`SELECT COUNT(*) AS c FROM events WHERE date(date) BETWEEN date(?) AND date(?)`).get(startDate, endDate)?.c || 0;
+
+      let outstandingDuesCents = 0;
+      try { outstandingDuesCents = calculateOrgDuesSummary().totalDuesOutstandingCents; } catch (_) {}
+
       writeSummaryBlock(doc, [
-        { label: 'Period', value: `${startDate} to ${endDate}` },
         { label: 'Transactions', value: txns.length },
-        { label: 'Income', value: formatMoneyFromCents(income) },
-        { label: 'Expenses', value: formatMoneyFromCents(expense) },
+        { label: 'Total income', value: formatMoneyFromCents(income) },
+        { label: 'Total expenses', value: formatMoneyFromCents(expense) },
         { label: 'Net', value: formatMoneyFromCents(income - expense) },
+        { label: 'Dues collected', value: formatMoneyFromCents(duesCollected) },
+        { label: 'Outstanding dues', value: formatMoneyFromCents(outstandingDuesCents) },
+        { label: 'Donations', value: formatMoneyFromCents(donations) },
+        { label: 'Campaign contributions', value: formatMoneyFromCents(campaignRevenue) },
+        { label: 'Event revenue', value: formatMoneyFromCents(eventRevenue) },
+        { label: 'Total expenditures', value: formatMoneyFromCents(expendituresPeriodCents) },
+        { label: 'Events in period', value: eventsInPeriod },
         { label: 'Active campaigns', value: activeCampaigns.length },
       ]);
+
+      drawBarChart(doc, {
+        title: 'Income Breakdown',
+        items: [
+          { label: 'Dues', cents: duesCollected },
+          { label: 'Donations', cents: donations },
+          { label: 'Campaign Contributions', cents: campaignRevenue },
+          { label: 'Event Revenue', cents: eventRevenue },
+        ],
+      });
 
       writeSectionHeading(doc, 'Transactions');
       drawTable(doc, branding, { columns: TXN_COLS, rows: enrichTxnRows(txns) });
 
       if (activeCampaigns.length > 0) {
         writeSectionHeading(doc, 'Campaigns in Period');
+        const nameW = USABLE_WIDTH - 180;
         activeCampaigns.forEach((camp) => {
-          doc.fontSize(9.5).font(bFont()).fillColor('#334155').text(`${camp.name || '—'}`, { continued: true });
-          doc.font('Inter').fillColor('#64748b').text(`  ${camp.start_date || '—'} → ${camp.end_date || '—'}`);
+          const rowY = doc.y;
+          // Explicit, bounded x/width for both segments (instead of continued
+          // text) so a long campaign name can't push into or overlap the date.
+          doc.fontSize(9.5).font(bFont()).fillColor('#334155');
+          doc.text(fitText(doc, camp.name || '—', nameW), MARGIN, rowY, { width: nameW, lineBreak: false });
+          doc.fontSize(9.5).font('Inter').fillColor('#64748b');
+          doc.text(fitText(doc, `${camp.start_date || '—'} → ${camp.end_date || '—'}`, 180), MARGIN + nameW, rowY, { width: 180, align: 'right', lineBreak: false });
+          doc.y = rowY + 14;
         });
         doc.moveDown(0.5);
       }
