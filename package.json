@@ -1,7 +1,7 @@
 {
   "name": "civicflow",
   "productName": "CivicFlow",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Civicflow - Offline desktop app for community organizations",
   "main": "src/main.js",
   "private": true,
