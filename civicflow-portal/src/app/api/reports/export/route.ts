@@ -83,10 +83,15 @@ export async function GET(request: Request) {
 
     const responseBody = new ArrayBuffer(body.byteLength);
     new Uint8Array(responseBody).set(body);
+    // PDFs open inline (browser's native viewer, with its own save/print
+    // controls) so the user can look the report over before deciding to keep
+    // it — the web equivalent of the desktop app's PDF preview window. CSV/
+    // XLSX have no native browser viewer, so those still download directly.
+    const disposition = format === "pdf" ? "inline" : "attachment";
     return new Response(responseBody, {
       headers: {
         "Content-Type": reportContentType(format),
-        "Content-Disposition": `attachment; filename="${reportFileName(reportTypeParam, format)}"`,
+        "Content-Disposition": `${disposition}; filename="${reportFileName(reportTypeParam, format)}"`,
       },
     });
   });

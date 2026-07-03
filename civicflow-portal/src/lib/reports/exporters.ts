@@ -1,7 +1,7 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import * as XLSX from "xlsx";
 import type { ReportData, ReportRow, ReportType } from "@/lib/reports/report-builder";
-import { formatDate } from "@/lib/formatting";
+import { formatCurrency, formatDate } from "@/lib/formatting";
 
 export type ReportExportFormat = "csv" | "xlsx" | "pdf";
 
@@ -84,7 +84,7 @@ export async function exportReportPdf(report: ReportData, organizationName: stri
   const tableTop = pageHeight - headerHeight;
   const tableBottom = footerHeight + margin;
   const maxRowsPerPage = Math.max(1, Math.floor((tableTop - tableBottom - rowHeight) / rowHeight));
-  const columns = report.columns.slice(0, 10);
+  const columns = (report.pdfColumns ?? report.columns).slice(0, 10);
   const colWidth = (pageWidth - margin * 2) / columns.length;
 
   const rows = report.rows.length ? report.rows : [{ Message: "No rows matched this report." }];
@@ -113,6 +113,37 @@ export async function exportReportPdf(report: ReportData, organizationName: stri
         page.drawText(truncate(value, Math.max(6, Math.floor(colWidth / 6))), { x: margin + index * colWidth + 4, y, size: 7, font: regular, color: rgb(0.08, 0.11, 0.17) });
       });
       y -= rowHeight;
+    }
+
+    // Simple horizontal bar chart (single hue — magnitude-only comparison,
+    // no categorical identity to distinguish) drawn under the table on the
+    // last page, mirroring the desktop app's pdfkit-drawn income breakdown.
+    if (report.chartData && report.chartData.length > 0 && pageIndex === pages - 1) {
+      const chartRowHeight = 14;
+      const chartGap = 8;
+      const chartTitleHeight = 18;
+      const neededHeight = chartTitleHeight + report.chartData.length * (chartRowHeight + chartGap);
+      if (y - tableBottom > neededHeight) {
+        y -= 16;
+        page.drawText("INCOME BREAKDOWN", { x: margin, y, size: 9, font: bold, color: rgb(0.02, 0.09, 0.18) });
+        y -= chartTitleHeight;
+
+        const labelWidth = 140;
+        const valueWidth = 80;
+        const barAreaWidth = pageWidth - margin * 2 - labelWidth - valueWidth;
+        const maxAmount = Math.max(...report.chartData.map((item) => Math.abs(item.amount)), 1);
+
+        for (const item of report.chartData) {
+          const barWidth = Math.max(2, (Math.abs(item.amount) / maxAmount) * barAreaWidth);
+          page.drawText(truncate(item.label, 22), { x: margin, y: y + 3, size: 8, font: regular, color: rgb(0.1, 0.16, 0.25) });
+          page.drawRectangle({ x: margin + labelWidth, y, width: barAreaWidth, height: chartRowHeight, color: rgb(0.94, 0.96, 0.98) });
+          if (barWidth > 0) {
+            page.drawRectangle({ x: margin + labelWidth, y, width: barWidth, height: chartRowHeight, color: rgb(0.06, 0.46, 0.43) });
+          }
+          page.drawText(formatCurrency(item.amount), { x: margin + labelWidth + barAreaWidth + 6, y: y + 3, size: 8, font: bold, color: rgb(0.08, 0.11, 0.17) });
+          y -= chartRowHeight + chartGap;
+        }
+      }
     }
 
     page.drawText(`Page ${pageIndex + 1} of ${pages}`, { x: pageWidth - margin - 70, y: 20, size: 8, font: regular, color: rgb(0.39, 0.45, 0.55) });

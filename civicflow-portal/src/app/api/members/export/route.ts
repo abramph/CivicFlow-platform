@@ -13,6 +13,7 @@ import {
   type MemberExportRow,
 } from "@/lib/member-filters";
 import { prisma } from "@/lib/prisma";
+import { formatCurrency } from "@/lib/formatting";
 
 const EXPORT_LIMIT = 5000;
 const formats = new Set(["csv", "xlsx", "pdf", "print"]);
@@ -57,7 +58,7 @@ function buildRows(members: MemberExportRow[]) {
     Country: member.country ?? "",
     "Join Date": isoDate(member.joinDate),
     Delinquent: member.isDelinquent ? "Yes" : "No",
-    "Outstanding Dues": calculateMemberOutstandingDues(member).toFixed(2),
+    "Outstanding Dues": formatCurrency(calculateMemberOutstandingDues(member)),
     "Created At": member.createdAt.toISOString(),
   }));
 }

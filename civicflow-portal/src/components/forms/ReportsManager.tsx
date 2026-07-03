@@ -124,7 +124,15 @@ export function ReportsManager({
   }
 
   function download(format: "csv" | "xlsx" | "pdf") {
-    window.location.href = `/api/reports/export?${buildParams({ format }).toString()}`;
+    const url = `/api/reports/export?${buildParams({ format }).toString()}`;
+    if (format === "pdf") {
+      // Opens in a new tab using the browser's native PDF viewer (inline
+      // Content-Disposition) so the user can preview it before saving,
+      // instead of forcing an immediate download.
+      window.open(url, "_blank");
+      return;
+    }
+    window.location.href = url;
   }
 
   async function handleSend(event: FormEvent<HTMLFormElement>) {

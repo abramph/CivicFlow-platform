@@ -28,11 +28,17 @@ export type ReportCell = string | number | boolean | null;
 export type ReportRow = Record<string, ReportCell>;
 export type ReportSummaryItem = { label: string; value: string | number };
 
+export type ReportChartItem = { label: string; amount: number };
+
 export type ReportData = {
   title: string;
   columns: string[];
+  /** Narrower column set for the PDF export only (CSV/XLSX always use `columns`). */
+  pdfColumns?: string[];
   rows: ReportRow[];
   summary: ReportSummaryItem[];
+  /** Simple magnitude-comparison data drawn as a bar chart in the PDF export, when present. */
+  chartData?: ReportChartItem[];
   metadata: {
     reportType: ReportType;
     generatedAt: string;
@@ -101,12 +107,20 @@ function fullName(member: { firstName: string; lastName: string; preferredName?:
   return member ? formatPersonName(member) : "";
 }
 
-function baseReport(input: BuildReportInput, columns: string[], rows: ReportRow[], summary: ReportSummaryItem[]): ReportData {
+function baseReport(
+  input: BuildReportInput,
+  columns: string[],
+  rows: ReportRow[],
+  summary: ReportSummaryItem[],
+  extra?: { pdfColumns?: string[]; chartData?: ReportChartItem[] }
+): ReportData {
   return {
     title: reportTitle(input.reportType),
     columns,
+    ...(extra?.pdfColumns ? { pdfColumns: extra.pdfColumns } : {}),
     rows,
     summary,
+    ...(extra?.chartData ? { chartData: extra.chartData } : {}),
     metadata: {
       reportType: input.reportType,
       generatedAt: new Date().toISOString(),
@@ -134,13 +148,38 @@ export async function buildReport(input: BuildReportInput): Promise<ReportData> 
 
   switch (input.reportType) {
     case "GENERAL_FINANCIAL": {
-      const [contributions, duesPayments, expenditures, outstandingCharges] = await Promise.all([
-        prisma.contribution.findMany({ where: { organizationId, ...(range ? { contributionDate: range } : {}), ...(campaignId ? { campaignId } : {}), ...(eventId ? { eventId } : {}) }, select: { amount: true } }),
+      const [contributions, duesPayments, expenditures, outstandingCharges, eventsInPeriod, activeCampaigns] = await Promise.all([
+        prisma.contribution.findMany({ where: { organizationId, ...(range ? { contributionDate: range } : {}), ...(campaignId ? { campaignId } : {}), ...(eventId ? { eventId } : {}) }, select: { amount: true, campaignId: true, eventId: true } }),
         prisma.duesPayment.findMany({ where: { organizationId, ...(range ? { paymentDate: range } : {}), ...(memberId ? { memberId } : {}) }, select: { amount: true } }),
         prisma.expenditure.findMany({ where: { organizationId, ...(range ? { date: range } : {}), ...(campaignId ? { campaignId } : {}), ...(eventId ? { eventId } : {}) }, select: { amount: true } }),
         prisma.duesCharge.findMany({ where: { organizationId, status: { in: ["PENDING", "PARTIAL"] } }, include: { adjustments: { select: { amount: true } } } }),
+        prisma.event.count({ where: { organizationId, ...(range ? { startAt: range } : {}) } }),
+        prisma.campaign.count({
+          where: {
+            organizationId,
+            // Campaigns overlapping the period (open-ended start/end treated as unbounded),
+            // same semantics as the desktop app's "active campaigns" report section.
+            ...(start || end
+              ? {
+                  AND: [
+                    { OR: [{ startDate: null }, ...(end ? [{ startDate: { lte: end } }] : [])] },
+                    { OR: [{ endDate: null }, ...(start ? [{ endDate: { gte: start } }] : [])] },
+                  ],
+                }
+              : { status: "active" }),
+          },
+        }),
       ]);
+      // `Contribution.source` is a channel (member profile / campaign page / etc.),
+      // not an income category — bucket by which relation is set instead, same
+      // split desktop's org financial report uses (dues / donations / campaign / event).
+      const campaignContributions = contributions.filter((row) => row.campaignId);
+      const eventContributions = contributions.filter((row) => !row.campaignId && row.eventId);
+      const generalDonations = contributions.filter((row) => !row.campaignId && !row.eventId);
       const contributionTotal = total(contributions);
+      const campaignContributionTotal = total(campaignContributions);
+      const eventContributionTotal = total(eventContributions);
+      const donationTotal = total(generalDonations);
       const duesTotal = total(duesPayments);
       const expenditureTotal = total(expenditures);
       const outstandingTotal = outstandingCharges.reduce((sum, charge) => {
@@ -151,18 +190,33 @@ export async function buildReport(input: BuildReportInput): Promise<ReportData> 
         input,
         ["Metric", "Amount"],
         [
-          { Metric: "Contributions", Amount: money(contributionTotal) },
+          { Metric: "Total income", Amount: money(contributionTotal + duesTotal) },
           { Metric: "Dues collected", Amount: money(duesTotal) },
+          { Metric: "Donations", Amount: money(donationTotal) },
+          { Metric: "Campaign contributions", Amount: money(campaignContributionTotal) },
+          { Metric: "Event revenue", Amount: money(eventContributionTotal) },
           { Metric: "Expenditures", Amount: money(expenditureTotal) },
           { Metric: "Net cash activity", Amount: money(contributionTotal + duesTotal - expenditureTotal) },
-          { Metric: "Outstanding dues", Amount: money(outstandingTotal) },
+          { Metric: "Outstanding dues (as of today)", Amount: money(outstandingTotal) },
+          { Metric: "Events in period", Amount: eventsInPeriod },
+          { Metric: "Active campaigns", Amount: activeCampaigns },
         ],
         [
-          { label: "Contribution total", value: money(contributionTotal) },
+          { label: "Total income", value: money(contributionTotal + duesTotal) },
           { label: "Dues collected", value: money(duesTotal) },
           { label: "Expenditures", value: money(expenditureTotal) },
           { label: "Outstanding dues", value: money(outstandingTotal) },
-        ]
+          { label: "Events in period", value: eventsInPeriod },
+          { label: "Active campaigns", value: activeCampaigns },
+        ],
+        {
+          chartData: [
+            { label: "Dues", amount: duesTotal },
+            { label: "Donations", amount: donationTotal },
+            { label: "Campaign Contributions", amount: campaignContributionTotal },
+            { label: "Event Revenue", amount: eventContributionTotal },
+          ],
+        }
       );
     }
     case "CONTRIBUTIONS": {
@@ -261,7 +315,10 @@ export async function buildReport(input: BuildReportInput): Promise<ReportData> 
         input,
         columns,
         rows.map((row) => ({ Name: fullName(row), Status: formatEnumLabel(row.membershipStatus), Category: row.membershipCategory?.name ?? "", Age: calculateAge(row.dateOfBirth), Gender: row.gender ?? "", Email: row.email ?? "", Phone: row.phone ?? "", City: row.city ?? "", State: row.state ?? "", ZIP: row.zipCode ?? "", County: row.county ?? "", Country: row.country ?? "", "Join Date": formatDate(row.joinDate), Delinquent: row.isDelinquent ? "Yes" : "No", "Outstanding Dues": money(calculateMemberOutstandingDues(row)) })),
-        [{ label: "Members", value: rows.length }, { label: "Delinquent", value: rows.filter((row) => row.isDelinquent).length }]
+        [{ label: "Members", value: rows.length }, { label: "Delinquent", value: rows.filter((row) => row.isDelinquent).length }],
+        // Delinquent Members is a "who owes what" report — the PDF only needs
+        // Name + Outstanding Dues; CSV/XLSX keep the full contact/demographic set.
+        input.reportType === "DELINQUENT_MEMBERS" ? { pdfColumns: ["Name", "Outstanding Dues"] } : undefined
       );
     }
     case "EXPENDITURES": {
@@ -293,7 +350,6 @@ export async function buildReport(input: BuildReportInput): Promise<ReportData> 
           membershipCategory: { select: { name: true } },
           duesPayments: {
             orderBy: { paymentDate: "desc" },
-            take: 1,
             select: { paymentDate: true, amount: true, method: true },
           },
         },
@@ -302,18 +358,22 @@ export async function buildReport(input: BuildReportInput): Promise<ReportData> 
       });
       return baseReport(
         input,
-        ["Name", "Email", "Phone", "Category", "Join Date", "Last Payment Date", "Last Payment Amount", "Last Payment Method"],
+        ["Name", "Email", "Phone", "Category", "Join Date", "Total Paid", "Last Payment Date", "Last Payment Amount", "Last Payment Method"],
         rows.map((row) => ({
           Name: fullName(row),
           Email: row.email ?? "",
           Phone: row.phone ?? "",
           Category: row.membershipCategory?.name ?? "",
           "Join Date": formatDate(row.joinDate),
+          "Total Paid": money(total(row.duesPayments)),
           "Last Payment Date": row.duesPayments[0] ? formatDate(row.duesPayments[0].paymentDate) : "",
           "Last Payment Amount": row.duesPayments[0] ? money(row.duesPayments[0].amount) : "",
           "Last Payment Method": row.duesPayments[0] ? formatEnumLabel(row.duesPayments[0].method) : "",
         })),
         [{ label: "Members current on dues", value: rows.length }],
+        // Mirror the desktop "Dues Current" report: PDF just needs Name + how
+        // much they've paid in total; CSV/XLSX keep full contact/payment detail.
+        { pdfColumns: ["Name", "Total Paid"] }
       );
     }
     case "DUES_PAYMENT_DETAIL": {
