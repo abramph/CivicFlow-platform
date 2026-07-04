@@ -12,6 +12,7 @@ export const reportTypeOptions = [
   { value: "DUES_PAYMENT_DETAIL", label: "Dues payment detail" },
   { value: "OUTSTANDING_DUES", label: "Outstanding dues" },
   { value: "DUES_CURRENT_MEMBERS", label: "Members current on dues" },
+  { value: "FULL_YEAR_DUES_PAID", label: "Members with full year dues paid" },
   { value: "DELINQUENT_MEMBERS", label: "Delinquent members" },
   { value: "CAMPAIGN_PAYERS", label: "Campaign / event payer report" },
   { value: "EXPENDITURES", label: "Expenditures" },
@@ -374,6 +375,64 @@ export async function buildReport(input: BuildReportInput): Promise<ReportData> 
         // Mirror the desktop "Dues Current" report: PDF just needs Name + how
         // much they've paid in total; CSV/XLSX keep full contact/payment detail.
         { pdfColumns: ["Name", "Total Paid"] }
+      );
+    }
+    case "FULL_YEAR_DUES_PAID": {
+      // Mirrors the desktop app's "Members with Full Year Dues Paid" report.
+      // Defaults to the current calendar year when no date range is given,
+      // like desktop's year picker; the portal's generic start/end pickers
+      // let an org run it for any period, not just a full calendar year.
+      const now = new Date();
+      const periodStart = start ?? new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
+      const periodEnd = end ?? new Date(Date.UTC(now.getUTCFullYear(), 11, 31, 23, 59, 59, 999));
+
+      const charges = await prisma.duesCharge.findMany({
+        where: {
+          organizationId,
+          dueDate: { gte: periodStart, lte: periodEnd },
+          status: { not: "VOID" },
+          ...(categoryId ? { member: { membershipCategoryId: categoryId } } : {}),
+        },
+        include: {
+          member: { select: { id: true, firstName: true, lastName: true, preferredName: true, email: true, phone: true, joinDate: true, membershipCategory: { select: { name: true } } } },
+          adjustments: { select: { amount: true } },
+        },
+      });
+
+      const byMember = new Map<
+        string,
+        { member: (typeof charges)[number]["member"]; totalDue: number; totalPaid: number; totalAdjustments: number }
+      >();
+      for (const charge of charges) {
+        const existing = byMember.get(charge.memberId) ?? { member: charge.member, totalDue: 0, totalPaid: 0, totalAdjustments: 0 };
+        existing.totalDue += Number(charge.amountDue);
+        existing.totalPaid += Number(charge.amountPaid);
+        existing.totalAdjustments += charge.adjustments.reduce((sum, adjustment) => sum + Number(adjustment.amount), 0);
+        byMember.set(charge.memberId, existing);
+      }
+
+      const fullyPaid = [...byMember.values()]
+        .filter((entry) => entry.totalDue > 0 && entry.totalPaid + entry.totalAdjustments >= entry.totalDue)
+        .sort((a, b) => (a.member.lastName + a.member.firstName).localeCompare(b.member.lastName + b.member.firstName))
+        .slice(0, take);
+
+      return baseReport(
+        input,
+        ["Name", "Email", "Phone", "Category", "Join Date", "Total Due", "Paid in Year", "Adjustments"],
+        fullyPaid.map((entry) => ({
+          Name: fullName(entry.member),
+          Email: entry.member.email ?? "",
+          Phone: entry.member.phone ?? "",
+          Category: entry.member.membershipCategory?.name ?? "",
+          "Join Date": formatDate(entry.member.joinDate),
+          "Total Due": money(entry.totalDue),
+          "Paid in Year": money(entry.totalPaid),
+          Adjustments: money(entry.totalAdjustments),
+        })),
+        [{ label: "Members fully paid", value: fullyPaid.length }],
+        // Slim PDF to Name + amount paid, matching the desktop app; CSV/XLSX
+        // keep full contact/category detail.
+        { pdfColumns: ["Name", "Paid in Year"] }
       );
     }
     case "DUES_PAYMENT_DETAIL": {

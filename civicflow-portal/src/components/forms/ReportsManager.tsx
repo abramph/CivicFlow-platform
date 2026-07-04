@@ -28,6 +28,7 @@ const reportTypes = [
   ["DUES_PAYMENT_DETAIL", "Dues payment detail"],
   ["OUTSTANDING_DUES", "Outstanding dues"],
   ["DUES_CURRENT_MEMBERS", "Members current on dues"],
+  ["FULL_YEAR_DUES_PAID", "Members with full year dues paid"],
   ["DELINQUENT_MEMBERS", "Delinquent members"],
   ["CAMPAIGN_PAYERS", "Campaign / event payer report"],
   ["EXPENDITURES", "Expenditures"],
