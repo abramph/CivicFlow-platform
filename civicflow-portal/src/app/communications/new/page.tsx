@@ -15,6 +15,7 @@ export default async function NewCommunicationPage({
 }) {
   const { organizationId } = await requirePermission("communications:write");
   const resolvedSearchParams = await searchParams;
+  const isDuesReminderPreset = getValue(resolvedSearchParams.preset) === "dues_reminder";
 
   const [members, campaigns, events, categories] = await Promise.all([
     prisma.orgMember.findMany({
@@ -54,7 +55,21 @@ export default async function NewCommunicationPage({
         ]}
       />
       <SectionCard title="Mass Communication Campaign" description="Send announcements, meeting minutes, dues reminders, event notices, and general email communications to selected member groups.">
-        <CommunicationCampaignForm categories={categories.map((category) => ({ id: category.id, label: category.name }))} />
+        <CommunicationCampaignForm
+          categories={categories.map((category) => ({ id: category.id, label: category.name }))}
+          initial={
+            isDuesReminderPreset
+              ? {
+                  communicationType: "DUES_REMINDER",
+                  selector: "outstanding_dues",
+                  pushEnabled: true,
+                  deepLink: "/report-payment",
+                  title: "Dues Reminder",
+                  subject: "Your dues payment is due",
+                }
+              : undefined
+          }
+        />
       </SectionCard>
       <SectionCard title="Communication Entry" description="Organization context is taken from your authenticated session.">
         <CommunicationLogForm

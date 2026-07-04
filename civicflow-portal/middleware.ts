@@ -3,8 +3,24 @@ import { NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
 import { requireRateLimit } from "@/lib/rate-limit";
 
+// Paths the member-facing universal link domain (app.civicflowapp.com, set
+// via MOBILE_APP_WEB_HOST) transparently maps onto their /m/* implementation
+// — kept separate from the staff portal's own /dues, /events, etc. pages.
+const MEMBER_WEB_FALLBACK_PATHS = new Set([
+  "/report-payment",
+  "/dues",
+  "/announcements",
+  "/events",
+  "/payment-history",
+]);
+
 export async function middleware(req: NextRequest) {
   const pathname = req.nextUrl.pathname;
+
+  const memberWebHost = process.env.MOBILE_APP_WEB_HOST;
+  if (memberWebHost && req.nextUrl.hostname === memberWebHost && MEMBER_WEB_FALLBACK_PATHS.has(pathname)) {
+    return NextResponse.rewrite(new URL(`/m${pathname}`, req.url));
+  }
 
   if (pathname === "/login") {
     const limited = await requireRateLimit({
@@ -38,8 +54,15 @@ export async function middleware(req: NextRequest) {
     if (limited) return limited;
   }
 
-  // Stripe webhooks and cron endpoints use their own secret — not NextAuth sessions
-  if (pathname === "/api/webhooks/stripe" || pathname.startsWith("/api/cron/")) {
+  // Stripe webhooks, cron endpoints, the mobile bearer-token API, and the
+  // universal-link verification files all authenticate (or intentionally
+  // don't) outside of the NextAuth cookie session — never gate them here.
+  if (
+    pathname === "/api/webhooks/stripe" ||
+    pathname.startsWith("/api/cron/") ||
+    pathname.startsWith("/api/mobile/") ||
+    pathname.startsWith("/.well-known/")
+  ) {
     return NextResponse.next();
   }
 
@@ -64,7 +87,12 @@ export async function middleware(req: NextRequest) {
     pathname === "/verify-email" ||
     pathname === "/forgot-password" ||
     pathname === "/reset-password" ||
-    pathname === "/pricing";
+    pathname === "/pricing" ||
+    pathname === "/accept-invite" ||
+    // Member-facing web fallback pages for universal links — publicly
+    // viewable so an anonymous visitor sees the "open in app" banner
+    // instead of being bounced to the staff login page.
+    pathname.startsWith("/m/");
   const isAuthApi = pathname.startsWith("/api/auth");
   const isPublicApi = pathname === "/api/health";
 

@@ -4,6 +4,7 @@ import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { DuesAdjustmentForm } from "@/components/forms/DuesAdjustmentForm";
 import { DuesGenerateForm } from "@/components/forms/DuesGenerateForm";
 import { EvaluateMemberCategoryButton } from "@/components/forms/MembershipRuleActions";
+import { InviteMemberToAppButton } from "@/components/forms/InviteMemberToAppButton";
 import { AttachmentManager } from "@/components/forms/AttachmentManager";
 import { paymentMethodLabels as defaultPaymentMethodLabels } from "@/lib/payment-methods";
 import { prisma } from "@/lib/prisma";
@@ -250,6 +251,26 @@ export default async function MemberProfilePage({
 
       <SectionCard title="Member Documents" description="Private member files, forms, and supporting documents stored in organization-scoped object storage.">
         <AttachmentManager entityType="MEMBER" entityId={member.id} canWrite={canDo(role, "members:write")} />
+      </SectionCard>
+
+      <SectionCard title="Mobile App Access" description="Lets this member log into the CivicFlow mobile app to view dues, report payments, and receive announcements.">
+        <div className="grid gap-4 md:grid-cols-2">
+          <StatCard
+            label="App Login"
+            value={member.userId ? "Linked" : "Not set up"}
+            helper={member.userId ? "This member can log into the mobile app." : "Send an invite to let them set up a password."}
+          />
+          <StatCard
+            label="Push Notifications"
+            value={member.commsPushEnabled ? "Enabled" : "Opted out"}
+            helper={member.requiredNoticesOnly ? "Required notices only" : "Marketing + required notices"}
+          />
+        </div>
+        {!member.userId && canDo(role, "members:write") ? (
+          <div className="mt-4">
+            <InviteMemberToAppButton memberId={member.id} />
+          </div>
+        ) : null}
       </SectionCard>
 
       <SectionCard title="Member Timeline" description="Recent member transitions and activity history.">

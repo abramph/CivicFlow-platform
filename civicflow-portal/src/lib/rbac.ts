@@ -19,6 +19,7 @@ export const ROLES = {
   FINANCE:     "FINANCE",      // Finance officer — dues, contributions, expenditures
   STAFF:       "STAFF",        // General staff — events, campaigns, communications
   READ_ONLY:   "READ_ONLY",    // View-only access — no writes
+  MEMBER:      "MEMBER",       // Mobile app member — no staff permissions; scoped to own data via mobile guards only
 } as const;
 
 export type Role = keyof typeof ROLES;
@@ -227,6 +228,12 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.REMINDERS_READ,
     PERMISSIONS.AUDIT_LOGS_READ,
   ],
+
+  // Members never get staff permissions — a MEMBER role must never see other
+  // members' data. All mobile/member data access goes through dedicated
+  // mobile guards (src/lib/mobile-auth.ts) scoped to the caller's own linked
+  // OrgMember record, never through canDo()/requirePermission().
+  MEMBER: [],
 };
 
 // ─── Helper ───────────────────────────────────────────────────────────────────

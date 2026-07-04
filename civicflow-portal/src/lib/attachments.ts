@@ -13,6 +13,7 @@ export const attachmentEntityTypes = [
   "REPORT_EXPORT",
   "EXPENDITURE",
   "CONTRIBUTION",
+  "PAYMENT_REPORT",
   "OTHER",
 ] as const satisfies readonly AttachmentEntityType[];
 
@@ -29,6 +30,7 @@ const readPermissions: Record<AttachmentEntityType, Permission> = {
   REPORT_EXPORT: "reports:read",
   EXPENDITURE: "expenditures:read",
   CONTRIBUTION: "contributions:read",
+  PAYMENT_REPORT: "dues:read",
   OTHER: "org_settings:read",
 };
 
@@ -43,6 +45,7 @@ const writePermissions: Record<AttachmentEntityType, Permission> = {
   REPORT_EXPORT: "reports:export",
   EXPENDITURE: "expenditures:write",
   CONTRIBUTION: "contributions:write",
+  PAYMENT_REPORT: "dues:write",
   OTHER: "org_settings:write",
 };
 
@@ -77,6 +80,8 @@ export async function verifyAttachmentEntity(organizationId: string, entityType:
       return Boolean(await prisma.expenditure.findFirst({ where: { id: entityId, organizationId }, select: { id: true } }));
     case "CONTRIBUTION":
       return Boolean(await prisma.contribution.findFirst({ where: { id: entityId, organizationId }, select: { id: true } }));
+    case "PAYMENT_REPORT":
+      return Boolean(await prisma.paymentReport.findFirst({ where: { id: entityId, organizationId }, select: { id: true } }));
     case "OTHER":
       return true;
     default:

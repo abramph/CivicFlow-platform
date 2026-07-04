@@ -1,9 +1,11 @@
 import { requirePermission } from "@/lib/auth-guards";
 import { withApiErrorHandling } from "@/lib/api-route";
 import { createAuditEvent } from "@/lib/audit";
+import { formatEnumLabel } from "@/lib/formatting";
 import { parseJsonBody, z } from "@/lib/validation";
 import { prisma } from "@/lib/prisma";
 import { createMemberTimelineEvent } from "@/lib/member-timeline";
+import { sendPushToMember } from "@/lib/push";
 import { requireRateLimit } from "@/lib/rate-limit";
 
 const optionalTextField = (maxLength: number) =>
@@ -195,6 +197,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         newValue: { membershipStatus: updated.membershipStatus, reason: normalizeOptionalText(input.statusChangeReason) },
         createdByUserId: session.userId,
       });
+
+      await sendPushToMember({
+        organizationId,
+        memberId: updated.id,
+        title: "Membership Status Update",
+        body: `Your membership status is now: ${formatEnumLabel(updated.membershipStatus)}.`,
+        deepLink: "/dues",
+        required: true,
+      }).catch(() => null);
     }
 
     if (existing.membershipCategoryId !== updated.membershipCategoryId) {

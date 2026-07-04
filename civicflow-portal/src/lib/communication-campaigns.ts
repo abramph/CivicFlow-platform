@@ -4,6 +4,7 @@ import { buildMemberWhere, parseMemberFilters } from "@/lib/member-filters";
 import { createMemberTimelineEvent } from "@/lib/member-timeline";
 import { sendEmail } from "@/lib/mail";
 import { prisma } from "@/lib/prisma";
+import { sendPushToTokens } from "@/lib/push";
 import { sendSms } from "@/lib/sms";
 import { getSignedObjectUrl } from "@/lib/storage";
 
@@ -35,6 +36,11 @@ export async function resolveCommunicationRecipients(organizationId: string, fil
     where = { organizationId, id: { in: filter.memberIds ?? [] } };
   } else if (selector === "filtered" && filter.memberFilters) {
     where = buildMemberWhere(organizationId, parseMemberFilters(filter.memberFilters));
+  } else if (selector === "outstanding_dues") {
+    where = {
+      organizationId,
+      duesCharges: { some: { organizationId, status: { in: ["PENDING", "PARTIAL"] } } },
+    };
   } else {
     where = {
       organizationId,
@@ -118,9 +124,36 @@ export async function sendCommunicationCampaign(input: {
         errorMessage = "Internal log only";
       }
 
+      let pushDeliveryStatus: "SENT" | "SKIPPED" | "FAILED" | null = null;
+      let pushError: string | null = null;
+      if (campaign.pushEnabled && recipient.member?.userId) {
+        if (recipient.member.commsPushEnabled) {
+          const tokens = await prisma.mobileDeviceToken.findMany({
+            where: { userId: recipient.member.userId },
+            select: { token: true },
+          });
+          const result = await sendPushToTokens(
+            tokens.map((t) => t.token),
+            { title: campaign.title, body: campaign.body, deepLink: campaign.deepLink }
+          );
+          pushDeliveryStatus = result.sent > 0 ? "SENT" : tokens.length === 0 ? "SKIPPED" : "FAILED";
+          if (pushDeliveryStatus !== "SENT") pushError = tokens.length === 0 ? "No registered devices" : "Delivery failed";
+        } else {
+          pushDeliveryStatus = "SKIPPED";
+          pushError = "Member opted out of push notifications";
+        }
+      }
+
       await prisma.communicationRecipient.update({
         where: { id: recipient.id },
-        data: { deliveryStatus, errorMessage, sentAt: deliveryStatus === "SENT" ? new Date() : null },
+        data: {
+          deliveryStatus,
+          errorMessage,
+          sentAt: deliveryStatus === "SENT" ? new Date() : null,
+          pushDeliveryStatus: pushDeliveryStatus ?? undefined,
+          pushError,
+          pushSentAt: pushDeliveryStatus === "SENT" ? new Date() : null,
+        },
       });
 
       await prisma.communicationLog.create({
@@ -136,6 +169,22 @@ export async function sendCommunicationCampaign(input: {
           communicationDate: new Date(),
         },
       });
+
+      if (pushDeliveryStatus) {
+        await prisma.communicationLog.create({
+          data: {
+            organizationId: input.organizationId,
+            memberId: recipient.memberId,
+            createdByUserId: input.actorUserId ?? null,
+            communicationType: "PUSH",
+            direction: "OUTBOUND",
+            subject: campaign.title,
+            message: campaign.body,
+            outcome: pushDeliveryStatus === "SENT" ? "Sent" : pushError,
+            communicationDate: new Date(),
+          },
+        });
+      }
 
       if (recipient.memberId) {
         await createMemberTimelineEvent({
@@ -172,4 +221,30 @@ export async function sendCommunicationCampaign(input: {
   });
 
   return { sent, skipped, failed };
+}
+
+/**
+ * Fires every campaign scheduled for now-or-earlier that hasn't gone out
+ * yet. Called by the cron/campaigns route — mirrors processPendingReminderLogs'
+ * cross-organization processing pattern.
+ */
+export async function processScheduledCampaigns(limit = 50) {
+  const due = await prisma.communicationCampaign.findMany({
+    where: { status: "READY", scheduledFor: { lte: new Date() } },
+    orderBy: { scheduledFor: "asc" },
+    take: limit,
+  });
+
+  let sent = 0;
+  let failed = 0;
+  for (const campaign of due) {
+    try {
+      await sendCommunicationCampaign({ organizationId: campaign.organizationId, campaignId: campaign.id });
+      sent += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+
+  return { processed: due.length, sent, failed };
 }

@@ -32,6 +32,7 @@ enum OrgRole {
   FINANCE
   STAFF
   READ_ONLY
+  MEMBER
 }
 
 enum SubscriptionStatus {
@@ -120,6 +121,7 @@ enum ReminderStatus {
 enum CommunicationType {
   EMAIL
   SMS
+  PUSH
   PHONE_CALL
   VOICEMAIL
   IN_PERSON
@@ -251,7 +253,20 @@ enum AttachmentEntityType {
   REPORT_EXPORT
   EXPENDITURE
   CONTRIBUTION
+  PAYMENT_REPORT
   OTHER
+}
+
+enum MobileDevicePlatform {
+  ios
+  android
+  web
+}
+
+enum PaymentReportStatus {
+  pending
+  approved
+  rejected
 }
 
 enum PaymentLinkType {
@@ -271,58 +286,61 @@ enum PaymentLinkStatus {
 
 /// A tenant organization on the CivicFlow SaaS platform.
 model Organization {
-  id        String    @id @default(cuid())
-  slug      String    @unique
-  name      String
+  id               String    @id @default(cuid())
+  slug             String    @unique
+  name             String
   organizationType String?
-  logoUrl   String?
-  email     String?
-  website   String?
-  phone     String?
-  address   String?
-  addressLine1 String?
-  addressLine2 String?
-  city      String?
-  state     String?
-  zipCode   String?
-  country   String?
-  plan         String    @default("free")   // "free" | "essential" | "elite"
-  trialEndsAt  DateTime?                    // set at org creation; nil once subscribed or expired
-  seatLimit    Int?                         // null = use plan default; set explicitly when seats are purchased
-  status    OrgStatus @default(active)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  logoUrl          String?
+  email            String?
+  website          String?
+  phone            String?
+  address          String?
+  addressLine1     String?
+  addressLine2     String?
+  city             String?
+  state            String?
+  zipCode          String?
+  country          String?
+  plan             String    @default("free") // "free" | "essential" | "elite"
+  trialEndsAt      DateTime? // set at org creation; nil once subscribed or expired
+  seatLimit        Int? // null = use plan default; set explicitly when seats are purchased
+  status           OrgStatus @default(active)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   memberships   OrganizationMembership[]
   subscriptions Subscription[]
   auditEvents   AuditEvent[]
 
   // Scoped data models
-  members     OrgMember[]
-  campaigns   Campaign[]
-  events      Event[]
-  meetings    Meeting[]
-  expenditures Expenditure[]
-  categories  Category[]
-  settings    OrgSettings?
-  paymentLinks PaymentLink[]
-  duesAccounts          DuesAccount[]
-  duesCharges           DuesCharge[]
-  duesPayments          DuesPayment[]
-  duesAdjustments       DuesAdjustment[]
-  paymentMethodConfigs  PaymentMethodConfig[]
-  contributions         Contribution[]
-  contributionReceipts  ContributionReceipt[]
-  communicationLogs     CommunicationLog[]
-  communicationCampaigns CommunicationCampaign[]
+  members                 OrgMember[]
+  campaigns               Campaign[]
+  events                  Event[]
+  meetings                Meeting[]
+  expenditures            Expenditure[]
+  categories              Category[]
+  settings                OrgSettings?
+  paymentLinks            PaymentLink[]
+  duesAccounts            DuesAccount[]
+  duesCharges             DuesCharge[]
+  duesPayments            DuesPayment[]
+  duesAdjustments         DuesAdjustment[]
+  paymentMethodConfigs    PaymentMethodConfig[]
+  contributions           Contribution[]
+  contributionReceipts    ContributionReceipt[]
+  communicationLogs       CommunicationLog[]
+  communicationCampaigns  CommunicationCampaign[]
   communicationRecipients CommunicationRecipient[]
-  paymentImportBatches  PaymentImportBatch[]
-  paymentImportItems    PaymentImportItem[]
-  attendanceRecords     AttendanceRecord[]
-  memberTimelineEvents  MemberTimelineEvent[]
-  reportExports         ReportExport[]
-  emailReminderLogs     EmailReminderLog[]
-  attachments           Attachment[]
+  paymentImportBatches    PaymentImportBatch[]
+  paymentImportItems      PaymentImportItem[]
+  attendanceRecords       AttendanceRecord[]
+  memberTimelineEvents    MemberTimelineEvent[]
+  reportExports           ReportExport[]
+  emailReminderLogs       EmailReminderLog[]
+  attachments             Attachment[]
+  memberInvites           MemberInvite[]
+  mobileDeviceTokens      MobileDeviceToken[]
+  paymentReports          PaymentReport[]
 
   @@index([slug])
   @@index([status])
@@ -330,32 +348,36 @@ model Organization {
 
 /// A platform user (email + password, SaaS auth).
 model User {
-  id            String   @id @default(cuid())
-  email         String   @unique
-  displayName   String?
-  passwordHash  String
-  emailVerified Boolean  @default(false)
-  mfaEnabled    Boolean  @default(false)
-  mfaSecret     String?
+  id             String   @id @default(cuid())
+  email          String   @unique
+  displayName    String?
+  passwordHash   String
+  emailVerified  Boolean  @default(false)
+  mfaEnabled     Boolean  @default(false)
+  mfaSecret      String?
   mfaBackupCodes String[]
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  memberships  OrganizationMembership[]
-  savedFilters SavedFilter[]
-  auditEvents  AuditEvent[]
-  verificationTokens   AccountVerificationToken[]
-  mfaChallengeTokens   MfaChallengeToken[]
-  createdContributions Contribution[] @relation("ContributionCreatedBy")
-  createdPaymentLinks  PaymentLink[] @relation("PaymentLinkCreatedBy")
-  communicationLogs    CommunicationLog[] @relation("CommunicationCreatedBy")
-  communicationCampaigns CommunicationCampaign[] @relation("CommunicationCampaignCreatedBy")
-  attendanceRecords    AttendanceRecord[] @relation("AttendanceRecordedBy")
-  meetings             Meeting[] @relation("MeetingCreatedBy")
-  memberTimelineEvents MemberTimelineEvent[] @relation("MemberTimelineCreatedBy")
-  reportExports       ReportExport[]  @relation("ReportExportCreatedBy")
-  reminderLogs        EmailReminderLog[] @relation("ReminderCreatedBy")
-  uploadedAttachments Attachment[] @relation("AttachmentUploadedBy")
+  memberships            OrganizationMembership[]
+  savedFilters           SavedFilter[]
+  auditEvents            AuditEvent[]
+  verificationTokens     AccountVerificationToken[]
+  mfaChallengeTokens     MfaChallengeToken[]
+  createdContributions   Contribution[]             @relation("ContributionCreatedBy")
+  createdPaymentLinks    PaymentLink[]              @relation("PaymentLinkCreatedBy")
+  communicationLogs      CommunicationLog[]         @relation("CommunicationCreatedBy")
+  communicationCampaigns CommunicationCampaign[]    @relation("CommunicationCampaignCreatedBy")
+  attendanceRecords      AttendanceRecord[]         @relation("AttendanceRecordedBy")
+  meetings               Meeting[]                  @relation("MeetingCreatedBy")
+  memberTimelineEvents   MemberTimelineEvent[]      @relation("MemberTimelineCreatedBy")
+  reportExports          ReportExport[]             @relation("ReportExportCreatedBy")
+  reminderLogs           EmailReminderLog[]         @relation("ReminderCreatedBy")
+  uploadedAttachments    Attachment[]               @relation("AttachmentUploadedBy")
+  memberProfiles         OrgMember[]                @relation("OrgMemberLogin")
+  sentMemberInvites      MemberInvite[]             @relation("MemberInviteCreatedBy")
+  mobileDeviceTokens     MobileDeviceToken[]
+  reviewedPaymentReports PaymentReport[]            @relation("PaymentReportReviewedBy")
 
   @@index([email])
 }
@@ -365,7 +387,7 @@ model MfaChallengeToken {
   id        String   @id @default(cuid())
   userId    String
   token     String   @unique @default(cuid())
-  type      String   // "pending" | "completion"
+  type      String // "pending" | "completion"
   expiresAt DateTime
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -379,7 +401,7 @@ model AccountVerificationToken {
   id        String    @id @default(cuid())
   userId    String
   token     String    @unique
-  type      String    // "email_verification" | "password_reset"
+  type      String // "email_verification" | "password_reset"
   expiresAt DateTime
   usedAt    DateTime?
   createdAt DateTime  @default(now())
@@ -393,14 +415,14 @@ model AccountVerificationToken {
 /// Join table: User ↔ Organization with a role.
 /// organizationId is always derived from the session — never trusted from client input.
 model OrganizationMembership {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   organizationId String
   userId         String
-  role           OrgRole  @default(STAFF)
+  role           OrgRole   @default(STAFF)
   invitedAt      DateTime?
-  joinedAt       DateTime @default(now())
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  joinedAt       DateTime  @default(now())
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -437,8 +459,8 @@ model AuditEvent {
   organizationId String?
   actorId        String?
   actorEmail     String?
-  action         String   // e.g. "member.create", "dues.update"
-  resource       String   // e.g. "member", "campaign"
+  action         String // e.g. "member.create", "dues.update"
+  resource       String // e.g. "member", "campaign"
   resourceId     String?
   before         Json?
   after          Json?
@@ -461,54 +483,63 @@ model AuditEvent {
 
 /// Organization member (scoped).
 model OrgMember {
-  id               String           @id @default(cuid())
-  organizationId   String
-  firstName        String
-  lastName         String
-  preferredName    String?
-  email            String?
-  phone            String?
-  membershipStatus MembershipStatus @default(active)
-  statusChangedAt  DateTime?
-  statusChangedByUserId String?
-  statusChangeReason String?
-  isDelinquent     Boolean          @default(false)
-  delinquentSince  DateTime?
-  lastDuesEvaluationAt DateTime?
-  joinDate         DateTime?
-  dateOfBirth      DateTime?
-  gender           String?
-  addressLine1     String?
-  addressLine2     String?
-  city             String?
-  state            String?
-  zipCode          String?
-  county           String?
-  country          String?
-  membershipCategoryId String?
-  membershipCategoryManualOverride Boolean @default(false)
-  householdName    String?
-  emergencyContactName String?
-  emergencyContactPhone String?
-  notes            String?
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
+  id                               String           @id @default(cuid())
+  organizationId                   String
+  userId                           String?
+  firstName                        String
+  lastName                         String
+  preferredName                    String?
+  email                            String?
+  phone                            String?
+  membershipStatus                 MembershipStatus @default(active)
+  statusChangedAt                  DateTime?
+  statusChangedByUserId            String?
+  statusChangeReason               String?
+  isDelinquent                     Boolean          @default(false)
+  delinquentSince                  DateTime?
+  lastDuesEvaluationAt             DateTime?
+  joinDate                         DateTime?
+  dateOfBirth                      DateTime?
+  gender                           String?
+  addressLine1                     String?
+  addressLine2                     String?
+  city                             String?
+  state                            String?
+  zipCode                          String?
+  county                           String?
+  country                          String?
+  membershipCategoryId             String?
+  membershipCategoryManualOverride Boolean          @default(false)
+  householdName                    String?
+  emergencyContactName             String?
+  emergencyContactPhone            String?
+  notes                            String?
+  commsPushEnabled                 Boolean          @default(true)
+  commsEmailEnabled                Boolean          @default(true)
+  commsSmsEnabled                  Boolean          @default(false)
+  requiredNoticesOnly              Boolean          @default(false)
+  createdAt                        DateTime         @default(now())
+  updatedAt                        DateTime         @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  membershipCategory Category? @relation("MemberMembershipCategory", fields: [membershipCategoryId], references: [id], onDelete: SetNull)
-  duesAccounts    DuesAccount[] @relation("DuesAccountMember")
-  duesCharges     DuesCharge[]
-  duesPayments    DuesPayment[]
-  duesAdjustments DuesAdjustment[]
-  contributions   Contribution[]
-  receipts        ContributionReceipt[]
-  reminderLogs    EmailReminderLog[]
-  communicationLogs CommunicationLog[]
+  organization            Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user                    User?                    @relation("OrgMemberLogin", fields: [userId], references: [id], onDelete: SetNull)
+  membershipCategory      Category?                @relation("MemberMembershipCategory", fields: [membershipCategoryId], references: [id], onDelete: SetNull)
+  duesAccounts            DuesAccount[]            @relation("DuesAccountMember")
+  duesCharges             DuesCharge[]
+  duesPayments            DuesPayment[]
+  duesAdjustments         DuesAdjustment[]
+  contributions           Contribution[]
+  receipts                ContributionReceipt[]
+  reminderLogs            EmailReminderLog[]
+  communicationLogs       CommunicationLog[]
   communicationRecipients CommunicationRecipient[]
-  paymentImportItems PaymentImportItem[] @relation("PaymentImportItemMatchedMember")
-  attendanceRecords AttendanceRecord[]
-  timelineEvents MemberTimelineEvent[]
+  paymentImportItems      PaymentImportItem[]      @relation("PaymentImportItemMatchedMember")
+  attendanceRecords       AttendanceRecord[]
+  timelineEvents          MemberTimelineEvent[]
+  invites                 MemberInvite[]
+  paymentReports          PaymentReport[]
 
+  @@unique([organizationId, userId])
   @@index([organizationId])
   @@index([organizationId, membershipStatus])
   @@index([organizationId, lastName, firstName])
@@ -519,28 +550,29 @@ model OrgMember {
   @@index([organizationId, county])
   @@index([organizationId, joinDate])
   @@index([organizationId, isDelinquent])
+  @@index([userId])
 }
 
 /// Campaign (fundraising / advocacy), scoped to an org.
 model Campaign {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   organizationId String
   name           String
   description    String?
-  goal           Decimal? @db.Decimal(12, 2)
+  goal           Decimal?  @db.Decimal(12, 2)
   startDate      DateTime?
   endDate        DateTime?
-  status         String   @default("active")
+  status         String    @default("active")
   notes          String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  contributions Contribution[]
-  communicationLogs CommunicationLog[]
-  expenditures Expenditure[]
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contributions      Contribution[]
+  communicationLogs  CommunicationLog[]
+  expenditures       Expenditure[]
   paymentImportItems PaymentImportItem[]
-  paymentLinks PaymentLink[]
+  paymentLinks       PaymentLink[]
 
   @@index([organizationId])
   @@index([organizationId, status])
@@ -548,25 +580,25 @@ model Campaign {
 
 /// Event, scoped to an org.
 model Event {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   organizationId String
   title          String
   description    String?
   location       String?
   startAt        DateTime?
   endAt          DateTime?
-  status         String   @default("upcoming")
+  status         String    @default("upcoming")
   notes          String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  contributions Contribution[]
-  communicationLogs CommunicationLog[]
-  attendanceRecords AttendanceRecord[]
-  expenditures Expenditure[]
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contributions      Contribution[]
+  communicationLogs  CommunicationLog[]
+  attendanceRecords  AttendanceRecord[]
+  expenditures       Expenditure[]
   paymentImportItems PaymentImportItem[]
-  paymentLinks PaymentLink[]
+  paymentLinks       PaymentLink[]
 
   @@index([organizationId])
   @@index([organizationId, startAt])
@@ -574,38 +606,38 @@ model Event {
 
 /// Expenditure record, scoped to an org.
 model Expenditure {
-  id             String   @id @default(cuid())
-  organizationId String
-  description    String
-  amount         Decimal  @db.Decimal(12, 2)
-  category       String?
-  categoryId     String?
-  date           DateTime
-  vendor         String?
-  receiptUrl     String?
-  reference      String?
+  id              String    @id @default(cuid())
+  organizationId  String
+  description     String
+  amount          Decimal   @db.Decimal(12, 2)
+  category        String?
+  categoryId      String?
+  date            DateTime
+  vendor          String?
+  receiptUrl      String?
+  reference       String?
   paymentMethodId String?
-  paymentMethod  String?
-  campaignId     String?
-  eventId        String?
-  notes          String?
-  lockedAt       DateTime?
-  lockedByUserId String?
-  voidedAt       DateTime?
-  voidedByUserId String?
-  voidReason     String?
-  correctionOfId String?
-  correctedById  String?
-  revisionNumber Int      @default(1)
-  editReason     String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  paymentMethod   String?
+  campaignId      String?
+  eventId         String?
+  notes           String?
+  lockedAt        DateTime?
+  lockedByUserId  String?
+  voidedAt        DateTime?
+  voidedByUserId  String?
+  voidReason      String?
+  correctionOfId  String?
+  correctedById   String?
+  revisionNumber  Int       @default(1)
+  editReason      String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  categoryRef  Category? @relation("ExpenditureCategory", fields: [categoryId], references: [id], onDelete: SetNull)
+  organization        Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  categoryRef         Category?            @relation("ExpenditureCategory", fields: [categoryId], references: [id], onDelete: SetNull)
   paymentMethodConfig PaymentMethodConfig? @relation(fields: [paymentMethodId], references: [id], onDelete: SetNull)
-  campaign     Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
-  event        Event? @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  campaign            Campaign?            @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  event               Event?               @relation(fields: [eventId], references: [id], onDelete: SetNull)
 
   @@index([organizationId])
   @@index([organizationId, date])
@@ -617,30 +649,30 @@ model Expenditure {
 
 /// Category lookup table, scoped to an org.
 model Category {
-  id             String   @id @default(cuid())
-  organizationId String
-  name           String
-  type           String   // MEMBERSHIP | DUES | CONTRIBUTION | EXPENDITURE | EVENT | CAMPAIGN
-  description    String?
-  isActive       Boolean  @default(true)
-  notes          String?
-  amountDefault  Decimal? @db.Decimal(12, 2)
-  frequency      String?
+  id                     String    @id @default(cuid())
+  organizationId         String
+  name                   String
+  type                   String // MEMBERSHIP | DUES | CONTRIBUTION | EXPENDITURE | EVENT | CAMPAIGN
+  description            String?
+  isActive               Boolean   @default(true)
+  notes                  String?
+  amountDefault          Decimal?  @db.Decimal(12, 2)
+  frequency              String?
   standardDuesCategoryId String?
-  minAge         Int?
-  maxAge         Int?
-  autoAssignByAge Boolean @default(false)
-  priority       Int      @default(0)
-  effectiveDate  DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  minAge                 Int?
+  maxAge                 Int?
+  autoAssignByAge        Boolean   @default(false)
+  priority               Int       @default(0)
+  effectiveDate          DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  standardDuesCategory Category? @relation("MembershipCategoryStandardDues", fields: [standardDuesCategoryId], references: [id], onDelete: SetNull)
-  membershipCategories Category[] @relation("MembershipCategoryStandardDues")
-  members      OrgMember[] @relation("MemberMembershipCategory")
-  duesAccounts DuesAccount[] @relation("DuesAccountCategory")
-  expenditures Expenditure[] @relation("ExpenditureCategory")
+  organization         Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  standardDuesCategory Category?     @relation("MembershipCategoryStandardDues", fields: [standardDuesCategoryId], references: [id], onDelete: SetNull)
+  membershipCategories Category[]    @relation("MembershipCategoryStandardDues")
+  members              OrgMember[]   @relation("MemberMembershipCategory")
+  duesAccounts         DuesAccount[] @relation("DuesAccountCategory")
+  expenditures         Expenditure[] @relation("ExpenditureCategory")
 
   @@unique([organizationId, name, type])
   @@index([organizationId])
@@ -650,19 +682,19 @@ model Category {
 }
 
 model PaymentMethodConfig {
-  id             String   @id @default(cuid())
-  organizationId String
-  method         DuesPaymentMethod
-  label          String
-  instructions   String?
+  id                String            @id @default(cuid())
+  organizationId    String
+  method            DuesPaymentMethod
+  label             String
+  instructions      String?
   accountIdentifier String?
-  notes          String?
-  isActive       Boolean  @default(true)
-  sortOrder      Int      @default(0)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  notes             String?
+  isActive          Boolean           @default(true)
+  sortOrder         Int               @default(0)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   expenditures Expenditure[]
 
   @@unique([organizationId, method])
@@ -671,19 +703,19 @@ model PaymentMethodConfig {
 }
 
 model PaymentImportBatch {
-  id             String                   @id @default(cuid())
-  organizationId String
-  sourceType     PaymentImportSourceType
-  fileName       String?
-  status         PaymentImportBatchStatus @default(UPLOADED)
+  id               String                   @id @default(cuid())
+  organizationId   String
+  sourceType       PaymentImportSourceType
+  fileName         String?
+  status           PaymentImportBatchStatus @default(UPLOADED)
   uploadedByUserId String?
-  uploadedAt     DateTime                 @default(now())
-  processedAt    DateTime?
-  notes          String?
-  createdAt      DateTime                 @default(now())
-  updatedAt      DateTime                 @updatedAt
+  uploadedAt       DateTime                 @default(now())
+  processedAt      DateTime?
+  notes            String?
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   items        PaymentImportItem[]
 
   @@index([organizationId])
@@ -719,14 +751,14 @@ model PaymentImportItem {
   createdAt             DateTime                        @default(now())
   updatedAt             DateTime                        @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  batch        PaymentImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
-  matchedMember OrgMember? @relation("PaymentImportItemMatchedMember", fields: [matchedMemberId], references: [id], onDelete: SetNull)
-  matchedDuesCharge DuesCharge? @relation(fields: [matchedDuesChargeId], references: [id], onDelete: SetNull)
-  matchedCampaign Campaign? @relation(fields: [matchedCampaignId], references: [id], onDelete: SetNull)
-  matchedEvent Event? @relation(fields: [matchedEventId], references: [id], onDelete: SetNull)
-  postedDuesPayment DuesPayment? @relation(fields: [postedDuesPaymentId], references: [id], onDelete: SetNull)
-  postedContribution Contribution? @relation(fields: [postedContributionId], references: [id], onDelete: SetNull)
+  organization       Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  batch              PaymentImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  matchedMember      OrgMember?         @relation("PaymentImportItemMatchedMember", fields: [matchedMemberId], references: [id], onDelete: SetNull)
+  matchedDuesCharge  DuesCharge?        @relation(fields: [matchedDuesChargeId], references: [id], onDelete: SetNull)
+  matchedCampaign    Campaign?          @relation(fields: [matchedCampaignId], references: [id], onDelete: SetNull)
+  matchedEvent       Event?             @relation(fields: [matchedEventId], references: [id], onDelete: SetNull)
+  postedDuesPayment  DuesPayment?       @relation(fields: [postedDuesPaymentId], references: [id], onDelete: SetNull)
+  postedContribution Contribution?      @relation(fields: [postedContributionId], references: [id], onDelete: SetNull)
 
   @@unique([organizationId, sourceType, externalTransactionId])
   @@index([organizationId])
@@ -741,29 +773,29 @@ model PaymentImportItem {
 
 /// Organization-level settings (one-to-one with Organization).
 model OrgSettings {
-  id              String   @id @default(cuid())
-  organizationId  String   @unique
-  timezone        String   @default("America/New_York")
-  currency        String   @default("USD")
-  fiscalYearStart Int      @default(1) // month number 1–12
-  logoUrl         String?
-  emailFrom       String?
-  customDomain    String?
-  financialEditWindowHours Int @default(24)
-  requireReasonForFinancialEdits Boolean @default(true)
-  allowFinanceCorrections Boolean @default(true)
-  lockReceiptsAfterIssue Boolean @default(true)
-  duesStartRule DuesStartRule @default(JOIN_DATE)
-  delinquentAfterMonths Int @default(3)
-  delinquentAfterDays Int?
-  autoMarkDelinquent Boolean @default(true)
-  gracePeriodDays Int @default(0)
-  autoSuspendAfterMonths Int?
-  autoDeactivateAfterMonths Int?
-  reminderFrequencyDays Int?
-  openingBalanceCents Int      @default(0)
-  openingBalanceDate  DateTime?
-  updatedAt       DateTime @updatedAt
+  id                             String        @id @default(cuid())
+  organizationId                 String        @unique
+  timezone                       String        @default("America/New_York")
+  currency                       String        @default("USD")
+  fiscalYearStart                Int           @default(1) // month number 1–12
+  logoUrl                        String?
+  emailFrom                      String?
+  customDomain                   String?
+  financialEditWindowHours       Int           @default(24)
+  requireReasonForFinancialEdits Boolean       @default(true)
+  allowFinanceCorrections        Boolean       @default(true)
+  lockReceiptsAfterIssue         Boolean       @default(true)
+  duesStartRule                  DuesStartRule @default(JOIN_DATE)
+  delinquentAfterMonths          Int           @default(3)
+  delinquentAfterDays            Int?
+  autoMarkDelinquent             Boolean       @default(true)
+  gracePeriodDays                Int           @default(0)
+  autoSuspendAfterMonths         Int?
+  autoDeactivateAfterMonths      Int?
+  reminderFrequencyDays          Int?
+  openingBalanceCents            Int           @default(0)
+  openingBalanceDate             DateTime?
+  updatedAt                      DateTime      @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 }
@@ -797,9 +829,9 @@ model DuesAccount {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  member       OrgMember? @relation("DuesAccountMember", fields: [memberId], references: [id], onDelete: SetNull)
-  category     Category? @relation("DuesAccountCategory", fields: [categoryId], references: [id], onDelete: SetNull)
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  member       OrgMember?    @relation("DuesAccountMember", fields: [memberId], references: [id], onDelete: SetNull)
+  category     Category?     @relation("DuesAccountCategory", fields: [categoryId], references: [id], onDelete: SetNull)
   charges      DuesCharge[]
   payments     DuesPayment[]
 
@@ -812,57 +844,16 @@ model DuesAccount {
 }
 
 model DuesCharge {
-  id             String          @id @default(cuid())
+  id             String           @id @default(cuid())
   organizationId String
   memberId       String
   duesAccountId  String
-  amountDue      Decimal         @db.Decimal(12, 2)
-  amountPaid     Decimal         @default(0) @db.Decimal(12, 2)
+  amountDue      Decimal          @db.Decimal(12, 2)
+  amountPaid     Decimal          @default(0) @db.Decimal(12, 2)
   dueDate        DateTime
   periodStart    DateTime?
   periodEnd      DateTime?
   status         DuesChargeStatus @default(PENDING)
-  notes          String?
-  lockedAt       DateTime?
-  lockedByUserId String?
-  voidedAt       DateTime?
-  voidedByUserId String?
-  voidReason     String?
-  correctionOfId String?
-  correctedById  String?
-  revisionNumber Int             @default(1)
-  editReason     String?
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  member       OrgMember     @relation(fields: [memberId], references: [id], onDelete: Cascade)
-  duesAccount  DuesAccount   @relation(fields: [duesAccountId], references: [id], onDelete: Cascade)
-  payments     DuesPayment[]
-  adjustments  DuesAdjustment[]
-  paymentImportItems PaymentImportItem[]
-
-  @@index([organizationId])
-  @@index([memberId])
-  @@index([status])
-  @@index([dueDate])
-  @@index([periodStart])
-  @@index([periodEnd])
-  @@index([createdAt])
-  @@index([organizationId, memberId, dueDate])
-  @@unique([organizationId, memberId, duesAccountId, periodStart, periodEnd])
-}
-
-model DuesPayment {
-  id             String           @id @default(cuid())
-  organizationId String
-  memberId       String
-  duesChargeId   String?
-  duesAccountId  String?
-  amount         Decimal          @db.Decimal(12, 2)
-  paymentDate    DateTime
-  method         DuesPaymentMethod
-  reference      String?
   notes          String?
   lockedAt       DateTime?
   lockedByUserId String?
@@ -876,10 +867,51 @@ model DuesPayment {
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  member       OrgMember     @relation(fields: [memberId], references: [id], onDelete: Cascade)
-  duesCharge   DuesCharge?   @relation(fields: [duesChargeId], references: [id], onDelete: SetNull)
-  duesAccount  DuesAccount?  @relation(fields: [duesAccountId], references: [id], onDelete: SetNull)
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  member             OrgMember           @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  duesAccount        DuesAccount         @relation(fields: [duesAccountId], references: [id], onDelete: Cascade)
+  payments           DuesPayment[]
+  adjustments        DuesAdjustment[]
+  paymentImportItems PaymentImportItem[]
+
+  @@unique([organizationId, memberId, duesAccountId, periodStart, periodEnd])
+  @@index([organizationId])
+  @@index([memberId])
+  @@index([status])
+  @@index([dueDate])
+  @@index([periodStart])
+  @@index([periodEnd])
+  @@index([createdAt])
+  @@index([organizationId, memberId, dueDate])
+}
+
+model DuesPayment {
+  id             String            @id @default(cuid())
+  organizationId String
+  memberId       String
+  duesChargeId   String?
+  duesAccountId  String?
+  amount         Decimal           @db.Decimal(12, 2)
+  paymentDate    DateTime
+  method         DuesPaymentMethod
+  reference      String?
+  notes          String?
+  lockedAt       DateTime?
+  lockedByUserId String?
+  voidedAt       DateTime?
+  voidedByUserId String?
+  voidReason     String?
+  correctionOfId String?
+  correctedById  String?
+  revisionNumber Int               @default(1)
+  editReason     String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  member             OrgMember           @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  duesCharge         DuesCharge?         @relation(fields: [duesChargeId], references: [id], onDelete: SetNull)
+  duesAccount        DuesAccount?        @relation(fields: [duesAccountId], references: [id], onDelete: SetNull)
   paymentImportItems PaymentImportItem[]
 
   @@index([organizationId])
@@ -914,37 +946,37 @@ model DuesAdjustment {
 }
 
 model Contribution {
-  id             String             @id @default(cuid())
-  organizationId String
-  memberId       String?
-  campaignId     String?
-  eventId        String?
-  amount         Decimal            @db.Decimal(12, 2)
+  id               String             @id @default(cuid())
+  organizationId   String
+  memberId         String?
+  campaignId       String?
+  eventId          String?
+  amount           Decimal            @db.Decimal(12, 2)
   contributionDate DateTime
-  paymentMethod  DuesPaymentMethod?
-  source         ContributionSource @default(MANUAL)
-  receiptRequested Boolean          @default(false)
-  notes          String?
-  contributorName String?
-  createdByUserId String?
-  lockedAt       DateTime?
-  lockedByUserId String?
-  voidedAt       DateTime?
-  voidedByUserId String?
-  voidReason     String?
-  correctionOfId String?
-  correctedById  String?
-  revisionNumber Int                @default(1)
-  editReason     String?
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
+  paymentMethod    DuesPaymentMethod?
+  source           ContributionSource @default(MANUAL)
+  receiptRequested Boolean            @default(false)
+  notes            String?
+  contributorName  String?
+  createdByUserId  String?
+  lockedAt         DateTime?
+  lockedByUserId   String?
+  voidedAt         DateTime?
+  voidedByUserId   String?
+  voidReason       String?
+  correctionOfId   String?
+  correctedById    String?
+  revisionNumber   Int                @default(1)
+  editReason       String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  member       OrgMember?    @relation(fields: [memberId], references: [id], onDelete: SetNull)
-  campaign     Campaign?     @relation(fields: [campaignId], references: [id], onDelete: SetNull)
-  event        Event?        @relation(fields: [eventId], references: [id], onDelete: SetNull)
-  createdByUser User?        @relation("ContributionCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  receipts     ContributionReceipt[]
+  organization       Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  member             OrgMember?            @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  campaign           Campaign?             @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  event              Event?                @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  createdByUser      User?                 @relation("ContributionCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  receipts           ContributionReceipt[]
   paymentImportItems PaymentImportItem[]
 
   @@index([organizationId])
@@ -956,30 +988,30 @@ model Contribution {
 }
 
 model ContributionReceipt {
-  id                String               @id @default(cuid())
-  organizationId    String
-  contributionId    String
-  memberId          String?
-  receiptNumber     String
-  deliveredAt       DateTime?
-  deliveryStatus    ReceiptDeliveryStatus @default(NOT_SENT)
-  errorMessage      String?
-  metadata          Json?
-  lockedAt          DateTime?
-  lockedByUserId    String?
-  voidedAt          DateTime?
-  voidedByUserId    String?
-  voidReason        String?
-  correctionOfId    String?
-  correctedById     String?
-  revisionNumber    Int                   @default(1)
-  editReason        String?
-  createdAt         DateTime             @default(now())
-  updatedAt         DateTime             @updatedAt
+  id             String                @id @default(cuid())
+  organizationId String
+  contributionId String
+  memberId       String?
+  receiptNumber  String
+  deliveredAt    DateTime?
+  deliveryStatus ReceiptDeliveryStatus @default(NOT_SENT)
+  errorMessage   String?
+  metadata       Json?
+  lockedAt       DateTime?
+  lockedByUserId String?
+  voidedAt       DateTime?
+  voidedByUserId String?
+  voidReason     String?
+  correctionOfId String?
+  correctedById  String?
+  revisionNumber Int                   @default(1)
+  editReason     String?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   contribution Contribution @relation(fields: [contributionId], references: [id], onDelete: Cascade)
-  member       OrgMember?    @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  member       OrgMember?   @relation(fields: [memberId], references: [id], onDelete: SetNull)
 
   @@unique([organizationId, receiptNumber])
   @@index([organizationId])
@@ -1003,8 +1035,8 @@ model ReportExport {
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdByUser User?       @relation("ReportExportCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdByUser User?        @relation("ReportExportCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
 
   @@index([organizationId])
   @@index([status])
@@ -1012,23 +1044,23 @@ model ReportExport {
 }
 
 model EmailReminderLog {
-  id             String         @id @default(cuid())
-  organizationId String
-  memberId       String?
-  reminderType   ReminderType
-  status         ReminderStatus @default(QUEUED)
-  recipientEmail String?
-  subject        String?
-  bodyPreview    String?
-  sentAt         DateTime?
-  errorMessage   String?
-  metadata       Json?
+  id              String         @id @default(cuid())
+  organizationId  String
+  memberId        String?
+  reminderType    ReminderType
+  status          ReminderStatus @default(QUEUED)
+  recipientEmail  String?
+  subject         String?
+  bodyPreview     String?
+  sentAt          DateTime?
+  errorMessage    String?
+  metadata        Json?
   createdByUserId String?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  member       OrgMember?    @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  member        OrgMember?   @relation(fields: [memberId], references: [id], onDelete: SetNull)
   createdByUser User?        @relation("ReminderCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
 
   @@index([organizationId])
@@ -1084,13 +1116,16 @@ model CommunicationCampaign {
   attachmentKeys    Json?
   meetingId         String?
   createdByUserId   String?
+  pushEnabled       Boolean                      @default(false)
+  deepLink          String?
+  scheduledFor      DateTime?
   sentAt            DateTime?
   createdAt         DateTime                     @default(now())
   updatedAt         DateTime                     @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  meeting      Meeting?     @relation(fields: [meetingId], references: [id], onDelete: SetNull)
-  createdBy    User?        @relation("CommunicationCampaignCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  organization Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  meeting      Meeting?                 @relation(fields: [meetingId], references: [id], onDelete: SetNull)
+  createdBy    User?                    @relation("CommunicationCampaignCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   recipients   CommunicationRecipient[]
 
   @@index([organizationId])
@@ -1099,24 +1134,28 @@ model CommunicationCampaign {
   @@index([status])
   @@index([sentAt])
   @@index([createdAt])
+  @@index([scheduledFor])
 }
 
 model CommunicationRecipient {
-  id             String                      @id @default(cuid())
-  organizationId String
-  campaignId     String
-  memberId       String?
-  email          String?
-  phone          String?
-  deliveryStatus CommunicationDeliveryStatus @default(PENDING)
-  errorMessage   String?
-  sentAt         DateTime?
-  createdAt      DateTime                    @default(now())
-  updatedAt      DateTime                    @updatedAt
+  id                 String                       @id @default(cuid())
+  organizationId     String
+  campaignId         String
+  memberId           String?
+  email              String?
+  phone              String?
+  deliveryStatus     CommunicationDeliveryStatus  @default(PENDING)
+  errorMessage       String?
+  sentAt             DateTime?
+  pushDeliveryStatus CommunicationDeliveryStatus?
+  pushSentAt         DateTime?
+  pushError          String?
+  createdAt          DateTime                     @default(now())
+  updatedAt          DateTime                     @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   campaign     CommunicationCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  member       OrgMember? @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  member       OrgMember?            @relation(fields: [memberId], references: [id], onDelete: SetNull)
 
   @@index([organizationId])
   @@index([campaignId])
@@ -1142,10 +1181,10 @@ model AttendanceRecord {
   updatedAt        DateTime         @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  member       OrgMember     @relation(fields: [memberId], references: [id], onDelete: Cascade)
-  event        Event?        @relation(fields: [eventId], references: [id], onDelete: SetNull)
-  meeting      Meeting?      @relation(fields: [meetingId], references: [id], onDelete: SetNull)
-  recordedBy   User?         @relation("AttendanceRecordedBy", fields: [recordedByUserId], references: [id], onDelete: SetNull)
+  member       OrgMember    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  event        Event?       @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  meeting      Meeting?     @relation(fields: [meetingId], references: [id], onDelete: SetNull)
+  recordedBy   User?        @relation("AttendanceRecordedBy", fields: [recordedByUserId], references: [id], onDelete: SetNull)
 
   @@index([organizationId])
   @@index([memberId])
@@ -1168,9 +1207,9 @@ model Meeting {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdBy    User?        @relation("MeetingCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  attendanceRecords AttendanceRecord[]
+  organization           Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy              User?                   @relation("MeetingCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  attendanceRecords      AttendanceRecord[]
   communicationCampaigns CommunicationCampaign[]
 
   @@index([organizationId])
@@ -1202,26 +1241,27 @@ model MemberTimelineEvent {
 }
 
 model Attachment {
-  id                String               @id @default(cuid())
-  organizationId    String
-  entityType        AttachmentEntityType
-  entityId          String
-  purpose           String?
-  fileName          String
-  contentType       String
-  byteSize          Int
-  objectKey         String
-  title             String?
-  description       String?
-  uploadedByUserId  String?
-  uploadedAt        DateTime             @default(now())
-  deletedAt         DateTime?
-  deletedByUserId   String?
-  createdAt         DateTime             @default(now())
-  updatedAt         DateTime             @updatedAt
+  id               String               @id @default(cuid())
+  organizationId   String
+  entityType       AttachmentEntityType
+  entityId         String
+  purpose          String?
+  fileName         String
+  contentType      String
+  byteSize         Int
+  objectKey        String
+  title            String?
+  description      String?
+  uploadedByUserId String?
+  uploadedAt       DateTime             @default(now())
+  deletedAt        DateTime?
+  deletedByUserId  String?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  uploadedBy   User?        @relation("AttachmentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  uploadedBy     User?           @relation("AttachmentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+  paymentReports PaymentReport[]
 
   @@index([organizationId])
   @@index([organizationId, entityType, entityId])
@@ -1232,22 +1272,22 @@ model Attachment {
 
 /// A shareable payment link that lets non-portal users pay via Stripe Checkout.
 model PaymentLink {
-  id             String            @id @default(cuid())
-  organizationId String
-  slug           String            @unique
-  title          String
-  description    String?
-  linkType       PaymentLinkType   @default(GENERAL)
-  amount         Decimal?          @db.Decimal(12, 2)
-  minAmount      Decimal?          @db.Decimal(12, 2)
-  campaignId     String?
-  eventId        String?
-  status         PaymentLinkStatus @default(active)
-  expiresAt      DateTime?
-  useCount       Int               @default(0)
+  id              String            @id @default(cuid())
+  organizationId  String
+  slug            String            @unique
+  title           String
+  description     String?
+  linkType        PaymentLinkType   @default(GENERAL)
+  amount          Decimal?          @db.Decimal(12, 2)
+  minAmount       Decimal?          @db.Decimal(12, 2)
+  campaignId      String?
+  eventId         String?
+  status          PaymentLinkStatus @default(active)
+  expiresAt       DateTime?
+  useCount        Int               @default(0)
   createdByUserId String?
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
 
   organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   campaign      Campaign?    @relation(fields: [campaignId], references: [id], onDelete: SetNull)
@@ -1259,4 +1299,77 @@ model PaymentLink {
   @@index([organizationId, status])
   @@index([campaignId])
   @@index([eventId])
+}
+
+// ─── Mobile member app ────────────────────────────────────────────────────────
+
+/// Admin-initiated invite for an OrgMember to create mobile/web login credentials.
+/// Single-use, expiring, scoped to one member — never an open self-signup surface.
+model MemberInvite {
+  id              String    @id @default(cuid())
+  organizationId  String
+  memberId        String
+  tokenHash       String    @unique
+  expiresAt       DateTime
+  acceptedAt      DateTime?
+  createdByUserId String?
+  createdAt       DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  member       OrgMember    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  createdBy    User?        @relation("MemberInviteCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([memberId])
+  @@index([expiresAt])
+}
+
+/// A registered push-notification target device for a logged-in User (staff or member).
+/// organizationId is null when the token isn't scoped to a single org context.
+model MobileDeviceToken {
+  id             String               @id @default(cuid())
+  userId         String
+  organizationId String?
+  platform       MobileDevicePlatform
+  token          String
+  deviceName     String?
+  lastSeenAt     DateTime             @default(now())
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, token])
+  @@index([userId])
+  @@index([organizationId])
+}
+
+/// A member-submitted "I paid my dues" report, pending treasurer/admin review.
+model PaymentReport {
+  id                  String              @id @default(cuid())
+  organizationId      String
+  memberId            String
+  amount              Decimal             @db.Decimal(12, 2)
+  paymentMethod       DuesPaymentMethod
+  paymentDate         DateTime
+  referenceNumber     String?
+  note                String?
+  receiptAttachmentId String?
+  status              PaymentReportStatus @default(pending)
+  reviewedById        String?
+  reviewedAt          DateTime?
+  rejectionReason     String?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  member            OrgMember    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  reviewedBy        User?        @relation("PaymentReportReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  receiptAttachment Attachment?  @relation(fields: [receiptAttachmentId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([memberId])
+  @@index([createdAt])
 }

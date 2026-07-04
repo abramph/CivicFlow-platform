@@ -40,6 +40,7 @@ export interface OrgSession extends AuthedSession {
 // ─── Role hierarchy ───────────────────────────────────────────────────────────
 
 const ROLE_RANK: Record<Role, number> = {
+  MEMBER:      -1,
   READ_ONLY:   0,
   STAFF:       1,
   FINANCE:     2,

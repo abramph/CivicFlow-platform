@@ -6,6 +6,19 @@ const serverEnvSchema = z.object({
   DATABASE_URL: z.string().min(1),
   NEXTAUTH_SECRET: z.string().min(1),
   NEXTAUTH_URL: z.string().url(),
+  MOBILE_JWT_SECRET: z.string().min(1),
+  // Base URL for universal links / web fallback pages (app.civicflowapp.com in
+  // production; falls back to the portal's own URL until that domain is wired up).
+  MOBILE_APP_WEB_BASE_URL: z.string().url().optional(),
+  // Hostname (no protocol) that middleware rewrites /dues, /events, etc. to
+  // their /m/* member web-fallback implementation — e.g. "app.civicflowapp.com".
+  MOBILE_APP_WEB_HOST: z.string().optional(),
+  // Universal link (iOS) / app link (Android) verification. Placeholders
+  // until the app is enrolled in the Apple Developer Program / signed for
+  // release — see mobile deployment docs.
+  APPLE_APP_ID: z.string().optional(),
+  ANDROID_PACKAGE_NAME: z.string().optional(),
+  ANDROID_SHA256_CERT_FINGERPRINTS: z.string().optional(),
 
   STRIPE_SECRET_KEY: z.string().min(1),
   STRIPE_WEBHOOK_SECRET: z.string().min(1),
@@ -53,6 +66,12 @@ export function getServerEnv(): ServerEnv {
     DATABASE_URL: process.env.DATABASE_URL,
     NEXTAUTH_SECRET: process.env.NEXTAUTH_SECRET,
     NEXTAUTH_URL: process.env.NEXTAUTH_URL,
+    MOBILE_JWT_SECRET: process.env.MOBILE_JWT_SECRET,
+    MOBILE_APP_WEB_BASE_URL: process.env.MOBILE_APP_WEB_BASE_URL,
+    MOBILE_APP_WEB_HOST: process.env.MOBILE_APP_WEB_HOST,
+    APPLE_APP_ID: process.env.APPLE_APP_ID,
+    ANDROID_PACKAGE_NAME: process.env.ANDROID_PACKAGE_NAME,
+    ANDROID_SHA256_CERT_FINGERPRINTS: process.env.ANDROID_SHA256_CERT_FINGERPRINTS,
     STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY,
     STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET,
     STRIPE_PRICE_ESSENTIAL_MONTHLY: process.env.STRIPE_PRICE_ESSENTIAL_MONTHLY,
@@ -89,6 +108,12 @@ export function getServerEnv(): ServerEnv {
     DATABASE_URL: parsed.DATABASE_URL ?? "",
     NEXTAUTH_SECRET: parsed.NEXTAUTH_SECRET ?? "",
     NEXTAUTH_URL: parsed.NEXTAUTH_URL ?? "http://localhost:3000",
+    MOBILE_JWT_SECRET: parsed.MOBILE_JWT_SECRET ?? "dev-insecure-mobile-jwt-secret",
+    MOBILE_APP_WEB_BASE_URL: parsed.MOBILE_APP_WEB_BASE_URL,
+    MOBILE_APP_WEB_HOST: parsed.MOBILE_APP_WEB_HOST,
+    APPLE_APP_ID: parsed.APPLE_APP_ID,
+    ANDROID_PACKAGE_NAME: parsed.ANDROID_PACKAGE_NAME,
+    ANDROID_SHA256_CERT_FINGERPRINTS: parsed.ANDROID_SHA256_CERT_FINGERPRINTS,
     STRIPE_SECRET_KEY: parsed.STRIPE_SECRET_KEY ?? "",
     STRIPE_WEBHOOK_SECRET: parsed.STRIPE_WEBHOOK_SECRET ?? "",
     STRIPE_PRICE_ESSENTIAL_MONTHLY: parsed.STRIPE_PRICE_ESSENTIAL_MONTHLY,
@@ -116,4 +141,10 @@ export function getServerEnv(): ServerEnv {
 export function isEmailSendEnabled() {
   const env = getServerEnv();
   return env.ENABLE_EMAIL_SEND === "1" || env.ENABLE_EMAIL_SEND === "true";
+}
+
+/** Base URL for member-facing universal links / web fallback pages. */
+export function getMobileAppWebBaseUrl(): string {
+  const env = getServerEnv();
+  return (env.MOBILE_APP_WEB_BASE_URL ?? env.NEXTAUTH_URL).replace(/\/+$/, "");
 }

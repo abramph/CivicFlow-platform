@@ -5,6 +5,7 @@ import { parseJsonBody, z } from "@/lib/validation";
 import { prisma } from "@/lib/prisma";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { createMemberTimelineEvent } from "@/lib/member-timeline";
+import { recordDuesPayment } from "@/lib/dues-payments";
 
 const createDuesPaymentSchema = z.object({
   memberId: z.union([z.string().min(1), z.literal(""), z.null()]).optional(),
@@ -140,41 +141,17 @@ export async function POST(request: Request) {
       resolvedMethod = paymentMethod.method;
     }
 
-    const { row } = await prisma.$transaction(async (tx) => {
-      const payment = await tx.duesPayment.create({
-        data: {
-          organizationId,
-          memberId: resolvedMemberId,
-          duesChargeId,
-          duesAccountId: resolvedDuesAccountId,
-          amount: input.amount,
-          paymentDate: new Date(input.paymentDate),
-          method: resolvedMethod,
-          reference,
-          notes,
-        },
-      });
-
-      if (charge) {
-        const nextAmountPaid = Number(charge.amountPaid) + input.amount;
-        const amountDue = Number(charge.amountDue);
-        const nextStatus =
-          nextAmountPaid <= 0
-            ? "PENDING"
-            : nextAmountPaid >= amountDue
-              ? "PAID"
-              : "PARTIAL";
-
-        await tx.duesCharge.update({
-          where: { id: charge.id },
-          data: {
-            amountPaid: nextAmountPaid,
-            status: nextStatus,
-          },
-        });
-      }
-
-      return { row: payment };
+    const row = await recordDuesPayment({
+      organizationId,
+      memberId: resolvedMemberId,
+      duesChargeId,
+      duesAccountId: resolvedDuesAccountId,
+      amount: input.amount,
+      paymentDate: new Date(input.paymentDate),
+      method: resolvedMethod,
+      reference,
+      notes,
+      charge,
     });
 
     await createAuditEvent({

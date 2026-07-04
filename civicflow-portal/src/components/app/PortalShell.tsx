@@ -49,6 +49,8 @@ export function PortalShell({ children }: { children: ReactNode }) {
     { href: "/members", label: "Members" },
     { href: "/contributions", label: "Contributions" },
     { href: "/dues", label: "Dues" },
+    { href: "/dues/reminders", label: "Dues Campaigns" },
+    { href: "/payment-reports", label: "Payment Reports" },
     { href: "/campaigns", label: "Campaigns" },
     { href: "/events", label: "Events" },
     { href: "/meetings", label: "Meetings" },

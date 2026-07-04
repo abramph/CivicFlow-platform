@@ -7,7 +7,8 @@ This repository contains three deployable units:
 | Desktop app | `/` (root) | Electron + React/Vite | Distributed installer |
 | License server | `civicflow-license-server/` | Node/Express + SQLite | VPS (PM2) |
 | Cloud API | `cloud-api/` | Node/Express + SQLite | VPS or cloud |
-| Portal (SaaS) | `civicflow-portal/` | Next.js 15 | Planned: DigitalOcean |
+| Portal (SaaS) | `civicflow-portal/` | Next.js 16 | Planned: DigitalOcean |
+| Mobile app | `civicflow-mobile/` | Expo / React Native | App Store / Google Play (see `MOBILE_DEPLOYMENT.md`) |
 
 ---
 
