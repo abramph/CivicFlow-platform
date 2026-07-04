@@ -17,7 +17,13 @@ const ACCESS_TOKEN_TTL_SECONDS = 15 * 60; // 15 minutes
 const REFRESH_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
 
 function getSecretKey() {
-  return new TextEncoder().encode(getServerEnv().MOBILE_JWT_SECRET);
+  const secret = getServerEnv().MOBILE_JWT_SECRET;
+  if (!secret) {
+    throw new Error(
+      "MOBILE_JWT_SECRET is not configured — set it in the environment before using mobile auth."
+    );
+  }
+  return new TextEncoder().encode(secret);
 }
 
 export class MobileAuthError extends Error {

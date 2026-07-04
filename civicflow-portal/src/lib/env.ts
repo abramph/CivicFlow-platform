@@ -6,7 +6,11 @@ const serverEnvSchema = z.object({
   DATABASE_URL: z.string().min(1),
   NEXTAUTH_SECRET: z.string().min(1),
   NEXTAUTH_URL: z.string().url(),
-  MOBILE_JWT_SECRET: z.string().min(1),
+  // Optional at the env-validation level (unlike NEXTAUTH_SECRET) so a
+  // missing value doesn't break unrelated requests app-wide — mobile-auth.ts
+  // throws its own clear error if a mobile auth route is actually hit
+  // without this configured.
+  MOBILE_JWT_SECRET: z.string().min(1).optional(),
   // Base URL for universal links / web fallback pages (app.civicflowapp.com in
   // production; falls back to the portal's own URL until that domain is wired up).
   MOBILE_APP_WEB_BASE_URL: z.string().url().optional(),
