@@ -127,7 +127,16 @@ async function getAccrualStart(memberId: string, requestedStart?: Date) {
   if (settings.duesStartRule === "MANUAL" && requestedStart) {
     policyStart = startOfDay(requestedStart);
   }
-  return requestedStart && requestedStart > policyStart ? startOfDay(requestedStart) : policyStart;
+  const start = requestedStart && requestedStart > policyStart ? startOfDay(requestedStart) : policyStart;
+
+  // Hard floor, independent of duesStartRule and whether a start date was
+  // supplied — prevents retroactively billing members for periods before
+  // this org's dues history is actually known (e.g. a desktop→cloud
+  // migration that didn't import a per-member charge ledger).
+  if (settings.duesAccrualNotBeforeDate && start < settings.duesAccrualNotBeforeDate) {
+    return startOfDay(settings.duesAccrualNotBeforeDate);
+  }
+  return start;
 }
 
 async function buildExpectedPeriods(memberId: string, startDate: Date, endDate: Date) {

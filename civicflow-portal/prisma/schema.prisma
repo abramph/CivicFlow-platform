@@ -786,6 +786,12 @@ model OrgSettings {
   allowFinanceCorrections        Boolean       @default(true)
   lockReceiptsAfterIssue         Boolean       @default(true)
   duesStartRule                  DuesStartRule @default(JOIN_DATE)
+  // Hard floor: dues accrual never generates a charge dated before this,
+  // regardless of duesStartRule or a caller-supplied start date. Set
+  // automatically on desktop→cloud migration (which has no per-member dues
+  // charge history to import) so "Generate Dues" can't retroactively bill
+  // members for periods already paid on desktop.
+  duesAccrualNotBeforeDate       DateTime?
   delinquentAfterMonths          Int           @default(3)
   delinquentAfterDays            Int?
   autoMarkDelinquent             Boolean       @default(true)

@@ -433,5 +433,18 @@ export async function runMigrationImport(
     counts.expenditures++;
   }
 
+  // 9. Dues accrual floor — this import brings in payment history as
+  //    Contribution records (see step 7/7b), not a per-member DuesCharge
+  //    ledger, so the org has no historical charge data. Without this,
+  //    "Generate Dues" would retroactively bill every member back to their
+  //    original join date, since none of their real desktop payments are
+  //    linked to a cloud charge. Set the floor to "now" so charges are only
+  //    ever generated for periods going forward from the migration itself.
+  await prisma.orgSettings.upsert({
+    where: { organizationId },
+    update: { duesAccrualNotBeforeDate: new Date() },
+    create: { organizationId, duesAccrualNotBeforeDate: new Date() },
+  });
+
   return counts;
 }
