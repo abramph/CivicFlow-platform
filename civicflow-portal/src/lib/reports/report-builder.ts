@@ -378,7 +378,15 @@ export async function buildReport(input: BuildReportInput): Promise<ReportData> 
       );
     }
     case "FULL_YEAR_DUES_PAID": {
-      // Mirrors the desktop app's "Members with Full Year Dues Paid" report.
+      // Analogous to the desktop app's "Members with Full Year Dues Paid"
+      // report, but not numerically identical: desktop compares total dues
+      // payments in the calendar year against a flat (current monthly rate
+      // × 12) target, with no per-period charge ledger and no brought-forward
+      // check. This version uses the actual DuesCharge ledger for the period
+      // (correctly reflecting rate changes and partial-year membership) and
+      // additionally excludes anyone who still owes money from before the
+      // period — a member isn't "fully paid" if they're carrying a prior
+      // unpaid balance, even if this period's charges are covered.
       // Defaults to the current calendar year when no date range is given,
       // like desktop's year picker; the portal's generic start/end pickers
       // let an org run it for any period, not just a full calendar year.
@@ -411,8 +419,35 @@ export async function buildReport(input: BuildReportInput): Promise<ReportData> 
         byMember.set(charge.memberId, existing);
       }
 
-      const fullyPaid = [...byMember.values()]
-        .filter((entry) => entry.totalDue > 0 && entry.totalPaid + entry.totalAdjustments >= entry.totalDue)
+      const inPeriodCandidates = [...byMember.entries()].filter(
+        ([, entry]) => entry.totalDue > 0 && entry.totalPaid + entry.totalAdjustments >= entry.totalDue
+      );
+
+      // A member isn't truly "fully paid" if they still owe money from before
+      // this period — check for any unpaid balance carried forward, even
+      // though their in-period charges are covered.
+      const priorCharges =
+        inPeriodCandidates.length === 0
+          ? []
+          : await prisma.duesCharge.findMany({
+              where: {
+                organizationId,
+                dueDate: { lt: periodStart },
+                status: { not: "VOID" },
+                memberId: { in: inPeriodCandidates.map(([memberId]) => memberId) },
+              },
+              select: { memberId: true, amountDue: true, amountPaid: true, adjustments: { select: { amount: true } } },
+            });
+      const priorBalanceByMember = new Map<string, number>();
+      for (const charge of priorCharges) {
+        const adjustments = charge.adjustments.reduce((sum, adjustment) => sum + Number(adjustment.amount), 0);
+        const outstanding = Math.max(0, Number(charge.amountDue) - Number(charge.amountPaid) - adjustments);
+        priorBalanceByMember.set(charge.memberId, (priorBalanceByMember.get(charge.memberId) ?? 0) + outstanding);
+      }
+
+      const fullyPaid = inPeriodCandidates
+        .filter(([memberId]) => (priorBalanceByMember.get(memberId) ?? 0) <= 0)
+        .map(([, entry]) => entry)
         .sort((a, b) => (a.member.lastName + a.member.firstName).localeCompare(b.member.lastName + b.member.firstName))
         .slice(0, take);
 
@@ -429,7 +464,13 @@ export async function buildReport(input: BuildReportInput): Promise<ReportData> 
           "Paid in Year": money(entry.totalPaid),
           Adjustments: money(entry.totalAdjustments),
         })),
-        [{ label: "Members fully paid", value: fullyPaid.length }],
+        [
+          { label: "Members fully paid", value: fullyPaid.length },
+          {
+            label: "Excluded for prior-year balance",
+            value: inPeriodCandidates.length - fullyPaid.length,
+          },
+        ],
         // Slim PDF to Name + amount paid, matching the desktop app; CSV/XLSX
         // keep full contact/category detail.
         { pdfColumns: ["Name", "Paid in Year"] }
