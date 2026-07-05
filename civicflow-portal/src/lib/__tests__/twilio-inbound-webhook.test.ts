@@ -4,11 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/rate-limit", () => ({ requireRateLimit: vi.fn().mockResolvedValue(null) }));
 
 const updateManyOrgMember = vi.fn().mockResolvedValue({ count: 1 });
+const queryRawOrgMember = vi.fn().mockResolvedValue([{ id: "member-1" }]);
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     orgMember: {
       updateMany: (...args: unknown[]) => updateManyOrgMember(...args),
     },
+    $queryRaw: (...args: unknown[]) => queryRawOrgMember(...args),
   },
 }));
 
@@ -42,6 +44,8 @@ describe("Twilio inbound webhook", () => {
 
   beforeEach(() => {
     updateManyOrgMember.mockClear();
+    queryRawOrgMember.mockClear();
+    queryRawOrgMember.mockResolvedValue([{ id: "member-1" }]);
     process.env.SMS_API_KEY = AUTH_TOKEN;
   });
 
@@ -75,14 +79,23 @@ describe("Twilio inbound webhook", () => {
     expect(updateManyOrgMember).not.toHaveBeenCalled();
   });
 
-  it("opts a member out on a verified STOP keyword", async () => {
+  it("opts a member out on a verified STOP keyword, matching by id from the phone lookup", async () => {
+    queryRawOrgMember.mockResolvedValueOnce([{ id: "member-1" }, { id: "member-2" }]);
     const request = makeRequest({ From: "+15551234567", Body: "STOP" });
     const response = await POST(request);
     expect(response.status).toBe(200);
     expect(updateManyOrgMember).toHaveBeenCalledWith({
-      where: { phone: "+15551234567" },
+      where: { id: { in: ["member-1", "member-2"] } },
       data: { commsSmsEnabled: false, smsOptedOutAt: expect.any(Date) },
     });
+  });
+
+  it("looks up members by digits-only phone (full and last-10) so mixed-format stored numbers still match", async () => {
+    const request = makeRequest({ From: "+15551234567", Body: "STOP" });
+    await POST(request);
+    const callArgs = queryRawOrgMember.mock.calls[0];
+    expect(callArgs).toContain("15551234567");
+    expect(callArgs).toContain("5551234567");
   });
 
   it("treats other STOP-family keywords the same way", async () => {
@@ -90,7 +103,7 @@ describe("Twilio inbound webhook", () => {
     const response = await POST(request);
     expect(response.status).toBe(200);
     expect(updateManyOrgMember).toHaveBeenCalledWith({
-      where: { phone: "+15551234567" },
+      where: { id: { in: ["member-1"] } },
       data: { commsSmsEnabled: false, smsOptedOutAt: expect.any(Date) },
     });
   });
@@ -100,15 +113,24 @@ describe("Twilio inbound webhook", () => {
     const response = await POST(request);
     expect(response.status).toBe(200);
     expect(updateManyOrgMember).toHaveBeenCalledWith({
-      where: { phone: "+15551234567" },
+      where: { id: { in: ["member-1"] } },
       data: { commsSmsEnabled: true, smsOptedOutAt: null },
     });
+  });
+
+  it("does nothing when no member matches the phone number", async () => {
+    queryRawOrgMember.mockResolvedValueOnce([]);
+    const request = makeRequest({ From: "+15551234567", Body: "STOP" });
+    const response = await POST(request);
+    expect(response.status).toBe(200);
+    expect(updateManyOrgMember).not.toHaveBeenCalled();
   });
 
   it("does nothing for a message body that isn't a STOP/START keyword", async () => {
     const request = makeRequest({ From: "+15551234567", Body: "Thanks!" });
     const response = await POST(request);
     expect(response.status).toBe(200);
+    expect(queryRawOrgMember).not.toHaveBeenCalled();
     expect(updateManyOrgMember).not.toHaveBeenCalled();
   });
 });

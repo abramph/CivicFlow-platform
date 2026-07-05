@@ -78,22 +78,38 @@ export async function POST(request: Request) {
   const from = paramsObject.From;
   const body = (paramsObject.Body ?? "").trim().toUpperCase();
 
-  // NOTE: matches OrgMember.phone by exact string equality. Phone numbers
-  // entered elsewhere in the app aren't normalized to E.164, so a member
-  // whose number is stored in a different format than Twilio's `From` won't
-  // be matched here — acceptable for a first pass, but worth normalizing
-  // phone storage before relying on this as the sole compliance mechanism.
-  if (from && STOP_KEYWORDS.has(body)) {
-    await prisma.orgMember.updateMany({
-      where: { phone: from },
-      data: { commsSmsEnabled: false, smsOptedOutAt: new Date() },
-    });
-  } else if (from && START_KEYWORDS.has(body)) {
-    await prisma.orgMember.updateMany({
-      where: { phone: from },
-      data: { commsSmsEnabled: true, smsOptedOutAt: null },
-    });
+  if (from && (STOP_KEYWORDS.has(body) || START_KEYWORDS.has(body))) {
+    const matchingIds = await findMemberIdsByPhone(from);
+    if (matchingIds.length > 0) {
+      const data = STOP_KEYWORDS.has(body)
+        ? { commsSmsEnabled: false, smsOptedOutAt: new Date() }
+        : { commsSmsEnabled: true, smsOptedOutAt: null };
+      await prisma.orgMember.updateMany({ where: { id: { in: matchingIds } }, data });
+    }
   }
 
   return twimlResponse();
+}
+
+function digitsOnly(value: string): string {
+  return value.replace(/\D/g, "");
+}
+
+/**
+ * OrgMember.phone is free text (manual entry or CSV import) and rarely
+ * stored in E.164, while Twilio's `From` always is — so an exact string
+ * match would miss most members. Matches by digits only, against either
+ * the full number or just the last 10 (to catch a stored number missing
+ * its "1" country code), via a raw query since Prisma can't express a
+ * normalize-then-compare filter directly.
+ */
+async function findMemberIdsByPhone(from: string): Promise<string[]> {
+  const fullDigits = digitsOnly(from);
+  const last10Digits = fullDigits.slice(-10);
+  const rows = await prisma.$queryRaw<{ id: string }[]>`
+    SELECT id FROM "OrgMember"
+    WHERE phone IS NOT NULL
+      AND regexp_replace(phone, '\D', '', 'g') IN (${fullDigits}, ${last10Digits})
+  `;
+  return rows.map((row) => row.id);
 }

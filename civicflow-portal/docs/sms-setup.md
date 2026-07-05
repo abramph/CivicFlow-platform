@@ -36,11 +36,15 @@ Member `phone` fields are free text (manual entry or CSV import) and are rarely 
 prefixed `+1`; an 11-digit number starting with `1` gets a `+` prefix; anything already in E.164 is
 left as-is. Numbers that don't fit one of those shapes (missing digits, non-US numbers without a
 `+`, non-numeric junk) fail with "Invalid phone number." and are never sent to Twilio. This does
-**not** normalize the stored `OrgMember.phone` value itself — only the number used for the send —
-so the inbound STOP/START webhook's `where: { phone: from }` lookup (an exact string match against
-Twilio's always-E.164 `From`) can still miss a member whose phone is on file in a different format
-than what they texted from. Normalizing `OrgMember.phone` storage itself is a larger, separate
-data-migration task, not covered by this feature.
+**not** normalize the stored `OrgMember.phone` value itself — only the number used for the send.
+
+The inbound STOP/START webhook (`src/app/api/webhooks/twilio/inbound/route.ts`) has to find matching
+members from Twilio's always-E.164 `From`, so it can't rely on the same in-app normalization. It
+instead matches by digits only, via a raw SQL `regexp_replace(phone, '\D', '', 'g')` comparison
+against both the full digit string and the last 10 digits (to catch a stored number missing its
+leading `1`) — so "215-917-4391", "(215) 917-4391", and "+12159174391" all match a text from
+`+12159174391`. This still won't match a number that's missing digits, transposed, or otherwise
+wrong on file — there's no substitute for the member's stored phone actually being correct.
 
 ## 3. Twilio account setup
 
