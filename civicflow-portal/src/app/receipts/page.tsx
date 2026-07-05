@@ -5,7 +5,8 @@ import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { ReceiptsManager } from "@/components/forms/ReceiptsManager";
 
 export default async function ReceiptsPage() {
-  const { organizationId } = await requirePermission("receipts:read");
+  const { organizationId, can } = await requirePermission("receipts:read");
+  const canWrite = can("receipts:write");
   const [rows, contributions, paymentMethods] = await Promise.all([
     prisma.contributionReceipt.findMany({
       where: { organizationId },
@@ -87,6 +88,7 @@ export default async function ReceiptsPage() {
             contributionAmount: receipt.contribution.amount.toString(),
             attachmentId: attachmentByReceiptId.get(receipt.id)?.id ?? null,
           }))}
+          canWrite={canWrite}
         />
       </SectionCard>
     </main>

@@ -32,9 +32,11 @@ type ReceiptRow = {
 export function ReceiptsManager({
   contributions,
   receipts,
+  canWrite,
 }: {
   contributions: ContributionOption[];
   receipts: ReceiptRow[];
+  canWrite: boolean;
 }) {
   const router = useRouter();
   const [form, setForm] = useState({
@@ -86,6 +88,7 @@ export function ReceiptsManager({
 
   return (
     <div className="space-y-6">
+      {canWrite ? (
       <form className="grid gap-4 md:grid-cols-3" onSubmit={handleSubmit}>
         <label className="space-y-2 text-sm font-medium text-slate-900 md:col-span-3">
           <span>Contribution</span>
@@ -131,6 +134,9 @@ export function ReceiptsManager({
           </button>
         </div>
       </form>
+      ) : (
+        <p className="text-sm text-slate-700">You have read-only access to receipts.</p>
+      )}
 
       <div className="overflow-x-auto">
         <table className="min-w-full text-sm">
