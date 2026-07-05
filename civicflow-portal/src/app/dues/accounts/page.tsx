@@ -4,7 +4,8 @@ import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { DuesAccountsManager } from "@/components/forms/DuesAccountsManager";
 
 export default async function DuesAccountsPage() {
-  const { organizationId } = await requirePermission("dues:read");
+  const { organizationId, can } = await requirePermission("dues:read");
+  const canWrite = can("dues:write");
 
   const [members, duesCategories, accounts] = await Promise.all([
     prisma.orgMember.findMany({
@@ -86,6 +87,7 @@ export default async function DuesAccountsPage() {
             notes: account.notes,
             chargeCount: account._count.charges,
           }))}
+          canWrite={canWrite}
         />
       </SectionCard>
     </main>

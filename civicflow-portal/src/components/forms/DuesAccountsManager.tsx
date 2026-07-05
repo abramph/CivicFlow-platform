@@ -40,10 +40,12 @@ export function DuesAccountsManager({
   members,
   duesCategories,
   accounts,
+  canWrite,
 }: {
   members: MemberOption[];
   duesCategories: DuesCategoryOption[];
   accounts: DuesAccountRow[];
+  canWrite: boolean;
 }) {
   const router = useRouter();
   const [form, setForm] = useState({
@@ -140,6 +142,7 @@ export function DuesAccountsManager({
 
   return (
     <div className="space-y-6">
+      {canWrite ? (
       <form className="space-y-5" onSubmit={handleSubmit}>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           <label className="space-y-2 text-sm font-medium text-slate-900">
@@ -249,6 +252,9 @@ export function DuesAccountsManager({
           {saving ? "Creating..." : "Create Dues Account"}
         </button>
       </form>
+      ) : (
+        <p className="text-sm text-slate-700">You have read-only access to dues accounts.</p>
+      )}
 
       <div className="overflow-x-auto">
         <table className="min-w-full text-sm">

@@ -5,7 +5,8 @@ import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { DuesPaymentsManager } from "@/components/forms/DuesPaymentsManager";
 
 export default async function DuesPaymentsPage() {
-  const { organizationId } = await requirePermission("dues:read");
+  const { organizationId, can } = await requirePermission("dues:read");
+  const canWrite = can("dues:write");
 
   await ensureDefaultPaymentMethods(prisma, organizationId);
 
@@ -100,6 +101,7 @@ export default async function DuesPaymentsPage() {
           }))}
           paymentMethods={paymentMethods}
           paymentMethodLabels={methodLabels}
+          canWrite={canWrite}
         />
       </SectionCard>
     </main>

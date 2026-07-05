@@ -69,12 +69,14 @@ export function DuesPaymentsManager({
   payments,
   paymentMethods,
   paymentMethodLabels,
+  canWrite,
 }: {
   members: MemberOption[];
   charges: DuesChargeOption[];
   payments: DuesPaymentRow[];
   paymentMethods: PaymentMethodOption[];
   paymentMethodLabels: Record<string, string>;
+  canWrite: boolean;
 }) {
   const router = useRouter();
   const [form, setForm] = useState({
@@ -177,6 +179,7 @@ export function DuesPaymentsManager({
 
   return (
     <div className="space-y-6">
+      {canWrite ? (
       <form className="space-y-5" onSubmit={handleSubmit}>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <label className="space-y-2 text-sm font-medium text-slate-900">
@@ -291,6 +294,9 @@ export function DuesPaymentsManager({
           {saving ? "Recording..." : "Record Dues Payment"}
         </button>
       </form>
+      ) : (
+        <p className="text-sm text-slate-700">You have read-only access to dues payments.</p>
+      )}
 
       <div className="overflow-x-auto">
         <table className="min-w-full text-sm">

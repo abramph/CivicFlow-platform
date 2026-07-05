@@ -4,7 +4,15 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { fieldClassName } from "@/components/forms/formStyles";
 
-export function DuesAdjustmentForm({ memberId, duesChargeId = "" }: { memberId: string; duesChargeId?: string }) {
+export function DuesAdjustmentForm({
+  memberId,
+  duesChargeId = "",
+  canWrite,
+}: {
+  memberId: string;
+  duesChargeId?: string;
+  canWrite: boolean;
+}) {
   const router = useRouter();
   const [form, setForm] = useState({ adjustmentType: "WAIVER", amount: "", reason: "" });
   const [saving, setSaving] = useState(false);
@@ -34,6 +42,10 @@ export function DuesAdjustmentForm({ memberId, duesChargeId = "" }: { memberId: 
     setForm({ adjustmentType: "WAIVER", amount: "", reason: "" });
     setMessage("Adjustment recorded.");
     router.refresh();
+  }
+
+  if (!canWrite) {
+    return <p className="text-sm text-slate-700">You have read-only access to dues adjustments.</p>;
   }
 
   return (

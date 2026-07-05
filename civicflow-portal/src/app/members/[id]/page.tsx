@@ -467,7 +467,7 @@ export default async function MemberProfilePage({
         <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
           <h3 className="text-sm font-semibold text-slate-950">Dues Adjustments</h3>
           <div className="mt-4">
-            <DuesAdjustmentForm memberId={member.id} />
+            <DuesAdjustmentForm memberId={member.id} canWrite={can("dues:write")} />
           </div>
           <div className="mt-4 overflow-x-auto">
             <table className="min-w-full text-sm">

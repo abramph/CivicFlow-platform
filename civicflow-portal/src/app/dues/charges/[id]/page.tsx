@@ -17,7 +17,8 @@ export default async function DuesChargeDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const { organizationId } = await requirePermission("dues:read");
+  const { organizationId, can } = await requirePermission("dues:read");
+  const canWrite = can("dues:write");
   const { id } = await params;
 
   const charge = await prisma.duesCharge.findFirst({
@@ -107,7 +108,7 @@ export default async function DuesChargeDetailPage({
       </SectionCard>
 
       <SectionCard title="Adjustments" description="Adjustments reduce the outstanding balance while preserving the original charge amount.">
-        <DuesAdjustmentForm memberId={charge.member.id} duesChargeId={charge.id} />
+        <DuesAdjustmentForm memberId={charge.member.id} duesChargeId={charge.id} canWrite={canWrite} />
         <div className="mt-4 overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="bg-slate-50 text-left text-slate-700">

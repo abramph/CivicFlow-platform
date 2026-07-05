@@ -56,11 +56,13 @@ export function DuesChargesManager({
   accounts,
   charges,
   defaultMemberId = "",
+  canWrite,
 }: {
   members: MemberOption[];
   accounts: DuesAccountOption[];
   charges: DuesChargeRow[];
   defaultMemberId?: string;
+  canWrite: boolean;
 }) {
   const router = useRouter();
   const [form, setForm] = useState({
@@ -169,6 +171,7 @@ export function DuesChargesManager({
 
   return (
     <div className="space-y-6">
+      {canWrite ? (
       <form className="space-y-5" onSubmit={handleSubmit}>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <label className="space-y-2 text-sm font-medium text-slate-900">
@@ -257,6 +260,9 @@ export function DuesChargesManager({
           {saving ? "Creating..." : "Create Dues Charge"}
         </button>
       </form>
+      ) : (
+        <p className="text-sm text-slate-700">You have read-only access to dues charges.</p>
+      )}
 
       <div className="overflow-x-auto">
         <table className="min-w-full text-sm">

@@ -12,7 +12,8 @@ export default async function DuesChargesPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { organizationId } = await requirePermission("dues:read");
+  const { organizationId, can } = await requirePermission("dues:read");
+  const canWrite = can("dues:write");
   const resolvedSearchParams = await searchParams;
   const memberId = getValue(resolvedSearchParams.memberId);
 
@@ -82,6 +83,7 @@ export default async function DuesChargesPage({
             amountPaid: charge.amountPaid.toString(),
           }))}
           defaultMemberId={memberId}
+          canWrite={canWrite}
         />
       </SectionCard>
     </main>
