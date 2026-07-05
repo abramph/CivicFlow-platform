@@ -1,13 +1,7 @@
 import { withApiErrorHandling } from "@/lib/api-route";
 import { processScheduledCampaigns } from "@/lib/communication-campaigns";
+import { validateCronSecret } from "@/lib/cron-auth";
 import { requireRateLimit } from "@/lib/rate-limit";
-
-function validateCronSecret(request: Request): boolean {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return false;
-  const auth = request.headers.get("authorization") ?? "";
-  return auth === `Bearer ${secret}`;
-}
 
 /**
  * Fires scheduled communication campaigns (dues reminders, announcements,

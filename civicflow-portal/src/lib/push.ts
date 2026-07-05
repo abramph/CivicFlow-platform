@@ -80,6 +80,9 @@ export async function sendPushToMember(params: {
   if (!params.required && !member.commsPushEnabled) {
     return { sent: 0, failed: 0, skipped: true, reason: "Member has opted out of push notifications" };
   }
+  if (!params.required && member.requiredNoticesOnly) {
+    return { sent: 0, failed: 0, skipped: true, reason: "Member opted into required notices only" };
+  }
 
   const tokens = await prisma.mobileDeviceToken.findMany({
     where: { userId: member.userId },

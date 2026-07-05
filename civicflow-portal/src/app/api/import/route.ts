@@ -28,7 +28,17 @@ function parseSqliteDb(buffer: Buffer, table: string): Record<string, string>[] 
   try {
     writeFileSync(tmp, buffer);
     const db = new Database(tmp, { readonly: true });
-    const rows = db.prepare(`SELECT * FROM ${table} LIMIT 5000`).all() as Record<string, unknown>[];
+    // SQLite doesn't support parameter binding for identifiers (table names),
+    // so the table must be validated against the file's own actual table
+    // list before being string-interpolated into the query.
+    const actualTables = db
+      .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`)
+      .all() as { name: string }[];
+    if (!actualTables.some((t) => t.name === table)) {
+      db.close();
+      throw new Error("table_not_found");
+    }
+    const rows = db.prepare(`SELECT * FROM "${table}" LIMIT 5000`).all() as Record<string, unknown>[];
     db.close();
     return rows.map((r) =>
       Object.fromEntries(Object.entries(r).map(([k, v]) => [k, String(v ?? "")]))
@@ -220,7 +230,7 @@ async function importContributions(
 
 export async function POST(request: Request) {
   return withApiErrorHandling(async () => {
-    const { organizationId } = await requirePermission("members:write");
+    const { organizationId } = await requirePermission("members:write", "throw");
 
     const contentLength = Number(request.headers.get("content-length") ?? 0);
     if (contentLength > MAX_BYTES) {
@@ -257,6 +267,9 @@ export async function POST(request: Request) {
     } catch (err) {
       if (String(err).includes("table_required")) {
         return Response.json({ error: "Please select a table from the SQLite file." }, { status: 400 });
+      }
+      if (String(err).includes("table_not_found")) {
+        return Response.json({ error: "That table doesn't exist in the uploaded file." }, { status: 400 });
       }
       throw err;
     }

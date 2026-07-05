@@ -1,13 +1,7 @@
 import { withApiErrorHandling } from "@/lib/api-route";
+import { validateCronSecret } from "@/lib/cron-auth";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { processPendingReminderLogs } from "@/lib/reminders";
-
-function validateCronSecret(request: Request): boolean {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return false;
-  const auth = request.headers.get("authorization") ?? "";
-  return auth === `Bearer ${secret}`;
-}
 
 export async function POST(request: Request) {
   const limited = await requireRateLimit({

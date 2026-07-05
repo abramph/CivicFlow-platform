@@ -158,7 +158,7 @@ export async function sendCommunicationCampaign(input: {
       let pushDeliveryStatus: "SENT" | "SKIPPED" | "FAILED" | null = null;
       let pushError: string | null = null;
       if (campaign.pushEnabled && recipient.member?.userId) {
-        if (recipient.member.commsPushEnabled) {
+        if (recipient.member.commsPushEnabled && !recipient.member.requiredNoticesOnly) {
           const tokens = await prisma.mobileDeviceToken.findMany({
             where: { userId: recipient.member.userId },
             select: { token: true },
@@ -171,7 +171,9 @@ export async function sendCommunicationCampaign(input: {
           if (pushDeliveryStatus !== "SENT") pushError = tokens.length === 0 ? "No registered devices" : "Delivery failed";
         } else {
           pushDeliveryStatus = "SKIPPED";
-          pushError = "Member opted out of push notifications";
+          pushError = recipient.member.requiredNoticesOnly
+            ? "Member opted into required notices only"
+            : "Member opted out of push notifications";
         }
       }
 

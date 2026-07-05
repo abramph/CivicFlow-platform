@@ -6,6 +6,7 @@ import {
   generateMissingDuesChargesForOrganization,
 } from "@/lib/dues-accrual";
 import { evaluateMemberDelinquency, evaluateOrganizationDelinquency } from "@/lib/member-delinquency";
+import { prisma } from "@/lib/prisma";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { parseJsonBody, z } from "@/lib/validation";
 
@@ -31,6 +32,17 @@ export async function POST(request: Request) {
     const endDate = input.endDate ? new Date(input.endDate) : new Date();
     if (startDate && startDate > endDate) {
       return Response.json({ ok: false, error: "Start date must be before end date." }, { status: 400 });
+    }
+
+    if (input.memberId) {
+      // generateMissingDuesChargesForMember/evaluateMemberDelinquency look the
+      // member up by bare id with no organizationId filter of their own — this
+      // is the only checkpoint that stops a caller in one org from generating
+      // charges or flipping delinquency status for a member in another org.
+      const member = await prisma.orgMember.findFirst({ where: { id: input.memberId, organizationId } });
+      if (!member) {
+        return Response.json({ ok: false, error: "Member not found" }, { status: 404 });
+      }
     }
 
     const result = input.memberId
