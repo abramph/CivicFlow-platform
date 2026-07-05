@@ -4,7 +4,8 @@ import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { UsersAndRolesManager } from "@/components/forms/UsersAndRolesManager";
 
 export default async function UsersSettingsPage() {
-  const { organizationId, role, session } = await requirePermission("users:read");
+  const { organizationId, role, session, can } = await requirePermission("users:read");
+  const canManage = can("users:manage");
 
   const memberships = await prisma.organizationMembership.findMany({
     where: { organizationId },
@@ -55,6 +56,8 @@ export default async function UsersSettingsPage() {
             },
           }))}
           currentUserId={session.userId}
+          canManage={canManage}
+          actorRole={role}
         />
       </SectionCard>
     </main>

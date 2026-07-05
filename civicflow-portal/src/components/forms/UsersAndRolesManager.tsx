@@ -8,6 +8,20 @@ import { formatDateTime, formatText } from "@/lib/formatting";
 const roleOptions = ["ORG_OWNER", "ORG_ADMIN", "FINANCE", "STAFF", "READ_ONLY"] as const;
 type RoleOption = (typeof roleOptions)[number];
 
+// Mirrors auth-guards.ts's ROLE_RANK — kept in sync manually since this is a
+// client component and that file is server-only (imports next-auth session
+// helpers). Used only to hide role choices the server would reject anyway;
+// the server's rank check is the actual enforcement.
+const ROLE_RANK: Record<string, number> = {
+  MEMBER: -1,
+  READ_ONLY: 0,
+  STAFF: 1,
+  FINANCE: 2,
+  ORG_ADMIN: 3,
+  ORG_OWNER: 4,
+  SUPER_ADMIN: 5,
+};
+
 type MembershipRow = {
   id: string;
   role: string;
@@ -23,15 +37,23 @@ type MembershipRow = {
 export function UsersAndRolesManager({
   memberships,
   currentUserId,
+  canManage,
+  actorRole,
 }: {
   memberships: MembershipRow[];
   currentUserId: string;
+  canManage: boolean;
+  actorRole: string;
 }) {
   const router = useRouter();
+  const assignableRoleOptions = roleOptions.filter((option) => ROLE_RANK[option] <= (ROLE_RANK[actorRole] ?? -1));
+  const defaultInviteRole = assignableRoleOptions.includes("STAFF")
+    ? "STAFF"
+    : (assignableRoleOptions[assignableRoleOptions.length - 1] ?? "READ_ONLY");
   const [inviteForm, setInviteForm] = useState({
     displayName: "",
     email: "",
-    role: "STAFF" as RoleOption,
+    role: defaultInviteRole as RoleOption,
     temporaryPassword: "",
   });
   const [savingInvite, setSavingInvite] = useState(false);
@@ -173,69 +195,75 @@ export function UsersAndRolesManager({
 
   return (
     <div className="space-y-6">
-      <form className="space-y-5" onSubmit={handleInvite}>
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <label className="space-y-2 text-sm font-medium text-slate-900">
-            <span>Display name</span>
-            <input
-              value={inviteForm.displayName}
-              onChange={(event) => setInviteValue("displayName", event.target.value)}
-              className={classNames(fieldClassName, fieldErrors.displayName && fieldErrorClassName)}
-            />
-            {fieldErrors.displayName ? <p className="text-sm font-medium text-red-700">{fieldErrors.displayName}</p> : null}
-          </label>
-          <label className="space-y-2 text-sm font-medium text-slate-900">
-            <span>Email</span>
-            <input
-              type="email"
-              value={inviteForm.email}
-              onChange={(event) => setInviteValue("email", event.target.value)}
-              className={classNames(fieldClassName, fieldErrors.email && fieldErrorClassName)}
-            />
-            {fieldErrors.email ? <p className="text-sm font-medium text-red-700">{fieldErrors.email}</p> : null}
-          </label>
-          <label className="space-y-2 text-sm font-medium text-slate-900">
-            <span>Role</span>
-            <select
-              value={inviteForm.role}
-              onChange={(event) => setInviteValue("role", event.target.value as RoleOption)}
-              className={fieldClassName}
-            >
-              {roleOptions.map((role) => (
-                <option key={role} value={role}>
-                  {role}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="space-y-2 text-sm font-medium text-slate-900">
-            <span>Temporary password</span>
-            <input
-              type="password"
-              value={inviteForm.temporaryPassword}
-              onChange={(event) => setInviteValue("temporaryPassword", event.target.value)}
-              className={classNames(fieldClassName, fieldErrors.temporaryPassword && fieldErrorClassName)}
-            />
-            {fieldErrors.temporaryPassword ? (
-              <p className="text-sm font-medium text-red-700">{fieldErrors.temporaryPassword}</p>
-            ) : null}
-          </label>
-        </div>
-
-        {inviteError ? (
-          <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
-            {inviteError}
+      {canManage ? (
+        <form className="space-y-5" onSubmit={handleInvite}>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <label className="space-y-2 text-sm font-medium text-slate-900">
+              <span>Display name</span>
+              <input
+                value={inviteForm.displayName}
+                onChange={(event) => setInviteValue("displayName", event.target.value)}
+                className={classNames(fieldClassName, fieldErrors.displayName && fieldErrorClassName)}
+              />
+              {fieldErrors.displayName ? <p className="text-sm font-medium text-red-700">{fieldErrors.displayName}</p> : null}
+            </label>
+            <label className="space-y-2 text-sm font-medium text-slate-900">
+              <span>Email</span>
+              <input
+                type="email"
+                value={inviteForm.email}
+                onChange={(event) => setInviteValue("email", event.target.value)}
+                className={classNames(fieldClassName, fieldErrors.email && fieldErrorClassName)}
+              />
+              {fieldErrors.email ? <p className="text-sm font-medium text-red-700">{fieldErrors.email}</p> : null}
+            </label>
+            <label className="space-y-2 text-sm font-medium text-slate-900">
+              <span>Role</span>
+              <select
+                value={inviteForm.role}
+                onChange={(event) => setInviteValue("role", event.target.value as RoleOption)}
+                className={fieldClassName}
+              >
+                {assignableRoleOptions.map((role) => (
+                  <option key={role} value={role}>
+                    {role}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-2 text-sm font-medium text-slate-900">
+              <span>Temporary password</span>
+              <input
+                type="password"
+                value={inviteForm.temporaryPassword}
+                onChange={(event) => setInviteValue("temporaryPassword", event.target.value)}
+                className={classNames(fieldClassName, fieldErrors.temporaryPassword && fieldErrorClassName)}
+              />
+              {fieldErrors.temporaryPassword ? (
+                <p className="text-sm font-medium text-red-700">{fieldErrors.temporaryPassword}</p>
+              ) : null}
+            </label>
           </div>
-        ) : null}
 
-        <button
-          type="submit"
-          disabled={savingInvite}
-          className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-slate-400"
-        >
-          {savingInvite ? "Inviting..." : "Invite User"}
-        </button>
-      </form>
+          {inviteError ? (
+            <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
+              {inviteError}
+            </div>
+          ) : null}
+
+          <button
+            type="submit"
+            disabled={savingInvite}
+            className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+          >
+            {savingInvite ? "Inviting..." : "Invite User"}
+          </button>
+        </form>
+      ) : (
+        <p className="text-sm text-slate-700">
+          You have read-only access to the user roster. Ask an owner or admin for invite/role-change access if you need it.
+        </p>
+      )}
 
       {rowError ? (
         <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
@@ -263,32 +291,46 @@ export function UsersAndRolesManager({
                 </td>
                 <td className="px-4 py-3 text-slate-900">{membership.user.email}</td>
                 <td className="px-4 py-3 text-slate-900">
-                  <select
-                    defaultValue={membership.role}
-                    disabled={rowBusyId === membership.id}
-                    onChange={(event) => updateRole(membership.id, event.target.value as RoleOption)}
-                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950"
-                  >
-                    {!roleOptions.includes(membership.role as RoleOption) ? (
-                      <option value={membership.role}>{membership.role}</option>
-                    ) : null}
-                    {roleOptions.map((role) => (
-                      <option key={role} value={role}>
-                        {role}
-                      </option>
-                    ))}
-                  </select>
+                  {(() => {
+                    const rowOutranksActor = (ROLE_RANK[membership.role] ?? 0) > (ROLE_RANK[actorRole] ?? -1);
+                    if (!canManage || rowOutranksActor) {
+                      return membership.role;
+                    }
+                    return (
+                      <select
+                        defaultValue={membership.role}
+                        disabled={rowBusyId === membership.id}
+                        onChange={(event) => updateRole(membership.id, event.target.value as RoleOption)}
+                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950"
+                      >
+                        {!assignableRoleOptions.includes(membership.role as RoleOption) ? (
+                          <option value={membership.role}>{membership.role}</option>
+                        ) : null}
+                        {assignableRoleOptions.map((role) => (
+                          <option key={role} value={role}>
+                            {role}
+                          </option>
+                        ))}
+                      </select>
+                    );
+                  })()}
                 </td>
                 <td className="px-4 py-3 text-slate-900">{formatDateTime(membership.joinedAt)}</td>
                 <td className="px-4 py-3 text-slate-900">
-                  <button
-                    type="button"
-                    disabled={rowBusyId === membership.id || membership.user.id === currentUserId}
-                    onClick={() => removeAccess(membership.id)}
-                    className="rounded-lg border border-red-300 bg-white px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
-                  >
-                    {membership.user.id === currentUserId ? "Current user" : rowBusyId === membership.id ? "Working..." : "Remove"}
-                  </button>
+                  {canManage ? (
+                    <button
+                      type="button"
+                      disabled={
+                        rowBusyId === membership.id ||
+                        membership.user.id === currentUserId ||
+                        (ROLE_RANK[membership.role] ?? 0) > (ROLE_RANK[actorRole] ?? -1)
+                      }
+                      onClick={() => removeAccess(membership.id)}
+                      className="rounded-lg border border-red-300 bg-white px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
+                    >
+                      {membership.user.id === currentUserId ? "Current user" : rowBusyId === membership.id ? "Working..." : "Remove"}
+                    </button>
+                  ) : null}
                 </td>
               </tr>
             ))}
