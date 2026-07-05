@@ -61,6 +61,8 @@ export function ReportsManager({
   events,
   meetings,
   initial,
+  canExport,
+  canSend,
 }: {
   rows: ReportRow[];
   members: Option[];
@@ -69,6 +71,8 @@ export function ReportsManager({
   events: Option[];
   meetings: Option[];
   initial: { reportType: string; startDate: string; endDate: string };
+  canExport: boolean;
+  canSend: boolean;
 }) {
   const router = useRouter();
   const [form, setForm] = useState({
@@ -244,45 +248,51 @@ export function ReportsManager({
 
       <div className="flex flex-wrap gap-3">
         <button type="button" onClick={preview} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">Preview</button>
-        <button type="button" onClick={() => download("csv")} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50">Export CSV</button>
-        <button type="button" onClick={() => download("xlsx")} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50">Export XLSX</button>
-        <button type="button" onClick={() => download("pdf")} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50">Export PDF</button>
+        {canExport ? (
+          <>
+            <button type="button" onClick={() => download("csv")} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50">Export CSV</button>
+            <button type="button" onClick={() => download("xlsx")} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50">Export XLSX</button>
+            <button type="button" onClick={() => download("pdf")} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50">Export PDF</button>
+          </>
+        ) : null}
       </div>
 
-      <form onSubmit={handleSend} className="space-y-4 rounded-lg border border-slate-200 bg-white p-4">
-        <div className="grid gap-4 md:grid-cols-3">
+      {canSend ? (
+        <form onSubmit={handleSend} className="space-y-4 rounded-lg border border-slate-200 bg-white p-4">
+          <div className="grid gap-4 md:grid-cols-3">
+            <label className="space-y-2 text-sm font-medium text-slate-900">
+              <span>Email attachment format</span>
+              <select value={form.format} onChange={(event) => setForm((current) => ({ ...current, format: event.target.value }))} className={fieldClassName}>
+                <option value="pdf">PDF</option>
+                <option value="csv">CSV</option>
+                <option value="xlsx">XLSX</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-2 pt-7 text-sm font-medium text-slate-900">
+              <input type="checkbox" checked={form.includeAttachment} onChange={(event) => setForm((current) => ({ ...current, includeAttachment: event.target.checked }))} />
+              Include attachment
+            </label>
+            <label className="flex items-center gap-2 pt-7 text-sm font-medium text-slate-900">
+              <input type="checkbox" checked={form.includeSummary} onChange={(event) => setForm((current) => ({ ...current, includeSummary: event.target.checked }))} />
+              Include summary in body
+            </label>
+          </div>
+
+          <ReportRecipientSelector value={recipient} onChange={setRecipient} members={members} categories={categories} events={events} meetings={meetings} />
+
           <label className="space-y-2 text-sm font-medium text-slate-900">
-            <span>Email attachment format</span>
-            <select value={form.format} onChange={(event) => setForm((current) => ({ ...current, format: event.target.value }))} className={fieldClassName}>
-              <option value="pdf">PDF</option>
-              <option value="csv">CSV</option>
-              <option value="xlsx">XLSX</option>
-            </select>
+            <span>Email subject</span>
+            <input value={form.subject} onChange={(event) => setForm((current) => ({ ...current, subject: event.target.value }))} className={fieldClassName} />
           </label>
-          <label className="flex items-center gap-2 pt-7 text-sm font-medium text-slate-900">
-            <input type="checkbox" checked={form.includeAttachment} onChange={(event) => setForm((current) => ({ ...current, includeAttachment: event.target.checked }))} />
-            Include attachment
+          <label className="space-y-2 text-sm font-medium text-slate-900">
+            <span>Email message</span>
+            <textarea value={form.body} onChange={(event) => setForm((current) => ({ ...current, body: event.target.value }))} className={fieldClassName} rows={4} />
           </label>
-          <label className="flex items-center gap-2 pt-7 text-sm font-medium text-slate-900">
-            <input type="checkbox" checked={form.includeSummary} onChange={(event) => setForm((current) => ({ ...current, includeSummary: event.target.checked }))} />
-            Include summary in body
-          </label>
-        </div>
-
-        <ReportRecipientSelector value={recipient} onChange={setRecipient} members={members} categories={categories} events={events} meetings={meetings} />
-
-        <label className="space-y-2 text-sm font-medium text-slate-900">
-          <span>Email subject</span>
-          <input value={form.subject} onChange={(event) => setForm((current) => ({ ...current, subject: event.target.value }))} className={fieldClassName} />
-        </label>
-        <label className="space-y-2 text-sm font-medium text-slate-900">
-          <span>Email message</span>
-          <textarea value={form.body} onChange={(event) => setForm((current) => ({ ...current, body: event.target.value }))} className={fieldClassName} rows={4} />
-        </label>
-        <button type="submit" disabled={saving} className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-slate-400">
-          {saving ? "Sending..." : "Send Report"}
-        </button>
-      </form>
+          <button type="submit" disabled={saving} className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-slate-400">
+            {saving ? "Sending..." : "Send Report"}
+          </button>
+        </form>
+      ) : null}
 
       {error ? <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div> : null}
       {result ? <div className="rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">{result}</div> : null}

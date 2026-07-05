@@ -32,7 +32,9 @@ export default async function ReportsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { organizationId } = await requirePermission("reports:read");
+  const { organizationId, can } = await requirePermission("reports:read");
+  const canExport = can("reports:export");
+  const canSend = can("reports:export") && can("communications:write");
   const resolvedSearchParams = await searchParams;
   const reportType = getValue(resolvedSearchParams.reportType);
   const startDate = getValue(resolvedSearchParams.startDate);
@@ -134,6 +136,8 @@ export default async function ReportsPage({
           events={events.map((event) => ({ id: event.id, label: `${event.title}${event.startAt ? ` - ${formatDate(event.startAt)}` : ""}` }))}
           meetings={meetings.map((meeting) => ({ id: meeting.id, label: `${meeting.title} - ${formatDate(meeting.meetingDate)}` }))}
           initial={{ reportType: isReportType(reportType) ? reportType : "GENERAL_FINANCIAL", startDate: dateInputValue(startDate), endDate: dateInputValue(endDate) }}
+          canExport={canExport}
+          canSend={canSend}
         />
       </SectionCard>
 
