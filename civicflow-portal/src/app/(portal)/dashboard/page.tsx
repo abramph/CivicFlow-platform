@@ -4,6 +4,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/authOptions";
 import { prisma } from "@/lib/prisma";
 import { getAnalytics } from "@/lib/apiClient";
+import type { Permission, Role } from "@/lib/rbac";
+import { getEffectivePermissions } from "@/lib/role-permissions";
 import {
   Users, Calendar, DollarSign, TrendingDown, AlertCircle, UserCheck,
   Target, Receipt, ChevronRight, Mail, Shield, FileText,
@@ -112,6 +114,10 @@ export default async function DashboardPage() {
 
   // ── SaaS path ──────────────────────────────────────────────────────────────
   const orgId = String(session?.organizationId || "");
+  const role = (session?.role ?? "READ_ONLY") as Role;
+  const permissions = await getEffectivePermissions(orgId, role);
+  const can = (permission: Permission) => permissions.includes(permission);
+  const canSeeExpenditures = can("expenditures:read");
 
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -307,10 +313,10 @@ export default async function DashboardPage() {
         <StatCard label="Past Due"                value={pastDueCount}                  subtext="Pending action" icon={AlertCircle} color="amber" href="/dues" />
         <StatCard label="Dues Outstanding"        value={toCurrency(outstandingCents)}  subtext="Unpaid charges" icon={DollarSign} color="amber" href="/dues" />
         <StatCard label="Dues Collected (30d)"    value={toCurrency(dues30dCents)}      subtext="Last 30 days"  icon={DollarSign}  color="emerald" href="/dues" />
-        <StatCard label="Expenses (30d)"          value={toCurrency(exp30dCents)}       subtext="Last 30 days"  icon={TrendingDown} color="amber" href="/expenditures" />
-        <StatCard label="Ledger Total"            value={toCurrency(ledgerCents)}       subtext="Income minus expenses" icon={DollarSign} color="sky" />
-        <StatCard label="Expenditures (Month)"    value={toCurrency(expMonthCents)}     subtext="Current month" icon={Receipt}     color="red"     href="/expenditures" />
-        <StatCard label="Expenditures (YTD)"      value={toCurrency(expYtdCents)}       subtext="Year to date"  icon={Receipt}     color="red"     href="/expenditures" />
+        {canSeeExpenditures && <StatCard label="Expenses (30d)"          value={toCurrency(exp30dCents)}       subtext="Last 30 days"  icon={TrendingDown} color="amber" href="/expenditures" />}
+        {canSeeExpenditures && <StatCard label="Ledger Total"            value={toCurrency(ledgerCents)}       subtext="Income minus expenses" icon={DollarSign} color="sky" />}
+        {canSeeExpenditures && <StatCard label="Expenditures (Month)"    value={toCurrency(expMonthCents)}     subtext="Current month" icon={Receipt}     color="red"     href="/expenditures" />}
+        {canSeeExpenditures && <StatCard label="Expenditures (YTD)"      value={toCurrency(expYtdCents)}       subtext="Year to date"  icon={Receipt}     color="red"     href="/expenditures" />}
         <StatCard label="Upcoming Events"         value={upcomingEventsCount}           subtext="Next 30 days"  icon={Calendar}    color="sky"     href="/events" />
       </div>
 
@@ -398,15 +404,15 @@ export default async function DashboardPage() {
         <h3 className="text-lg font-semibold text-slate-800 mb-4">Quick Actions</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {[
-            { href: "/members",       label: "Members",       sub: "Manage membership",   icon: Users,      color: "emerald" as Color },
-            { href: "/campaigns",     label: "Campaigns",     sub: "Track fundraising",   icon: Target,     color: "emerald" as Color },
-            { href: "/events",        label: "Events",        sub: "Schedule & manage",   icon: Calendar,   color: "sky"     as Color },
-            { href: "/communications",label: "Communications",sub: "Mass email & notices",icon: Mail,       color: "sky"     as Color },
-            { href: "/contributions", label: "Contributions", sub: "View all income",     icon: DollarSign, color: "emerald" as Color },
-            { href: "/dues",          label: "Dues",          sub: "Billing & payments",  icon: Receipt,    color: "amber"   as Color },
-            { href: "/expenditures",  label: "Expenditures",  sub: "Track spending",      icon: TrendingDown, color: "red"  as Color },
-            { href: "/reports",       label: "Reports",       sub: "Financial overview",  icon: FileText,   color: "sky"     as Color },
-          ].map(({ href, label, sub, icon: Icon, color }) => {
+            { href: "/members",       label: "Members",       sub: "Manage membership",   icon: Users,      color: "emerald" as Color, visible: true },
+            { href: "/campaigns",     label: "Campaigns",     sub: "Track fundraising",   icon: Target,     color: "emerald" as Color, visible: true },
+            { href: "/events",        label: "Events",        sub: "Schedule & manage",   icon: Calendar,   color: "sky"     as Color, visible: true },
+            { href: "/communications",label: "Communications",sub: "Mass email & notices",icon: Mail,       color: "sky"     as Color, visible: true },
+            { href: "/contributions", label: "Contributions", sub: "View all income",     icon: DollarSign, color: "emerald" as Color, visible: true },
+            { href: "/dues",          label: "Dues",          sub: "Billing & payments",  icon: Receipt,    color: "amber"   as Color, visible: true },
+            { href: "/expenditures",  label: "Expenditures",  sub: "Track spending",      icon: TrendingDown, color: "red"  as Color, visible: canSeeExpenditures },
+            { href: "/reports",       label: "Reports",       sub: "Financial overview",  icon: FileText,   color: "sky"     as Color, visible: true },
+          ].filter((action) => action.visible).map(({ href, label, sub, icon: Icon, color }) => {
             const c = colorMap[color];
             return (
               <Link
