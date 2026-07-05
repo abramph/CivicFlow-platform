@@ -37,7 +37,8 @@ type OrganizationSettingsFormProps = {
 export function OrganizationSettingsForm({
   organization,
   settings,
-}: OrganizationSettingsFormProps) {
+  canWrite,
+}: OrganizationSettingsFormProps & { canWrite: boolean }) {
   const router = useRouter();
   const [form, setForm] = useState({
     name: organization.name,
@@ -151,6 +152,10 @@ export function OrganizationSettingsForm({
 
   return (
     <form className="space-y-6" onSubmit={handleSubmit}>
+      {!canWrite ? (
+        <p className="text-sm text-slate-700">You have read-only access to organization settings.</p>
+      ) : null}
+      <fieldset disabled={!canWrite} className="m-0 min-w-0 space-y-6 border-0 p-0">
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <label className="space-y-2 text-sm font-medium text-slate-900">
           <span>Organization name</span>
@@ -343,6 +348,7 @@ export function OrganizationSettingsForm({
       >
         {saving ? "Saving..." : "Save Organization Settings"}
       </button>
+      </fieldset>
     </form>
   );
 }

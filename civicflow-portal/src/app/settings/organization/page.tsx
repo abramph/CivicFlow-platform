@@ -83,7 +83,7 @@ export default async function OrgSettingsPage() {
       </div>
 
       <SectionCard title="Organization Profile" description="Changes save through the protected organization settings API and stay scoped to the organization attached to your session.">
-        <OrganizationSettingsForm organization={organization} settings={settings} />
+        <OrganizationSettingsForm organization={organization} settings={settings} canWrite={can("org_settings:write")} />
       </SectionCard>
 
       <SectionCard title="Organization Logo Upload" description="Upload a private logo file for organization branding. The latest active logo is linked to the organization profile.">
