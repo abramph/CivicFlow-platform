@@ -36,6 +36,8 @@ type MemberEditFormProps = {
     emergencyContactName: string | null;
     emergencyContactPhone: string | null;
     notes: string | null;
+    commsSmsEnabled: boolean;
+    smsOptedOutAtLabel: string | null;
   };
   membershipCategories: Array<{
     id: string;
@@ -85,6 +87,7 @@ export function MemberEditForm({ member, membershipCategories }: MemberEditFormP
     emergencyContactName: member.emergencyContactName ?? "",
     emergencyContactPhone: member.emergencyContactPhone ?? "",
     notes: member.notes ?? "",
+    commsSmsEnabled: member.commsSmsEnabled,
     statusChangeReason: "",
   });
   const [saving, setSaving] = useState(false);
@@ -136,6 +139,7 @@ export function MemberEditForm({ member, membershipCategories }: MemberEditFormP
           emergencyContactName: form.emergencyContactName.trim() || null,
           emergencyContactPhone: form.emergencyContactPhone.trim() || null,
           notes: form.notes.trim() || null,
+          commsSmsEnabled: form.commsSmsEnabled,
         }),
       });
 
@@ -309,6 +313,27 @@ export function MemberEditForm({ member, membershipCategories }: MemberEditFormP
           />
           <span>Lock membership category</span>
         </label>
+
+        <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <label className="flex items-center gap-3 text-sm font-medium text-slate-900">
+            <input
+              type="checkbox"
+              checked={form.commsSmsEnabled}
+              onChange={(event) => setFieldValue("commsSmsEnabled", event.target.checked)}
+              className="h-4 w-4 rounded border-slate-300 text-emerald-700 focus:ring-emerald-600"
+            />
+            <span>Allow SMS notifications</span>
+          </label>
+          <p className={helperTextClassName}>
+            Only sent if the organization has the SMS add-on enabled and this member has a valid phone number.
+          </p>
+          {member.smsOptedOutAtLabel ? (
+            <p className="text-xs font-medium text-amber-700">
+              This member texted STOP on {member.smsOptedOutAtLabel} — SMS stays blocked until they text START,
+              regardless of this toggle.
+            </p>
+          ) : null}
+        </div>
 
         <label className="space-y-2 text-sm font-medium text-slate-900 md:col-span-2 xl:col-span-3">
           <span>Address line 1</span>

@@ -272,6 +272,21 @@ export default async function MemberProfilePage({
         ) : null}
       </SectionCard>
 
+      <SectionCard title="SMS Preferences" description="SMS is a paid add-on — this member only receives texts if their organization has it enabled and they've opted in.">
+        <div className="grid gap-4 md:grid-cols-2">
+          <StatCard
+            label="SMS Notifications"
+            value={member.commsSmsEnabled ? "Enabled" : "Opted out"}
+            helper={member.phone ? undefined : "No phone number on file"}
+          />
+          <StatCard
+            label="Carrier Opt-Out (STOP)"
+            value={member.smsOptedOutAt ? `Replied STOP ${formatDate(member.smsOptedOutAt)}` : "None recorded"}
+            helper={member.smsOptedOutAt ? "Blocks SMS regardless of the toggle until they text START" : undefined}
+          />
+        </div>
+      </SectionCard>
+
       <SectionCard title="Member Timeline" description="Recent member transitions and activity history.">
         <div className="space-y-3">
           {recentTimelineEvents.length === 0 ? <p className="text-sm text-slate-600">No timeline events yet.</p> : recentTimelineEvents.map((event) => (

@@ -2,7 +2,7 @@ import { requirePermission } from "@/lib/auth-guards";
 import { PageHeader, SectionCard } from "@/components/app/PageChrome";
 import { MemberEditForm } from "@/components/forms/MemberEditForm";
 import { prisma } from "@/lib/prisma";
-import { formatDateInputValue } from "@/lib/formatting";
+import { formatDate, formatDateInputValue } from "@/lib/formatting";
 
 export default async function EditMemberPage({
   params,
@@ -39,6 +39,8 @@ export default async function EditMemberPage({
         emergencyContactName: true,
         emergencyContactPhone: true,
         notes: true,
+        commsSmsEnabled: true,
+        smsOptedOutAt: true,
       },
     }),
     prisma.category.findMany({
@@ -70,6 +72,9 @@ export default async function EditMemberPage({
     );
   }
 
+  const { smsOptedOutAt, ...memberWithoutRawOptOut } = member;
+  const smsOptedOutAtLabel = smsOptedOutAt ? formatDate(smsOptedOutAt) : null;
+
   return (
     <main className="space-y-6">
       <PageHeader
@@ -85,9 +90,10 @@ export default async function EditMemberPage({
       <SectionCard title="Member Form" description="Changes save through the existing PATCH /api/members/[id] route.">
         <MemberEditForm
           member={{
-            ...member,
+            ...memberWithoutRawOptOut,
             joinDate: formatDateInputValue(member.joinDate),
             dateOfBirth: formatDateInputValue(member.dateOfBirth),
+            smsOptedOutAtLabel,
           }}
           membershipCategories={membershipCategories}
         />

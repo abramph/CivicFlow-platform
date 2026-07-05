@@ -54,6 +54,7 @@ const updateMemberSchema = z.object({
   householdName: optionalTextField(160),
   emergencyContactName: optionalTextField(160),
   emergencyContactPhone: optionalTextField(50),
+  commsSmsEnabled: z.boolean().optional(),
 });
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -141,6 +142,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       ...(input.emergencyContactPhone !== undefined
         ? { emergencyContactPhone: normalizeOptionalText(input.emergencyContactPhone) }
         : {}),
+      ...(input.commsSmsEnabled !== undefined ? { commsSmsEnabled: input.commsSmsEnabled } : {}),
     };
 
     const updated = await prisma.orgMember.update({
