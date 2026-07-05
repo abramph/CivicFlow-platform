@@ -4,7 +4,8 @@ import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { RemindersManager } from "@/components/forms/RemindersManager";
 
 export default async function RemindersPage() {
-  const { organizationId } = await requirePermission("reminders:read");
+  const { organizationId, can } = await requirePermission("reminders:read");
+  const canWrite = can("reminders:send");
   const [rows, members] = await Promise.all([
     prisma.emailReminderLog.findMany({
       where: { organizationId },
@@ -49,6 +50,7 @@ export default async function RemindersPage() {
             sentAt: row.sentAt?.toISOString() ?? null,
             memberName: row.member ? `${row.member.firstName} ${row.member.lastName}` : null,
           }))}
+          canWrite={canWrite}
         />
       </SectionCard>
     </main>
