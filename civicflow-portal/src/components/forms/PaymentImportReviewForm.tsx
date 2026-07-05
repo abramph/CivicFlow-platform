@@ -21,6 +21,7 @@ export function PaymentImportReviewForm({
   charges,
   campaigns,
   events,
+  canWrite,
 }: {
   batchId: string;
   item: Item;
@@ -28,6 +29,7 @@ export function PaymentImportReviewForm({
   charges: Option[];
   campaigns: Option[];
   events: Option[];
+  canWrite: boolean;
 }) {
   const router = useRouter();
   const [form, setForm] = useState({
@@ -40,6 +42,10 @@ export function PaymentImportReviewForm({
     receiptRequested: false,
   });
   const [message, setMessage] = useState<string | null>(null);
+
+  if (!canWrite) {
+    return <p className="text-sm text-slate-700">You have read-only access to this import item.</p>;
+  }
 
   async function saveReview() {
     const response = await fetch(`/api/payments/imports/${batchId}/items/${item.id}`, {

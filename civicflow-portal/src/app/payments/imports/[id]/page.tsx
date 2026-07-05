@@ -6,7 +6,8 @@ import { PaymentImportReviewForm } from "@/components/forms/PaymentImportReviewF
 import { formatCurrency, formatDate, formatDateTime, formatEnumLabel, formatPersonName } from "@/lib/formatting";
 
 export default async function PaymentImportDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { organizationId } = await requirePermission("dues:read");
+  const { organizationId, can } = await requirePermission("dues:read");
+  const canWrite = can("dues:write");
   const { id } = await params;
   const [batch, members, charges, campaigns, events] = await Promise.all([
     prisma.paymentImportBatch.findFirst({
@@ -45,7 +46,7 @@ export default async function PaymentImportDetailPage({ params }: { params: Prom
                 <p className="mt-3 text-sm text-slate-700">Posted items are immutable. Use financial correction/void controls for changes.</p>
               ) : (
                 <div className="mt-4">
-                  <PaymentImportReviewForm batchId={batch.id} item={item} members={memberOptions} charges={chargeOptions} campaigns={campaigns.map((campaign) => ({ id: campaign.id, label: campaign.name }))} events={events.map((event) => ({ id: event.id, label: event.title }))} />
+                  <PaymentImportReviewForm batchId={batch.id} item={item} members={memberOptions} charges={chargeOptions} campaigns={campaigns.map((campaign) => ({ id: campaign.id, label: campaign.name }))} events={events.map((event) => ({ id: event.id, label: event.title }))} canWrite={canWrite} />
                 </div>
               )}
             </div>
