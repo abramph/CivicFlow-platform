@@ -1,4 +1,4 @@
-import type { CommunicationCampaignChannel, Prisma } from "@prisma/client";
+import type { CommunicationCampaign, CommunicationCampaignChannel, Prisma } from "@prisma/client";
 import { createAuditEvent } from "@/lib/audit";
 import { buildMemberWhere, parseMemberFilters } from "@/lib/member-filters";
 import { createMemberTimelineEvent } from "@/lib/member-timeline";
@@ -70,6 +70,201 @@ export async function resolveCommunicationRecipients(organizationId: string, fil
   });
 }
 
+// Max recipients processed synchronously per sendCommunicationCampaign()
+// invocation, and the concurrency within that batch. A campaign under this
+// size (true of every current organization) completes fully within the
+// initiating request; anything larger is picked up in further batches by
+// processScheduledCampaigns() (or a repeat "Send Now" click), since
+// recipients are only ever pulled by deliveryStatus: PENDING — safe to call
+// this function again at any time.
+const RECIPIENT_BATCH_SIZE = 300;
+const SEND_CONCURRENCY = 20;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
+  return chunks;
+}
+
+type PendingRecipient = Prisma.CommunicationRecipientGetPayload<{ include: { member: true } }>;
+
+async function processRecipient(
+  recipient: PendingRecipient,
+  ctx: {
+    campaign: CommunicationCampaign;
+    organizationId: string;
+    actorUserId?: string | null;
+    messageBody: string;
+    smsBody: string;
+    isMultiChannel: boolean;
+    tokensByUserId: Map<string, string[]>;
+  }
+): Promise<"SENT" | "SKIPPED" | "FAILED"> {
+  try {
+    let deliveryStatus: "SENT" | "SKIPPED" = "SKIPPED";
+    let errorMessage: string | null = null;
+    // For EMAIL_AND_SMS, either channel succeeding counts as SENT overall,
+    // but a per-channel failure is still worth surfacing — label each
+    // reason by channel so "Sent" + an error doesn't read as a
+    // contradiction, and so a failure on one channel isn't silently
+    // dropped when the other also fails.
+    if (emailEnabled(ctx.campaign.channel) && recipient.email) {
+      const result = await sendEmail({ to: recipient.email, subject: ctx.campaign.subject, text: ctx.messageBody });
+      deliveryStatus = result.sent ? "SENT" : "SKIPPED";
+      if (result.skipped) {
+        const reason = result.reason ?? "Email sending skipped";
+        errorMessage = ctx.isMultiChannel ? `Email: ${reason}` : reason;
+      }
+    }
+    if (smsEnabled(ctx.campaign.channel) && recipient.phone) {
+      const result = await sendMemberSms({
+        organizationId: ctx.organizationId,
+        memberId: recipient.memberId,
+        phone: recipient.phone,
+        body: ctx.smsBody,
+        campaignId: ctx.campaign.id,
+        sentById: ctx.actorUserId ?? null,
+      });
+      if (result.status === "SENT") deliveryStatus = "SENT";
+      if (result.status === "FAILED") {
+        const reason = result.errorMessage ?? "SMS send failed";
+        const smsError = ctx.isMultiChannel ? `SMS: ${reason}` : reason;
+        errorMessage = errorMessage ? `${errorMessage}; ${smsError}` : smsError;
+      }
+    }
+    if (ctx.campaign.channel === "INTERNAL_LOG_ONLY") {
+      deliveryStatus = "SKIPPED";
+      errorMessage = "Internal log only";
+    }
+
+    let pushDeliveryStatus: "SENT" | "SKIPPED" | "FAILED" | null = null;
+    let pushError: string | null = null;
+    if (ctx.campaign.pushEnabled && recipient.member?.userId) {
+      if (recipient.member.commsPushEnabled && !recipient.member.requiredNoticesOnly) {
+        const tokens = ctx.tokensByUserId.get(recipient.member.userId) ?? [];
+        const result = await sendPushToTokens(tokens, {
+          title: ctx.campaign.title,
+          body: ctx.campaign.body,
+          deepLink: ctx.campaign.deepLink,
+        });
+        pushDeliveryStatus = result.sent > 0 ? "SENT" : tokens.length === 0 ? "SKIPPED" : "FAILED";
+        if (pushDeliveryStatus !== "SENT") pushError = tokens.length === 0 ? "No registered devices" : "Delivery failed";
+      } else {
+        pushDeliveryStatus = "SKIPPED";
+        pushError = recipient.member.requiredNoticesOnly
+          ? "Member opted into required notices only"
+          : "Member opted out of push notifications";
+      }
+    }
+
+    await prisma.communicationRecipient.update({
+      where: { id: recipient.id },
+      data: {
+        deliveryStatus,
+        errorMessage,
+        sentAt: deliveryStatus === "SENT" ? new Date() : null,
+        pushDeliveryStatus: pushDeliveryStatus ?? undefined,
+        pushError,
+        pushSentAt: pushDeliveryStatus === "SENT" ? new Date() : null,
+      },
+    });
+
+    await prisma.communicationLog.create({
+      data: {
+        organizationId: ctx.organizationId,
+        memberId: recipient.memberId,
+        createdByUserId: ctx.actorUserId ?? null,
+        communicationType: ctx.campaign.channel === "SMS" ? "SMS" : "EMAIL",
+        direction: "OUTBOUND",
+        subject: ctx.campaign.subject,
+        message: ctx.messageBody,
+        outcome: deliveryStatus === "SENT" ? "Sent" : errorMessage,
+        communicationDate: new Date(),
+      },
+    });
+
+    if (pushDeliveryStatus) {
+      await prisma.communicationLog.create({
+        data: {
+          organizationId: ctx.organizationId,
+          memberId: recipient.memberId,
+          createdByUserId: ctx.actorUserId ?? null,
+          communicationType: "PUSH",
+          direction: "OUTBOUND",
+          subject: ctx.campaign.title,
+          message: ctx.campaign.body,
+          outcome: pushDeliveryStatus === "SENT" ? "Sent" : pushError,
+          communicationDate: new Date(),
+        },
+      });
+    }
+
+    if (recipient.memberId) {
+      await createMemberTimelineEvent({
+        organizationId: ctx.organizationId,
+        memberId: recipient.memberId,
+        eventType: "COMMUNICATION_LOGGED",
+        title: "Communication campaign sent",
+        newValue: { campaignId: ctx.campaign.id, deliveryStatus },
+        createdByUserId: ctx.actorUserId,
+      });
+    }
+
+    return deliveryStatus;
+  } catch (error) {
+    await prisma.communicationRecipient.update({
+      where: { id: recipient.id },
+      data: { deliveryStatus: "FAILED", errorMessage: error instanceof Error ? error.message : "Delivery failed" },
+    });
+    return "FAILED";
+  }
+}
+
+/** Sets the campaign's final SENT/FAILED status and writes the one audit
+ * event for the whole send — guarded by a conditional update so that only
+ * the invocation which actually flips the status off SENDING/READY writes
+ * it, even if two batches race to finalize the same campaign. */
+async function finalizeCampaign(
+  campaignId: string,
+  organizationId: string,
+  actorUserId?: string | null,
+  actorEmail?: string | null
+) {
+  const [sent, skipped, failed] = await Promise.all([
+    prisma.communicationRecipient.count({ where: { campaignId, deliveryStatus: "SENT" } }),
+    prisma.communicationRecipient.count({ where: { campaignId, deliveryStatus: "SKIPPED" } }),
+    prisma.communicationRecipient.count({ where: { campaignId, deliveryStatus: "FAILED" } }),
+  ]);
+  const status = failed > 0 ? "FAILED" : "SENT";
+
+  const { count } = await prisma.communicationCampaign.updateMany({
+    where: { id: campaignId, status: { notIn: ["SENT", "FAILED"] } },
+    data: { status, sentAt: new Date() },
+  });
+
+  if (count > 0) {
+    await createAuditEvent({
+      organizationId,
+      actorUserId,
+      actorEmail,
+      action: "communication_campaign.send",
+      entityType: "communication_campaign",
+      entityId: campaignId,
+      metadata: { sent, skipped, failed },
+    });
+  }
+
+  return { sent, skipped, failed };
+}
+
+/**
+ * Processes up to RECIPIENT_BATCH_SIZE still-PENDING recipients of a
+ * campaign, with SEND_CONCURRENCY-wide concurrency, and finalizes the
+ * campaign once no PENDING recipients remain. Idempotent and resumable:
+ * safe to call repeatedly (a repeat "Send Now" click, or a later cron
+ * tick / processScheduledCampaigns pass) — it always just picks up
+ * whatever is still PENDING.
+ */
 export async function sendCommunicationCampaign(input: {
   organizationId: string;
   campaignId: string;
@@ -78,12 +273,27 @@ export async function sendCommunicationCampaign(input: {
 }) {
   const campaign = await prisma.communicationCampaign.findFirst({
     where: { id: input.campaignId, organizationId: input.organizationId },
-    include: { recipients: { include: { member: true } } },
   });
   if (!campaign) throw new Error("Communication campaign not found");
-  if (campaign.status === "SENT") throw new Error("Communication campaign has already been sent");
+  if (campaign.status === "SENT" || campaign.status === "FAILED") {
+    return { sent: 0, skipped: 0, failed: 0, remainingPending: 0, complete: true };
+  }
 
-  await prisma.communicationCampaign.update({ where: { id: campaign.id }, data: { status: "SENDING" } });
+  const pendingRecipients = await prisma.communicationRecipient.findMany({
+    where: { campaignId: campaign.id, deliveryStatus: "PENDING" },
+    include: { member: true },
+    orderBy: { createdAt: "asc" },
+    take: RECIPIENT_BATCH_SIZE,
+  });
+
+  if (pendingRecipients.length === 0) {
+    const totals = await finalizeCampaign(campaign.id, input.organizationId, input.actorUserId, input.actorEmail);
+    return { ...totals, remainingPending: 0, complete: true };
+  }
+
+  if (campaign.status !== "SENDING") {
+    await prisma.communicationCampaign.update({ where: { id: campaign.id }, data: { status: "SENDING" } });
+  }
 
   const organization = await prisma.organization.findUnique({
     where: { id: input.organizationId },
@@ -95,9 +305,6 @@ export async function sendCommunicationCampaign(input: {
     link: smsLink,
   });
 
-  let sent = 0;
-  let skipped = 0;
-  let failed = 0;
   const uploadedAttachments = await prisma.attachment.findMany({
     where: {
       organizationId: input.organizationId,
@@ -107,7 +314,7 @@ export async function sendCommunicationCampaign(input: {
     },
     orderBy: { uploadedAt: "desc" },
   });
-  const attachmentLines = [];
+  const attachmentLines: string[] = [];
   for (const attachment of uploadedAttachments) {
     const url = await getSignedObjectUrl(attachment.objectKey, 7 * 24 * 60 * 60);
     attachmentLines.push(`${attachment.title || attachment.fileName}: ${url}`);
@@ -116,154 +323,77 @@ export async function sendCommunicationCampaign(input: {
     ? `${campaign.body}\n\nAttachments:\n${attachmentLines.join("\n")}`
     : campaign.body;
 
-  for (const recipient of campaign.recipients) {
-    try {
-      let deliveryStatus: "SENT" | "SKIPPED" = "SKIPPED";
-      let errorMessage: string | null = null;
-      // For EMAIL_AND_SMS, either channel succeeding counts as SENT overall,
-      // but a per-channel failure is still worth surfacing — label each
-      // reason by channel so "Sent" + an error doesn't read as a
-      // contradiction, and so a failure on one channel isn't silently
-      // dropped when the other also fails.
-      const isMultiChannel = campaign.channel === "EMAIL_AND_SMS";
-      if (emailEnabled(campaign.channel) && recipient.email) {
-        const result = await sendEmail({ to: recipient.email, subject: campaign.subject, text: messageBody });
-        deliveryStatus = result.sent ? "SENT" : "SKIPPED";
-        if (result.skipped) {
-          const reason = result.reason ?? "Email sending skipped";
-          errorMessage = isMultiChannel ? `Email: ${reason}` : reason;
-        }
-      }
-      if (smsEnabled(campaign.channel) && recipient.phone) {
-        const result = await sendMemberSms({
+  // Batch-fetch every recipient's mobile device tokens up front, instead of
+  // one query per recipient inside the loop — the single largest N+1 here.
+  const userIds = pendingRecipients
+    .map((recipient) => recipient.member?.userId)
+    .filter((id): id is string => Boolean(id));
+  const deviceTokens = userIds.length
+    ? await prisma.mobileDeviceToken.findMany({
+        where: { userId: { in: userIds } },
+        select: { userId: true, token: true },
+      })
+    : [];
+  const tokensByUserId = new Map<string, string[]>();
+  for (const deviceToken of deviceTokens) {
+    const list = tokensByUserId.get(deviceToken.userId) ?? [];
+    list.push(deviceToken.token);
+    tokensByUserId.set(deviceToken.userId, list);
+  }
+
+  const isMultiChannel = campaign.channel === "EMAIL_AND_SMS";
+  let sent = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  for (const batch of chunk(pendingRecipients, SEND_CONCURRENCY)) {
+    const outcomes = await Promise.all(
+      batch.map((recipient) =>
+        processRecipient(recipient, {
+          campaign,
           organizationId: input.organizationId,
-          memberId: recipient.memberId,
-          phone: recipient.phone,
-          body: smsBody,
-          campaignId: campaign.id,
-          sentById: input.actorUserId ?? null,
-        });
-        if (result.status === "SENT") deliveryStatus = "SENT";
-        if (result.status === "FAILED") {
-          const reason = result.errorMessage ?? "SMS send failed";
-          const smsError = isMultiChannel ? `SMS: ${reason}` : reason;
-          errorMessage = errorMessage ? `${errorMessage}; ${smsError}` : smsError;
-        }
-      }
-      if (campaign.channel === "INTERNAL_LOG_ONLY") {
-        deliveryStatus = "SKIPPED";
-        errorMessage = "Internal log only";
-      }
-
-      let pushDeliveryStatus: "SENT" | "SKIPPED" | "FAILED" | null = null;
-      let pushError: string | null = null;
-      if (campaign.pushEnabled && recipient.member?.userId) {
-        if (recipient.member.commsPushEnabled && !recipient.member.requiredNoticesOnly) {
-          const tokens = await prisma.mobileDeviceToken.findMany({
-            where: { userId: recipient.member.userId },
-            select: { token: true },
-          });
-          const result = await sendPushToTokens(
-            tokens.map((t) => t.token),
-            { title: campaign.title, body: campaign.body, deepLink: campaign.deepLink }
-          );
-          pushDeliveryStatus = result.sent > 0 ? "SENT" : tokens.length === 0 ? "SKIPPED" : "FAILED";
-          if (pushDeliveryStatus !== "SENT") pushError = tokens.length === 0 ? "No registered devices" : "Delivery failed";
-        } else {
-          pushDeliveryStatus = "SKIPPED";
-          pushError = recipient.member.requiredNoticesOnly
-            ? "Member opted into required notices only"
-            : "Member opted out of push notifications";
-        }
-      }
-
-      await prisma.communicationRecipient.update({
-        where: { id: recipient.id },
-        data: {
-          deliveryStatus,
-          errorMessage,
-          sentAt: deliveryStatus === "SENT" ? new Date() : null,
-          pushDeliveryStatus: pushDeliveryStatus ?? undefined,
-          pushError,
-          pushSentAt: pushDeliveryStatus === "SENT" ? new Date() : null,
-        },
-      });
-
-      await prisma.communicationLog.create({
-        data: {
-          organizationId: input.organizationId,
-          memberId: recipient.memberId,
-          createdByUserId: input.actorUserId ?? null,
-          communicationType: campaign.channel === "SMS" ? "SMS" : "EMAIL",
-          direction: "OUTBOUND",
-          subject: campaign.subject,
-          message: messageBody,
-          outcome: deliveryStatus === "SENT" ? "Sent" : errorMessage,
-          communicationDate: new Date(),
-        },
-      });
-
-      if (pushDeliveryStatus) {
-        await prisma.communicationLog.create({
-          data: {
-            organizationId: input.organizationId,
-            memberId: recipient.memberId,
-            createdByUserId: input.actorUserId ?? null,
-            communicationType: "PUSH",
-            direction: "OUTBOUND",
-            subject: campaign.title,
-            message: campaign.body,
-            outcome: pushDeliveryStatus === "SENT" ? "Sent" : pushError,
-            communicationDate: new Date(),
-          },
-        });
-      }
-
-      if (recipient.memberId) {
-        await createMemberTimelineEvent({
-          organizationId: input.organizationId,
-          memberId: recipient.memberId,
-          eventType: "COMMUNICATION_LOGGED",
-          title: "Communication campaign sent",
-          newValue: { campaignId: campaign.id, deliveryStatus },
-          createdByUserId: input.actorUserId,
-        });
-      }
-
-      if (deliveryStatus === "SENT") sent += 1;
+          actorUserId: input.actorUserId,
+          messageBody,
+          smsBody,
+          isMultiChannel,
+          tokensByUserId,
+        })
+      )
+    );
+    for (const outcome of outcomes) {
+      if (outcome === "SENT") sent += 1;
+      else if (outcome === "FAILED") failed += 1;
       else skipped += 1;
-    } catch (error) {
-      failed += 1;
-      await prisma.communicationRecipient.update({
-        where: { id: recipient.id },
-        data: { deliveryStatus: "FAILED", errorMessage: error instanceof Error ? error.message : "Delivery failed" },
-      });
     }
   }
 
-  const status = failed > 0 ? "FAILED" : "SENT";
-  await prisma.communicationCampaign.update({ where: { id: campaign.id }, data: { status, sentAt: new Date() } });
-  await createAuditEvent({
-    organizationId: input.organizationId,
-    actorUserId: input.actorUserId,
-    actorEmail: input.actorEmail,
-    action: "communication_campaign.send",
-    entityType: "communication_campaign",
-    entityId: campaign.id,
-    metadata: { sent, skipped, failed, attachmentCount: uploadedAttachments.length },
+  const remainingPending = await prisma.communicationRecipient.count({
+    where: { campaignId: campaign.id, deliveryStatus: "PENDING" },
   });
 
-  return { sent, skipped, failed };
+  if (remainingPending === 0) {
+    const totals = await finalizeCampaign(campaign.id, input.organizationId, input.actorUserId, input.actorEmail);
+    return { ...totals, remainingPending: 0, complete: true };
+  }
+
+  return { sent, skipped, failed, remainingPending, complete: false };
 }
 
 /**
  * Fires every campaign scheduled for now-or-earlier that hasn't gone out
- * yet. Called by the cron/campaigns route — mirrors processPendingReminderLogs'
- * cross-organization processing pattern.
+ * yet, and resumes any campaign still SENDING with PENDING recipients left
+ * over from a previous batch (e.g. a very large recipient list that
+ * exceeded RECIPIENT_BATCH_SIZE in one pass). Called by the cron/campaigns
+ * route — mirrors processPendingReminderLogs' cross-organization pattern.
  */
 export async function processScheduledCampaigns(limit = 50) {
   const due = await prisma.communicationCampaign.findMany({
-    where: { status: "READY", scheduledFor: { lte: new Date() } },
+    where: {
+      OR: [
+        { status: "READY", scheduledFor: { lte: new Date() } },
+        { status: "SENDING", recipients: { some: { deliveryStatus: "PENDING" } } },
+      ],
+    },
     orderBy: { scheduledFor: "asc" },
     take: limit,
   });
@@ -272,8 +402,8 @@ export async function processScheduledCampaigns(limit = 50) {
   let failed = 0;
   for (const campaign of due) {
     try {
-      await sendCommunicationCampaign({ organizationId: campaign.organizationId, campaignId: campaign.id });
-      sent += 1;
+      const result = await sendCommunicationCampaign({ organizationId: campaign.organizationId, campaignId: campaign.id });
+      if (result.complete) sent += 1;
     } catch {
       failed += 1;
     }
