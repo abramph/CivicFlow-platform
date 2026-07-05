@@ -3,6 +3,17 @@ import { NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
 import { requireRateLimit } from "@/lib/rate-limit";
 
+// Every response below depends on live session/auth state (including which
+// pathname is even allowed), so none of it may ever be cached by the browser
+// or an intermediary — a stale cached redirect/RSC response served back on
+// browser back/forward navigation is exactly what makes the MFA challenge
+// page (or any gated page) render as a raw, un-hydrated payload instead of
+// the real page.
+function withNoStore(response: NextResponse): NextResponse {
+  response.headers.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  return response;
+}
+
 // Paths the member-facing universal link domain (app.civicflowapp.com, set
 // via MOBILE_APP_WEB_HOST) transparently maps onto their /m/* implementation
 // — kept separate from the staff portal's own /dues, /events, etc. pages.
@@ -73,11 +84,11 @@ export async function middleware(req: NextRequest) {
     const isMfaPage = pathname === "/login/mfa";
     const isAuthEndpoint = pathname.startsWith("/api/auth");
     if (!isMfaPage && !isAuthEndpoint) {
-      return NextResponse.redirect(new URL("/login/mfa", req.url));
+      return withNoStore(NextResponse.redirect(new URL("/login/mfa", req.url)));
     }
     const response = NextResponse.next();
     response.headers.set("x-pathname", pathname);
-    return response;
+    return withNoStore(response);
   }
 
   const isPublicPage =
@@ -97,16 +108,16 @@ export async function middleware(req: NextRequest) {
   const isPublicApi = pathname === "/api/health";
 
   if (!token && !isPublicPage && !isAuthApi && !isPublicApi) {
-    return NextResponse.redirect(new URL("/login", req.url));
+    return withNoStore(NextResponse.redirect(new URL("/login", req.url)));
   }
 
   if (token && !token.mfaPending && pathname === "/login") {
-    return NextResponse.redirect(new URL("/dashboard", req.url));
+    return withNoStore(NextResponse.redirect(new URL("/dashboard", req.url)));
   }
 
   const response = NextResponse.next();
   response.headers.set("x-pathname", pathname);
-  return response;
+  return withNoStore(response);
 }
 
 export const config = {
