@@ -4,6 +4,7 @@ import { withApiErrorHandling } from "@/lib/api-route";
 import { createAuditEvent } from "@/lib/audit";
 import { resolveCommunicationRecipients, sendCommunicationCampaign } from "@/lib/communication-campaigns";
 import { validateDeepLink } from "@/lib/deep-links";
+import { getSmsEntitlement } from "@/lib/sms-entitlement";
 import { prisma } from "@/lib/prisma";
 import { parseJsonBody, ValidationError, z } from "@/lib/validation";
 
@@ -34,6 +35,16 @@ export async function POST(request: Request) {
   return withApiErrorHandling(async () => {
     const { session, organizationId } = await requirePermission("communications:write", "throw");
     const input = await parseJsonBody(request, createCampaignSchema);
+
+    if (input.channel === "SMS" || input.channel === "EMAIL_AND_SMS") {
+      const entitlement = await getSmsEntitlement(organizationId);
+      if (!entitlement.allowed) {
+        throw new ValidationError(
+          entitlement.reason ?? "Your organization does not have the SMS add-on enabled. Enable it in Billing Settings to send SMS campaigns."
+        );
+      }
+    }
+
     const recipientFilter = input.recipientFilter ?? { selector: "active_with_email" };
     const recipients = await resolveCommunicationRecipients(organizationId, recipientFilter, input.channel);
 

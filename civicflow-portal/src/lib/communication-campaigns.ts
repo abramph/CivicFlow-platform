@@ -5,8 +5,9 @@ import { createMemberTimelineEvent } from "@/lib/member-timeline";
 import { sendEmail } from "@/lib/mail";
 import { prisma } from "@/lib/prisma";
 import { sendPushToTokens } from "@/lib/push";
-import { sendSms } from "@/lib/sms";
+import { applySmsTemplateTokens, sendMemberSms } from "@/lib/sms-service";
 import { getSignedObjectUrl } from "@/lib/storage";
+import { getMobileAppWebBaseUrl } from "@/lib/env";
 
 type RecipientFilter = {
   selector?: string;
@@ -84,6 +85,16 @@ export async function sendCommunicationCampaign(input: {
 
   await prisma.communicationCampaign.update({ where: { id: campaign.id }, data: { status: "SENDING" } });
 
+  const organization = await prisma.organization.findUnique({
+    where: { id: input.organizationId },
+    select: { name: true },
+  });
+  const smsLink = campaign.deepLink ? `${getMobileAppWebBaseUrl()}${campaign.deepLink}` : null;
+  const smsBody = applySmsTemplateTokens(campaign.body, {
+    organizationName: organization?.name ?? "your organization",
+    link: smsLink,
+  });
+
   let sent = 0;
   let skipped = 0;
   let failed = 0;
@@ -115,9 +126,16 @@ export async function sendCommunicationCampaign(input: {
         errorMessage = result.skipped ? result.reason ?? "Email sending skipped" : null;
       }
       if (smsEnabled(campaign.channel) && recipient.phone) {
-        const result = await sendSms({ to: recipient.phone, body: campaign.body });
-        if (result.sent) deliveryStatus = "SENT";
-        if (result.skipped && !errorMessage) errorMessage = result.reason ?? null;
+        const result = await sendMemberSms({
+          organizationId: input.organizationId,
+          memberId: recipient.memberId,
+          phone: recipient.phone,
+          body: smsBody,
+          campaignId: campaign.id,
+          sentById: input.actorUserId ?? null,
+        });
+        if (result.status === "SENT") deliveryStatus = "SENT";
+        if (result.status === "FAILED" && !errorMessage) errorMessage = result.errorMessage ?? null;
       }
       if (campaign.channel === "INTERNAL_LOG_ONLY") {
         deliveryStatus = "SKIPPED";

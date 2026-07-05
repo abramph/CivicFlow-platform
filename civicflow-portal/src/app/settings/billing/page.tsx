@@ -6,6 +6,7 @@ import { formatDate } from "@/lib/formatting";
 import { PLANS, getPlan } from "@/lib/plans";
 import { ManageBillingButton } from "@/components/app/BillingActions";
 import { BillingPlans } from "@/components/app/BillingPlans";
+import { SmsAddOnCard } from "@/components/app/SmsAddOnCard";
 import { checkMemberLimit, getTrialStatus, checkSeatLimit } from "@/lib/plan-gate";
 
 type SearchParams = Promise<{ success?: string }>;
@@ -128,6 +129,11 @@ export default async function BillingSettingsPage({
           hasActiveSubscription={hasActiveSubscription}
           canManageBilling={canManageBilling}
         />
+      </SectionCard>
+
+      {/* SMS add-on */}
+      <SectionCard title="SMS" description="SMS is a paid add-on — never bundled free into any plan, since each message costs real money to deliver.">
+        <SmsAddOnCard canManageBilling={canManageBilling} hasActiveSubscription={hasActiveSubscription} />
       </SectionCard>
 
       {/* Subscription management */}

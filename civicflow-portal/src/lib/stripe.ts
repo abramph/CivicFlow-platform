@@ -1,4 +1,5 @@
 import Stripe from "stripe";
+import { SMS_ADDON } from "@/lib/sms-pricing";
 
 let _stripe: Stripe | null = null;
 
@@ -58,6 +59,32 @@ export function isSeatPriceId(priceId: string): boolean {
     process.env.STRIPE_PRICE_ELITE_SEAT_YEARLY,
   ];
   return seatIds.includes(priceId);
+}
+
+export function smsAddOnPriceId(): string {
+  const priceId = process.env[SMS_ADDON.stripePriceEnvKey];
+  if (!priceId) throw new Error(`Stripe price not configured for the SMS add-on (${SMS_ADDON.stripePriceEnvKey})`);
+  return priceId;
+}
+
+export function isSmsAddOnPriceId(priceId: string): boolean {
+  return priceId === process.env[SMS_ADDON.stripePriceEnvKey];
+}
+
+/** Adds the SMS add-on as a new line item on an existing subscription (prorated automatically by Stripe). */
+export async function addSmsAddOnToSubscription(stripeSubscriptionId: string): Promise<{ subscriptionItemId: string }> {
+  const stripe = getStripe();
+  const item = await stripe.subscriptionItems.create({
+    subscription: stripeSubscriptionId,
+    price: smsAddOnPriceId(),
+  });
+  return { subscriptionItemId: item.id };
+}
+
+/** Removes the SMS add-on line item (prorated automatically by Stripe). */
+export async function removeSmsAddOnFromSubscription(subscriptionItemId: string): Promise<void> {
+  const stripe = getStripe();
+  await stripe.subscriptionItems.del(subscriptionItemId);
 }
 
 export async function getOrCreateStripeCustomer(

@@ -1,5 +1,7 @@
 import crypto from "crypto";
 
+export { isValidE164Phone } from "@/lib/phone";
+
 const OTP_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 export function generateOtpCode(): string {
@@ -21,10 +23,4 @@ export function maskPhone(phone: string): string {
   if (digits.length <= 4) return "•".repeat(digits.length);
   const last4 = digits.slice(-4);
   return `${"•".repeat(digits.length - 4)}${last4}`;
-}
-
-const E164_PATTERN = /^\+[1-9]\d{6,14}$/;
-
-export function isValidE164Phone(phone: string): boolean {
-  return E164_PATTERN.test(phone.trim());
 }

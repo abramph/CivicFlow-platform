@@ -3,8 +3,9 @@ import { prisma } from "@/lib/prisma";
 import { getServerEnv } from "@/lib/env";
 import { createAuditEvent } from "@/lib/audit";
 import { requireRateLimit } from "@/lib/rate-limit";
-import { planFromPriceId, isSeatPriceId } from "@/lib/stripe";
+import { planFromPriceId, isSeatPriceId, isSmsAddOnPriceId } from "@/lib/stripe";
 import { getPlan } from "@/lib/plans";
+import { SMS_ADDON } from "@/lib/sms-pricing";
 import type { SubscriptionStatus } from "@prisma/client";
 
 export const runtime = "nodejs";
@@ -101,6 +102,38 @@ async function upsertSubscriptionFromStripe(
     data: {
       plan: isActive ? plan : "free",
       ...(isActive ? { seatLimit } : { seatLimit: null }),
+    },
+  });
+
+  // Keep the SMS add-on entitlement in sync with Stripe's own truth, even if
+  // it was added/removed directly in the Stripe dashboard rather than
+  // through our /api/billing/sms-addon button.
+  const smsAddOnItem = sub.items.data.find((item) => item.price?.id && isSmsAddOnPriceId(item.price.id));
+  const currentPeriodStart = sub.current_period_start ? new Date(sub.current_period_start * 1000) : null;
+  const currentPeriodEnd = sub.current_period_end ? new Date(sub.current_period_end * 1000) : null;
+  const existingSmsSettings = await prisma.organizationSmsSettings.findUnique({ where: { organizationId: orgId } });
+  const periodRolledOver =
+    !existingSmsSettings?.smsBillingPeriodStart ||
+    (currentPeriodStart && existingSmsSettings.smsBillingPeriodStart.getTime() !== currentPeriodStart.getTime());
+
+  await prisma.organizationSmsSettings.upsert({
+    where: { organizationId: orgId },
+    create: {
+      organizationId: orgId,
+      smsAddOnActive: Boolean(smsAddOnItem),
+      smsMonthlyLimit: smsAddOnItem ? SMS_ADDON.includedMessagesPerMonth : 0,
+      smsOverageRateCents: SMS_ADDON.overageRateCents,
+      smsBillingPeriodStart: currentPeriodStart,
+      smsBillingPeriodEnd: currentPeriodEnd,
+      stripeSmsSubscriptionItemId: smsAddOnItem?.id ?? null,
+    },
+    update: {
+      smsAddOnActive: Boolean(smsAddOnItem),
+      smsMonthlyLimit: smsAddOnItem ? SMS_ADDON.includedMessagesPerMonth : (existingSmsSettings?.smsMonthlyLimit ?? 0),
+      stripeSmsSubscriptionItemId: smsAddOnItem?.id ?? null,
+      ...(periodRolledOver
+        ? { smsUsedThisPeriod: 0, smsBillingPeriodStart: currentPeriodStart, smsBillingPeriodEnd: currentPeriodEnd }
+        : {}),
     },
   });
 
@@ -226,6 +259,10 @@ export async function POST(request: Request) {
           await prisma.organization.update({
             where: { id: orgId },
             data: { plan: "free" },
+          });
+          await prisma.organizationSmsSettings.updateMany({
+            where: { organizationId: orgId },
+            data: { smsAddOnActive: false, stripeSmsSubscriptionItemId: null },
           });
           await createAuditEvent({
             organizationId: orgId,

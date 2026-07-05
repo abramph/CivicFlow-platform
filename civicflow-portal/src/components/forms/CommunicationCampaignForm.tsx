@@ -9,6 +9,7 @@ type Option = { id: string; label: string };
 export function CommunicationCampaignForm({
   categories,
   initial,
+  smsEnabled,
 }: {
   categories: Option[];
   initial?: Partial<{
@@ -19,6 +20,7 @@ export function CommunicationCampaignForm({
     title: string;
     subject: string;
   }>;
+  smsEnabled: boolean;
 }) {
   const router = useRouter();
   const [form, setForm] = useState({
@@ -85,7 +87,20 @@ export function CommunicationCampaignForm({
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <label className="space-y-2 text-sm font-medium text-slate-900"><span>Title</span><input required className={fieldClassName} value={form.title} onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))} /></label>
         <label className="space-y-2 text-sm font-medium text-slate-900"><span>Type</span><select className={fieldClassName} value={form.communicationType} onChange={(event) => setForm((current) => ({ ...current, communicationType: event.target.value }))}><option value="GENERAL">General</option><option value="ANNOUNCEMENT">Announcement</option><option value="MEETING_MINUTES">Meeting minutes</option><option value="DUES_REMINDER">Dues reminder</option><option value="EVENT_NOTICE">Event notice</option><option value="CAMPAIGN_UPDATE">Campaign update</option><option value="OTHER">Other</option></select></label>
-        <label className="space-y-2 text-sm font-medium text-slate-900"><span>Channel</span><select className={fieldClassName} value={form.channel} onChange={(event) => setForm((current) => ({ ...current, channel: event.target.value }))}><option value="EMAIL">Email</option><option value="SMS">SMS</option><option value="EMAIL_AND_SMS">Email and SMS</option><option value="INTERNAL_LOG_ONLY">Internal log only</option></select></label>
+        <label className="space-y-2 text-sm font-medium text-slate-900">
+          <span>Channel</span>
+          <select className={fieldClassName} value={form.channel} onChange={(event) => setForm((current) => ({ ...current, channel: event.target.value }))}>
+            <option value="EMAIL">Email</option>
+            <option value="SMS" disabled={!smsEnabled}>SMS{!smsEnabled ? " (requires add-on)" : ""}</option>
+            <option value="EMAIL_AND_SMS" disabled={!smsEnabled}>Email and SMS{!smsEnabled ? " (requires add-on)" : ""}</option>
+            <option value="INTERNAL_LOG_ONLY">Internal log only</option>
+          </select>
+          {!smsEnabled ? (
+            <p className="text-xs text-slate-500">
+              SMS requires the SMS add-on — enable it in <a href="/settings/billing" className="text-emerald-700 hover:underline">Billing Settings</a>.
+            </p>
+          ) : null}
+        </label>
         <label className="space-y-2 text-sm font-medium text-slate-900"><span>Recipients</span><select className={fieldClassName} value={form.selector} onChange={(event) => setForm((current) => ({ ...current, selector: event.target.value }))}><option value="active_with_email">All active with email</option><option value="delinquent">Delinquent members</option><option value="outstanding_dues">Members with unpaid/partial dues</option><option value="category">By category/location</option></select></label>
       </div>
       <div className="grid gap-4 md:grid-cols-4">

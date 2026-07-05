@@ -65,11 +65,12 @@ export async function middleware(req: NextRequest) {
     if (limited) return limited;
   }
 
-  // Stripe webhooks, cron endpoints, the mobile bearer-token API, and the
-  // universal-link verification files all authenticate (or intentionally
-  // don't) outside of the NextAuth cookie session — never gate them here.
+  // Provider webhooks (Stripe, Twilio), cron endpoints, the mobile
+  // bearer-token API, and the universal-link verification files all
+  // authenticate (or intentionally don't) outside of the NextAuth cookie
+  // session — never gate them here. Webhooks verify their own signature.
   if (
-    pathname === "/api/webhooks/stripe" ||
+    pathname.startsWith("/api/webhooks/") ||
     pathname.startsWith("/api/cron/") ||
     pathname.startsWith("/api/mobile/") ||
     pathname.startsWith("/.well-known/")

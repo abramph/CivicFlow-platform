@@ -282,6 +282,13 @@ enum PaymentLinkStatus {
   archived
 }
 
+enum SmsMessageStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  FAILED
+}
+
 // ─── SaaS Core Models ────────────────────────────────────────────────────────
 
 /// A tenant organization on the CivicFlow SaaS platform.
@@ -342,6 +349,8 @@ model Organization {
   mobileDeviceTokens      MobileDeviceToken[]
   paymentReports          PaymentReport[]
   rolePermissionSets      OrgRolePermissionSet[]
+  smsMessages             SmsMessage[]
+  smsSettings             OrganizationSmsSettings?
 
   @@index([slug])
   @@index([status])
@@ -389,6 +398,7 @@ model User {
   sentMemberInvites      MemberInvite[]             @relation("MemberInviteCreatedBy")
   mobileDeviceTokens     MobileDeviceToken[]
   reviewedPaymentReports PaymentReport[]            @relation("PaymentReportReviewedBy")
+  sentSmsMessages        SmsMessage[]               @relation("SmsMessageSentBy")
 
   @@index([email])
 }
@@ -532,6 +542,11 @@ model OrgMember {
   commsPushEnabled                 Boolean          @default(true)
   commsEmailEnabled                Boolean          @default(true)
   commsSmsEnabled                  Boolean          @default(false)
+  /// Set only by a real inbound "STOP" SMS reply — legally distinct from the
+  /// member just flipping commsSmsEnabled off in their own preferences.
+  /// Non-null hard-blocks SMS sending regardless of commsSmsEnabled; only a
+  /// "START"/"UNSTOP" reply clears it.
+  smsOptedOutAt                    DateTime?
   requiredNoticesOnly              Boolean          @default(false)
   createdAt                        DateTime         @default(now())
   updatedAt                        DateTime         @updatedAt
@@ -553,6 +568,7 @@ model OrgMember {
   timelineEvents          MemberTimelineEvent[]
   invites                 MemberInvite[]
   paymentReports          PaymentReport[]
+  smsMessages             SmsMessage[]
 
   @@unique([organizationId, userId])
   @@index([organizationId])
@@ -819,6 +835,60 @@ model OrgSettings {
   updatedAt                      DateTime      @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+/// SMS is a paid add-on, never bundled free into any plan — this row tracks
+/// whether an org has purchased it plus its usage/limits for the current
+/// billing period. Deliberately has no cached "smsEnabled" field: entitlement
+/// is always recomputed live from smsAddOnActive + the org's current
+/// Subscription.status (see getSmsEntitlement in lib/sms-entitlement.ts),
+/// the same way auth-guards.ts never trusts a cached permission.
+model OrganizationSmsSettings {
+  id                          String    @id @default(cuid())
+  organizationId              String    @unique
+  smsAddOnActive              Boolean   @default(false)
+  smsMonthlyLimit             Int       @default(0)
+  smsUsedThisPeriod           Int       @default(0)
+  smsOverageRateCents         Int       @default(2)
+  smsBillingPeriodStart       DateTime?
+  smsBillingPeriodEnd         DateTime?
+  stripeSmsSubscriptionItemId String?
+  createdAt                   DateTime  @default(now())
+  updatedAt                   DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+/// One row per SMS send attempt. Doubles as the delivery log (status field
+/// covers queued→sent→delivered→failed) — mirrors how CommunicationRecipient
+/// already tracks delivery status inline rather than a separate log table.
+model SmsMessage {
+  id                String           @id @default(cuid())
+  organizationId    String
+  memberId          String?
+  phone             String
+  body              String
+  status            SmsMessageStatus @default(QUEUED)
+  provider          String           @default("twilio")
+  providerMessageId String?
+  costEstimateCents Int?
+  campaignId        String?
+  sentById          String?
+  sentAt            DateTime?
+  errorMessage      String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  organization Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  member       OrgMember?             @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  campaign     CommunicationCampaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  sentBy       User?                  @relation("SmsMessageSentBy", fields: [sentById], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([campaignId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([memberId])
 }
 
 /// Per-organization override of a role's permission set — lets an ORG_OWNER
@@ -1171,6 +1241,7 @@ model CommunicationCampaign {
   meeting      Meeting?                 @relation(fields: [meetingId], references: [id], onDelete: SetNull)
   createdBy    User?                    @relation("CommunicationCampaignCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   recipients   CommunicationRecipient[]
+  smsMessages  SmsMessage[]
 
   @@index([organizationId])
   @@index([communicationType])

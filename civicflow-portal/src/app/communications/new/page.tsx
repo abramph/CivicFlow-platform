@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { PageHeader, SectionCard } from "@/components/app/PageChrome";
 import { CommunicationLogForm } from "@/components/forms/CommunicationLogForm";
 import { CommunicationCampaignForm } from "@/components/forms/CommunicationCampaignForm";
+import { getSmsEntitlement } from "@/lib/sms-entitlement";
 
 function getValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
@@ -17,7 +18,7 @@ export default async function NewCommunicationPage({
   const resolvedSearchParams = await searchParams;
   const isDuesReminderPreset = getValue(resolvedSearchParams.preset) === "dues_reminder";
 
-  const [members, campaigns, events, categories] = await Promise.all([
+  const [members, campaigns, events, categories, smsEntitlement] = await Promise.all([
     prisma.orgMember.findMany({
       where: { organizationId },
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
@@ -41,6 +42,7 @@ export default async function NewCommunicationPage({
       orderBy: { name: "asc" },
       select: { id: true, name: true },
     }),
+    getSmsEntitlement(organizationId),
   ]);
 
   return (
@@ -57,6 +59,7 @@ export default async function NewCommunicationPage({
       <SectionCard title="Mass Communication Campaign" description="Send announcements, meeting minutes, dues reminders, event notices, and general email communications to selected member groups.">
         <CommunicationCampaignForm
           categories={categories.map((category) => ({ id: category.id, label: category.name }))}
+          smsEnabled={smsEntitlement.allowed}
           initial={
             isDuesReminderPreset
               ? {
