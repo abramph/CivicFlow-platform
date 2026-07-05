@@ -37,6 +37,14 @@ export async function acceptMemberInvite(
         emailVerified: true,
       },
     });
+  } else {
+    // An account with this email already exists — holding the invite token
+    // (sent to the member's inbox) is not proof of controlling that account,
+    // so require its real password before linking the member record to it.
+    const passwordValid = await bcrypt.compare(password, user.passwordHash);
+    if (!passwordValid) {
+      return { ok: false, error: "An account with this email already exists. Enter that account's password to link it." };
+    }
   }
 
   await prisma.$transaction([
