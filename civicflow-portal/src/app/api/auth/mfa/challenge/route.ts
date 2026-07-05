@@ -2,6 +2,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/authOptions";
 import { prisma } from "@/lib/prisma";
 import { totpVerify } from "@/lib/totp";
+import { hashOtpCode } from "@/lib/sms-otp";
 import bcrypt from "bcryptjs";
 
 export async function POST(req: Request) {
@@ -45,6 +46,7 @@ export async function POST(req: Request) {
   }
 
   let verified = false;
+  let smsOtpRecordId: string | null = null;
 
   if (code.length === 8) {
     // Backup code attempt
@@ -63,10 +65,28 @@ export async function POST(req: Request) {
     }
   } else {
     verified = totpVerify(code, user.mfaSecret);
+
+    // Not a valid TOTP code — it may be the SMS one-time code sent via
+    // /api/auth/mfa/send-sms instead (both are 6 digits, so there's no way
+    // to tell which was intended without checking both).
+    if (!verified) {
+      const smsRecord = await prisma.mfaChallengeToken.findFirst({
+        where: { userId: session.mfaUserId, type: "sms_otp", expiresAt: { gt: new Date() } },
+        orderBy: { createdAt: "desc" },
+      });
+      if (smsRecord?.codeHash && smsRecord.codeHash === hashOtpCode(code)) {
+        verified = true;
+        smsOtpRecordId = smsRecord.id;
+      }
+    }
   }
 
   if (!verified) {
     return Response.json({ error: "Invalid code. Please try again." }, { status: 400 });
+  }
+
+  if (smsOtpRecordId) {
+    await prisma.mfaChallengeToken.delete({ where: { id: smsOtpRecordId } });
   }
 
   // Consume the pending token and issue a completion token (5 min TTL)

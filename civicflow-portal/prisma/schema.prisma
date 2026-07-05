@@ -357,6 +357,11 @@ model User {
   mfaEnabled         Boolean  @default(false)
   mfaSecret          String?
   mfaBackupCodes     String[]
+  /// SMS-based MFA fallback for when the authenticator app/backup codes
+  /// aren't available. Only trusted once verified (a code was actually sent
+  /// to and confirmed from this number) — set together, never independently.
+  phone              String?
+  phoneVerified      Boolean  @default(false)
   /// Bumped to revoke every outstanding mobile access/refresh token for this
   /// user at once (password reset, mobile logout) — mobile JWTs embed the
   /// version they were issued with; a mismatch against the current value
@@ -388,12 +393,16 @@ model User {
   @@index([email])
 }
 
-/// Short-lived token for two-phase MFA login flow.
+/// Short-lived token for two-phase MFA login flow, and (via the "sms_otp" /
+/// "phone_verify" types) SMS-based one-time codes. codeHash/phone are only
+/// populated for those two SMS-related types.
 model MfaChallengeToken {
   id        String   @id @default(cuid())
   userId    String
   token     String   @unique @default(cuid())
-  type      String // "pending" | "completion"
+  type      String // "pending" | "completion" | "sms_otp" | "phone_verify"
+  codeHash  String? // SHA-256 of the SMS one-time code, for "sms_otp" / "phone_verify"
+  phone     String? // Candidate/target phone number, for "sms_otp" / "phone_verify"
   expiresAt DateTime
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)

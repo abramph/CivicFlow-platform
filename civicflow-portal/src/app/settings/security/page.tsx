@@ -158,6 +158,145 @@ function MfaSetupFlow({ onDone }: { onDone: () => void }) {
   return null;
 }
 
+type PhoneStep = "idle" | "codeSent" | "verified";
+
+function PhoneBackupSection({ initialMaskedPhone }: { initialMaskedPhone: string | null }) {
+  const [step, setStep] = useState<PhoneStep>(initialMaskedPhone ? "verified" : "idle");
+  const [maskedPhone, setMaskedPhone] = useState(initialMaskedPhone);
+  const [phone, setPhone] = useState("");
+  const [code, setCode] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  async function sendCode() {
+    const trimmed = phone.trim();
+    if (!trimmed) return;
+    setSubmitting(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await fetch("/api/auth/mfa/phone/send-verification", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: trimmed }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Failed to send verification code.");
+        return;
+      }
+      setStep("codeSent");
+      setNotice(
+        data.skipped
+          ? "SMS delivery isn't configured on this server yet — ask your administrator, then try again once it's set up."
+          : "Verification code sent. It expires in 10 minutes."
+      );
+    } catch {
+      setError("Unable to connect. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function confirmCode() {
+    const trimmed = code.trim();
+    if (!trimmed) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/auth/mfa/phone/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: trimmed }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Invalid code. Please try again.");
+        return;
+      }
+      setMaskedPhone(phone.trim().replace(/\d(?=\d{4})/g, "•"));
+      setStep("verified");
+      setCode("");
+      setNotice(null);
+    } catch {
+      setError("Unable to connect. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-5">
+      <p className="font-semibold text-slate-900">SMS backup code</p>
+      <p className="mt-1 text-sm text-slate-600">
+        If you lose access to your authenticator app and your backup codes, we can text a one-time code to your
+        phone instead.
+      </p>
+
+      {step === "verified" ? (
+        <div className="mt-4 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
+          <span className="text-emerald-600">✓</span>
+          <p className="text-sm text-emerald-800">Verified phone on file: {maskedPhone}</p>
+        </div>
+      ) : (
+        <div className="mt-4 space-y-3">
+          {step === "idle" ? (
+            <div className="flex gap-2">
+              <input
+                type="tel"
+                placeholder="+15551234567"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-emerald-500 focus:outline-none"
+              />
+              <button
+                onClick={sendCode}
+                disabled={submitting || !phone.trim()}
+                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+              >
+                {submitting ? "Sending…" : "Send Code"}
+              </button>
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              <input
+                type="text"
+                inputMode="numeric"
+                placeholder="000000"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                maxLength={6}
+                className="w-32 rounded-lg border border-slate-300 px-3 py-2 text-center font-mono text-sm tracking-widest text-slate-900 focus:border-emerald-500 focus:outline-none"
+              />
+              <button
+                onClick={confirmCode}
+                disabled={submitting || !code.trim()}
+                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+              >
+                {submitting ? "Verifying…" : "Verify"}
+              </button>
+              <button
+                onClick={() => {
+                  setStep("idle");
+                  setNotice(null);
+                  setError(null);
+                }}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-600 hover:bg-slate-100"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+          {notice ? <p className="text-sm text-slate-600">{notice}</p> : null}
+        </div>
+      )}
+
+      {error ? <p className="mt-2 text-sm text-red-600">{error}</p> : null}
+    </div>
+  );
+}
+
 function DisableMfaForm({ onDone }: { onDone: () => void }) {
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -231,13 +370,17 @@ function DisableMfaForm({ onDone }: { onDone: () => void }) {
 export default function SecuritySettingsPage() {
   const router = useRouter();
   const [mfaEnabled, setMfaEnabled] = useState<boolean | null>(null);
+  const [maskedPhone, setMaskedPhone] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   // Load current MFA status on mount
   useEffect(() => {
     fetch("/api/auth/mfa/status")
       .then((r) => r.json())
-      .then((d) => setMfaEnabled(d.mfaEnabled ?? false))
+      .then((d) => {
+        setMfaEnabled(d.mfaEnabled ?? false);
+        setMaskedPhone(d.maskedPhone ?? null);
+      })
       .catch(() => setLoadError("Failed to load security settings."));
   }, []);
 
@@ -307,6 +450,8 @@ export default function SecuritySettingsPage() {
           </div>
         )}
       </div>
+
+      {mfaEnabled === true && <PhoneBackupSection initialMaskedPhone={maskedPhone} />}
     </main>
   );
 }

@@ -117,7 +117,7 @@ export async function sendCommunicationCampaign(input: {
       if (smsEnabled(campaign.channel) && recipient.phone) {
         const result = await sendSms({ to: recipient.phone, body: campaign.body });
         if (result.sent) deliveryStatus = "SENT";
-        if (result.skipped && !errorMessage) errorMessage = result.reason;
+        if (result.skipped && !errorMessage) errorMessage = result.reason ?? null;
       }
       if (campaign.channel === "INTERNAL_LOG_ONLY") {
         deliveryStatus = "SKIPPED";

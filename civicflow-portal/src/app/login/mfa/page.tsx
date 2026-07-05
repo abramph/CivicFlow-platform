@@ -8,8 +8,33 @@ export default function MfaChallengePage() {
   const [code, setCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [smsSending, setSmsSending] = useState(false);
+  const [smsNotice, setSmsNotice] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
+
+  async function handleSendSms() {
+    setSmsSending(true);
+    setSmsNotice(null);
+    setError(null);
+    try {
+      const res = await fetch("/api/auth/mfa/send-sms", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Unable to send a code by text right now.");
+        return;
+      }
+      setSmsNotice(
+        data.skipped
+          ? "SMS delivery isn't configured on this server — use your authenticator app or a backup code instead."
+          : `Code sent to ${data.maskedPhone}. Enter it above.`
+      );
+    } catch {
+      setError("Unable to connect. Please try again.");
+    } finally {
+      setSmsSending(false);
+    }
+  }
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -108,6 +133,18 @@ export default function MfaChallengePage() {
             {submitting ? "Verifying…" : "Verify"}
           </button>
         </form>
+
+        <div className="mt-3 text-center">
+          <button
+            type="button"
+            onClick={handleSendSms}
+            disabled={smsSending}
+            className="text-xs font-medium text-emerald-600 hover:underline disabled:opacity-60"
+          >
+            {smsSending ? "Sending…" : "Can't access your app? Text me a code instead"}
+          </button>
+        </div>
+        {smsNotice ? <p className="mt-2 text-center text-xs text-slate-600">{smsNotice}</p> : null}
 
         <p className="mt-5 text-center text-xs text-slate-500">
           Wrong account?{" "}
