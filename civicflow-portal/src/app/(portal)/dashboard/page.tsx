@@ -76,6 +76,13 @@ export default async function DashboardPage() {
     redirect("/login");
   }
 
+  // Members have zero staff permissions and must never see this
+  // organization-wide financial/member summary — send them to their own
+  // member-facing view instead.
+  if (hasSaasSession && session?.role === "MEMBER") {
+    redirect("/m/dues");
+  }
+
   // ── Legacy API path ────────────────────────────────────────────────────────
   if (hasLegacySession) {
     const analytics = await getAnalytics({

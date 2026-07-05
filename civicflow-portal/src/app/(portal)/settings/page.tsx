@@ -16,6 +16,12 @@ export default async function SettingsPage() {
     redirect("/login");
   }
 
+  // Members have zero staff permissions — send them to their own
+  // member-facing view instead of the organization settings hub.
+  if (hasSaasSession && session?.role === "MEMBER") {
+    redirect("/m/dues");
+  }
+
   if (hasLegacySession) {
     return (
       <div className="space-y-6">

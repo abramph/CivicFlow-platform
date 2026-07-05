@@ -8,7 +8,9 @@ import { LogoutButton } from "@/components/LogoutButton";
 import { canDo } from "@/lib/rbac";
 
 function isHiddenPath(pathname: string) {
-  return pathname === "/login" || pathname === "/buy";
+  // Member-facing pages render their own chrome — never wrap them in the
+  // staff sidebar shell.
+  return pathname === "/login" || pathname === "/buy" || pathname === "/accept-invite" || pathname.startsWith("/m/");
 }
 
 function isActive(pathname: string, href: string) {
@@ -41,6 +43,13 @@ export function PortalShell({ children }: { children: ReactNode }) {
   const hasLegacySession = Boolean(session?.api_key && session?.org_id && !session?.userId);
 
   if (!hasSaasSession && !hasLegacySession) {
+    return <>{children}</>;
+  }
+
+  // Members have zero staff permissions — never render the staff nav shell
+  // around them. The page itself also redirects to /m/dues; this just
+  // avoids a flash of staff navigation while that redirect resolves.
+  if (hasSaasSession && session?.role === "MEMBER") {
     return <>{children}</>;
   }
 
