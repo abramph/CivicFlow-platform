@@ -1,3 +1,4 @@
+import * as Sentry from "@sentry/nextjs";
 import { prisma } from "@/lib/prisma";
 import { withApiErrorHandling } from "@/lib/api-route";
 import { parseJsonBody, z } from "@/lib/validation";
@@ -12,8 +13,13 @@ function appBaseUrl(): string {
   return String(process.env.NEXTAUTH_URL || "http://localhost:3000").replace(/\/$/, "");
 }
 
-// Always return the same response — never reveal whether the email exists.
-const OK_RESPONSE = Response.json({ ok: true, message: "If that email is registered, a reset link has been sent." });
+// Always return an equivalent response — never reveal whether the email
+// exists. Built fresh per request: a `Response` body is a single-use
+// stream, so a shared module-level instance would come back empty on
+// every call after the first.
+function okResponse() {
+  return Response.json({ ok: true, message: "If that email is registered, a reset link has been sent." });
+}
 
 export async function POST(request: Request) {
   return withApiErrorHandling(async () => {
@@ -21,13 +27,24 @@ export async function POST(request: Request) {
     const email = input.email.toLowerCase();
 
     const user = await prisma.user.findUnique({ where: { email } });
-    if (!user) return OK_RESPONSE;
+    if (!user) return okResponse();
 
     const token = await createPasswordResetToken(user.id);
     const resetUrl = `${appBaseUrl()}/reset-password?token=${token}`;
 
-    await sendPasswordResetEmail({ to: email, resetUrl });
+    // A transient SMTP/provider failure here must never surface as a 500 to
+    // the user — that would both leak that the email exists (a real 500 vs.
+    // the generic success response) and give no useful recovery action
+    // besides "try again". Log it for our own alerting/diagnosis and still
+    // return the same success response; the user can always request another
+    // link if the email genuinely never arrives.
+    try {
+      await sendPasswordResetEmail({ to: email, resetUrl });
+    } catch (error) {
+      Sentry.captureException(error);
+      console.error("[forgot-password] Failed to send password reset email:", error);
+    }
 
-    return OK_RESPONSE;
+    return okResponse();
   });
 }
