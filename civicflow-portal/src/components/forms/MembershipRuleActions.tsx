@@ -3,10 +3,12 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-export function EvaluateMemberCategoryButton({ memberId }: { memberId: string }) {
+export function EvaluateMemberCategoryButton({ memberId, canWrite }: { memberId: string; canWrite: boolean }) {
   const router = useRouter();
   const [running, setRunning] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+
+  if (!canWrite) return null;
 
   async function runEvaluation() {
     setRunning(true);
@@ -46,10 +48,12 @@ export function EvaluateMemberCategoryButton({ memberId }: { memberId: string })
   );
 }
 
-export function RunCategoryRulesButton() {
+export function RunCategoryRulesButton({ canWrite }: { canWrite: boolean }) {
   const router = useRouter();
   const [running, setRunning] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+
+  if (!canWrite) return null;
 
   async function runRules() {
     setRunning(true);

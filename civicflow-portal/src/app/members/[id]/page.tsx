@@ -220,7 +220,7 @@ export default async function MemberProfilePage({
           <StatCard label="Member Record" value={member.id} helper="Internal CivicFlow member identifier." />
         </div>
         <div className="mt-4">
-          <EvaluateMemberCategoryButton memberId={member.id} />
+          <EvaluateMemberCategoryButton memberId={member.id} canWrite={can("members:write")} />
         </div>
         <div className="mt-4 grid gap-4 md:grid-cols-2">
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -378,7 +378,7 @@ export default async function MemberProfilePage({
           <StatCard label="Outstanding" value={formatCurrency(totalOutstanding)} helper={`${duesOpenCount} open charges`} />
         </div>
         <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-          <DuesGenerateForm memberId={member.id} />
+          <DuesGenerateForm memberId={member.id} canWrite={can("dues:write")} />
         </div>
         <div className="mt-4 grid gap-4 xl:grid-cols-2">
           <div className="rounded-xl border border-slate-200 bg-white">

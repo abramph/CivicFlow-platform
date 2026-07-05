@@ -7,14 +7,18 @@ import { fieldClassName } from "@/components/forms/formStyles";
 export function DuesGenerateForm({
   memberId = "",
   members = [],
+  canWrite,
 }: {
   memberId?: string;
   members?: Array<{ id: string; firstName: string; lastName: string }>;
+  canWrite: boolean;
 }) {
   const router = useRouter();
   const [form, setForm] = useState({ memberId, startDate: "", endDate: new Date().toISOString().slice(0, 10) });
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+
+  if (!canWrite) return null;
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

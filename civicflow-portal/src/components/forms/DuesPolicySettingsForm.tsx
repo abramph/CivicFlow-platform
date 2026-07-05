@@ -23,7 +23,7 @@ function optionalNumber(value: string) {
   return value ? Number(value) : null;
 }
 
-export function DuesPolicySettingsForm({ settings }: { settings: DuesPolicySettings }) {
+export function DuesPolicySettingsForm({ settings, canWrite }: { settings: DuesPolicySettings; canWrite: boolean }) {
   const router = useRouter();
   const [form, setForm] = useState({
     ...settings,
@@ -34,6 +34,10 @@ export function DuesPolicySettingsForm({ settings }: { settings: DuesPolicySetti
   });
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+
+  if (!canWrite) {
+    return <p className="text-sm text-slate-700">You have read-only access to dues policy settings.</p>;
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

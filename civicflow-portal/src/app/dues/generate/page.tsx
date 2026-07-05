@@ -24,7 +24,7 @@ export default async function GenerateDuesPage() {
         ]}
       />
       <SectionCard title="Generate Missing Dues" description="Run for all active members or a selected member over a date range.">
-        <DuesGenerateForm members={members} />
+        <DuesGenerateForm members={members} canWrite />
       </SectionCard>
     </main>
   );

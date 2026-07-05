@@ -62,11 +62,13 @@ export function CategoryManager({
   duesCategories,
   allowedTypes = categoryTypes,
   initialType = "MEMBERSHIP",
+  canWrite,
 }: {
   categories: CategoryRow[];
   duesCategories: Array<{ id: string; name: string }>;
   allowedTypes?: readonly CategoryType[];
   initialType?: CategoryType;
+  canWrite: boolean;
 }) {
   const router = useRouter();
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -221,6 +223,7 @@ export function CategoryManager({
 
   return (
     <div className="space-y-6">
+      {canWrite ? (
       <form className="space-y-5" onSubmit={handleSubmit}>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {allowedTypes.length > 1 ? (
@@ -414,6 +417,9 @@ export function CategoryManager({
           ) : null}
         </div>
       </form>
+      ) : (
+        <p className="text-sm text-slate-700">You have read-only access to categories.</p>
+      )}
 
       <div className="overflow-x-auto">
         <table className="min-w-full text-sm">
@@ -469,13 +475,17 @@ export function CategoryManager({
                   </td>
                   <td className="px-4 py-3 text-slate-900">{category.isActive ? "Active" : "Inactive"}</td>
                   <td className="px-4 py-3 text-slate-900">
-                    <button
-                      type="button"
-                      onClick={() => startEdit(category)}
-                      className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50"
-                    >
-                      Edit
-                    </button>
+                    {canWrite ? (
+                      <button
+                        type="button"
+                        onClick={() => startEdit(category)}
+                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50"
+                      >
+                        Edit
+                      </button>
+                    ) : (
+                      "—"
+                    )}
                   </td>
                 </tr>
               ))

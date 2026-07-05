@@ -9,7 +9,9 @@ import { RunCategoryRulesButton } from "@/components/forms/MembershipRuleActions
 import { formatCurrency, formatEnumLabel, formatText } from "@/lib/formatting";
 
 export default async function DuesSettingsPage() {
-  const { organizationId } = await requirePermission("dues:read");
+  const { organizationId, can } = await requirePermission("dues:read");
+  const canOrgSettingsWrite = can("org_settings:write");
+  const canDuesWrite = can("dues:write");
 
   const [categories, accounts, settings] = await Promise.all([
     prisma.category.findMany({
@@ -77,7 +79,7 @@ export default async function DuesSettingsPage() {
 
       <SectionCard title="Dues and Membership Categories" description="Use dues categories for plan defaults and membership categories for member classification plus standard dues linkage.">
         <div className="mb-5">
-          <RunCategoryRulesButton />
+          <RunCategoryRulesButton canWrite={canOrgSettingsWrite} />
         </div>
         <CategoryManager
           categories={categories.map((category) => ({
@@ -90,6 +92,7 @@ export default async function DuesSettingsPage() {
           duesCategories={duesCategories}
           allowedTypes={["DUES", "MEMBERSHIP"]}
           initialType="DUES"
+          canWrite={canOrgSettingsWrite}
         />
       </SectionCard>
 
@@ -109,11 +112,12 @@ export default async function DuesSettingsPage() {
             allowFinanceCorrections: settings.allowFinanceCorrections,
             lockReceiptsAfterIssue: settings.lockReceiptsAfterIssue,
           }}
+          canWrite={canOrgSettingsWrite}
         />
       </SectionCard>
 
       <SectionCard title="Run Dues Evaluation" description="Generate missing charges from join dates and re-evaluate delinquency under the current policy.">
-        <DuesGenerateForm />
+        <DuesGenerateForm canWrite={canDuesWrite} />
       </SectionCard>
 
       <SectionCard title="Current Dues Accounts" description="A quick setup-oriented view of the dues accounts that currently exist and how they relate back to categories.">

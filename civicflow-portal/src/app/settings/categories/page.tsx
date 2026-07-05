@@ -5,7 +5,8 @@ import { CategoryManager } from "@/components/forms/CategoryManager";
 import { RunCategoryRulesButton } from "@/components/forms/MembershipRuleActions";
 
 export default async function CategoriesSettingsPage() {
-  const { organizationId } = await requirePermission("org_settings:read");
+  const { organizationId, can } = await requirePermission("org_settings:read");
+  const canWrite = can("org_settings:write");
 
   const categories = await prisma.category.findMany({
     where: { organizationId },
@@ -46,7 +47,7 @@ export default async function CategoriesSettingsPage() {
 
       <SectionCard title="Category Setup" description="Category setup drives desktop-style organization structure, including membership classification and category-linked dues defaults.">
         <div className="mb-5">
-          <RunCategoryRulesButton />
+          <RunCategoryRulesButton canWrite={canWrite} />
         </div>
         <CategoryManager
           categories={categories.map((category) => ({
@@ -58,6 +59,7 @@ export default async function CategoriesSettingsPage() {
           }))}
           duesCategories={duesCategories}
           initialType="MEMBERSHIP"
+          canWrite={canWrite}
         />
       </SectionCard>
     </main>
