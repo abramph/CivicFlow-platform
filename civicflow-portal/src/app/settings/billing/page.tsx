@@ -16,7 +16,7 @@ export default async function BillingSettingsPage({
   searchParams: SearchParams;
 }) {
   const params = await searchParams;
-  const { organizationId, role } = await requirePermission("billing:read");
+  const { organizationId, role, can } = await requirePermission("billing:read");
 
   const [organization, subscription, memberCheck, trial, seatCheck] = await Promise.all([
     prisma.organization.findUnique({
@@ -34,7 +34,7 @@ export default async function BillingSettingsPage({
 
   const currentPlanId = organization?.plan ?? "free";
   const currentPlan = getPlan(currentPlanId);
-  const canManageBilling = role === "ORG_OWNER" || role === "SUPER_ADMIN";
+  const canManageBilling = can("billing:manage");
 
   // Org has an active Stripe subscription — plan changes must go through the
   // billing portal, not a new checkout session.
