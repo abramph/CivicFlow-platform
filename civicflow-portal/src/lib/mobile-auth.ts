@@ -81,6 +81,43 @@ export async function signMobileTokenPair(userId: string, tokenVersion: number) 
   };
 }
 
+/**
+ * Shared final step of mobile login, used both by the direct (no-MFA) path
+ * in mobile/auth/login and by mobile/auth/mfa/challenge once a code is
+ * verified — checks the account actually has an active MEMBER membership
+ * (this is the member-facing app; staff-only accounts aren't valid here),
+ * then issues a fresh token pair.
+ */
+export async function completeMobileLogin(user: {
+  id: string;
+  email: string;
+  displayName: string | null;
+  mobileTokenVersion: number;
+}): Promise<
+  | { ok: true; data: { accessToken: string; refreshToken: string; expiresIn: number; user: { id: string; email: string; displayName: string | null } } }
+  | { ok: false; status: number; error: string }
+> {
+  const membershipCount = await prisma.organizationMembership.count({
+    where: { userId: user.id, role: "MEMBER", organization: { status: "active" } },
+  });
+  if (membershipCount === 0) {
+    return {
+      ok: false,
+      status: 403,
+      error: "This account is not set up as a CivicFlow member. Ask your organization for an app invite.",
+    };
+  }
+
+  const tokens = await signMobileTokenPair(user.id, user.mobileTokenVersion);
+  return {
+    ok: true,
+    data: {
+      ...tokens,
+      user: { id: user.id, email: user.email, displayName: user.displayName },
+    },
+  };
+}
+
 interface MobileTokenClaims {
   userId: string;
   tokenVersion: number;

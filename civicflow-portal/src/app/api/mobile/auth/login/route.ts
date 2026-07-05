@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import { withApiErrorHandling } from "@/lib/api-route";
-import { signMobileTokenPair } from "@/lib/mobile-auth";
+import { completeMobileLogin } from "@/lib/mobile-auth";
 import { prisma } from "@/lib/prisma";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { parseJsonBody, z } from "@/lib/validation";
@@ -34,29 +34,24 @@ export async function POST(request: Request) {
     }
 
     if (user.mfaEnabled) {
-      return Response.json(
-        { ok: false, error: "mfa_required_use_portal", message: "This account has multi-factor authentication enabled. Please log in via the CivicFlow web portal." },
-        { status: 403 }
-      );
+      // Password verified but a second factor is required — issue a
+      // short-lived challenge token (verified by mobile/auth/mfa/challenge)
+      // instead of full session tokens. Mirrors the web login flow's
+      // "pending" MfaChallengeToken, just without a NextAuth session cookie
+      // to carry the pending state between requests.
+      await prisma.mfaChallengeToken.deleteMany({
+        where: { userId: user.id, type: "pending", expiresAt: { lt: new Date() } },
+      });
+      const challenge = await prisma.mfaChallengeToken.create({
+        data: { userId: user.id, type: "pending", expiresAt: new Date(Date.now() + 10 * 60 * 1000) },
+      });
+      return Response.json({ ok: true, mfaRequired: true, mfaToken: challenge.token });
     }
 
-    const membershipCount = await prisma.organizationMembership.count({
-      where: { userId: user.id, role: "MEMBER", organization: { status: "active" } },
-    });
-    if (membershipCount === 0) {
-      return Response.json(
-        { ok: false, error: "This account is not set up as a CivicFlow member. Ask your organization for an app invite." },
-        { status: 403 }
-      );
+    const result = await completeMobileLogin(user);
+    if (!result.ok) {
+      return Response.json({ ok: false, error: result.error }, { status: result.status });
     }
-
-    const tokens = await signMobileTokenPair(user.id, user.mobileTokenVersion);
-    return Response.json({
-      ok: true,
-      data: {
-        ...tokens,
-        user: { id: user.id, email: user.email, displayName: user.displayName },
-      },
-    });
+    return Response.json({ ok: true, data: result.data });
   });
 }
