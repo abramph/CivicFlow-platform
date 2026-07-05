@@ -44,7 +44,7 @@ function emptyForm() {
   };
 }
 
-export function PaymentMethodsManager({ methods }: { methods: PaymentMethodRow[] }) {
+export function PaymentMethodsManager({ methods, canWrite }: { methods: PaymentMethodRow[]; canWrite: boolean }) {
   const router = useRouter();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm());
@@ -141,6 +141,7 @@ export function PaymentMethodsManager({ methods }: { methods: PaymentMethodRow[]
 
   return (
     <div className="space-y-6">
+      {canWrite ? (
       <form className="space-y-5" onSubmit={handleSubmit}>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <label className="space-y-2 text-sm font-medium text-slate-900">
@@ -254,6 +255,9 @@ export function PaymentMethodsManager({ methods }: { methods: PaymentMethodRow[]
           ) : null}
         </div>
       </form>
+      ) : (
+        <p className="text-sm text-slate-700">You have read-only access to payment methods.</p>
+      )}
 
       <div className="overflow-x-auto">
         <table className="min-w-full text-sm">
@@ -276,13 +280,17 @@ export function PaymentMethodsManager({ methods }: { methods: PaymentMethodRow[]
                 <td className="px-4 py-3 text-slate-900">{method.instructions || "-"}</td>
                 <td className="px-4 py-3 text-slate-900">{method.isActive ? "Active" : "Inactive"}</td>
                 <td className="px-4 py-3">
-                  <button
-                    type="button"
-                    onClick={() => startEdit(method)}
-                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50"
-                  >
-                    Edit
-                  </button>
+                  {canWrite ? (
+                    <button
+                      type="button"
+                      onClick={() => startEdit(method)}
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50"
+                    >
+                      Edit
+                    </button>
+                  ) : (
+                    "—"
+                  )}
                 </td>
               </tr>
             ))}

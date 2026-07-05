@@ -5,7 +5,8 @@ import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { PaymentMethodsManager } from "@/components/forms/PaymentMethodsManager";
 
 export default async function PaymentMethodsSettingsPage() {
-  const { organizationId } = await requirePermission("org_settings:read");
+  const { organizationId, can } = await requirePermission("org_settings:read");
+  const canWrite = can("org_settings:write");
 
   await ensureDefaultPaymentMethods(prisma, organizationId);
 
@@ -33,7 +34,7 @@ export default async function PaymentMethodsSettingsPage() {
       </div>
 
       <SectionCard title="Accepted Payment Methods" description="Labels and instructions shown on payment entry forms are organization-scoped.">
-        <PaymentMethodsManager methods={methods} />
+        <PaymentMethodsManager methods={methods} canWrite={canWrite} />
       </SectionCard>
     </main>
   );
