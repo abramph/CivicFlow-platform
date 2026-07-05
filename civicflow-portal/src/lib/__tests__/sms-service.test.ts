@@ -125,6 +125,23 @@ describe("sendMemberSms", () => {
     expect(sendSms).not.toHaveBeenCalled();
   });
 
+  it("normalizes a typical US-formatted member phone number (e.g. from CSV import) before sending", async () => {
+    isSmsConfigured.mockReturnValueOnce(true);
+    getSmsEntitlement.mockResolvedValueOnce({ allowed: true, remaining: 500, limit: 1000 });
+    findUniqueOrgMember.mockResolvedValueOnce({ commsSmsEnabled: true, smsOptedOutAt: null });
+    createSmsMessage.mockResolvedValueOnce({ id: "sms-1", status: "QUEUED" });
+    sendSms.mockResolvedValueOnce({ sent: true, skipped: false, to: "+12159174391" });
+    updateSmsMessage.mockResolvedValueOnce({ id: "sms-1", status: "SENT" });
+
+    const result = await sendMemberSms(baseParams({ phone: "215-917-4391" }));
+
+    expect(result.status).toBe("SENT");
+    expect(sendSms).toHaveBeenCalledWith(expect.objectContaining({ to: "+12159174391" }));
+    expect(createSmsMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ phone: "+12159174391" }) })
+    );
+  });
+
   it("records usage and marks SENT on a successful Twilio send, and allows overage (soft cap)", async () => {
     isSmsConfigured.mockReturnValueOnce(true);
     // remaining is negative — already over the limit — but still allowed (soft cap).

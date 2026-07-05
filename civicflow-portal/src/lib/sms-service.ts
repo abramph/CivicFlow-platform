@@ -1,6 +1,6 @@
 import type { SmsMessage } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { isValidE164Phone } from "@/lib/phone";
+import { normalizeToE164 } from "@/lib/phone";
 import { getSmsEntitlement, recordSmsUsage } from "@/lib/sms-entitlement";
 import { isSmsConfigured, sendSms } from "@/lib/sms";
 import { SMS_ADDON } from "@/lib/sms-pricing";
@@ -65,7 +65,8 @@ export async function sendMemberSms(params: SendMemberSmsParams): Promise<SmsMes
     return failedRow(params, entitlement.reason ?? "SMS is not enabled for this organization.");
   }
 
-  if (!isValidE164Phone(phone)) {
+  const normalizedPhone = normalizeToE164(phone);
+  if (!normalizedPhone) {
     return failedRow(params, "Invalid phone number.");
   }
 
@@ -85,7 +86,7 @@ export async function sendMemberSms(params: SendMemberSmsParams): Promise<SmsMes
     data: {
       organizationId,
       memberId: memberId ?? null,
-      phone,
+      phone: normalizedPhone,
       body: finalBody,
       status: "QUEUED",
       campaignId: campaignId ?? null,
@@ -93,7 +94,7 @@ export async function sendMemberSms(params: SendMemberSmsParams): Promise<SmsMes
     },
   });
 
-  const result = await sendSms({ to: phone, body: finalBody });
+  const result = await sendSms({ to: normalizedPhone, body: finalBody });
 
   const updated = await prisma.smsMessage.update({
     where: { id: queued.id },

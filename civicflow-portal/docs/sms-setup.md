@@ -28,7 +28,21 @@ sending simply reports "SMS delivery is not configured." instead of attempting d
 Only `SMS_PROVIDER=twilio` is currently implemented. Any other value (or none) causes `sendSms()`
 to no-op with a descriptive `reason`.
 
-## 2. Twilio account setup
+## 2. Member phone number format
+
+Member `phone` fields are free text (manual entry or CSV import) and are rarely stored in E.164.
+`sendMemberSms()` (`src/lib/sms-service.ts`) normalizes via `normalizeToE164()`
+(`src/lib/phone.ts`) before validating or sending: a 10-digit number is assumed North American and
+prefixed `+1`; an 11-digit number starting with `1` gets a `+` prefix; anything already in E.164 is
+left as-is. Numbers that don't fit one of those shapes (missing digits, non-US numbers without a
+`+`, non-numeric junk) fail with "Invalid phone number." and are never sent to Twilio. This does
+**not** normalize the stored `OrgMember.phone` value itself — only the number used for the send —
+so the inbound STOP/START webhook's `where: { phone: from }` lookup (an exact string match against
+Twilio's always-E.164 `From`) can still miss a member whose phone is on file in a different format
+than what they texted from. Normalizing `OrgMember.phone` storage itself is a larger, separate
+data-migration task, not covered by this feature.
+
+## 3. Twilio account setup
 
 1. Create a Twilio account and a phone number capable of SMS in the region you'll send to.
 2. Copy the Account SID and Auth Token from the Twilio Console into `TWILIO_ACCOUNT_SID` and
@@ -52,14 +66,14 @@ to no-op with a descriptive `reason`.
    Twilio's own carrier-level Advanced Opt-Out is a separate mechanism and should also stay
    enabled.
 
-## 3. DigitalOcean App Platform environment variables
+## 4. DigitalOcean App Platform environment variables
 
 In the DO App Platform dashboard for the `civicflow-portal` app: Settings → App-Level Environment
 Variables (or the specific component's environment variables) → add each of the five variables
 above as **encrypted** values, then trigger a redeploy (or let the next push deploy them). Do not
 commit real values to the repo or to `.env` files tracked by git.
 
-## 4. Stripe: SMS add-on product/price
+## 5. Stripe: SMS add-on product/price
 
 The SMS add-on is billed as a separate Stripe Subscription Item on the org's existing subscription,
 not a new checkout flow:
@@ -85,7 +99,7 @@ never blocked for being over the limit, only tracked (`SmsMessage.costEstimateCe
 invoicing yet — the Platform Admin dashboard's "Est. Overage Revenue" figure is for visibility, not
 an automated charge.
 
-## 5. Testing checklist
+## 6. Testing checklist
 
 Run before any production rollout:
 
@@ -105,7 +119,7 @@ Run before any production rollout:
 - [ ] Send START from the same phone, confirm the member becomes eligible again.
 - [ ] Confirm `/admin/platform`'s SMS section reflects real counts after the above sends.
 
-## 6. Production rollout checklist
+## 7. Production rollout checklist
 
 - [ ] A2P 10DLC brand/campaign registration complete (if sending to US numbers).
 - [ ] Production Twilio Account SID/Auth Token/From Number set as DO encrypted env vars (not the
