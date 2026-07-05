@@ -120,10 +120,19 @@ export async function sendCommunicationCampaign(input: {
     try {
       let deliveryStatus: "SENT" | "SKIPPED" = "SKIPPED";
       let errorMessage: string | null = null;
+      // For EMAIL_AND_SMS, either channel succeeding counts as SENT overall,
+      // but a per-channel failure is still worth surfacing — label each
+      // reason by channel so "Sent" + an error doesn't read as a
+      // contradiction, and so a failure on one channel isn't silently
+      // dropped when the other also fails.
+      const isMultiChannel = campaign.channel === "EMAIL_AND_SMS";
       if (emailEnabled(campaign.channel) && recipient.email) {
         const result = await sendEmail({ to: recipient.email, subject: campaign.subject, text: messageBody });
         deliveryStatus = result.sent ? "SENT" : "SKIPPED";
-        errorMessage = result.skipped ? result.reason ?? "Email sending skipped" : null;
+        if (result.skipped) {
+          const reason = result.reason ?? "Email sending skipped";
+          errorMessage = isMultiChannel ? `Email: ${reason}` : reason;
+        }
       }
       if (smsEnabled(campaign.channel) && recipient.phone) {
         const result = await sendMemberSms({
@@ -135,7 +144,11 @@ export async function sendCommunicationCampaign(input: {
           sentById: input.actorUserId ?? null,
         });
         if (result.status === "SENT") deliveryStatus = "SENT";
-        if (result.status === "FAILED" && !errorMessage) errorMessage = result.errorMessage ?? null;
+        if (result.status === "FAILED") {
+          const reason = result.errorMessage ?? "SMS send failed";
+          const smsError = isMultiChannel ? `SMS: ${reason}` : reason;
+          errorMessage = errorMessage ? `${errorMessage}; ${smsError}` : smsError;
+        }
       }
       if (campaign.channel === "INTERNAL_LOG_ONLY") {
         deliveryStatus = "SKIPPED";
