@@ -20,6 +20,7 @@ export async function GET() {
         smsOverageRateCents: settings?.smsOverageRateCents ?? SMS_ADDON.overageRateCents,
         smsBillingPeriodEnd: settings?.smsBillingPeriodEnd ?? null,
         monthlyPriceCents: SMS_ADDON.monthlyPriceCents,
+        includedMessagesPerMonth: SMS_ADDON.includedMessagesPerMonth,
       },
     });
   });

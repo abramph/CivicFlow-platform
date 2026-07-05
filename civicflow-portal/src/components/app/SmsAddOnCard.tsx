@@ -9,6 +9,7 @@ interface SmsAddOnStatus {
   smsOverageRateCents: number;
   smsBillingPeriodEnd: string | null;
   monthlyPriceCents: number;
+  includedMessagesPerMonth: number;
 }
 
 export function SmsAddOnCard({
@@ -67,8 +68,9 @@ export function SmsAddOnCard({
           <p className="font-semibold text-slate-900">SMS Add-on</p>
           <p className="mt-1 text-sm text-slate-600">
             Send dues reminders, announcements, and event notices by text message. $
-            {(status.monthlyPriceCents / 100).toFixed(0)}/mo, includes {status.smsMonthlyLimit.toLocaleString()}{" "}
-            messages, then ${(status.smsOverageRateCents / 100).toFixed(2)}/message overage.
+            {(status.monthlyPriceCents / 100).toFixed(0)}/mo, includes{" "}
+            {status.includedMessagesPerMonth.toLocaleString()} messages, then $
+            {(status.smsOverageRateCents / 100).toFixed(2)}/message overage.
           </p>
         </div>
         <span

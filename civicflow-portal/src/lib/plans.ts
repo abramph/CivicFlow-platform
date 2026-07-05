@@ -64,7 +64,7 @@ export const PLANS: Record<PlanId, PlanConfig> = {
     highlights: [
       "Up to 500 members",
       "3 portal user seats included",
-      "Email & SMS campaigns",
+      "Email campaigns",
       "PDF export",
       "Attendance tracking",
       "Payment import & reconciliation",
