@@ -6,7 +6,17 @@ import { formatDate, formatDateTime, formatEnumLabel } from "@/lib/formatting";
 export default async function PlatformAdminPage() {
   await requireSuperAdmin();
 
-  const [organizations, usersCount, subscriptions, recentAuditEvents] = await Promise.all([
+  const ACTIVELY_SUBSCRIBED_STATUSES = ["active", "trialing", "past_due"] as const;
+
+  const [
+    organizations,
+    organizationsCount,
+    activelySubscribedOrgsCount,
+    usersCount,
+    subscriptions,
+    subscriptionsCount,
+    recentAuditEvents,
+  ] = await Promise.all([
     prisma.organization.findMany({
       orderBy: [{ createdAt: "desc" }],
       include: {
@@ -20,11 +30,20 @@ export default async function PlatformAdminPage() {
       },
       take: 50,
     }),
+    prisma.organization.count(),
+    // Distinct organizations with at least one currently-paying-or-trialing
+    // subscription — not a raw subscription-row count, since an org can
+    // accumulate multiple historical Subscription rows (old + new) and we
+    // don't want to double-count it.
+    prisma.organization.count({
+      where: { subscriptions: { some: { status: { in: [...ACTIVELY_SUBSCRIBED_STATUSES] } } } },
+    }),
     prisma.user.count(),
     prisma.subscription.findMany({
       orderBy: [{ createdAt: "desc" }],
       take: 50,
     }),
+    prisma.subscription.count(),
     prisma.auditEvent.findMany({
       orderBy: [{ createdAt: "desc" }],
       take: 50,
@@ -39,14 +58,15 @@ export default async function PlatformAdminPage() {
         actions={[{ href: "/dashboard", label: "Back to Dashboard" }]}
       />
 
-      <div className="grid gap-4 md:grid-cols-4">
-        <StatCard label="Organizations" value={organizations.length} />
+      <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-5">
+        <StatCard label="Organizations" value={organizationsCount} />
+        <StatCard label="Actively Subscribed Organizations" value={activelySubscribedOrgsCount} helper="Active, trialing, or past due" />
         <StatCard label="Users" value={usersCount} />
-        <StatCard label="Subscriptions" value={subscriptions.length} />
+        <StatCard label="Subscription Records" value={subscriptionsCount} helper="All statuses, including cancelled" />
         <StatCard label="Recent Audit Events" value={recentAuditEvents.length} />
       </div>
 
-      <SectionCard title="Organizations" description="Current organizations on the platform, including member counts and contribution volume.">
+      <SectionCard title="Organizations" description={`Most recent ${organizations.length} of ${organizationsCount} total organizations, including member counts and contribution volume.`}>
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="bg-slate-50 text-left text-slate-700">
@@ -80,7 +100,7 @@ export default async function PlatformAdminPage() {
         </div>
       </SectionCard>
 
-      <SectionCard title="Subscriptions" description="Current Stripe subscription metadata tracked by the SaaS billing layer.">
+      <SectionCard title="Subscriptions" description={`Most recent ${subscriptions.length} of ${subscriptionsCount} total subscription records tracked by the SaaS billing layer.`}>
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="bg-slate-50 text-left text-slate-700">
