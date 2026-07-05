@@ -22,8 +22,8 @@ function requestWithToken(token: string) {
 
 describe("mobile-auth: token round trip", () => {
   it("signs and verifies an access token for the same user", async () => {
-    findUniqueUser.mockResolvedValueOnce({ id: "user-1", email: "member@example.com" });
-    const token = await signAccessToken("user-1");
+    findUniqueUser.mockResolvedValueOnce({ id: "user-1", email: "member@example.com", mobileTokenVersion: 0 });
+    const token = await signAccessToken("user-1", 0);
     const session = await requireMobileAuth(requestWithToken(token));
     expect(session).toEqual({ userId: "user-1", email: "member@example.com" });
   });
@@ -36,8 +36,24 @@ describe("mobile-auth: token round trip", () => {
 
   it("rejects a token whose user no longer exists", async () => {
     findUniqueUser.mockResolvedValueOnce(null);
-    const token = await signAccessToken("deleted-user");
+    const token = await signAccessToken("deleted-user", 0);
     await expect(requireMobileAuth(requestWithToken(token))).rejects.toThrow(/no longer exists/);
+  });
+});
+
+describe("mobile-auth: token revocation via mobileTokenVersion", () => {
+  it("rejects an access token signed with a version older than the user's current one", async () => {
+    // Token was issued at version 0 (e.g. before a password reset or logout bumped it to 1).
+    findUniqueUser.mockResolvedValueOnce({ id: "user-1", email: "member@example.com", mobileTokenVersion: 1 });
+    const token = await signAccessToken("user-1", 0);
+    await expect(requireMobileAuth(requestWithToken(token))).rejects.toThrow(/Invalid or expired access token/);
+  });
+
+  it("accepts an access token signed with the user's current version", async () => {
+    findUniqueUser.mockResolvedValueOnce({ id: "user-1", email: "member@example.com", mobileTokenVersion: 3 });
+    const token = await signAccessToken("user-1", 3);
+    const session = await requireMobileAuth(requestWithToken(token));
+    expect(session.userId).toBe("user-1");
   });
 });
 
@@ -49,11 +65,11 @@ describe("mobile-auth: cross-organization tenant isolation", () => {
   });
 
   it("grants access when the caller has a MEMBER membership in the requested org", async () => {
-    findUniqueUser.mockResolvedValueOnce({ id: "user-1", email: "member@example.com" });
+    findUniqueUser.mockResolvedValueOnce({ id: "user-1", email: "member@example.com", mobileTokenVersion: 0 });
     findFirstMembership.mockResolvedValueOnce({ id: "membership-1", organizationId: "org-a", userId: "user-1", role: "MEMBER" });
     findFirstOrgMember.mockResolvedValueOnce({ id: "member-1" });
 
-    const token = await signAccessToken("user-1");
+    const token = await signAccessToken("user-1", 0);
     const result = await requireMobileMembership(requestWithToken(token), "org-a");
 
     expect(result.organizationId).toBe("org-a");
@@ -64,11 +80,11 @@ describe("mobile-auth: cross-organization tenant isolation", () => {
   });
 
   it("denies access to an organization the caller does not belong to — even though they're authenticated", async () => {
-    findUniqueUser.mockResolvedValueOnce({ id: "user-1", email: "member@example.com" });
+    findUniqueUser.mockResolvedValueOnce({ id: "user-1", email: "member@example.com", mobileTokenVersion: 0 });
     // Caller only has a membership in org-a; they ask for org-b's data.
     findFirstMembership.mockResolvedValueOnce(null);
 
-    const token = await signAccessToken("user-1");
+    const token = await signAccessToken("user-1", 0);
     await expect(requireMobileMembership(requestWithToken(token), "org-b")).rejects.toThrow(
       /No active membership for this organization/
     );
@@ -76,11 +92,11 @@ describe("mobile-auth: cross-organization tenant isolation", () => {
   });
 
   it("denies access when a membership exists but has no linked OrgMember record", async () => {
-    findUniqueUser.mockResolvedValueOnce({ id: "user-1", email: "member@example.com" });
+    findUniqueUser.mockResolvedValueOnce({ id: "user-1", email: "member@example.com", mobileTokenVersion: 0 });
     findFirstMembership.mockResolvedValueOnce({ id: "membership-1", organizationId: "org-a", userId: "user-1", role: "MEMBER" });
     findFirstOrgMember.mockResolvedValueOnce(null);
 
-    const token = await signAccessToken("user-1");
+    const token = await signAccessToken("user-1", 0);
     await expect(requireMobileMembership(requestWithToken(token), "org-a")).rejects.toThrow(
       /No linked member record/
     );

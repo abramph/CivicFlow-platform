@@ -349,16 +349,21 @@ model Organization {
 
 /// A platform user (email + password, SaaS auth).
 model User {
-  id             String   @id @default(cuid())
-  email          String   @unique
-  displayName    String?
-  passwordHash   String
-  emailVerified  Boolean  @default(false)
-  mfaEnabled     Boolean  @default(false)
-  mfaSecret      String?
-  mfaBackupCodes String[]
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                 String   @id @default(cuid())
+  email              String   @unique
+  displayName        String?
+  passwordHash       String
+  emailVerified      Boolean  @default(false)
+  mfaEnabled         Boolean  @default(false)
+  mfaSecret          String?
+  mfaBackupCodes     String[]
+  /// Bumped to revoke every outstanding mobile access/refresh token for this
+  /// user at once (password reset, mobile logout) — mobile JWTs embed the
+  /// version they were issued with; a mismatch against the current value
+  /// means the token is treated as invalid even if not yet expired.
+  mobileTokenVersion Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   memberships            OrganizationMembership[]
   savedFilters           SavedFilter[]

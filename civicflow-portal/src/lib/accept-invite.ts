@@ -12,7 +12,7 @@ export async function acceptMemberInvite(
   token: string,
   password: string
 ): Promise<
-  | { ok: true; user: { id: string; email: string; displayName: string | null } }
+  | { ok: true; user: { id: string; email: string; displayName: string | null }; mobileTokenVersion: number }
   | { ok: false; error: string }
 > {
   const result = await consumeMemberInvite(token);
@@ -58,5 +58,9 @@ export async function acceptMemberInvite(
 
   await markMemberInviteAccepted(inviteId);
 
-  return { ok: true, user: { id: user.id, email: user.email, displayName: user.displayName } };
+  return {
+    ok: true,
+    user: { id: user.id, email: user.email, displayName: user.displayName },
+    mobileTokenVersion: user.mobileTokenVersion,
+  };
 }

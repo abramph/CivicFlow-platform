@@ -19,17 +19,20 @@ export async function POST(request: Request) {
     if (rateLimited) return rateLimited;
 
     const { refreshToken } = await parseJsonBody(request, bodySchema);
-    const userId = await verifyRefreshToken(refreshToken);
-    if (!userId) {
+    const claims = await verifyRefreshToken(refreshToken);
+    if (!claims) {
       return Response.json({ ok: false, error: "Invalid or expired refresh token." }, { status: 401 });
     }
 
-    const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
-    if (!user) {
-      return Response.json({ ok: false, error: "Account no longer exists." }, { status: 401 });
+    const user = await prisma.user.findUnique({
+      where: { id: claims.userId },
+      select: { id: true, mobileTokenVersion: true },
+    });
+    if (!user || user.mobileTokenVersion !== claims.tokenVersion) {
+      return Response.json({ ok: false, error: "Invalid or expired refresh token." }, { status: 401 });
     }
 
-    const tokens = await signMobileTokenPair(user.id);
+    const tokens = await signMobileTokenPair(user.id, user.mobileTokenVersion);
     return Response.json({ ok: true, data: tokens });
   });
 }

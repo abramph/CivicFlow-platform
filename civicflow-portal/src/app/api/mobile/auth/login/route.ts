@@ -50,7 +50,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const tokens = await signMobileTokenPair(user.id);
+    const tokens = await signMobileTokenPair(user.id, user.mobileTokenVersion);
     return Response.json({
       ok: true,
       data: {

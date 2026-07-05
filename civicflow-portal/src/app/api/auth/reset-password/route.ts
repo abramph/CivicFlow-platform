@@ -21,7 +21,9 @@ export async function POST(request: Request) {
     const passwordHash = await bcrypt.hash(input.password, 12);
     await prisma.user.update({
       where: { id: result.userId },
-      data: { passwordHash, emailVerified: true },
+      // Also revokes every outstanding mobile session — a password reset is
+      // exactly the scenario where existing tokens should not survive.
+      data: { passwordHash, emailVerified: true, mobileTokenVersion: { increment: 1 } },
     });
 
     return Response.json({ ok: true });

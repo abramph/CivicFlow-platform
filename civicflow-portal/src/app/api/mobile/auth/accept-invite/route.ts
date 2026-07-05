@@ -23,7 +23,7 @@ export async function POST(request: Request) {
     const result = await acceptMemberInvite(token, password);
     if (!result.ok) throw new ValidationError(result.error);
 
-    const tokens = await signMobileTokenPair(result.user.id);
+    const tokens = await signMobileTokenPair(result.user.id, result.mobileTokenVersion);
     return Response.json({ ok: true, data: { ...tokens, user: result.user } });
   });
 }

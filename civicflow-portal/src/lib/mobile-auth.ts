@@ -8,6 +8,12 @@
  *
  * organizationId is NEVER trusted from client input — requireMobileMembership
  * always re-derives it from the caller's OrganizationMembership row.
+ *
+ * Revocation: both token types embed the User.mobileTokenVersion they were
+ * issued with. Since they're otherwise stateless JWTs (no denylist), this is
+ * the only way to kill an outstanding token before its natural expiry —
+ * bumping the version (password reset, mobile logout) invalidates every
+ * previously-issued access/refresh token for that user at once.
  */
 import { SignJWT, jwtVerify } from "jose";
 import { getServerEnv } from "@/lib/env";
@@ -42,26 +48,31 @@ export class MobileForbiddenError extends Error {
   }
 }
 
-async function signToken(userId: string, type: "access" | "refresh", ttlSeconds: number) {
-  return new SignJWT({ sub: userId, type })
+async function signToken(userId: string, type: "access" | "refresh", ttlSeconds: number, tokenVersion: number) {
+  return new SignJWT({ sub: userId, type, v: tokenVersion })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(Math.floor(Date.now() / 1000) + ttlSeconds)
     .sign(getSecretKey());
 }
 
-export function signAccessToken(userId: string) {
-  return signToken(userId, "access", ACCESS_TOKEN_TTL_SECONDS);
+export function signAccessToken(userId: string, tokenVersion: number) {
+  return signToken(userId, "access", ACCESS_TOKEN_TTL_SECONDS, tokenVersion);
 }
 
-export function signRefreshToken(userId: string) {
-  return signToken(userId, "refresh", REFRESH_TOKEN_TTL_SECONDS);
+export function signRefreshToken(userId: string, tokenVersion: number) {
+  return signToken(userId, "refresh", REFRESH_TOKEN_TTL_SECONDS, tokenVersion);
 }
 
-export async function signMobileTokenPair(userId: string) {
+/**
+ * @param tokenVersion The user's *current* User.mobileTokenVersion — always
+ * pass the value just read from the DB, never a cached/stale one, since this
+ * is exactly what a caller uses to prove the pair isn't already revoked.
+ */
+export async function signMobileTokenPair(userId: string, tokenVersion: number) {
   const [accessToken, refreshToken] = await Promise.all([
-    signAccessToken(userId),
-    signRefreshToken(userId),
+    signAccessToken(userId, tokenVersion),
+    signRefreshToken(userId, tokenVersion),
   ]);
   return {
     accessToken,
@@ -70,11 +81,16 @@ export async function signMobileTokenPair(userId: string) {
   };
 }
 
-async function verifyMobileToken(token: string, expectedType: "access" | "refresh") {
+interface MobileTokenClaims {
+  userId: string;
+  tokenVersion: number;
+}
+
+async function verifyMobileToken(token: string, expectedType: "access" | "refresh"): Promise<MobileTokenClaims | null> {
   try {
     const { payload } = await jwtVerify(token, getSecretKey());
-    if (payload.type !== expectedType || typeof payload.sub !== "string") return null;
-    return payload.sub;
+    if (payload.type !== expectedType || typeof payload.sub !== "string" || typeof payload.v !== "number") return null;
+    return { userId: payload.sub, tokenVersion: payload.v };
   } catch {
     return null;
   }
@@ -103,11 +119,17 @@ export async function requireMobileAuth(request: Request): Promise<MobileSession
   const token = getBearerToken(request);
   if (!token) throw new MobileAuthError("Missing bearer token");
 
-  const userId = await verifyMobileToken(token, "access");
-  if (!userId) throw new MobileAuthError("Invalid or expired access token");
+  const claims = await verifyMobileToken(token, "access");
+  if (!claims) throw new MobileAuthError("Invalid or expired access token");
 
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, email: true } });
+  const user = await prisma.user.findUnique({
+    where: { id: claims.userId },
+    select: { id: true, email: true, mobileTokenVersion: true },
+  });
   if (!user) throw new MobileAuthError("Account no longer exists");
+  if (user.mobileTokenVersion !== claims.tokenVersion) {
+    throw new MobileAuthError("Invalid or expired access token");
+  }
 
   return { userId: user.id, email: user.email };
 }
