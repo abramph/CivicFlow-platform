@@ -4,11 +4,15 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { fieldClassName } from "@/components/forms/formStyles";
 
-export function ManualTimelineEventForm({ memberId }: { memberId: string }) {
+export function ManualTimelineEventForm({ memberId, canWrite }: { memberId: string; canWrite: boolean }) {
   const router = useRouter();
   const [form, setForm] = useState({ title: "", description: "", occurredAt: new Date().toISOString().slice(0, 16) });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  if (!canWrite) {
+    return <p className="text-sm text-slate-700">You have read-only access to this member&apos;s timeline.</p>;
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

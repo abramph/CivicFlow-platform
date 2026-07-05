@@ -17,7 +17,8 @@ export default async function MembersPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { organizationId } = await requirePermission("members:read");
+  const { organizationId, can } = await requirePermission("members:read");
+  const canExport = can("reports:export");
   const resolvedSearchParams = await searchParams;
   const filters = parseMemberFilters(resolvedSearchParams);
   const where = buildMemberWhere(organizationId, filters);
@@ -268,15 +269,19 @@ export default async function MembersPage({
             >
               Reset Filters
             </Link>
-            <Link href={exportCsvHref} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50">
-              Export CSV
-            </Link>
-            <Link href={exportXlsxHref} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50">
-              Export Excel/XLSX
-            </Link>
-            <Link href={exportPdfHref} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50">
-              Export PDF
-            </Link>
+            {canExport ? (
+              <>
+                <Link href={exportCsvHref} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50">
+                  Export CSV
+                </Link>
+                <Link href={exportXlsxHref} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50">
+                  Export Excel/XLSX
+                </Link>
+                <Link href={exportPdfHref} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50">
+                  Export PDF
+                </Link>
+              </>
+            ) : null}
             <Link
               href={printHref}
               className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50"

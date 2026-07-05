@@ -5,7 +5,7 @@ import { ManualTimelineEventForm } from "@/components/forms/ManualTimelineEventF
 import { formatDateTime, formatEnumLabel, formatPersonName } from "@/lib/formatting";
 
 export default async function MemberTimelinePage({ params }: { params: Promise<{ id: string }> }) {
-  const { organizationId } = await requirePermission("members:read");
+  const { organizationId, can } = await requirePermission("members:read");
   const { id } = await params;
   const [member, rows] = await Promise.all([
     prisma.orgMember.findFirst({ where: { id, organizationId } }),
@@ -21,7 +21,7 @@ export default async function MemberTimelinePage({ params }: { params: Promise<{
         <StatCard label="Manual Notes" value={rows.filter((row) => row.eventType === "MANUAL").length} />
       </div>
       <SectionCard title="Add Manual Note" description="Manual timeline notes are audited and scoped to this member.">
-        <ManualTimelineEventForm memberId={member.id} />
+        <ManualTimelineEventForm memberId={member.id} canWrite={can("members:write")} />
       </SectionCard>
       <SectionCard title="Timeline" description="Most recent member history first.">
         <div className="space-y-3">
