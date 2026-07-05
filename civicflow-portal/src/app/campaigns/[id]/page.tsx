@@ -3,7 +3,6 @@ import { requirePermission } from "@/lib/auth-guards";
 import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { AttachmentManager } from "@/components/forms/AttachmentManager";
 import { prisma } from "@/lib/prisma";
-import { canDo } from "@/lib/rbac";
 import {
   formatCurrency,
   formatDate,
@@ -16,7 +15,7 @@ export default async function CampaignDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const { organizationId, role } = await requirePermission("campaigns:read");
+  const { organizationId, can } = await requirePermission("campaigns:read");
   const { id } = await params;
 
   const [campaign, contributionSummary, contributions] = await Promise.all([
@@ -98,7 +97,7 @@ export default async function CampaignDetailPage({
       </SectionCard>
 
       <SectionCard title="Campaign Attachments" description="Store private campaign documents, collateral, and supporting files.">
-        <AttachmentManager entityType="CAMPAIGN" entityId={campaign.id} canWrite={canDo(role, "campaigns:write")} />
+        <AttachmentManager entityType="CAMPAIGN" entityId={campaign.id} canWrite={can("campaigns:write")} />
       </SectionCard>
 
       <SectionCard title="Campaign Contributions" description="Contributions tied directly to this campaign.">

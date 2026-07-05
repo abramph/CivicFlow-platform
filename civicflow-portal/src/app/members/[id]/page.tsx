@@ -8,7 +8,6 @@ import { InviteMemberToAppButton } from "@/components/forms/InviteMemberToAppBut
 import { AttachmentManager } from "@/components/forms/AttachmentManager";
 import { paymentMethodLabels as defaultPaymentMethodLabels } from "@/lib/payment-methods";
 import { prisma } from "@/lib/prisma";
-import { canDo } from "@/lib/rbac";
 import {
   formatCurrency,
   formatDate,
@@ -22,7 +21,7 @@ export default async function MemberProfilePage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const { organizationId, role } = await requirePermission("members:read");
+  const { organizationId, can } = await requirePermission("members:read");
   const { id } = await params;
 
   const [
@@ -250,7 +249,7 @@ export default async function MemberProfilePage({
       </SectionCard>
 
       <SectionCard title="Member Documents" description="Private member files, forms, and supporting documents stored in organization-scoped object storage.">
-        <AttachmentManager entityType="MEMBER" entityId={member.id} canWrite={canDo(role, "members:write")} />
+        <AttachmentManager entityType="MEMBER" entityId={member.id} canWrite={can("members:write")} />
       </SectionCard>
 
       <SectionCard title="Mobile App Access" description="Lets this member log into the CivicFlow mobile app to view dues, report payments, and receive announcements.">
@@ -266,7 +265,7 @@ export default async function MemberProfilePage({
             helper={member.requiredNoticesOnly ? "Required notices only" : "Marketing + required notices"}
           />
         </div>
-        {!member.userId && canDo(role, "members:write") ? (
+        {!member.userId && can("members:write") ? (
           <div className="mt-4">
             <InviteMemberToAppButton memberId={member.id} />
           </div>

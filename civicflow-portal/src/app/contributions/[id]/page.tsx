@@ -2,7 +2,6 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requirePermission } from "@/lib/auth-guards";
 import { prisma } from "@/lib/prisma";
-import { canDo } from "@/lib/rbac";
 import { paymentMethodLabels as defaultPaymentMethodLabels } from "@/lib/payment-methods";
 import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { ContributionVoidForm } from "@/components/forms/ContributionVoidForm";
@@ -20,7 +19,7 @@ export default async function ContributionDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const { organizationId, role } = await requirePermission("contributions:read");
+  const { organizationId, can } = await requirePermission("contributions:read");
   const { id } = await params;
 
   const [contribution, paymentMethods] = await Promise.all([
@@ -43,7 +42,7 @@ export default async function ContributionDetailPage({
 
   if (!contribution) notFound();
 
-  const canWrite = canDo(role, "contributions:write");
+  const canWrite = can("contributions:write");
   const isVoided = !!contribution.voidedAt;
   const isLocked = !!contribution.lockedAt;
 

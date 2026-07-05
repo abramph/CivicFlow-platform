@@ -4,7 +4,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/authOptions";
 import { prisma } from "@/lib/prisma";
 import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
-import { canDo, type Role } from "@/lib/rbac";
+import type { Permission, Role } from "@/lib/rbac";
+import { getEffectivePermissions } from "@/lib/role-permissions";
 
 export default async function SettingsPage() {
   const session = await getServerSession(authOptions);
@@ -53,6 +54,8 @@ export default async function SettingsPage() {
 
   const organizationId = String(session?.organizationId ?? "");
   const role = (session?.role ?? "READ_ONLY") as Role;
+  const permissions = await getEffectivePermissions(organizationId, role);
+  const can = (permission: Permission) => permissions.includes(permission);
   const [organization, membershipCategoryCount, duesCategoryCount, paymentMethodCount] = await Promise.all([
     prisma.organization.findUnique({
       where: { id: organizationId },
@@ -74,12 +77,13 @@ export default async function SettingsPage() {
   ]);
 
   const tiles = [
-    { href: "/settings/organization", label: "Organization Profile", visible: canDo(role, "org_settings:read") },
-    { href: "/settings/categories", label: "Categories", visible: canDo(role, "org_settings:read") },
-    { href: "/settings/dues", label: "Dues Setup", visible: canDo(role, "dues:read") },
-    { href: "/settings/payment-methods", label: "Payment Methods", visible: canDo(role, "org_settings:read") },
-    { href: "/settings/users", label: "Users & Roles", visible: canDo(role, "users:read") },
-    { href: "/settings/billing", label: "Billing", visible: canDo(role, "billing:read") },
+    { href: "/settings/organization", label: "Organization Profile", visible: can("org_settings:read") },
+    { href: "/settings/categories", label: "Categories", visible: can("org_settings:read") },
+    { href: "/settings/dues", label: "Dues Setup", visible: can("dues:read") },
+    { href: "/settings/payment-methods", label: "Payment Methods", visible: can("org_settings:read") },
+    { href: "/settings/users", label: "Users & Roles", visible: can("users:read") },
+    { href: "/settings/roles", label: "Role Permissions", visible: role === "ORG_OWNER" || role === "SUPER_ADMIN" },
+    { href: "/settings/billing", label: "Billing", visible: can("billing:read") },
     { href: "/settings/security", label: "Security (MFA)", visible: true },
     { href: "/onboarding/organization", label: "Onboarding", visible: true },
   ].filter((tile) => tile.visible);

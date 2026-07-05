@@ -23,7 +23,8 @@ import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import type { Session } from "next-auth";
 import { authOptions } from "@/lib/authOptions";
-import { canDo, type Permission, type Role } from "@/lib/rbac";
+import type { Permission, Role } from "@/lib/rbac";
+import { getEffectivePermissions } from "@/lib/role-permissions";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -36,6 +37,9 @@ export interface OrgSession extends AuthedSession {
   organizationId: string;
   role: Role;
 }
+
+/** Synchronous check against the effective (possibly org-customized) permission set already fetched for this request. */
+export type PermissionChecker = (permission: Permission) => boolean;
 
 // ─── Role hierarchy ───────────────────────────────────────────────────────────
 
@@ -51,6 +55,11 @@ const ROLE_RANK: Record<Role, number> = {
 
 function roleAtLeast(actual: Role, minimum: Role): boolean {
   return ROLE_RANK[actual] >= ROLE_RANK[minimum];
+}
+
+/** Numeric rank for a role — higher outranks lower. Exposed so callers can prevent one role from granting/editing a role above its own rank (e.g. an ORG_ADMIN assigning ORG_OWNER). */
+export function roleRank(role: Role): number {
+  return ROLE_RANK[role];
 }
 
 // ─── Guards ───────────────────────────────────────────────────────────────────
@@ -78,6 +87,7 @@ export async function requireOrganization(): Promise<{
   session: OrgSession;
   organizationId: string;
   role: Role;
+  can: PermissionChecker;
 }> {
   const session = await getServerSession(authOptions);
 
@@ -90,10 +100,15 @@ export async function requireOrganization(): Promise<{
   }
 
   const orgSession = session as OrgSession;
+  const effectivePermissions = await getEffectivePermissions(orgSession.organizationId, orgSession.role);
+  const can: PermissionChecker = (permission) =>
+    orgSession.role === "SUPER_ADMIN" || effectivePermissions.includes(permission);
+
   return {
     session:        orgSession,
     organizationId: orgSession.organizationId,
     role:           orgSession.role,
+    can,
   };
 }
 
@@ -108,13 +123,10 @@ export async function requireOrganization(): Promise<{
 export async function requirePermission(
   permission: Permission,
   onForbidden: "redirect" | "throw" = "redirect"
-): Promise<{ session: OrgSession; organizationId: string; role: Role }> {
-  const { session, organizationId, role } = await requireOrganization();
+): Promise<{ session: OrgSession; organizationId: string; role: Role; can: PermissionChecker }> {
+  const { session, organizationId, role, can } = await requireOrganization();
 
-  const allowed =
-    canDo(role, permission) || role === "SUPER_ADMIN";
-
-  if (!allowed) {
+  if (!can(permission)) {
     if (onForbidden === "throw") {
       throw new ForbiddenError(
         `Permission denied: ${permission} (role: ${role})`
@@ -123,7 +135,7 @@ export async function requirePermission(
     redirect("/dashboard?error=forbidden");
   }
 
-  return { session, organizationId, role };
+  return { session, organizationId, role, can };
 }
 
 /**
@@ -133,8 +145,8 @@ export async function requirePermission(
 export async function requireRole(
   minimumRole: Role,
   onForbidden: "redirect" | "throw" = "redirect"
-): Promise<{ session: OrgSession; organizationId: string; role: Role }> {
-  const { session, organizationId, role } = await requireOrganization();
+): Promise<{ session: OrgSession; organizationId: string; role: Role; can: PermissionChecker }> {
+  const { session, organizationId, role, can } = await requireOrganization();
 
   if (!roleAtLeast(role, minimumRole)) {
     if (onForbidden === "throw") {
@@ -145,7 +157,7 @@ export async function requireRole(
     redirect("/dashboard?error=forbidden");
   }
 
-  return { session, organizationId, role };
+  return { session, organizationId, role, can };
 }
 
 /**
@@ -154,7 +166,7 @@ export async function requireRole(
  */
 export async function requireSuperAdmin(
   onForbidden: "redirect" | "throw" = "redirect"
-): Promise<{ session: OrgSession; organizationId: string; role: Role }> {
+): Promise<{ session: OrgSession; organizationId: string; role: Role; can: PermissionChecker }> {
   return requireRole("SUPER_ADMIN", onForbidden);
 }
 

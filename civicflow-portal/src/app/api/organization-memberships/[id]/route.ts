@@ -1,4 +1,5 @@
-import { requirePermission } from "@/lib/auth-guards";
+import { requirePermission, roleRank } from "@/lib/auth-guards";
+import type { Role } from "@/lib/rbac";
 import { withApiErrorHandling } from "@/lib/api-route";
 import { createAuditEvent } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
@@ -10,7 +11,7 @@ const updateMembershipSchema = z.object({
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   return withApiErrorHandling(async () => {
-    const { session, organizationId } = await requirePermission("users:manage", "throw");
+    const { session, organizationId, role: actorRole } = await requirePermission("users:manage", "throw");
     const { id } = await params;
     const input = await parseJsonBody(request, updateMembershipSchema);
 
@@ -25,6 +26,18 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
     if (!input.role) {
       throw new ValidationError("A role update is required.");
+    }
+
+    // Rank check is independent of the (now org-customizable) "users:manage"
+    // permission — without it, an ORG_ADMIN, or any role an owner has granted
+    // users:manage to via the permission editor, could grant itself or anyone
+    // else ORG_OWNER. Nobody may assign a role above their own rank, or modify
+    // a membership that already outranks them.
+    if (roleRank(input.role as Role) > roleRank(actorRole)) {
+      throw new ValidationError("You cannot assign a role higher than your own.");
+    }
+    if (roleRank(existing.role as Role) > roleRank(actorRole)) {
+      throw new ValidationError("You cannot modify a member whose role is higher than your own.");
     }
 
     const updated = await prisma.organizationMembership.update({
@@ -61,7 +74,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   return withApiErrorHandling(async () => {
-    const { session, organizationId } = await requirePermission("users:manage", "throw");
+    const { session, organizationId, role: actorRole } = await requirePermission("users:manage", "throw");
     const { id } = await params;
 
     const existing = await prisma.organizationMembership.findFirst({
@@ -75,6 +88,10 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
 
     if (existing.userId === session.userId) {
       throw new ValidationError("You cannot remove your own access from this organization.");
+    }
+
+    if (roleRank(existing.role as Role) > roleRank(actorRole)) {
+      throw new ValidationError("You cannot remove a member whose role is higher than your own.");
     }
 
     await prisma.organizationMembership.delete({

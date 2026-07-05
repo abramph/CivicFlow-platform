@@ -2,6 +2,7 @@ import type { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
+import { getEffectivePermissions } from "@/lib/role-permissions";
 
 const defaultApiBase = process.env.NEXT_PUBLIC_API_BASE || "https://api.civicflowapp.com/api";
 
@@ -220,6 +221,15 @@ export const authOptions: NextAuthOptions = {
         session.organizationId = token.organizationId ?? null;
         session.role = token.role ?? null;
       }
+
+      // Effective (possibly org-customized) permission set, embedded so
+      // client components (e.g. the portal nav) can filter without a
+      // separate round-trip — computed the same way requirePermission()
+      // does server-side.
+      session.permissions =
+        session.organizationId && session.role
+          ? await getEffectivePermissions(session.organizationId, session.role)
+          : [];
 
       session.org_id   = String(token.org_id  || "");
       session.api_key  = String(token.api_key || "");

@@ -1,5 +1,6 @@
 import { hash } from "bcryptjs";
-import { requirePermission } from "@/lib/auth-guards";
+import { requirePermission, roleRank } from "@/lib/auth-guards";
+import type { Role } from "@/lib/rbac";
 import { withApiErrorHandling } from "@/lib/api-route";
 import { createAuditEvent } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
@@ -47,8 +48,12 @@ export async function GET() {
 
 export async function POST(request: Request) {
   return withApiErrorHandling(async () => {
-    const { session, organizationId } = await requirePermission("users:manage", "throw");
+    const { session, organizationId, role: actorRole } = await requirePermission("users:manage", "throw");
     const input = await parseJsonBody(request, createMembershipSchema);
+
+    if (roleRank(input.role as Role) > roleRank(actorRole)) {
+      throw new ValidationError("You cannot invite someone with a role higher than your own.");
+    }
 
     let user = await prisma.user.findUnique({
       where: { email: input.email.trim().toLowerCase() },

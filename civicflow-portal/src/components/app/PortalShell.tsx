@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import type { ReactNode } from "react";
 import { LogoutButton } from "@/components/LogoutButton";
-import { canDo } from "@/lib/rbac";
 
 function isHiddenPath(pathname: string) {
   // Member-facing pages render their own chrome — never wrap them in the
@@ -80,6 +79,7 @@ export function PortalShell({ children }: { children: ReactNode }) {
     { href: "/settings/dues", label: "Dues Setup" },
     { href: "/settings/payment-methods", label: "Payment Methods" },
     { href: "/settings/users", label: "Users & Roles" },
+    { href: "/settings/roles", label: "Role Permissions" },
     { href: "/settings/security", label: "Security" },
     { href: "/settings/billing", label: "Billing" },
     { href: "/onboarding/organization", label: "Onboarding" },
@@ -96,50 +96,54 @@ export function PortalShell({ children }: { children: ReactNode }) {
   const navItems = hasSaasSession ? saasNav : legacyNav;
   const canSeePlatformAdmin =
     hasSaasSession && session?.role === "SUPER_ADMIN";
+  const can = (permission: string) => (session?.permissions ?? []).includes(permission);
 
   const visibleNavItems = hasSaasSession
     ? navItems.filter((item) => {
         if (item.href.startsWith("/settings/organization")) {
-          return canDo(session?.role ?? "READ_ONLY", "org_settings:read");
+          return can("org_settings:read");
         }
         if (item.href.startsWith("/settings/categories")) {
-          return canDo(session?.role ?? "READ_ONLY", "org_settings:read");
+          return can("org_settings:read");
         }
         if (item.href.startsWith("/settings/dues")) {
-          return canDo(session?.role ?? "READ_ONLY", "dues:read");
+          return can("dues:read");
         }
         if (item.href.startsWith("/settings/payment-methods")) {
-          return canDo(session?.role ?? "READ_ONLY", "org_settings:read");
+          return can("org_settings:read");
+        }
+        if (item.href.startsWith("/settings/roles")) {
+          return session?.role === "ORG_OWNER" || session?.role === "SUPER_ADMIN";
         }
         if (item.href.startsWith("/settings/users")) {
-          return canDo(session?.role ?? "READ_ONLY", "users:read");
+          return can("users:read");
         }
         if (item.href.startsWith("/settings/billing")) {
-          return canDo(session?.role ?? "READ_ONLY", "billing:read");
+          return can("billing:read");
         }
         if (item.href.startsWith("/communications")) {
-          return canDo(session?.role ?? "READ_ONLY", "communications:read");
+          return can("communications:read");
         }
         if (item.href.startsWith("/payments/imports") || item.href.startsWith("/payments/reconciliation")) {
-          return canDo(session?.role ?? "READ_ONLY", "dues:read");
+          return can("dues:read");
         }
         if (item.href === "/audit-logs") {
-          return canDo(session?.role ?? "READ_ONLY", "audit_logs:read");
+          return can("audit_logs:read");
         }
         if (item.href === "/payment-links") {
-          return canDo(session?.role ?? "READ_ONLY", "contributions:read");
+          return can("contributions:read");
         }
         if (item.href === "/import") {
-          return canDo(session?.role ?? "READ_ONLY", "members:write");
+          return can("members:write");
         }
         if (item.href === "/migration") {
-          return canDo(session?.role ?? "READ_ONLY", "org_settings:write");
+          return can("org_settings:write");
         }
         if (item.href.startsWith("/attendance")) {
-          return canDo(session?.role ?? "READ_ONLY", "attendance:read");
+          return can("attendance:read");
         }
         if (item.href.startsWith("/meetings")) {
-          return canDo(session?.role ?? "READ_ONLY", "meetings:read");
+          return can("meetings:read");
         }
         return true;
       })

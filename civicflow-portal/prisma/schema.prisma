@@ -341,6 +341,7 @@ model Organization {
   memberInvites           MemberInvite[]
   mobileDeviceTokens      MobileDeviceToken[]
   paymentReports          PaymentReport[]
+  rolePermissionSets      OrgRolePermissionSet[]
 
   @@index([slug])
   @@index([status])
@@ -804,6 +805,29 @@ model OrgSettings {
   updatedAt                      DateTime      @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+/// Per-organization override of a role's permission set — lets an ORG_OWNER
+/// customize exactly what ORG_ADMIN/FINANCE/STAFF/READ_ONLY can do in their
+/// org (e.g. label FINANCE as "Treasurer" and adjust its access). Presence of
+/// a row means "this org has customized this role" — even an empty
+/// `permissions` array is a deliberate choice, distinct from "never
+/// customized" (which falls back to the hardcoded default in rbac.ts).
+/// ORG_OWNER, SUPER_ADMIN, and MEMBER are never customizable — enforced in
+/// application code (src/lib/role-permissions.ts), not by this table alone.
+model OrgRolePermissionSet {
+  id              String   @id @default(cuid())
+  organizationId  String
+  role            OrgRole
+  permissions     String[]
+  updatedByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, role])
+  @@index([organizationId])
 }
 
 /// Saved search/filter for a user in a given module.

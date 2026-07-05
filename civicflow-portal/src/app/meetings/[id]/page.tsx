@@ -2,11 +2,10 @@ import { requirePermission } from "@/lib/auth-guards";
 import { prisma } from "@/lib/prisma";
 import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { AttachmentManager } from "@/components/forms/AttachmentManager";
-import { canDo } from "@/lib/rbac";
 import { formatDateTime, formatEnumLabel, formatText } from "@/lib/formatting";
 
 export default async function MeetingDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { organizationId, role } = await requirePermission("meetings:read");
+  const { organizationId, can } = await requirePermission("meetings:read");
   const { id } = await params;
   const meeting = await prisma.meeting.findFirst({
     where: { id, organizationId },
@@ -32,7 +31,7 @@ export default async function MeetingDetailPage({ params }: { params: Promise<{ 
         {meeting.notes ? <p className="mt-4 whitespace-pre-wrap text-sm leading-6 text-slate-800">{meeting.notes}</p> : null}
       </SectionCard>
       <SectionCard title="Meeting Minutes and Attachments" description="Upload minutes, agendas, handouts, and other private meeting documents.">
-        <AttachmentManager entityType="MEETING" entityId={meeting.id} purpose="MEETING_MINUTES" canWrite={canDo(role, "meetings:write")} titleLabel="Document title" />
+        <AttachmentManager entityType="MEETING" entityId={meeting.id} purpose="MEETING_MINUTES" canWrite={can("meetings:write")} titleLabel="Document title" />
       </SectionCard>
     </main>
   );

@@ -31,6 +31,8 @@ declare module "next-auth" {
     orgName?: string | null;
     role?: OrgRole | null;
     userEmail?: string;
+    // Effective (org-customized) permission set for the current role
+    permissions?: string[];
     // MFA pending state
     mfaPending?: boolean;
     mfaUserId?: string;

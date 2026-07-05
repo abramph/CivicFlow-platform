@@ -3,7 +3,6 @@ import { requirePermission } from "@/lib/auth-guards";
 import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { AttachmentManager } from "@/components/forms/AttachmentManager";
 import { prisma } from "@/lib/prisma";
-import { canDo } from "@/lib/rbac";
 import {
   formatCurrency,
   formatDateTime,
@@ -16,7 +15,7 @@ export default async function EventDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const { organizationId, role } = await requirePermission("events:read");
+  const { organizationId, can } = await requirePermission("events:read");
   const { id } = await params;
 
   const [event, contributionSummary, contributions, attendance] = await Promise.all([
@@ -107,7 +106,7 @@ export default async function EventDetailPage({
       </SectionCard>
 
       <SectionCard title="Event Attachments" description="Store private event documents, flyers, forms, and supporting files.">
-        <AttachmentManager entityType="EVENT" entityId={event.id} canWrite={canDo(role, "events:write")} />
+        <AttachmentManager entityType="EVENT" entityId={event.id} canWrite={can("events:write")} />
       </SectionCard>
 
       <SectionCard title="Event Attendance" description="Recent attendance records tied to this event.">

@@ -4,10 +4,9 @@ import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { OrganizationSettingsForm } from "@/components/forms/OrganizationSettingsForm";
 import { AttachmentManager } from "@/components/forms/AttachmentManager";
 import { OpeningBalanceForm } from "@/components/forms/OpeningBalanceForm";
-import { canDo } from "@/lib/rbac";
 
 export default async function OrgSettingsPage() {
-  const { organizationId, role } = await requirePermission("org_settings:read");
+  const { organizationId, role, can } = await requirePermission("org_settings:read");
 
   const [organization, settings, openingBalance, membershipCategoryCount, duesCategoryCount] = await Promise.all([
     prisma.organization.findUnique({
@@ -88,14 +87,14 @@ export default async function OrgSettingsPage() {
       </SectionCard>
 
       <SectionCard title="Organization Logo Upload" description="Upload a private logo file for organization branding. The latest active logo is linked to the organization profile.">
-        <AttachmentManager entityType="ORGANIZATION" entityId={organizationId} purpose="LOGO" canWrite={canDo(role, "org_settings:write")} titleLabel="Logo title" />
+        <AttachmentManager entityType="ORGANIZATION" entityId={organizationId} purpose="LOGO" canWrite={can("org_settings:write")} titleLabel="Logo title" />
       </SectionCard>
 
       <SectionCard title="Opening Balance" description="Set a one-time balance brought forward from a previous system. This appears in your financial summary so totals start from the correct number.">
         <OpeningBalanceForm
           initialAmountCents={openingBalance?.openingBalanceCents ?? 0}
           initialDate={openingBalance?.openingBalanceDate?.toISOString().slice(0, 10) ?? null}
-          canWrite={canDo(role, "org_settings:write")}
+          canWrite={can("org_settings:write")}
         />
       </SectionCard>
     </main>

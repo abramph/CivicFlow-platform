@@ -3,11 +3,10 @@ import { requirePermission } from "@/lib/auth-guards";
 import { prisma } from "@/lib/prisma";
 import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { AttachmentManager } from "@/components/forms/AttachmentManager";
-import { canDo } from "@/lib/rbac";
 import { formatCurrency, formatDate, formatText } from "@/lib/formatting";
 
 export default async function ExpenditureDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { organizationId, role } = await requirePermission("expenditures:read");
+  const { organizationId, can } = await requirePermission("expenditures:read");
   const { id } = await params;
   const row = await prisma.expenditure.findFirst({
     where: { id, organizationId },
@@ -46,7 +45,7 @@ export default async function ExpenditureDetailPage({ params }: { params: Promis
         {row.notes ? <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4"><p className="text-sm font-medium text-slate-950">Notes</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-800">{row.notes}</p></div> : null}
       </SectionCard>
       <SectionCard title="Receipt and Supporting Files" description="Upload private receipt images, invoices, approvals, or other expenditure support.">
-        <AttachmentManager entityType="EXPENDITURE" entityId={row.id} purpose="EXPENDITURE_RECEIPT" canWrite={canDo(role, "expenditures:write")} />
+        <AttachmentManager entityType="EXPENDITURE" entityId={row.id} purpose="EXPENDITURE_RECEIPT" canWrite={can("expenditures:write")} />
       </SectionCard>
     </main>
   );

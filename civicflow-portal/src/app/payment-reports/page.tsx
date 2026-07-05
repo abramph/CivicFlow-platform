@@ -3,7 +3,6 @@ import { requirePermission } from "@/lib/auth-guards";
 import { prisma } from "@/lib/prisma";
 import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { PaymentReportActions } from "@/components/forms/PaymentReportActions";
-import { canDo } from "@/lib/rbac";
 import { formatCurrency, formatDate, formatEnumLabel, formatPersonName } from "@/lib/formatting";
 
 const TABS = ["pending", "approved", "rejected"] as const;
@@ -13,7 +12,7 @@ export default async function PaymentReportsPage({
 }: {
   searchParams: Promise<{ status?: string }>;
 }) {
-  const { organizationId, role } = await requirePermission("dues:read");
+  const { organizationId, can } = await requirePermission("dues:read");
   const resolved = await searchParams;
   const status = (TABS as readonly string[]).includes(resolved.status ?? "") ? resolved.status : "pending";
 
@@ -31,7 +30,7 @@ export default async function PaymentReportsPage({
     Promise.all(TABS.map((tab) => prisma.paymentReport.count({ where: { organizationId, status: tab } }))),
   ]);
 
-  const canReview = canDo(role, "dues:write");
+  const canReview = can("dues:write");
 
   return (
     <main className="space-y-6">
