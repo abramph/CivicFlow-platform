@@ -54,6 +54,7 @@ export function PortalShell({ children }: { children: ReactNode }) {
 
   const saasNav = [
     { href: "/dashboard", label: "Dashboard" },
+    { href: "/inbox", label: "Inbox" },
     { href: "/members", label: "Members" },
     { href: "/contributions", label: "Contributions" },
     { href: "/dues", label: "Dues" },
@@ -144,6 +145,9 @@ export function PortalShell({ children }: { children: ReactNode }) {
         }
         if (item.href.startsWith("/meetings")) {
           return can("meetings:read");
+        }
+        if (item.href.startsWith("/inbox")) {
+          return can("messages:read");
         }
         return true;
       })

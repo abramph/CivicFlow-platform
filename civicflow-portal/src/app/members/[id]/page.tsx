@@ -186,6 +186,9 @@ export default async function MemberProfilePage({
         description="Member profile with current status, dues standing, and recent contribution activity."
         actions={[
           { href: `/members/${member.id}/edit`, label: "Edit Member", tone: "primary" },
+          ...(can("messages:write") && member.userId
+            ? [{ href: `/inbox?composeMemberId=${member.id}&composeMemberName=${encodeURIComponent(formatPersonName(member))}`, label: "Message" }]
+            : []),
           { href: `/contributions/new?memberId=${member.id}`, label: "Record Contribution" },
           { href: `/dues/payments/new?memberId=${member.id}`, label: "Record Dues Payment" },
           { href: `/communications/new?memberId=${member.id}`, label: "Log Communication" },

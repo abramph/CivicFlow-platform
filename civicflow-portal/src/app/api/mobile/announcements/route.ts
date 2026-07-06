@@ -35,6 +35,7 @@ export async function GET(request: Request) {
       body: recipient.campaign.body,
       deepLink: recipient.campaign.deepLink,
       sentAt: recipient.campaign.sentAt,
+      isRead: recipient.readAt !== null,
     }));
 
     return Response.json({ ok: true, data });

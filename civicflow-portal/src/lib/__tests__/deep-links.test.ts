@@ -10,6 +10,11 @@ describe("validateDeepLink", () => {
     expect(validateDeepLink("/payment-history")).toBe("/payment-history");
   });
 
+  it("accepts the messages inbox and a specific conversation thread", () => {
+    expect(validateDeepLink("/messages")).toBe("/messages");
+    expect(validateDeepLink("/messages/conv-abc123")).toBe("/messages/conv-abc123");
+  });
+
   it("accepts the custom scheme form", () => {
     expect(validateDeepLink("civicflow://report-payment")).toBe("civicflow://report-payment");
   });
