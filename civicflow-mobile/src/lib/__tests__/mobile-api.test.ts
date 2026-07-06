@@ -1,7 +1,10 @@
 import {
   getAnnouncements,
+  getCampaigns,
   getConversation,
   getConversations,
+  getPaymentLinkSlug,
+  getPaymentMethods,
   getProfile,
   markAnnouncementRead,
   sendConversationMessage,
@@ -104,5 +107,35 @@ describe('mobile-api', () => {
     const [, options] = mockApiFetch.mock.calls[0];
     const form = options.body as FormData;
     expect(form.get('duesChargeId')).toBe('charge-1');
+  });
+
+  it('getCampaigns requests the org-scoped campaign list', async () => {
+    mockApiFetch.mockResolvedValueOnce([]);
+    await getCampaigns('org-1');
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/campaigns?organizationId=org-1');
+  });
+
+  it('getPaymentMethods requests the org-scoped payment methods list', async () => {
+    mockApiFetch.mockResolvedValueOnce([]);
+    await getPaymentMethods('org-1');
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/payment-methods?organizationId=org-1');
+  });
+
+  it('getPaymentLinkSlug requests a campaign-scoped link', async () => {
+    mockApiFetch.mockResolvedValueOnce({ slug: null });
+    await getPaymentLinkSlug('org-1', { campaignId: 'camp-1' });
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/payment-link?organizationId=org-1&campaignId=camp-1');
+  });
+
+  it('getPaymentLinkSlug requests an event-scoped link', async () => {
+    mockApiFetch.mockResolvedValueOnce({ slug: null });
+    await getPaymentLinkSlug('org-1', { eventId: 'event-1' });
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/payment-link?organizationId=org-1&eventId=event-1');
+  });
+
+  it('getPaymentLinkSlug requests the org-wide dues-in-advance link', async () => {
+    mockApiFetch.mockResolvedValueOnce({ slug: null });
+    await getPaymentLinkSlug('org-1', { dues: true });
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/payment-link?organizationId=org-1&dues=true');
   });
 });

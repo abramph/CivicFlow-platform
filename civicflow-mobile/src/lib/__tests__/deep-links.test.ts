@@ -42,4 +42,15 @@ describe('resolveAllowedDeepLinkPath', () => {
       '/conversation/conv-abc123'
     );
   });
+
+  it('resolves the Make a Payment destinations', () => {
+    expect(resolveAllowedDeepLinkPath('civicflow://make-payment')).toBe('/make-payment');
+    expect(resolveAllowedDeepLinkPath('civicflow://make-payment/dues')).toBe('/make-payment/dues');
+    expect(resolveAllowedDeepLinkPath('civicflow://make-payment/campaign/camp-abc123')).toBe(
+      '/make-payment/campaign/camp-abc123'
+    );
+    expect(resolveAllowedDeepLinkPath('civicflow://make-payment/event/event-abc123')).toBe(
+      '/make-payment/event/event-abc123'
+    );
+  });
 });

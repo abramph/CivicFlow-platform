@@ -24,6 +24,10 @@ const ALLOWED_DEEP_LINK_PATTERNS: RegExp[] = [
   /^\/event\/[A-Za-z0-9_-]+$/,
   /^\/payments$/,
   /^\/profile$/,
+  /^\/make-payment$/,
+  /^\/make-payment\/dues$/,
+  /^\/make-payment\/campaign\/[A-Za-z0-9_-]+$/,
+  /^\/make-payment\/event\/[A-Za-z0-9_-]+$/,
 ];
 
 /** The only hostname https/http universal-link values are trusted from. */

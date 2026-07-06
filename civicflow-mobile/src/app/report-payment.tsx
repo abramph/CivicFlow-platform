@@ -1,5 +1,5 @@
 import * as ImagePicker from 'expo-image-picker';
-import { Redirect, router } from 'expo-router';
+import { Redirect, router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
 
@@ -29,7 +29,11 @@ function todayIsoDate() {
 
 export default function ReportPaymentScreen() {
   const { status, organizations, selectedOrganizationId } = useAuth();
-  const [category, setCategory] = useState<PaymentReportCategory>('MEMBERSHIP_DUES');
+  const { category: requestedCategory } = useLocalSearchParams<{ category?: string }>();
+  const initialCategory = CATEGORIES.some((option) => option.value === requestedCategory)
+    ? (requestedCategory as PaymentReportCategory)
+    : 'MEMBERSHIP_DUES';
+  const [category, setCategory] = useState<PaymentReportCategory>(initialCategory);
   const [duesCharges, setDuesCharges] = useState<DuesCharge[]>([]);
   const [duesChargeId, setDuesChargeId] = useState<string | null>(null);
   const [amount, setAmount] = useState('');

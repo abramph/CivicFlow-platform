@@ -194,3 +194,37 @@ export function updateProfile(organizationId: string, input: UpdateProfileInput)
     { method: 'PATCH', body: JSON.stringify({ organizationId, ...input }) }
   );
 }
+
+export interface Campaign {
+  id: string;
+  name: string;
+  description: string | null;
+  goal: string | null;
+  endDate: string | null;
+}
+
+export function getCampaigns(organizationId: string) {
+  return apiFetch<Campaign[]>(`/api/mobile/campaigns?organizationId=${encodeURIComponent(organizationId)}`);
+}
+
+export interface PayableMethod {
+  id: string;
+  label: string;
+  accountIdentifier: string | null;
+  instructions: string | null;
+}
+
+export function getPaymentMethods(organizationId: string) {
+  return apiFetch<PayableMethod[]>(`/api/mobile/payment-methods?organizationId=${encodeURIComponent(organizationId)}`);
+}
+
+export type PaymentLinkTarget = { campaignId: string } | { eventId: string } | { dues: true };
+
+export function getPaymentLinkSlug(organizationId: string, target: PaymentLinkTarget) {
+  const params = new URLSearchParams({ organizationId });
+  if ('campaignId' in target) params.set('campaignId', target.campaignId);
+  else if ('eventId' in target) params.set('eventId', target.eventId);
+  else params.set('dues', 'true');
+
+  return apiFetch<{ slug: string | null }>(`/api/mobile/payment-link?${params.toString()}`);
+}

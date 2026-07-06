@@ -22,6 +22,10 @@ const ALLOWED_DEEP_LINK_PATTERNS: RegExp[] = [
   /^\/event\/[A-Za-z0-9_-]+$/,
   /^\/payments$/,
   /^\/profile$/,
+  /^\/make-payment$/,
+  /^\/make-payment\/dues$/,
+  /^\/make-payment\/campaign\/[A-Za-z0-9_-]+$/,
+  /^\/make-payment\/event\/[A-Za-z0-9_-]+$/,
   /^\/accept-invite(\?.*)?$/,
   /^\/organization\/[A-Za-z0-9_-]+$/,
 ];
