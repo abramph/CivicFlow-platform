@@ -1,13 +1,10 @@
 import { Suspense } from "react";
-import { MemberPortalNav } from "@/components/app/MemberPortalNav";
+import { MemberPortalShell } from "@/components/app/MemberPortalShell";
 
 export default function MemberPortalLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-slate-100">
-      <Suspense fallback={null}>
-        <MemberPortalNav />
-      </Suspense>
-      {children}
-    </div>
+    <Suspense fallback={null}>
+      <MemberPortalShell>{children}</MemberPortalShell>
+    </Suspense>
   );
 }

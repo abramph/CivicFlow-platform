@@ -16,7 +16,7 @@ export default async function MemberDuesPage({ searchParams }: { searchParams: P
     );
   }
 
-  const [charges, totals] = await Promise.all([
+  const [charges, totals, paymentMethods] = await Promise.all([
     prisma.duesCharge.findMany({
       where: { organizationId: memberSession.organizationId, memberId: memberSession.memberId },
       orderBy: { dueDate: "desc" },
@@ -31,9 +31,16 @@ export default async function MemberDuesPage({ searchParams }: { searchParams: P
       },
       _sum: { amountDue: true, amountPaid: true },
     }),
+    prisma.paymentMethodConfig.findMany({
+      where: { organizationId: memberSession.organizationId, isActive: true },
+      orderBy: [{ sortOrder: "asc" }, { label: "asc" }],
+    }),
   ]);
 
   const outstanding = Math.max(0, Number(totals._sum.amountDue ?? 0) - Number(totals._sum.amountPaid ?? 0));
+  // Only surface methods staff actually configured with a handle/instructions —
+  // default seeded rows (e.g. "Cash", "Check") have neither and aren't actionable here.
+  const payableMethods = paymentMethods.filter((method) => method.accountIdentifier || method.instructions);
 
   return (
     <main className="mx-auto max-w-2xl space-y-6 p-6">
@@ -45,6 +52,43 @@ export default async function MemberDuesPage({ searchParams }: { searchParams: P
           Report a Payment
         </Link>
       </div>
+
+      {payableMethods.length > 0 ? (
+        <div className="rounded-xl border border-slate-200 bg-white">
+          <div className="border-b border-slate-200 px-4 py-3">
+            <h2 className="text-sm font-semibold text-slate-900">Ways to Pay</h2>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {payableMethods.map((method) => {
+              const isLink = method.accountIdentifier?.startsWith("http://") || method.accountIdentifier?.startsWith("https://");
+              return (
+                <div key={method.id} className="px-4 py-3 text-sm">
+                  <p className="font-semibold text-slate-900">{method.label}</p>
+                  {method.accountIdentifier ? (
+                    isLink ? (
+                      <a
+                        href={method.accountIdentifier}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-emerald-700 hover:underline"
+                      >
+                        {method.accountIdentifier}
+                      </a>
+                    ) : (
+                      <p className="text-slate-800">{method.accountIdentifier}</p>
+                    )
+                  ) : null}
+                  {method.instructions ? <p className="mt-1 text-slate-600">{method.instructions}</p> : null}
+                </div>
+              );
+            })}
+          </div>
+          <p className="border-t border-slate-100 px-4 py-3 text-xs text-slate-500">
+            After paying, use the button above to report it so your treasurer can confirm it.
+          </p>
+        </div>
+      ) : null}
+
       <div className="rounded-xl border border-slate-200 bg-white">
         <div className="border-b border-slate-200 px-4 py-3"><h2 className="text-sm font-semibold text-slate-900">Charges</h2></div>
         <div className="divide-y divide-slate-100">

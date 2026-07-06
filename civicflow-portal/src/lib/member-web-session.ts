@@ -7,7 +7,9 @@ export interface MemberWebSession {
   userId: string;
   organizationId: string;
   memberId: string;
-  organizations: { organizationId: string; organizationName: string }[];
+  organizationName: string;
+  organizationLogoUrl: string | null;
+  organizations: { organizationId: string; organizationName: string; organizationLogoUrl: string | null }[];
 }
 
 /**
@@ -27,7 +29,7 @@ export async function getMemberWebSession(requestedOrgId?: string): Promise<Memb
   const memberships = await prisma.organizationMembership.findMany({
     where: { userId: session.userId, role: "MEMBER", organization: { status: "active" } },
     orderBy: { joinedAt: "asc" },
-    include: { organization: { select: { id: true, name: true } } },
+    include: { organization: { select: { id: true, name: true, logoUrl: true } } },
   });
   if (memberships.length === 0) return null;
 
@@ -41,11 +43,19 @@ export async function getMemberWebSession(requestedOrgId?: string): Promise<Memb
   });
   if (!member) return null;
 
+  const activeMembership = memberships.find((m) => m.organizationId === organizationId)!;
+
   return {
     userId: session.userId,
     organizationId,
     memberId: member.id,
-    organizations: memberships.map((m) => ({ organizationId: m.organizationId, organizationName: m.organization.name })),
+    organizationName: activeMembership.organization.name,
+    organizationLogoUrl: activeMembership.organization.logoUrl,
+    organizations: memberships.map((m) => ({
+      organizationId: m.organizationId,
+      organizationName: m.organization.name,
+      organizationLogoUrl: m.organization.logoUrl,
+    })),
   };
 }
 
