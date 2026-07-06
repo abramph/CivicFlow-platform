@@ -15,19 +15,24 @@ export function NewConversationForm({ memberId, memberName }: { memberId: string
     event.preventDefault();
     setSaving(true);
     setError(null);
-    const response = await fetch("/api/messages/conversations", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ memberId, subject: subject.trim() || null, body: body.trim() }),
-    });
-    const payload = (await response.json().catch(() => null)) as { ok?: boolean; error?: string; data?: { id: string } } | null;
-    setSaving(false);
-    if (!response.ok || !payload?.ok || !payload.data?.id) {
-      setError(payload?.error || "Failed to start the conversation.");
-      return;
+    try {
+      const response = await fetch("/api/messages/conversations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ memberId, subject: subject.trim() || null, body: body.trim() }),
+      });
+      const payload = (await response.json().catch(() => null)) as { ok?: boolean; error?: string; data?: { id: string } } | null;
+      if (!response.ok || !payload?.ok || !payload.data?.id) {
+        setError(payload?.error || "Failed to start the conversation.");
+        setSaving(false);
+        return;
+      }
+      router.push(`/inbox/${payload.data.id}`);
+      router.refresh();
+    } catch {
+      setError("Unable to connect. Please try again.");
+      setSaving(false);
     }
-    router.push(`/inbox/${payload.data.id}`);
-    router.refresh();
   }
 
   return (

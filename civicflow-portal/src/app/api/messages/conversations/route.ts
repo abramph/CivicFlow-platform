@@ -80,6 +80,13 @@ export async function POST(request: Request) {
     if (!member.userId) {
       throw new ValidationError("This member doesn't have app access yet — send them an invite before messaging them in-app.");
     }
+    if (member.userId === session.userId) {
+      // A staff account can also be the OrgMember it's messaging (e.g. an
+      // owner who is also a member of their own org) — ConversationParticipant
+      // has a unique (conversationId, userId) constraint, so this would
+      // otherwise crash trying to insert the same user as both participants.
+      throw new ValidationError("You can't start a conversation with yourself.");
+    }
 
     const subject = input.subject?.trim() || null;
 

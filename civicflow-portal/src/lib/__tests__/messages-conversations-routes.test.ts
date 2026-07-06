@@ -102,6 +102,22 @@ describe("POST /api/messages/conversations", () => {
     expect(transaction).not.toHaveBeenCalled();
   });
 
+  it("rejects starting a conversation with yourself when the caller's own User is linked to that OrgMember", async () => {
+    // Regression test: an officer's account can also be the linked User of an
+    // OrgMember in the same org (e.g. an owner who is also a member).
+    // ConversationParticipant has a unique (conversationId, userId) constraint,
+    // so creating both participants with the same userId previously crashed
+    // with a raw 500 instead of a clean validation error.
+    findFirstOrgMember.mockResolvedValueOnce({ id: "member-1", userId: "officer-1", firstName: "Officer", lastName: "Self" });
+
+    const response = await createPOST(
+      jsonRequest("https://portal.test/api/messages/conversations", { memberId: "member-1", body: "Hi" })
+    );
+
+    expect(response.status).toBe(400);
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
   it("creates the conversation and notifies the member on success", async () => {
     findFirstOrgMember.mockResolvedValueOnce({ id: "member-1", userId: "member-user-1", firstName: "Jane", lastName: "Doe" });
     transaction.mockResolvedValueOnce({ id: "conv-1" });

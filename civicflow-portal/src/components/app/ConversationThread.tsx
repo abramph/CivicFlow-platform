@@ -61,22 +61,28 @@ export function ConversationThread({
     if (!trimmed) return;
     setSending(true);
     setError(null);
-    const response = await fetch(`/api/messages/conversations/${conversationId}/messages`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ body: trimmed }),
-    });
-    const payload = (await response.json().catch(() => null)) as { ok?: boolean; error?: string; data?: { id: string; createdAt: string } } | null;
-    setSending(false);
-    if (!response.ok || !payload?.ok || !payload.data) {
-      setError(payload?.error || "Failed to send message.");
-      return;
+    try {
+      const response = await fetch(`/api/messages/conversations/${conversationId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: trimmed }),
+      });
+      const payload = (await response.json().catch(() => null)) as { ok?: boolean; error?: string; data?: { id: string; createdAt: string } } | null;
+      if (!response.ok || !payload?.ok || !payload.data) {
+        setError(payload?.error || "Failed to send message.");
+        setSending(false);
+        return;
+      }
+      setMessages((current) => [
+        ...current,
+        { id: payload.data!.id, body: trimmed, senderUserId: currentUserId, senderDisplayName: "You", createdAt: payload.data!.createdAt },
+      ]);
+      setBody("");
+      setSending(false);
+    } catch {
+      setError("Unable to connect. Please try again.");
+      setSending(false);
     }
-    setMessages((current) => [
-      ...current,
-      { id: payload.data!.id, body: trimmed, senderUserId: currentUserId, senderDisplayName: "You", createdAt: payload.data!.createdAt },
-    ]);
-    setBody("");
   }
 
   return (
