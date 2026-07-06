@@ -16,6 +16,14 @@ const ALLOWED_DEEP_LINK_PATTERNS: RegExp[] = [
   /^\/payment-history$/,
   /^\/accept-invite(\?.*)?$/,
   /^\/organization\/[A-Za-z0-9_-]+$/,
+  // Member engagement expansion — inbox, per-item detail screens, and the
+  // Payments/Profile tabs. Keep in sync with civicflow-portal/src/lib/deep-links.ts.
+  /^\/inbox$/,
+  /^\/conversation\/[A-Za-z0-9_-]+$/,
+  /^\/announcement\/[A-Za-z0-9_-]+$/,
+  /^\/event\/[A-Za-z0-9_-]+$/,
+  /^\/payments$/,
+  /^\/profile$/,
 ];
 
 /** The only hostname https/http universal-link values are trusted from. */

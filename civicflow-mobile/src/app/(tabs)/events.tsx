@@ -1,5 +1,6 @@
+import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { FlatList, RefreshControl, StyleSheet } from 'react-native';
+import { FlatList, Pressable, RefreshControl, StyleSheet } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -36,14 +37,18 @@ export default function EventsScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
         contentContainerStyle={styles.list}
         renderItem={({ item }) => (
-          <ThemedView type="backgroundElement" style={styles.row}>
-            <ThemedText type="smallBold">{item.title}</ThemedText>
-            <ThemedText type="small" themeColor="textSecondary">
-              {item.startAt ? new Date(item.startAt).toLocaleString() : 'Date TBD'}
-              {item.location ? ` · ${item.location}` : ''}
-            </ThemedText>
-            {item.description ? <ThemedText type="default" style={styles.body}>{item.description}</ThemedText> : null}
-          </ThemedView>
+          <Pressable onPress={() => router.push(`/event/${item.id}`)}>
+            <ThemedView type="backgroundElement" style={styles.row}>
+              <ThemedText type="smallBold">{item.title}</ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">
+                {item.startAt ? new Date(item.startAt).toLocaleString() : 'Date TBD'}
+                {item.location ? ` · ${item.location}` : ''}
+              </ThemedText>
+              {item.description ? (
+                <ThemedText type="default" numberOfLines={2} style={styles.body}>{item.description}</ThemedText>
+              ) : null}
+            </ThemedView>
+          </Pressable>
         )}
         ListEmptyComponent={
           <ThemedText type="small" themeColor="textSecondary" style={styles.empty}>

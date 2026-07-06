@@ -1,6 +1,6 @@
 import * as ImagePicker from 'expo-image-picker';
 import { Redirect, router } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -8,9 +8,20 @@ import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
-import { submitPaymentReport } from '@/lib/mobile-api';
+import { getDues, submitPaymentReport, type DuesCharge, type PaymentReportCategory } from '@/lib/mobile-api';
 
 const PAYMENT_METHODS = ['CASH', 'CHECK', 'ZELLE', 'CASH_APP', 'VENMO', 'PAYPAL', 'CARD', 'OTHER'];
+
+const CATEGORIES: { value: PaymentReportCategory; label: string }[] = [
+  { value: 'MEMBERSHIP_DUES', label: 'Membership Dues' },
+  { value: 'EVENT_REGISTRATION', label: 'Event Registration' },
+  { value: 'DONATION', label: 'Donation' },
+  { value: 'FUNDRAISER', label: 'Fundraiser' },
+  { value: 'MERCHANDISE', label: 'Merchandise' },
+  { value: 'SPONSORSHIP', label: 'Sponsorship' },
+  { value: 'ASSESSMENT', label: 'Assessment' },
+  { value: 'OTHER', label: 'Other' },
+];
 
 function todayIsoDate() {
   return new Date().toISOString().slice(0, 10);
@@ -18,6 +29,9 @@ function todayIsoDate() {
 
 export default function ReportPaymentScreen() {
   const { status, organizations, selectedOrganizationId } = useAuth();
+  const [category, setCategory] = useState<PaymentReportCategory>('MEMBERSHIP_DUES');
+  const [duesCharges, setDuesCharges] = useState<DuesCharge[]>([]);
+  const [duesChargeId, setDuesChargeId] = useState<string | null>(null);
   const [amount, setAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState(PAYMENT_METHODS[0]);
   const [paymentDate, setPaymentDate] = useState(todayIsoDate());
@@ -27,6 +41,13 @@ export default function ReportPaymentScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+
+  useEffect(() => {
+    if (!selectedOrganizationId) return;
+    getDues(selectedOrganizationId)
+      .then((summary) => setDuesCharges(summary.charges))
+      .catch(() => setDuesCharges([]));
+  }, [selectedOrganizationId]);
 
   if (status === 'signedOut') {
     return <Redirect href={{ pathname: '/login', params: { redirectTo: '/report-payment' } }} />;
@@ -60,6 +81,8 @@ export default function ReportPaymentScreen() {
       await submitPaymentReport({
         organizationId: selectedOrganizationId,
         amount,
+        category,
+        duesChargeId: category === 'MEMBERSHIP_DUES' && duesChargeId ? duesChargeId : undefined,
         paymentMethod,
         paymentDate: new Date(paymentDate).toISOString(),
         referenceNumber: referenceNumber || undefined,
@@ -101,6 +124,43 @@ export default function ReportPaymentScreen() {
               <ThemedText type="link">Change organization</ThemedText>
             </Pressable>
           </ThemedView>
+        ) : null}
+
+        <ThemedText type="small" themeColor="textSecondary">What&apos;s this payment for?</ThemedText>
+        <ThemedView style={styles.methodRow}>
+          {CATEGORIES.map((option) => (
+            <Pressable
+              key={option.value}
+              style={[styles.methodChip, option.value === category && styles.methodChipSelected]}
+              onPress={() => {
+                setCategory(option.value);
+                if (option.value !== 'MEMBERSHIP_DUES') setDuesChargeId(null);
+              }}
+            >
+              <ThemedText type="small" style={option.value === category ? styles.methodChipTextSelected : undefined}>
+                {option.label}
+              </ThemedText>
+            </Pressable>
+          ))}
+        </ThemedView>
+
+        {category === 'MEMBERSHIP_DUES' && duesCharges.length > 0 ? (
+          <>
+            <ThemedText type="small" themeColor="textSecondary">Which charge is this for? (optional)</ThemedText>
+            <ThemedView style={styles.methodRow}>
+              {duesCharges.map((charge) => (
+                <Pressable
+                  key={charge.id}
+                  style={[styles.methodChip, charge.id === duesChargeId && styles.methodChipSelected]}
+                  onPress={() => setDuesChargeId(charge.id === duesChargeId ? null : charge.id)}
+                >
+                  <ThemedText type="small" style={charge.id === duesChargeId ? styles.methodChipTextSelected : undefined}>
+                    {charge.duesAccount.name} · ${Number(charge.amountDue).toFixed(2)}
+                  </ThemedText>
+                </Pressable>
+              ))}
+            </ThemedView>
+          </>
         ) : null}
 
         <ThemedText type="small" themeColor="textSecondary">Amount</ThemedText>

@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
-import { apiFetch, registerSessionExpiredHandler, setAccessToken } from '@/lib/api-client';
+import { API_BASE_URL, apiFetch, ApiError, registerSessionExpiredHandler, setAccessToken } from '@/lib/api-client';
 import { registerDeviceToken, unregisterDeviceToken } from '@/lib/push-registration';
 import { secureStorage } from '@/lib/secure-storage';
 
@@ -29,17 +29,40 @@ interface TokenPair {
 
 type AuthStatus = 'loading' | 'signedOut' | 'signedIn';
 
+export type LoginResult = { mfaRequired: true; mfaToken: string } | { mfaRequired: false };
+
 interface AuthContextValue {
   status: AuthStatus;
   user: MobileUser | null;
   organizations: MobileOrganization[];
   selectedOrganizationId: string | null;
   selectedOrganization: MobileOrganization | null;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<LoginResult>;
+  completeMfaChallenge: (mfaToken: string, code: string) => Promise<void>;
+  sendMfaSms: (mfaToken: string) => Promise<{ sent: boolean; skipped: boolean; maskedPhone?: string }>;
   acceptInvite: (token: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   selectOrganization: (organizationId: string) => Promise<void>;
   refreshOrganizations: () => Promise<void>;
+}
+
+/**
+ * Raw (non-apiFetch) POST for the two-step MFA login flow — apiFetch always
+ * unwraps `payload.data`, but the login endpoint's MFA branch returns
+ * `{ok, mfaRequired, mfaToken}` with no `data` field at all, so the caller
+ * needs the full parsed payload to tell the two shapes apart.
+ */
+async function rawPost<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload?.ok) {
+    throw new ApiError(payload?.error ?? 'Request failed', response.status, payload?.error);
+  }
+  return payload as T;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -114,12 +137,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void registerDeviceToken(selected ?? undefined);
   }
 
-  async function login(email: string, password: string) {
-    const data = await apiFetch<{ accessToken: string; refreshToken: string; expiresIn: number; user: MobileUser }>(
-      '/api/mobile/auth/login',
-      { method: 'POST', authenticated: false, body: JSON.stringify({ email, password }) }
+  async function login(email: string, password: string): Promise<LoginResult> {
+    const payload = await rawPost<
+      | { ok: true; mfaRequired: true; mfaToken: string }
+      | { ok: true; data: TokenPair & { user: MobileUser } }
+    >('/api/mobile/auth/login', { email, password });
+
+    if ('mfaRequired' in payload && payload.mfaRequired) {
+      return { mfaRequired: true, mfaToken: payload.mfaToken };
+    }
+
+    const { data } = payload as { ok: true; data: TokenPair & { user: MobileUser } };
+    await applyTokensAndUser(data, data.user);
+    return { mfaRequired: false };
+  }
+
+  async function completeMfaChallenge(mfaToken: string, code: string) {
+    const { data } = await rawPost<{ ok: true; data: TokenPair & { user: MobileUser } }>(
+      '/api/mobile/auth/mfa/challenge',
+      { mfaToken, code }
     );
     await applyTokensAndUser(data, data.user);
+  }
+
+  function sendMfaSms(mfaToken: string) {
+    return rawPost<{ sent: boolean; skipped: boolean; maskedPhone?: string }>(
+      '/api/mobile/auth/mfa/send-sms',
+      { mfaToken }
+    );
   }
 
   async function acceptInvite(token: string, password: string) {
@@ -165,6 +210,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     selectedOrganizationId,
     selectedOrganization,
     login,
+    completeMfaChallenge,
+    sendMfaSms,
     acceptInvite,
     logout,
     selectOrganization,

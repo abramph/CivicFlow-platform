@@ -21,7 +21,14 @@ export default function LoginScreen() {
     setSubmitting(true);
     setError(null);
     try {
-      await login(email.trim(), password);
+      const result = await login(email.trim(), password);
+      if (result.mfaRequired) {
+        router.push({
+          pathname: '/mfa-challenge',
+          params: { mfaToken: result.mfaToken, redirectTo: redirectTo ?? '' },
+        });
+        return;
+      }
       // Resume whatever deep link brought the member here while signed out —
       // only ever an allow-listed in-app destination, never trusted blindly.
       const resumePath = redirectTo ? resolveAllowedDeepLinkPath(redirectTo) : null;

@@ -6,20 +6,31 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/lib/auth-context';
-import { getAnnouncements, type Announcement } from '@/lib/mobile-api';
+import { getConversations, type ConversationSummary } from '@/lib/mobile-api';
 
-export default function AnnouncementsScreen() {
+const POLL_INTERVAL_MS = 20_000;
+
+function otherParticipantNames(conversation: ConversationSummary) {
+  return conversation.otherParticipants.map((p) => p.displayName).join(', ') || 'Officers';
+}
+
+export default function InboxScreen() {
   const { selectedOrganizationId } = useAuth();
-  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
     if (!selectedOrganizationId) return;
-    setAnnouncements(await getAnnouncements(selectedOrganizationId));
+    const data = await getConversations(selectedOrganizationId);
+    setConversations(data);
   }, [selectedOrganizationId]);
 
   useEffect(() => {
-    load();
+    setLoading(true);
+    load().finally(() => setLoading(false));
+    const timer = setInterval(load, POLL_INTERVAL_MS);
+    return () => clearInterval(timer);
   }, [load]);
 
   async function handleRefresh() {
@@ -30,30 +41,34 @@ export default function AnnouncementsScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <ThemedText type="title">Announcements</ThemedText>
+      <ThemedText type="title">Inbox</ThemedText>
       <FlatList
-        data={announcements}
+        data={conversations}
         keyExtractor={(item) => item.id}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
         contentContainerStyle={styles.list}
         renderItem={({ item }) => (
-          <Pressable onPress={() => router.push(`/announcement/${item.id}`)}>
+          <Pressable onPress={() => router.push(`/conversation/${item.id}`)}>
             <ThemedView type="backgroundElement" style={styles.row}>
               <ThemedView style={styles.rowHeader}>
-                <ThemedText type={item.isRead ? 'small' : 'smallBold'}>{item.subject || item.title}</ThemedText>
-                {!item.isRead ? <ThemedView style={styles.unreadDot} /> : null}
+                <ThemedText type={item.hasUnread ? 'smallBold' : 'small'}>
+                  {item.subject || otherParticipantNames(item)}
+                </ThemedText>
+                {item.hasUnread ? <ThemedView style={styles.unreadDot} /> : null}
               </ThemedView>
-              {item.sentAt ? (
-                <ThemedText type="small" themeColor="textSecondary">{new Date(item.sentAt).toLocaleDateString()}</ThemedText>
-              ) : null}
-              <ThemedText type="default" numberOfLines={2} style={styles.body}>{item.body}</ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">
+                {otherParticipantNames(item)}
+                {item.lastMessageAt ? ` · ${new Date(item.lastMessageAt).toLocaleDateString()}` : ''}
+              </ThemedText>
             </ThemedView>
           </Pressable>
         )}
         ListEmptyComponent={
-          <ThemedText type="small" themeColor="textSecondary" style={styles.empty}>
-            No announcements yet.
-          </ThemedText>
+          !loading ? (
+            <ThemedText type="small" themeColor="textSecondary" style={styles.empty}>
+              No conversations yet.
+            </ThemedText>
+          ) : null
         }
       />
     </ThemedView>
@@ -85,9 +100,6 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
     backgroundColor: '#047857',
-  },
-  body: {
-    marginTop: 4,
   },
   empty: {
     textAlign: 'center',

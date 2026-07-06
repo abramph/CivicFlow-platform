@@ -27,4 +27,19 @@ describe('resolveAllowedDeepLinkPath', () => {
   it('rejects malformed input', () => {
     expect(resolveAllowedDeepLinkPath('not a url')).toBeNull();
   });
+
+  it('resolves the new member engagement destinations', () => {
+    expect(resolveAllowedDeepLinkPath('civicflow://inbox')).toBe('/inbox');
+    expect(resolveAllowedDeepLinkPath('civicflow://conversation/conv-abc123')).toBe('/conversation/conv-abc123');
+    expect(resolveAllowedDeepLinkPath('civicflow://announcement/campaign-abc123')).toBe('/announcement/campaign-abc123');
+    expect(resolveAllowedDeepLinkPath('civicflow://event/event-abc123')).toBe('/event/event-abc123');
+    expect(resolveAllowedDeepLinkPath('civicflow://payments')).toBe('/payments');
+    expect(resolveAllowedDeepLinkPath('civicflow://profile')).toBe('/profile');
+  });
+
+  it('resolves the new destinations from a universal link too', () => {
+    expect(resolveAllowedDeepLinkPath('https://app.civicflowapp.com/conversation/conv-abc123')).toBe(
+      '/conversation/conv-abc123'
+    );
+  });
 });
