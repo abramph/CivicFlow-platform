@@ -10,6 +10,7 @@ import {
 } from "@/lib/member-filters";
 import { prisma } from "@/lib/prisma";
 import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
+import { BulkInviteToAppButton } from "@/components/forms/BulkInviteToAppButton";
 import { formatDate, formatEnumLabel, formatPersonName, formatText } from "@/lib/formatting";
 
 export default async function MembersPage({
@@ -19,6 +20,7 @@ export default async function MembersPage({
 }) {
   const { organizationId, can } = await requirePermission("members:read");
   const canExport = can("reports:export");
+  const canInviteBulk = can("members:write");
   const resolvedSearchParams = await searchParams;
   const filters = parseMemberFilters(resolvedSearchParams);
   const where = buildMemberWhere(organizationId, filters);
@@ -282,6 +284,7 @@ export default async function MembersPage({
                 </Link>
               </>
             ) : null}
+            {canInviteBulk ? <BulkInviteToAppButton filters={filters} /> : null}
             <Link
               href={printHref}
               className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50"

@@ -1,4 +1,6 @@
 import crypto from "crypto";
+import { getMobileAppWebBaseUrl } from "@/lib/env";
+import { sendEmail } from "@/lib/mail";
 import { prisma } from "@/lib/prisma";
 
 const INVITE_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -58,4 +60,50 @@ export async function consumeMemberInvite(
 
 export async function markMemberInviteAccepted(inviteId: string) {
   await prisma.memberInvite.update({ where: { id: inviteId }, data: { acceptedAt: new Date() } });
+}
+
+/**
+ * Creates an invite token and sends the invite email — the one path both the
+ * single-member invite route and the bulk-invite route go through, so the
+ * email copy only lives in one place.
+ */
+export async function sendMemberAppInviteEmail(params: {
+  member: { id: string; email: string };
+  organizationId: string;
+  organizationName: string | null;
+  createdByUserId?: string | null;
+}): Promise<void> {
+  const token = await createMemberInvite({
+    organizationId: params.organizationId,
+    memberId: params.member.id,
+    createdByUserId: params.createdByUserId,
+  });
+
+  const acceptUrl = `${getMobileAppWebBaseUrl()}/accept-invite?token=${encodeURIComponent(token)}`;
+  const orgName = params.organizationName ?? "Your organization";
+
+  await sendEmail({
+    to: params.member.email,
+    subject: `You're invited to the CivicFlow app — ${orgName}`,
+    text: [
+      `${orgName} has invited you to use the CivicFlow mobile app.`,
+      "",
+      "Set up your login to check your dues status, report a payment, and receive announcements.",
+      "",
+      acceptUrl,
+      "",
+      "This invite link expires in 7 days.",
+    ].join("\n"),
+    html: `
+      <p><strong>${orgName}</strong> has invited you to use the CivicFlow mobile app.</p>
+      <p>Set up your login to check your dues status, report a payment, and receive announcements.</p>
+      <p style="margin:24px 0">
+        <a href="${acceptUrl}" style="background:#059669;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:600">
+          Set Up My Account
+        </a>
+      </p>
+      <p style="color:#6b7280;font-size:13px">Or copy this link: ${acceptUrl}</p>
+      <p style="color:#6b7280;font-size:13px">This invite link expires in 7 days.</p>
+    `.trim(),
+  });
 }
