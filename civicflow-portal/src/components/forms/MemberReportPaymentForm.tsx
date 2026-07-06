@@ -1,5 +1,6 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { FormEvent, useState } from "react";
 import { fieldClassName } from "@/components/forms/formStyles";
 
@@ -17,8 +18,14 @@ const CATEGORIES: { value: string; label: string }[] = [
 ];
 
 export function MemberReportPaymentForm({ organizationId }: { organizationId: string }) {
+  const searchParams = useSearchParams();
+  const requestedCategory = searchParams.get("category");
+  const initialCategory = CATEGORIES.some((option) => option.value === requestedCategory)
+    ? requestedCategory!
+    : CATEGORIES[0].value;
+
   const [amount, setAmount] = useState("");
-  const [category, setCategory] = useState(CATEGORIES[0].value);
+  const [category, setCategory] = useState(initialCategory);
   const [paymentMethod, setPaymentMethod] = useState(PAYMENT_METHODS[0]);
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
   const [referenceNumber, setReferenceNumber] = useState("");

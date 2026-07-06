@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { href: "/m/announcements", label: "Announcements" },
   { href: "/m/events", label: "Events" },
   { href: "/m/payment-history", label: "Payment History" },
+  { href: "/m/make-payment", label: "Make a Payment" },
   { href: "/m/report-payment", label: "Report a Payment" },
 ];
 
