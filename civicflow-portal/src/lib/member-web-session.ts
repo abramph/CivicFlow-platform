@@ -1,7 +1,10 @@
+import { cookies } from "next/headers";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/authOptions";
 import { ForbiddenError } from "@/lib/auth-guards";
 import { prisma } from "@/lib/prisma";
+
+export const MEMBER_ORG_COOKIE = "cf_member_org";
 
 export interface MemberWebSession {
   userId: string;
@@ -20,7 +23,11 @@ export interface MemberWebSession {
  *
  * `requestedOrgId` (from a `?org=` query param) lets a member who belongs to
  * multiple organizations pick one; it's validated against their actual
- * memberships, never trusted blindly.
+ * memberships, never trusted blindly. When omitted, falls back to the
+ * member's last-selected org (the `cf_member_org` cookie, set by the
+ * select-organization endpoint) so switching orgs sticks across every link,
+ * not just ones that happen to carry `?org=`; if that's also unset or stale,
+ * falls back to their oldest membership.
  */
 export async function getMemberWebSession(requestedOrgId?: string): Promise<MemberWebSession | null> {
   const session = await getServerSession(authOptions);
@@ -33,8 +40,11 @@ export async function getMemberWebSession(requestedOrgId?: string): Promise<Memb
   });
   if (memberships.length === 0) return null;
 
+  const cookieOrgId = (await cookies()).get(MEMBER_ORG_COOKIE)?.value;
+
   const organizationId =
     (requestedOrgId && memberships.some((m) => m.organizationId === requestedOrgId) ? requestedOrgId : null) ??
+    (cookieOrgId && memberships.some((m) => m.organizationId === cookieOrgId) ? cookieOrgId : null) ??
     memberships[0].organizationId;
 
   const member = await prisma.orgMember.findFirst({

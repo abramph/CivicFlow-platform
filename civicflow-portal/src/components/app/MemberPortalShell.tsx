@@ -1,7 +1,8 @@
 "use client";
 
+import { signOut } from "next-auth/react";
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 
 const NAV_ITEMS = [
@@ -21,11 +22,13 @@ interface MemberSessionSummary {
 }
 
 export function MemberPortalShell({ children }: { children: ReactNode }) {
+  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const org = searchParams.get("org");
   const [open, setOpen] = useState(false);
   const [session, setSession] = useState<MemberSessionSummary | null>(null);
+  const [switching, setSwitching] = useState(false);
 
   useEffect(() => {
     const query = org ? `?org=${encodeURIComponent(org)}` : "";
@@ -37,6 +40,30 @@ export function MemberPortalShell({ children }: { children: ReactNode }) {
 
   function linkHref(href: string) {
     return org ? `${href}?org=${encodeURIComponent(org)}` : href;
+  }
+
+  async function switchOrganization(organizationId: string) {
+    if (!session || organizationId === session.organizationId) {
+      setOpen(false);
+      return;
+    }
+    setSwitching(true);
+    try {
+      const response = await fetch("/api/member-portal/select-organization", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ organizationId }),
+      });
+      if (response.ok) {
+        setOpen(false);
+        // Cookie now carries the choice — drop any ?org= so every future link
+        // (including ones that don't set it explicitly) uses the new org.
+        router.replace(pathname);
+        router.refresh();
+      }
+    } finally {
+      setSwitching(false);
+    }
   }
 
   return (
@@ -80,18 +107,19 @@ export function MemberPortalShell({ children }: { children: ReactNode }) {
               <div className="space-y-1 border-b border-slate-200 pb-4">
                 <p className="px-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Organization</p>
                 {session.organizations.map((option) => (
-                  <Link
+                  <button
                     key={option.organizationId}
-                    href={`${pathname}?org=${encodeURIComponent(option.organizationId)}`}
-                    onClick={() => setOpen(false)}
-                    className={`block rounded-lg px-3 py-2 text-sm font-medium ${
+                    type="button"
+                    disabled={switching}
+                    onClick={() => switchOrganization(option.organizationId)}
+                    className={`block w-full rounded-lg px-3 py-2 text-left text-sm font-medium disabled:opacity-60 ${
                       option.organizationId === session.organizationId
                         ? "bg-emerald-600 text-white"
                         : "text-slate-700 hover:bg-slate-100"
                     }`}
                   >
                     {option.organizationName}
-                  </Link>
+                  </button>
                 ))}
               </div>
             ) : null}
@@ -113,6 +141,14 @@ export function MemberPortalShell({ children }: { children: ReactNode }) {
                 );
               })}
             </nav>
+
+            <button
+              type="button"
+              onClick={() => signOut({ callbackUrl: "/login" })}
+              className="mt-auto rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Log Out
+            </button>
           </div>
           <button
             type="button"
