@@ -142,10 +142,15 @@ async function processRecipient(
     if (ctx.campaign.pushEnabled && recipient.member?.userId) {
       if (recipient.member.commsPushEnabled && !recipient.member.requiredNoticesOnly) {
         const tokens = ctx.tokensByUserId.get(recipient.member.userId) ?? [];
+        // Staff can set an explicit deepLink; otherwise an announcement-type
+        // campaign defaults to its own detail screen so tapping the push
+        // actually opens that announcement instead of just the list.
+        const isAnnouncementLike = ctx.campaign.communicationType === "ANNOUNCEMENT" || ctx.campaign.communicationType === "GENERAL";
+        const deepLink = ctx.campaign.deepLink ?? (isAnnouncementLike ? `/announcement/${ctx.campaign.id}` : null);
         const result = await sendPushToTokens(tokens, {
           title: ctx.campaign.title,
           body: ctx.campaign.body,
-          deepLink: ctx.campaign.deepLink,
+          deepLink,
         });
         pushDeliveryStatus = result.sent > 0 ? "SENT" : tokens.length === 0 ? "SKIPPED" : "FAILED";
         if (pushDeliveryStatus !== "SENT") pushError = tokens.length === 0 ? "No registered devices" : "Delivery failed";

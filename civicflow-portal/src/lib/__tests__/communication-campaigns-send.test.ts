@@ -152,6 +152,51 @@ describe("sendCommunicationCampaign", () => {
     );
   });
 
+  it("defaults the push deep link to the announcement's own detail screen when staff didn't set one", async () => {
+    findFirstCampaign.mockResolvedValueOnce(
+      makeCampaign({ pushEnabled: true, communicationType: "ANNOUNCEMENT", deepLink: null })
+    );
+    findManyRecipient.mockResolvedValueOnce([
+      makeRecipient("r1", { member: { userId: "user-1", commsPushEnabled: true, requiredNoticesOnly: false } }),
+    ]);
+    findManyDeviceToken.mockResolvedValueOnce([{ userId: "user-1", token: "token-1" }]);
+    countRecipient.mockResolvedValueOnce(0);
+
+    await sendCommunicationCampaign({ organizationId: "org-a", campaignId: "campaign-1" });
+
+    expect(sendPushToTokens).toHaveBeenCalledWith(["token-1"], expect.objectContaining({ deepLink: "/announcement/campaign-1" }));
+  });
+
+  it("keeps staff's explicit deep link instead of the announcement default when one is set", async () => {
+    findFirstCampaign.mockResolvedValueOnce(
+      makeCampaign({ pushEnabled: true, communicationType: "ANNOUNCEMENT", deepLink: "/dues" })
+    );
+    findManyRecipient.mockResolvedValueOnce([
+      makeRecipient("r1", { member: { userId: "user-1", commsPushEnabled: true, requiredNoticesOnly: false } }),
+    ]);
+    findManyDeviceToken.mockResolvedValueOnce([{ userId: "user-1", token: "token-1" }]);
+    countRecipient.mockResolvedValueOnce(0);
+
+    await sendCommunicationCampaign({ organizationId: "org-a", campaignId: "campaign-1" });
+
+    expect(sendPushToTokens).toHaveBeenCalledWith(["token-1"], expect.objectContaining({ deepLink: "/dues" }));
+  });
+
+  it("does not default a deep link for non-announcement campaign types", async () => {
+    findFirstCampaign.mockResolvedValueOnce(
+      makeCampaign({ pushEnabled: true, communicationType: "DUES_REMINDER", deepLink: null })
+    );
+    findManyRecipient.mockResolvedValueOnce([
+      makeRecipient("r1", { member: { userId: "user-1", commsPushEnabled: true, requiredNoticesOnly: false } }),
+    ]);
+    findManyDeviceToken.mockResolvedValueOnce([{ userId: "user-1", token: "token-1" }]);
+    countRecipient.mockResolvedValueOnce(0);
+
+    await sendCommunicationCampaign({ organizationId: "org-a", campaignId: "campaign-1" });
+
+    expect(sendPushToTokens).toHaveBeenCalledWith(["token-1"], expect.objectContaining({ deepLink: null }));
+  });
+
   it("processes every pending recipient and finalizes the campaign as SENT with one audit event when none remain", async () => {
     findFirstCampaign.mockResolvedValueOnce(makeCampaign());
     findManyRecipient.mockResolvedValueOnce([makeRecipient("r1"), makeRecipient("r2"), makeRecipient("r3")]);

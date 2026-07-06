@@ -1,7 +1,9 @@
+import type { PaymentReportCategory } from "@prisma/client";
 import { attachmentPrefix, maxAttachmentBytes } from "@/lib/attachments";
 import { withApiErrorHandling } from "@/lib/api-route";
 import { requireMobileMembership } from "@/lib/mobile-auth";
 import { createPaymentReportAndNotify, DUES_PAYMENT_METHODS } from "@/lib/payment-reports";
+import { PAYMENT_REPORT_CATEGORIES } from "@/lib/payment-report-categories";
 import { prisma } from "@/lib/prisma";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { buildSafeObjectKey, uploadBufferToSpaces } from "@/lib/storage";
@@ -14,8 +16,9 @@ function textValue(value: FormDataEntryValue | null) {
 /**
  * POST /api/mobile/report-payment (multipart/form-data)
  * Fields: organizationId, amount, paymentMethod, paymentDate, referenceNumber?,
- * note?, receipt? (file). Creates a pending PaymentReport and notifies the
- * organization's treasurers/admins for review.
+ * note?, category? (defaults to MEMBERSHIP_DUES), duesChargeId? (only used
+ * when category is MEMBERSHIP_DUES), receipt? (file). Creates a pending
+ * PaymentReport and notifies the organization's treasurers/admins for review.
  */
 export async function POST(request: Request) {
   return withApiErrorHandling(async () => {
@@ -54,6 +57,12 @@ export async function POST(request: Request) {
     const note = textValue(formData.get("note")) || null;
     const receipt = formData.get("receipt");
 
+    const categoryRaw = textValue(formData.get("category")).toUpperCase();
+    const category = (PAYMENT_REPORT_CATEGORIES as readonly string[]).includes(categoryRaw)
+      ? (categoryRaw as PaymentReportCategory)
+      : "MEMBERSHIP_DUES";
+    const duesChargeId = textValue(formData.get("duesChargeId")) || null;
+
     const report = await createPaymentReportAndNotify({
       organizationId: verifiedOrgId,
       memberId,
@@ -62,6 +71,8 @@ export async function POST(request: Request) {
       paymentDate,
       referenceNumber,
       note,
+      category,
+      duesChargeId,
     });
 
     if (receipt instanceof File && receipt.size > 0) {

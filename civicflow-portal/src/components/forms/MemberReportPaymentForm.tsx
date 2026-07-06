@@ -5,8 +5,20 @@ import { fieldClassName } from "@/components/forms/formStyles";
 
 const PAYMENT_METHODS = ["CASH", "CHECK", "ZELLE", "CASH_APP", "VENMO", "PAYPAL", "CARD", "OTHER"];
 
+const CATEGORIES: { value: string; label: string }[] = [
+  { value: "MEMBERSHIP_DUES", label: "Membership Dues" },
+  { value: "EVENT_REGISTRATION", label: "Event Registration" },
+  { value: "DONATION", label: "Donation" },
+  { value: "FUNDRAISER", label: "Fundraiser" },
+  { value: "MERCHANDISE", label: "Merchandise" },
+  { value: "SPONSORSHIP", label: "Sponsorship" },
+  { value: "ASSESSMENT", label: "Assessment" },
+  { value: "OTHER", label: "Other" },
+];
+
 export function MemberReportPaymentForm({ organizationId }: { organizationId: string }) {
   const [amount, setAmount] = useState("");
+  const [category, setCategory] = useState(CATEGORIES[0].value);
   const [paymentMethod, setPaymentMethod] = useState(PAYMENT_METHODS[0]);
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
   const [referenceNumber, setReferenceNumber] = useState("");
@@ -26,6 +38,7 @@ export function MemberReportPaymentForm({ organizationId }: { organizationId: st
         body: JSON.stringify({
           organizationId,
           amount: Number(amount),
+          category,
           paymentMethod,
           paymentDate: new Date(paymentDate).toISOString(),
           referenceNumber: referenceNumber || null,
@@ -54,6 +67,14 @@ export function MemberReportPaymentForm({ organizationId }: { organizationId: st
 
   return (
     <form className="space-y-4" onSubmit={handleSubmit}>
+      <label className="block space-y-1 text-sm font-medium text-slate-900">
+        <span>What&apos;s this payment for?</span>
+        <select className={fieldClassName} value={category} onChange={(e) => setCategory(e.target.value)}>
+          {CATEGORIES.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </select>
+      </label>
       <label className="block space-y-1 text-sm font-medium text-slate-900">
         <span>Amount</span>
         <input required type="number" step="0.01" min="0.01" className={fieldClassName} value={amount} onChange={(e) => setAmount(e.target.value)} />

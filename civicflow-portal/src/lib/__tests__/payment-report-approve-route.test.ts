@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const findFirstPaymentReport = vi.fn();
 const updatePaymentReport = vi.fn().mockResolvedValue({ id: "report-1", status: "approved" });
 const findFirstDuesCharge = vi.fn().mockResolvedValue(null);
+const createContribution = vi.fn().mockResolvedValue({ id: "contribution-1", amount: 50 });
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -11,6 +12,7 @@ vi.mock("@/lib/prisma", () => ({
       update: (...args: unknown[]) => updatePaymentReport(...args),
     },
     duesCharge: { findFirst: (...args: unknown[]) => findFirstDuesCharge(...args) },
+    contribution: { create: (...args: unknown[]) => createContribution(...args) },
   },
 }));
 
@@ -52,6 +54,8 @@ describe("POST /api/admin/payment-reports/:id/approve", () => {
     findFirstPaymentReport.mockReset();
     updatePaymentReport.mockClear();
     recordDuesPayment.mockClear();
+    createContribution.mockClear();
+    findFirstDuesCharge.mockClear();
   });
 
   it("404s when the report doesn't belong to the caller's organization", async () => {
@@ -70,6 +74,7 @@ describe("POST /api/admin/payment-reports/:id/approve", () => {
       paymentDate: new Date(),
       paymentMethod: "CASH",
       referenceNumber: null,
+      category: "MEMBERSHIP_DUES",
       member: { email: "member@example.com" },
     });
 
@@ -88,6 +93,7 @@ describe("POST /api/admin/payment-reports/:id/approve", () => {
       paymentDate: new Date(),
       paymentMethod: "CASH",
       referenceNumber: "REF-1",
+      category: "MEMBERSHIP_DUES",
       member: { email: "member@example.com" },
     });
     findFirstDuesCharge.mockResolvedValueOnce({ id: "charge-1", amountDue: 50, amountPaid: 0 });
@@ -100,6 +106,33 @@ describe("POST /api/admin/payment-reports/:id/approve", () => {
     );
     expect(updatePaymentReport).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: "approved" }) })
+    );
+    expect(createContribution).not.toHaveBeenCalled();
+  });
+
+  it("records a Contribution instead of a DuesPayment for a non-dues category, and never looks up a dues charge", async () => {
+    findFirstPaymentReport.mockResolvedValueOnce({
+      id: "report-1",
+      organizationId: "org-a",
+      memberId: "member-1",
+      status: "pending",
+      amount: 75,
+      paymentDate: new Date(),
+      paymentMethod: "CASH",
+      referenceNumber: null,
+      category: "DONATION",
+      member: { email: "member@example.com" },
+    });
+
+    const response = await POST(approveRequest(), { params: Promise.resolve({ id: "report-1" }) });
+    expect(response.status).toBe(200);
+
+    expect(recordDuesPayment).not.toHaveBeenCalled();
+    expect(findFirstDuesCharge).not.toHaveBeenCalled();
+    expect(createContribution).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ organizationId: "org-a", memberId: "member-1", source: "MANUAL" }),
+      })
     );
   });
 });

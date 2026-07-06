@@ -1,4 +1,4 @@
-import type { DuesPaymentMethod } from "@prisma/client";
+import type { DuesPaymentMethod, PaymentReportCategory } from "@prisma/client";
 import { createAuditEvent } from "@/lib/audit";
 import { sendEmail } from "@/lib/mail";
 import { prisma } from "@/lib/prisma";
@@ -22,7 +22,15 @@ export async function createPaymentReportAndNotify(params: {
   paymentDate: Date;
   referenceNumber?: string | null;
   note?: string | null;
+  /** Defaults to MEMBERSHIP_DUES so every existing caller (and every row
+   * created before this field existed) keeps behaving exactly as before. */
+  category?: PaymentReportCategory;
+  /** Only meaningful when category is MEMBERSHIP_DUES — which outstanding
+   * charge the member says this applies to. Not validated against the
+   * member's actual charges here; the approver isn't bound to it either. */
+  duesChargeId?: string | null;
 }) {
+  const category = params.category ?? "MEMBERSHIP_DUES";
   const report = await prisma.paymentReport.create({
     data: {
       organizationId: params.organizationId,
@@ -32,6 +40,8 @@ export async function createPaymentReportAndNotify(params: {
       paymentDate: params.paymentDate,
       referenceNumber: params.referenceNumber ?? null,
       note: params.note ?? null,
+      category,
+      duesChargeId: category === "MEMBERSHIP_DUES" ? (params.duesChargeId ?? null) : null,
     },
   });
 
@@ -40,7 +50,7 @@ export async function createPaymentReportAndNotify(params: {
     action: "payment_report.create",
     entityType: "payment_report",
     entityId: report.id,
-    metadata: { amount: report.amount.toString(), paymentMethod: report.paymentMethod },
+    metadata: { amount: report.amount.toString(), paymentMethod: report.paymentMethod, category },
   });
 
   const [member, treasurers] = await Promise.all([
@@ -58,7 +68,7 @@ export async function createPaymentReportAndNotify(params: {
         subject: "New member payment report to review",
         text: [
           `${member?.firstName ?? ""} ${member?.lastName ?? ""}`.trim() || "A member",
-          `reported a payment of $${params.amount.toFixed(2)} via ${params.paymentMethod}.`,
+          `reported a ${category.replace(/_/g, " ").toLowerCase()} payment of $${params.amount.toFixed(2)} via ${params.paymentMethod}.`,
           "Review it in the CivicFlow portal under Payment Reports.",
         ].join(" "),
       }).catch(() => null)

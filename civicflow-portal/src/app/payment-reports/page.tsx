@@ -60,12 +60,13 @@ export default async function PaymentReportsPage({
           </Link>
         ))}
       </div>
-      <SectionCard title={`${formatEnumLabel(status)} Reports`} description="Approving applies the payment to the member's oldest outstanding dues charge automatically.">
+      <SectionCard title={`${formatEnumLabel(status)} Reports`} description="Approving a Membership Dues report applies it to the member's oldest outstanding charge automatically; every other category records a Contribution instead.">
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="bg-slate-50 text-left text-slate-700">
               <tr>
                 <th className="px-4 py-3">Member</th>
+                <th className="px-4 py-3">Category</th>
                 <th className="px-4 py-3">Amount</th>
                 <th className="px-4 py-3">Method</th>
                 <th className="px-4 py-3">Payment Date</th>
@@ -78,7 +79,7 @@ export default async function PaymentReportsPage({
             </thead>
             <tbody>
               {reports.length === 0 ? (
-                <tr><td colSpan={8} className="px-4 py-6 text-center text-slate-600">No {status} payment reports.</td></tr>
+                <tr><td colSpan={9} className="px-4 py-6 text-center text-slate-600">No {status} payment reports.</td></tr>
               ) : reports.map((report) => (
                 <tr key={report.id} className="border-t border-slate-100">
                   <td className="px-4 py-3">
@@ -86,6 +87,7 @@ export default async function PaymentReportsPage({
                       {formatPersonName(report.member)}
                     </Link>
                   </td>
+                  <td className="px-4 py-3">{formatEnumLabel(report.category)}</td>
                   <td className="px-4 py-3">{formatCurrency(report.amount)}</td>
                   <td className="px-4 py-3">{formatEnumLabel(report.paymentMethod)}</td>
                   <td className="px-4 py-3">{formatDate(report.paymentDate)}</td>

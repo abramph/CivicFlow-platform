@@ -269,6 +269,23 @@ enum PaymentReportStatus {
   rejected
 }
 
+/// What a member-reported payment was actually for. MEMBERSHIP_DUES is the
+/// default so every existing PaymentReport row (all of which predate this
+/// field) keeps behaving exactly as before — approving it still applies to
+/// dues via recordDuesPayment. Any other category is approved as a
+/// Contribution instead (see the approve route) — reuses the existing
+/// donation/fundraiser ledger rather than a new one.
+enum PaymentReportCategory {
+  MEMBERSHIP_DUES
+  EVENT_REGISTRATION
+  DONATION
+  FUNDRAISER
+  MERCHANDISE
+  SPONSORSHIP
+  ASSESSMENT
+  OTHER
+}
+
 enum PaymentLinkType {
   GENERAL
   CAMPAIGN
@@ -993,6 +1010,7 @@ model DuesCharge {
   payments           DuesPayment[]
   adjustments        DuesAdjustment[]
   paymentImportItems PaymentImportItem[]
+  paymentReports     PaymentReport[]
 
   @@unique([organizationId, memberId, duesAccountId, periodStart, periodEnd])
   @@index([organizationId])
@@ -1532,29 +1550,37 @@ model MobileDeviceToken {
 
 /// A member-submitted "I paid my dues" report, pending treasurer/admin review.
 model PaymentReport {
-  id                  String              @id @default(cuid())
+  id                  String                @id @default(cuid())
   organizationId      String
   memberId            String
-  amount              Decimal             @db.Decimal(12, 2)
+  amount              Decimal               @db.Decimal(12, 2)
   paymentMethod       DuesPaymentMethod
   paymentDate         DateTime
   referenceNumber     String?
   note                String?
   receiptAttachmentId String?
-  status              PaymentReportStatus @default(pending)
+  category            PaymentReportCategory @default(MEMBERSHIP_DUES)
+  /// Which outstanding charge the member says this applies to — only
+  /// meaningful when category is MEMBERSHIP_DUES; the approver isn't bound
+  /// to it (still applies to the oldest outstanding charge at approval time)
+  /// but it's a strong hint of member intent.
+  duesChargeId        String?
+  status              PaymentReportStatus   @default(pending)
   reviewedById        String?
   reviewedAt          DateTime?
   rejectionReason     String?
-  createdAt           DateTime            @default(now())
-  updatedAt           DateTime            @updatedAt
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
 
   organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   member            OrgMember    @relation(fields: [memberId], references: [id], onDelete: Cascade)
   reviewedBy        User?        @relation("PaymentReportReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
   receiptAttachment Attachment?  @relation(fields: [receiptAttachmentId], references: [id], onDelete: SetNull)
+  duesCharge        DuesCharge?  @relation(fields: [duesChargeId], references: [id], onDelete: SetNull)
 
   @@index([organizationId])
   @@index([organizationId, status])
   @@index([memberId])
   @@index([createdAt])
+  @@index([category])
 }

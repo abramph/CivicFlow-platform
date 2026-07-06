@@ -14,6 +14,13 @@ const ALLOWED_DEEP_LINK_PATTERNS: RegExp[] = [
   /^\/payment-history$/,
   /^\/messages$/,
   /^\/messages\/[A-Za-z0-9_-]+$/,
+  // Member-facing mobile app destinations (civicflow-mobile) — distinct from
+  // the staff-only /messages/[id] web inbox above.
+  /^\/inbox$/,
+  /^\/conversation\/[A-Za-z0-9_-]+$/,
+  /^\/announcement\/[A-Za-z0-9_-]+$/,
+  /^\/event\/[A-Za-z0-9_-]+$/,
+  /^\/payments$/,
   /^\/accept-invite(\?.*)?$/,
   /^\/organization\/[A-Za-z0-9_-]+$/,
 ];

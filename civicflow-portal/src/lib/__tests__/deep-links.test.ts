@@ -15,6 +15,14 @@ describe("validateDeepLink", () => {
     expect(validateDeepLink("/messages/conv-abc123")).toBe("/messages/conv-abc123");
   });
 
+  it("accepts the mobile app's member-facing destinations", () => {
+    expect(validateDeepLink("/inbox")).toBe("/inbox");
+    expect(validateDeepLink("/conversation/conv-abc123")).toBe("/conversation/conv-abc123");
+    expect(validateDeepLink("/announcement/campaign-abc123")).toBe("/announcement/campaign-abc123");
+    expect(validateDeepLink("/event/event-abc123")).toBe("/event/event-abc123");
+    expect(validateDeepLink("/payments")).toBe("/payments");
+  });
+
   it("accepts the custom scheme form", () => {
     expect(validateDeepLink("civicflow://report-payment")).toBe("civicflow://report-payment");
   });
