@@ -101,9 +101,6 @@ export async function middleware(req: NextRequest) {
     pathname === "/reset-password" ||
     pathname === "/pricing" ||
     pathname === "/accept-invite" ||
-    pathname === "/sms-opt-in" ||
-    pathname === "/privacy" ||
-    pathname === "/terms" ||
     // Member-facing web fallback pages for universal links — publicly
     // viewable so an anonymous visitor sees the "open in app" banner
     // instead of being bounced to the staff login page.

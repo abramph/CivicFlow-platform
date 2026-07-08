@@ -4,7 +4,6 @@ import { signOut } from "next-auth/react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
-import { SmsOptInBanner } from "@/components/app/SmsOptInBanner";
 
 const NAV_ITEMS = [
   { href: "/m/dues", label: "Dues" },
@@ -14,16 +13,13 @@ const NAV_ITEMS = [
   { href: "/m/payment-history", label: "Payment History" },
   { href: "/m/make-payment", label: "Make a Payment" },
   { href: "/m/report-payment", label: "Report a Payment" },
-  { href: "/m/notifications", label: "Notification Settings" },
 ];
 
 interface MemberSessionSummary {
   organizationId: string;
-  memberId: string;
   organizationName: string;
   organizationLogoUrl: string | null;
   organizations: { organizationId: string; organizationName: string; organizationLogoUrl: string | null }[];
-  smsOptIn: boolean;
 }
 
 export function MemberPortalShell({ children }: { children: ReactNode }) {
@@ -162,10 +158,6 @@ export function MemberPortalShell({ children }: { children: ReactNode }) {
             className="flex-1 cursor-default bg-black/30"
           />
         </div>
-      ) : null}
-
-      {session && !session.smsOptIn ? (
-        <SmsOptInBanner organizationId={session.organizationId} memberId={session.memberId} />
       ) : null}
 
       {children}

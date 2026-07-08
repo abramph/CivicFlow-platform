@@ -3,14 +3,11 @@
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { SMS_CONSENT_TEXT } from "@/lib/sms-consent-text";
 
 export function AcceptInviteForm({ token }: { token: string }) {
   const router = useRouter();
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
-  const [phone, setPhone] = useState("");
-  const [smsOptIn, setSmsOptIn] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
@@ -30,15 +27,10 @@ export function AcceptInviteForm({ token }: { token: string }) {
 
     setSubmitting(true);
     try {
-      const trimmedPhone = phone.trim();
       const res = await fetch("/api/auth/accept-invite", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          token,
-          password,
-          ...(trimmedPhone ? { phone: trimmedPhone, smsOptIn } : {}),
-        }),
+        body: JSON.stringify({ token, password }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -106,45 +98,6 @@ export function AcceptInviteForm({ token }: { token: string }) {
             placeholder="Same as above"
           />
         </div>
-
-        <div>
-          <label htmlFor="phone" className="mb-1 block text-sm font-medium text-slate-700">
-            Mobile phone number <span className="font-normal text-slate-400">(optional)</span>
-          </label>
-          <input
-            id="phone"
-            name="phone"
-            type="tel"
-            autoComplete="tel"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
-            placeholder="+15551234567"
-          />
-        </div>
-
-        {phone.trim() ? (
-          <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-            <label className="flex items-start gap-3 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={smsOptIn}
-                onChange={(e) => setSmsOptIn(e.target.checked)}
-                className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-emerald-700 focus:ring-emerald-600"
-              />
-              <span>{SMS_CONSENT_TEXT}</span>
-            </label>
-            <p className="pl-7 text-xs text-slate-500">
-              <Link href="/privacy" target="_blank" className="font-medium text-emerald-700 hover:underline">
-                Privacy Policy
-              </Link>
-              {" · "}
-              <Link href="/terms" target="_blank" className="font-medium text-emerald-700 hover:underline">
-                Terms of Service
-              </Link>
-            </p>
-          </div>
-        ) : null}
 
         <button
           type="submit"

@@ -99,9 +99,6 @@ export const PERMISSIONS = {
   // Audit logs
   AUDIT_LOGS_READ: "audit_logs:read",
 
-  // SMS consent audit
-  SMS_CONSENT_READ: "sms_consent:read",
-
   // Super-admin only
   ALL_ORGS_READ:   "all_orgs:read",
   ALL_ORGS_MANAGE: "all_orgs:manage",
@@ -149,7 +146,6 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.MESSAGES_READ,
     PERMISSIONS.MESSAGES_WRITE,
     PERMISSIONS.AUDIT_LOGS_READ,
-    PERMISSIONS.SMS_CONSENT_READ,
   ],
 
   ORG_ADMIN: [
@@ -185,7 +181,6 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.MESSAGES_READ,
     PERMISSIONS.MESSAGES_WRITE,
     PERMISSIONS.AUDIT_LOGS_READ,
-    PERMISSIONS.SMS_CONSENT_READ,
   ],
 
   FINANCE: [
@@ -208,7 +203,6 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.MESSAGES_READ,
     PERMISSIONS.MESSAGES_WRITE,
     PERMISSIONS.AUDIT_LOGS_READ,
-    PERMISSIONS.SMS_CONSENT_READ,
   ],
 
   STAFF: [
