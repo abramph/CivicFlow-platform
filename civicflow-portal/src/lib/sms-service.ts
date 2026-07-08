@@ -29,7 +29,14 @@ export interface SendMemberSmsParams {
   body: string;
   campaignId?: string | null;
   sentById?: string | null;
-  /** Bypasses the member's own opt-out preference — reserved for legally required notices, mirrors the `required` param on sendPushToMember in lib/push.ts. */
+  /**
+   * Bypasses the member's own commsSmsEnabled preference toggle — reserved
+   * for legally required notices, mirrors the `required` param on
+   * sendPushToMember in lib/push.ts. Does NOT bypass smsOptIn or
+   * smsOptedOutAt: those are consent/compliance gates, not a preference, and
+   * Twilio/TCPA compliance requires them to block every message with no
+   * exceptions, "required" or not.
+   */
   required?: boolean;
 }
 
@@ -70,13 +77,21 @@ export async function sendMemberSms(params: SendMemberSmsParams): Promise<SmsMes
     return failedRow(params, "Invalid phone number.");
   }
 
-  if (memberId && !required) {
+  if (memberId) {
     const member = await prisma.orgMember.findUnique({
       where: { id: memberId },
-      select: { commsSmsEnabled: true, smsOptedOutAt: true },
+      select: { commsSmsEnabled: true, smsOptedOutAt: true, smsOptIn: true },
     });
-    if (member && (!member.commsSmsEnabled || member.smsOptedOutAt)) {
-      return failedRow(params, "Member opted out of SMS.");
+    if (member) {
+      if (!member.smsOptIn) {
+        return failedRow(params, "Member has not opted in to SMS.");
+      }
+      if (member.smsOptedOutAt) {
+        return failedRow(params, "Member opted out of SMS.");
+      }
+      if (!required && !member.commsSmsEnabled) {
+        return failedRow(params, "Member has SMS notifications turned off.");
+      }
     }
   }
 

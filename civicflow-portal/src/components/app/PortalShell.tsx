@@ -73,6 +73,7 @@ export function PortalShell({ children }: { children: ReactNode }) {
     { href: "/payments/imports", label: "Payment Imports" },
     { href: "/payments/reconciliation", label: "Reconciliation" },
     { href: "/audit-logs", label: "Audit Logs" },
+    { href: "/settings/sms-consent", label: "SMS Consent" },
     { href: "/payment-links", label: "Payment Links" },
     { href: "/settings", label: "Settings" },
     { href: "/settings/organization", label: "Organization" },
