@@ -78,10 +78,10 @@ describe("sendMemberSms", () => {
     expect(sendSms).not.toHaveBeenCalled();
   });
 
-  it("does not call Twilio when the member has opted out", async () => {
+  it("does not call Twilio when the member has never opted in to SMS", async () => {
     isSmsConfigured.mockReturnValueOnce(true);
     getSmsEntitlement.mockResolvedValueOnce({ allowed: true, remaining: 500, limit: 1000 });
-    findUniqueOrgMember.mockResolvedValueOnce({ commsSmsEnabled: false, smsOptedOutAt: null });
+    findUniqueOrgMember.mockResolvedValueOnce({ smsOptIn: false, commsSmsEnabled: false, smsOptedOutAt: null });
 
     const result = await sendMemberSms(baseParams());
 
@@ -89,10 +89,10 @@ describe("sendMemberSms", () => {
     expect(sendSms).not.toHaveBeenCalled();
   });
 
-  it("does not call Twilio when the member has a hard STOP opt-out, even if commsSmsEnabled is true", async () => {
+  it("does not call Twilio when the member has SMS notifications toggled off, even though they've opted in", async () => {
     isSmsConfigured.mockReturnValueOnce(true);
     getSmsEntitlement.mockResolvedValueOnce({ allowed: true, remaining: 500, limit: 1000 });
-    findUniqueOrgMember.mockResolvedValueOnce({ commsSmsEnabled: true, smsOptedOutAt: new Date() });
+    findUniqueOrgMember.mockResolvedValueOnce({ smsOptIn: true, commsSmsEnabled: false, smsOptedOutAt: null });
 
     const result = await sendMemberSms(baseParams());
 
@@ -100,19 +100,42 @@ describe("sendMemberSms", () => {
     expect(sendSms).not.toHaveBeenCalled();
   });
 
-  it("bypasses the opt-out check when required=true (legally required notices)", async () => {
+  it("does not call Twilio when the member has a hard STOP opt-out, even if opted in and commsSmsEnabled is true", async () => {
     isSmsConfigured.mockReturnValueOnce(true);
     getSmsEntitlement.mockResolvedValueOnce({ allowed: true, remaining: 500, limit: 1000 });
+    findUniqueOrgMember.mockResolvedValueOnce({ smsOptIn: true, commsSmsEnabled: true, smsOptedOutAt: new Date() });
+
+    const result = await sendMemberSms(baseParams());
+
+    expect(result.status).toBe("FAILED");
+    expect(sendSms).not.toHaveBeenCalled();
+  });
+
+  it("required=true bypasses the commsSmsEnabled preference toggle but still requires real opt-in", async () => {
+    isSmsConfigured.mockReturnValueOnce(true);
+    getSmsEntitlement.mockResolvedValueOnce({ allowed: true, remaining: 500, limit: 1000 });
+    findUniqueOrgMember.mockResolvedValueOnce({ smsOptIn: true, commsSmsEnabled: false, smsOptedOutAt: null });
     createSmsMessage.mockResolvedValueOnce({ id: "sms-1", status: "QUEUED" });
     sendSms.mockResolvedValueOnce({ sent: true, skipped: false, to: "+15551234567", providerMessageId: "SM1" });
     updateSmsMessage.mockResolvedValueOnce({ id: "sms-1", status: "SENT" });
 
     const result = await sendMemberSms(baseParams({ required: true }));
 
-    expect(findUniqueOrgMember).not.toHaveBeenCalled();
+    expect(findUniqueOrgMember).toHaveBeenCalled();
     expect(sendSms).toHaveBeenCalled();
     expect(result.status).toBe("SENT");
     expect(recordSmsUsage).toHaveBeenCalledWith("org-a");
+  });
+
+  it("required=true does NOT bypass a hard STOP opt-out or missing consent", async () => {
+    isSmsConfigured.mockReturnValueOnce(true);
+    getSmsEntitlement.mockResolvedValueOnce({ allowed: true, remaining: 500, limit: 1000 });
+    findUniqueOrgMember.mockResolvedValueOnce({ smsOptIn: true, commsSmsEnabled: true, smsOptedOutAt: new Date() });
+
+    const result = await sendMemberSms(baseParams({ required: true }));
+
+    expect(result.status).toBe("FAILED");
+    expect(sendSms).not.toHaveBeenCalled();
   });
 
   it("rejects an invalid phone number before calling Twilio", async () => {
@@ -128,7 +151,7 @@ describe("sendMemberSms", () => {
   it("normalizes a typical US-formatted member phone number (e.g. from CSV import) before sending", async () => {
     isSmsConfigured.mockReturnValueOnce(true);
     getSmsEntitlement.mockResolvedValueOnce({ allowed: true, remaining: 500, limit: 1000 });
-    findUniqueOrgMember.mockResolvedValueOnce({ commsSmsEnabled: true, smsOptedOutAt: null });
+    findUniqueOrgMember.mockResolvedValueOnce({ smsOptIn: true, commsSmsEnabled: true, smsOptedOutAt: null });
     createSmsMessage.mockResolvedValueOnce({ id: "sms-1", status: "QUEUED" });
     sendSms.mockResolvedValueOnce({ sent: true, skipped: false, to: "+12159174391" });
     updateSmsMessage.mockResolvedValueOnce({ id: "sms-1", status: "SENT" });
@@ -146,7 +169,7 @@ describe("sendMemberSms", () => {
     isSmsConfigured.mockReturnValueOnce(true);
     // remaining is negative — already over the limit — but still allowed (soft cap).
     getSmsEntitlement.mockResolvedValueOnce({ allowed: true, remaining: -10, limit: 1000 });
-    findUniqueOrgMember.mockResolvedValueOnce({ commsSmsEnabled: true, smsOptedOutAt: null });
+    findUniqueOrgMember.mockResolvedValueOnce({ smsOptIn: true, commsSmsEnabled: true, smsOptedOutAt: null });
     createSmsMessage.mockResolvedValueOnce({ id: "sms-1", status: "QUEUED" });
     sendSms.mockResolvedValueOnce({ sent: true, skipped: false, to: "+15551234567", providerMessageId: "SM1" });
     updateSmsMessage.mockResolvedValueOnce({ id: "sms-1", status: "SENT" });
@@ -160,7 +183,7 @@ describe("sendMemberSms", () => {
   it("marks FAILED and does not record usage when Twilio itself errors", async () => {
     isSmsConfigured.mockReturnValueOnce(true);
     getSmsEntitlement.mockResolvedValueOnce({ allowed: true, remaining: 500, limit: 1000 });
-    findUniqueOrgMember.mockResolvedValueOnce({ commsSmsEnabled: true, smsOptedOutAt: null });
+    findUniqueOrgMember.mockResolvedValueOnce({ smsOptIn: true, commsSmsEnabled: true, smsOptedOutAt: null });
     createSmsMessage.mockResolvedValueOnce({ id: "sms-1", status: "QUEUED" });
     sendSms.mockResolvedValueOnce({ sent: false, skipped: false, to: "+15551234567", reason: "Twilio request failed (500)" });
     updateSmsMessage.mockResolvedValueOnce({ id: "sms-1", status: "FAILED", errorMessage: "Twilio request failed (500)" });
@@ -174,7 +197,7 @@ describe("sendMemberSms", () => {
   it("appends the opt-out compliance suffix to the message body", async () => {
     isSmsConfigured.mockReturnValueOnce(true);
     getSmsEntitlement.mockResolvedValueOnce({ allowed: true, remaining: 500, limit: 1000 });
-    findUniqueOrgMember.mockResolvedValueOnce({ commsSmsEnabled: true, smsOptedOutAt: null });
+    findUniqueOrgMember.mockResolvedValueOnce({ smsOptIn: true, commsSmsEnabled: true, smsOptedOutAt: null });
     createSmsMessage.mockResolvedValueOnce({ id: "sms-1", status: "QUEUED" });
     sendSms.mockResolvedValueOnce({ sent: true, skipped: false, to: "+15551234567" });
     updateSmsMessage.mockResolvedValueOnce({ id: "sms-1", status: "SENT" });

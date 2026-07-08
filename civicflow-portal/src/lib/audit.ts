@@ -19,6 +19,7 @@ interface CreateAuditEventInput {
   entityType: string;
   entityId?: string | null;
   metadata?: Prisma.InputJsonValue;
+  ipAddress?: string | null;
 }
 
 /**
@@ -34,6 +35,7 @@ export async function createAuditEvent(input: CreateAuditEventInput) {
       resource: input.entityType,
       resourceId: input.entityId ?? null,
       after: input.metadata ?? undefined,
+      ipAddress: input.ipAddress ?? null,
     },
   });
 }

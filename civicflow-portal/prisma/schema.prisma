@@ -59,6 +59,16 @@ enum MembershipStatus {
   terminated
 }
 
+/// How a member gave explicit SMS consent. Serialized to the exact required
+/// label strings via formatSmsOptInMethod() (src/lib/sms-consent.ts) — kept
+/// as an enum here for data integrity, not @map'd, since Prisma enum values
+/// can't contain spaces.
+enum SmsOptInMethod {
+  WEBSITE_REGISTRATION
+  PROFILE_SETTINGS
+  QR_CODE
+}
+
 enum DuesChargeStatus {
   PENDING
   PARTIAL
@@ -433,7 +443,7 @@ model MfaChallengeToken {
   id        String   @id @default(cuid())
   userId    String
   token     String   @unique @default(cuid())
-  type      String // "pending" | "completion" | "sms_otp" | "phone_verify"
+  type      String // "pending" | "completion" | "sms_otp" | "phone_verify" | "sms_opt_in"
   codeHash  String? // SHA-256 of the SMS one-time code, for "sms_otp" / "phone_verify"
   phone     String? // Candidate/target phone number, for "sms_otp" / "phone_verify"
   expiresAt DateTime
@@ -571,6 +581,17 @@ model OrgMember {
   /// "START"/"UNSTOP" reply clears it.
   smsOptedOutAt                    DateTime?
   requiredNoticesOnly              Boolean          @default(false)
+  /// Explicit, recorded consent to receive SMS (Twilio/TCPA compliance).
+  /// This — not commsSmsEnabled — is the hard gate on whether SMS can be
+  /// sent at all; commsSmsEnabled is just the day-to-day on/off preference
+  /// once consent has been given. Only recordSmsOptIn()/recordSmsOptOut()
+  /// (src/lib/sms-consent.ts) should write these fields.
+  smsOptIn                         Boolean          @default(false)
+  smsOptInDate                     DateTime?
+  smsOptInIP                       String?
+  smsOptInMethod                   SmsOptInMethod?
+  smsOptOutDate                    DateTime?
+  smsConsentVersion                String?
   createdAt                        DateTime         @default(now())
   updatedAt                        DateTime         @updatedAt
 

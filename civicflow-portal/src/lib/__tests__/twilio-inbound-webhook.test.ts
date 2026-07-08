@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/rate-limit", () => ({ requireRateLimit: vi.fn().mockResolvedValue(null) }));
 
 const updateManyOrgMember = vi.fn().mockResolvedValue({ count: 1 });
-const queryRawOrgMember = vi.fn().mockResolvedValue([{ id: "member-1" }]);
+const queryRawOrgMember = vi.fn().mockResolvedValue([{ id: "member-1", organizationId: "org-1" }]);
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     orgMember: {
@@ -13,6 +13,9 @@ vi.mock("@/lib/prisma", () => ({
     $queryRaw: (...args: unknown[]) => queryRawOrgMember(...args),
   },
 }));
+
+const createAuditEvent = vi.fn().mockResolvedValue(undefined);
+vi.mock("@/lib/audit", () => ({ createAuditEvent: (...args: unknown[]) => createAuditEvent(...args) }));
 
 import { POST } from "@/app/api/webhooks/twilio/inbound/route";
 
@@ -45,7 +48,8 @@ describe("Twilio inbound webhook", () => {
   beforeEach(() => {
     updateManyOrgMember.mockClear();
     queryRawOrgMember.mockClear();
-    queryRawOrgMember.mockResolvedValue([{ id: "member-1" }]);
+    createAuditEvent.mockClear();
+    queryRawOrgMember.mockResolvedValue([{ id: "member-1", organizationId: "org-1" }]);
     process.env.SMS_API_KEY = AUTH_TOKEN;
   });
 
@@ -80,14 +84,23 @@ describe("Twilio inbound webhook", () => {
   });
 
   it("opts a member out on a verified STOP keyword, matching by id from the phone lookup", async () => {
-    queryRawOrgMember.mockResolvedValueOnce([{ id: "member-1" }, { id: "member-2" }]);
+    queryRawOrgMember.mockResolvedValueOnce([
+      { id: "member-1", organizationId: "org-1" },
+      { id: "member-2", organizationId: "org-2" },
+    ]);
     const request = makeRequest({ From: "+15551234567", Body: "STOP" });
     const response = await POST(request);
     expect(response.status).toBe(200);
     expect(updateManyOrgMember).toHaveBeenCalledWith({
       where: { id: { in: ["member-1", "member-2"] } },
-      data: { commsSmsEnabled: false, smsOptedOutAt: expect.any(Date) },
+      data: { commsSmsEnabled: false, smsOptedOutAt: expect.any(Date), smsOptIn: false, smsOptOutDate: expect.any(Date) },
     });
+    expect(createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: "org-1", action: "sms_consent.opt_out", entityId: "member-1" })
+    );
+    expect(createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: "org-2", action: "sms_consent.opt_out", entityId: "member-2" })
+    );
   });
 
   it("looks up members by digits-only phone (full and last-10) so mixed-format stored numbers still match", async () => {
@@ -104,18 +117,32 @@ describe("Twilio inbound webhook", () => {
     expect(response.status).toBe(200);
     expect(updateManyOrgMember).toHaveBeenCalledWith({
       where: { id: { in: ["member-1"] } },
-      data: { commsSmsEnabled: false, smsOptedOutAt: expect.any(Date) },
+      data: { commsSmsEnabled: false, smsOptedOutAt: expect.any(Date), smsOptIn: false, smsOptOutDate: expect.any(Date) },
     });
   });
 
-  it("opts a member back in on a verified START keyword, clearing smsOptedOutAt", async () => {
+  it("opts a member back in on a verified START keyword, clearing smsOptedOutAt and restoring smsOptIn", async () => {
     const request = makeRequest({ From: "+15551234567", Body: "START" });
     const response = await POST(request);
     expect(response.status).toBe(200);
     expect(updateManyOrgMember).toHaveBeenCalledWith({
       where: { id: { in: ["member-1"] } },
-      data: { commsSmsEnabled: true, smsOptedOutAt: null },
+      data: { commsSmsEnabled: true, smsOptedOutAt: null, smsOptIn: true, smsOptOutDate: null },
     });
+    expect(createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: "org-1", action: "sms_consent.opt_in", entityId: "member-1" })
+    );
+  });
+
+  it("replies with support info on a verified HELP keyword, without touching consent state", async () => {
+    const request = makeRequest({ From: "+15551234567", Body: "HELP" });
+    const response = await POST(request);
+    expect(response.status).toBe(200);
+    const text = await response.text();
+    expect(text).toContain("<Message>");
+    expect(text).toContain("support@civicflowapp.com");
+    expect(queryRawOrgMember).not.toHaveBeenCalled();
+    expect(updateManyOrgMember).not.toHaveBeenCalled();
   });
 
   it("does nothing when no member matches the phone number", async () => {

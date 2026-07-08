@@ -87,7 +87,7 @@ async function checkRedisLimit(
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
-function getClientIp(request: Request): string {
+export function getClientIp(request: Request): string {
   const forwarded = request.headers.get("x-forwarded-for") ?? "";
   if (forwarded) return forwarded.split(",")[0].trim();
   return request.headers.get("x-real-ip") ?? "unknown";
