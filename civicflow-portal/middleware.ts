@@ -116,7 +116,7 @@ export async function middleware(req: NextRequest) {
   }
 
   if (token && !token.mfaPending && pathname === "/login") {
-    return withNoStore(NextResponse.redirect(new URL("/dashboard", req.url)));
+    return withNoStore(NextResponse.redirect(new URL("/select-organization", req.url)));
   }
 
   const response = NextResponse.next();

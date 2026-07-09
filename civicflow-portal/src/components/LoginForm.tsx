@@ -31,7 +31,7 @@ export function LoginForm({ verified }: { verified?: boolean } = {}) {
         redirect: false,
         email: emailInput,
         password: passwordInput,
-        callbackUrl: "/dashboard",
+        callbackUrl: "/select-organization",
       });
 
       if (!result || result.error) {
@@ -40,7 +40,7 @@ export function LoginForm({ verified }: { verified?: boolean } = {}) {
         return;
       }
 
-      router.push("/dashboard");
+      router.push("/select-organization");
       router.refresh();
       return;
     } catch (err) {

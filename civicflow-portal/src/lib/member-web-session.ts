@@ -2,8 +2,13 @@ import { cookies } from "next/headers";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/authOptions";
 import { ForbiddenError } from "@/lib/auth-guards";
-import { prisma } from "@/lib/prisma";
+import { ACTIVE_ORG_COOKIE, getUserOrgMemberships } from "@/lib/org-context";
 
+/**
+ * @deprecated Superseded by ACTIVE_ORG_COOKIE (src/lib/org-context.ts), which
+ * now covers both staff and member surfaces. Still read here as a fallback
+ * so cookies set before the two mechanisms were unified keep working.
+ */
 export const MEMBER_ORG_COOKIE = "cf_member_org";
 
 export interface MemberWebSession {
@@ -21,50 +26,47 @@ export interface MemberWebSession {
  * visitor isn't authenticated or isn't a member — callers should render
  * the "open in app / log in" fallback UI in that case.
  *
+ * Sources its membership list from the same `getUserOrgMemberships` used by
+ * the staff org switcher, so a suspended membership or inactive org is
+ * excluded identically on both surfaces.
+ *
  * `requestedOrgId` (from a `?org=` query param) lets a member who belongs to
  * multiple organizations pick one; it's validated against their actual
  * memberships, never trusted blindly. When omitted, falls back to the
- * member's last-selected org (the `cf_member_org` cookie, set by the
- * select-organization endpoint) so switching orgs sticks across every link,
- * not just ones that happen to carry `?org=`; if that's also unset or stale,
- * falls back to their oldest membership.
+ * member's last-selected org (the unified `cf_active_org` cookie, or the
+ * legacy `cf_member_org` cookie for links/cookies set before unification)
+ * so switching orgs sticks across every link, not just ones that happen to
+ * carry `?org=`; if that's also unset or stale, falls back to their oldest
+ * membership.
  */
 export async function getMemberWebSession(requestedOrgId?: string): Promise<MemberWebSession | null> {
   const session = await getServerSession(authOptions);
   if (!session?.userId) return null;
 
-  const memberships = await prisma.organizationMembership.findMany({
-    where: { userId: session.userId, role: "MEMBER", organization: { status: "active" } },
-    orderBy: { joinedAt: "asc" },
-    include: { organization: { select: { id: true, name: true, logoUrl: true } } },
-  });
+  const memberships = (await getUserOrgMemberships(session.userId)).filter((m) => m.role === "MEMBER");
   if (memberships.length === 0) return null;
 
-  const cookieOrgId = (await cookies()).get(MEMBER_ORG_COOKIE)?.value;
+  const cookieStore = await cookies();
+  const cookieOrgId = cookieStore.get(ACTIVE_ORG_COOKIE)?.value ?? cookieStore.get(MEMBER_ORG_COOKIE)?.value;
 
   const organizationId =
     (requestedOrgId && memberships.some((m) => m.organizationId === requestedOrgId) ? requestedOrgId : null) ??
     (cookieOrgId && memberships.some((m) => m.organizationId === cookieOrgId) ? cookieOrgId : null) ??
     memberships[0].organizationId;
 
-  const member = await prisma.orgMember.findFirst({
-    where: { userId: session.userId, organizationId },
-    select: { id: true },
-  });
-  if (!member) return null;
-
-  const activeMembership = memberships.find((m) => m.organizationId === organizationId)!;
+  const active = memberships.find((m) => m.organizationId === organizationId)!;
+  if (!active.memberId) return null;
 
   return {
     userId: session.userId,
     organizationId,
-    memberId: member.id,
-    organizationName: activeMembership.organization.name,
-    organizationLogoUrl: activeMembership.organization.logoUrl,
+    memberId: active.memberId,
+    organizationName: active.organizationName,
+    organizationLogoUrl: active.organizationLogoUrl,
     organizations: memberships.map((m) => ({
       organizationId: m.organizationId,
-      organizationName: m.organization.name,
-      organizationLogoUrl: m.organization.logoUrl,
+      organizationName: m.organizationName,
+      organizationLogoUrl: m.organizationLogoUrl,
     })),
   };
 }

@@ -7,7 +7,10 @@ type SearchParams = Promise<{ verified?: string }>;
 
 export default async function LoginPage({ searchParams }: { searchParams: SearchParams }) {
   const session = await getServerSession(authOptions);
-  if (session?.userId || session?.api_key) {
+  if (session?.userId) {
+    redirect("/select-organization");
+  }
+  if (session?.api_key) {
     redirect("/dashboard");
   }
 

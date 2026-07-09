@@ -3,6 +3,7 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { getEffectivePermissions } from "@/lib/role-permissions";
+import { resolveActiveOrganization, getUserOrgMemberships } from "@/lib/org-context";
 
 const defaultApiBase = process.env.NEXT_PUBLIC_API_BASE || "https://api.civicflowapp.com/api";
 
@@ -207,15 +208,9 @@ export const authOptions: NextAuthOptions = {
       }
 
       if (token.userId) {
-        const [membership, user] = await Promise.all([
-          prisma.organizationMembership.findFirst({
-            where: {
-              userId: String(token.userId),
-              organization: { status: "active" },
-            },
-            orderBy: { joinedAt: "asc" },
-            include: { organization: { select: { name: true } } },
-          }),
+        const [active, organizations, user] = await Promise.all([
+          resolveActiveOrganization(String(token.userId)),
+          getUserOrgMemberships(String(token.userId)),
           prisma.user.findUnique({
             where: { id: String(token.userId) },
             select: { email: true },
@@ -224,9 +219,11 @@ export const authOptions: NextAuthOptions = {
 
         session.userId = String(token.userId);
         session.userEmail = user?.email ?? String(token.userEmail || "");
-        session.organizationId = membership?.organizationId ?? null;
-        session.orgName = membership?.organization?.name ?? null;
-        session.role = membership?.role ?? null;
+        session.organizationId = active?.organizationId ?? null;
+        session.orgName = active?.organizationName ?? null;
+        session.role = active?.role ?? null;
+        session.memberId = active?.memberId ?? null;
+        session.organizations = organizations;
       } else {
         session.userId = token.userId;
         session.userEmail = token.userEmail;

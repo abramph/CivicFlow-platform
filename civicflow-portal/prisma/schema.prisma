@@ -485,14 +485,19 @@ model AccountVerificationToken {
 /// Join table: User ↔ Organization with a role.
 /// organizationId is always derived from the session — never trusted from client input.
 model OrganizationMembership {
-  id             String    @id @default(cuid())
+  id             String                       @id @default(cuid())
   organizationId String
   userId         String
-  role           OrgRole   @default(STAFF)
+  role           OrgRole                      @default(STAFF)
+  /// Lets a super admin suspend one org membership without deleting the row
+  /// or affecting the user's other org memberships. Checked alongside the
+  /// org's own status when resolving the active organization for a
+  /// session — suspended behaves like "not a member of this org."
+  status         OrganizationMembershipStatus @default(active)
   invitedAt      DateTime?
-  joinedAt       DateTime  @default(now())
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  joinedAt       DateTime                     @default(now())
+  createdAt      DateTime                     @default(now())
+  updatedAt      DateTime                     @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -500,6 +505,11 @@ model OrganizationMembership {
   @@unique([organizationId, userId])
   @@index([organizationId])
   @@index([userId])
+}
+
+enum OrganizationMembershipStatus {
+  active
+  suspended
 }
 
 /// Stripe subscription record for an organization.
@@ -604,6 +614,10 @@ model OrgMember {
   smsOptInMethod                   SmsOptInMethod?
   smsOptOutDate                    DateTime?
   smsConsentVersion                String?
+  /// Human-friendly member number, optional and unique per org when set
+  /// (Postgres unique indexes allow multiple NULLs, so orgs that don't use
+  /// member numbers are unaffected).
+  memberNumber                     String?
   createdAt                        DateTime         @default(now())
   updatedAt                        DateTime         @updatedAt
 
@@ -627,6 +641,7 @@ model OrgMember {
   smsMessages             SmsMessage[]
 
   @@unique([organizationId, userId])
+  @@unique([organizationId, memberNumber])
   @@index([organizationId])
   @@index([organizationId, membershipStatus])
   @@index([organizationId, lastName, firstName])

@@ -14,58 +14,54 @@ vi.mock("@/lib/org-context", () => ({
   getUserOrgMemberships: (...args: unknown[]) => getUserOrgMemberships(...args),
 }));
 
-vi.mock("@/lib/member-web-session", () => ({
-  MEMBER_ORG_COOKIE: "cf_member_org",
-}));
-
 const setCookie = vi.fn();
 vi.mock("next/headers", () => ({
   cookies: () => Promise.resolve({ set: setCookie }),
 }));
 
-import { POST } from "@/app/api/member-portal/select-organization/route";
+import { POST } from "@/app/api/organization/select/route";
 
 function jsonRequest(body: unknown) {
-  return new Request("https://portal.test/api/member-portal/select-organization", {
+  return new Request("https://portal.test/api/organization/select", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
 }
 
-describe("POST /api/member-portal/select-organization (legacy alias)", () => {
+describe("POST /api/organization/select", () => {
   beforeEach(() => {
     getUserOrgMemberships.mockReset();
     setCookie.mockClear();
   });
 
-  it("rejects an organizationId the caller doesn't actually belong to", async () => {
+  it("rejects an organizationId the user doesn't belong to", async () => {
     getUserOrgMemberships.mockResolvedValueOnce([
-      { organizationId: "org-a", role: "MEMBER", memberId: "member-1" },
+      { organizationId: "org-a", role: "STAFF", memberId: null },
     ]);
 
     const response = await POST(jsonRequest({ organizationId: "org-b" }));
+    const data = await response.json();
 
     expect(response.status).toBe(403);
+    expect(data.ok).toBe(false);
     expect(setCookie).not.toHaveBeenCalled();
   });
 
-  it("sets both the unified and legacy cookies for a valid organization", async () => {
+  it("sets the unified cookie and returns the role/memberId for a valid organization", async () => {
     getUserOrgMemberships.mockResolvedValueOnce([
-      { organizationId: "org-a", role: "MEMBER", memberId: "member-1" },
+      { organizationId: "org-a", role: "STAFF", memberId: null },
+      { organizationId: "org-b", role: "MEMBER", memberId: "member-1" },
     ]);
 
-    const response = await POST(jsonRequest({ organizationId: "org-a" }));
+    const response = await POST(jsonRequest({ organizationId: "org-b" }));
+    const data = await response.json();
 
     expect(response.status).toBe(200);
+    expect(data).toMatchObject({ ok: true, role: "MEMBER", memberId: "member-1" });
     expect(setCookie).toHaveBeenCalledWith(
       "cf_active_org",
-      "org-a",
-      expect.objectContaining({ httpOnly: true, sameSite: "lax" })
-    );
-    expect(setCookie).toHaveBeenCalledWith(
-      "cf_member_org",
-      "org-a",
+      "org-b",
       expect.objectContaining({ httpOnly: true, sameSite: "lax" })
     );
   });
