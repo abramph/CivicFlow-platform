@@ -1,16 +1,28 @@
 import bcrypt from "bcryptjs";
 import { consumeMemberInvite, markMemberInviteAccepted } from "@/lib/member-invites";
 import { prisma } from "@/lib/prisma";
+import { recordSmsOptIn } from "@/lib/sms-consent";
+
+export interface AcceptInviteSmsConsent {
+  /** E.164 phone number, if the member entered one on the accept-invite form. */
+  phone?: string | null;
+  /** Whether they checked the SMS consent box — independent of just entering a phone. */
+  optIn?: boolean;
+  ip?: string;
+}
 
 /**
  * Consumes a member app invite: creates or links the User account, upserts
  * their MEMBER-role OrganizationMembership, and marks the invite accepted.
  * Shared by the mobile and web accept-invite routes — mobile additionally
  * signs a bearer token pair on top of this; web just redirects to /login.
+ * `smsConsent` is optional and web-only today (requirement: capture SMS
+ * opt-in at registration) — mobile's accept-invite route doesn't pass it.
  */
 export async function acceptMemberInvite(
   token: string,
-  password: string
+  password: string,
+  smsConsent?: AcceptInviteSmsConsent
 ): Promise<
   | { ok: true; user: { id: string; email: string; displayName: string | null }; mobileTokenVersion: number }
   | { ok: false; error: string }
@@ -57,6 +69,23 @@ export async function acceptMemberInvite(
   ]);
 
   await markMemberInviteAccepted(inviteId);
+
+  if (smsConsent?.phone) {
+    if (smsConsent.optIn) {
+      await recordSmsOptIn({
+        organizationId,
+        memberId: member.id,
+        phone: smsConsent.phone,
+        ip: smsConsent.ip ?? "unknown",
+        method: "WEBSITE_REGISTRATION",
+        actorUserId: user.id,
+      });
+    } else {
+      // Phone entered but consent box left unchecked — save the number on
+      // file without granting SMS consent; it can be used to opt in later.
+      await prisma.orgMember.update({ where: { id: member.id }, data: { phone: smsConsent.phone } });
+    }
+  }
 
   return {
     ok: true,
