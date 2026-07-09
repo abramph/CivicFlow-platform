@@ -1,5 +1,6 @@
 const express = require("express");
 const crypto = require("crypto");
+const path = require("path");
 const Sentry = require("@sentry/node");
 const {
   activateLicenseSeat,
@@ -372,6 +373,10 @@ function createApp() {
     res.setHeader("X-Frame-Options", "DENY");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
     next();
+  });
+
+  app.get("/favicon.ico", (_req, res) => {
+    res.sendFile(path.join(__dirname, "public", "favicon.ico"));
   });
 
   app.post("/webhooks/stripe", express.raw({ type: "application/json" }), async (req, res) => {

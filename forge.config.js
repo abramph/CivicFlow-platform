@@ -2,6 +2,7 @@ module.exports = {
   packagerConfig: {
     asar: true,
     executableName: "CivicFlow",
+    icon: "build/icon",
     ignore: [
       /tools[\\/]private\.pem$/,
       /tools[\\/]generate-license\.js$/,
