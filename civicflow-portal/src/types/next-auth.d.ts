@@ -37,6 +37,10 @@ declare module "next-auth" {
     mfaPending?: boolean;
     mfaUserId?: string;
     mfaTokenId?: string;
+    // ISO timestamp the pending challenge token expires at (10-minute TTL,
+    // see authOptions.ts) — lets the client show a countdown and detect
+    // expiry proactively instead of only after a failed submit.
+    mfaChallengeExpiresAt?: string | null;
   }
 }
 

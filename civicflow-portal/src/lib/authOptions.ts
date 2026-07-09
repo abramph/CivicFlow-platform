@@ -191,6 +191,18 @@ export const authOptions: NextAuthOptions = {
         session.org_id  = "";
         session.api_key = "";
         session.api_base = defaultApiBase;
+
+        // Lets the MFA page show a countdown and proactively detect expiry,
+        // instead of the user only finding out via a failed Verify/Text-me
+        // submission (which is how this was silently confusing before).
+        if (token.mfaTokenId) {
+          const challenge = await prisma.mfaChallengeToken.findUnique({
+            where: { id: String(token.mfaTokenId) },
+            select: { expiresAt: true },
+          });
+          session.mfaChallengeExpiresAt = challenge?.expiresAt?.toISOString() ?? null;
+        }
+
         return session;
       }
 
