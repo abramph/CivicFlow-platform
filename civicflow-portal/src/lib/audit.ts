@@ -12,7 +12,8 @@ export type AuditAction =
   | string;
 
 interface CreateAuditEventInput {
-  organizationId: string;
+  /** Null for platform-level actions with no owning organization (e.g. SUPER_ADMIN SMS Administration changes). */
+  organizationId: string | null;
   actorUserId?: string | null;
   actorEmail?: string | null;
   action: AuditAction;

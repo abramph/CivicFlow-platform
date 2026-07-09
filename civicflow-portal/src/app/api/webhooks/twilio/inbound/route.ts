@@ -1,6 +1,7 @@
-import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 import { requireRateLimit } from "@/lib/rate-limit";
+import { getEffectiveTwilioCredentials } from "@/lib/sms-credentials";
+import { verifyTwilioWebhookRequest } from "@/lib/twilio-signature";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,34 +10,6 @@ const STOP_KEYWORDS = new Set(["STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END"
 const START_KEYWORDS = new Set(["START", "YES", "UNSTOP"]);
 
 const EMPTY_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>';
-
-/** Reconstructs the public-facing URL Twilio actually signed, in case a proxy rewrites the scheme/host. */
-function getSignatureUrl(request: Request): string {
-  const forwardedProto = request.headers.get("x-forwarded-proto");
-  const forwardedHost = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
-  if (forwardedProto && forwardedHost) {
-    const url = new URL(request.url);
-    return `${forwardedProto}://${forwardedHost}${url.pathname}${url.search}`;
-  }
-  return request.url;
-}
-
-/** Twilio's documented request-signing algorithm: HMAC-SHA1(authToken, url + sorted "key+value" pairs), base64-encoded. */
-function computeTwilioSignature(url: string, params: Record<string, string>, authToken: string): string {
-  const sortedKeys = Object.keys(params).sort();
-  let data = url;
-  for (const key of sortedKeys) {
-    data += key + params[key];
-  }
-  return crypto.createHmac("sha1", authToken).update(Buffer.from(data, "utf-8")).digest("base64");
-}
-
-function signaturesMatch(expected: string, actual: string): boolean {
-  const expectedBuf = Buffer.from(expected);
-  const actualBuf = Buffer.from(actual);
-  if (expectedBuf.length !== actualBuf.length) return false;
-  return crypto.timingSafeEqual(expectedBuf, actualBuf);
-}
 
 function twimlResponse() {
   return new Response(EMPTY_TWIML, { status: 200, headers: { "Content-Type": "text/xml" } });
@@ -59,19 +32,9 @@ export async function POST(request: Request) {
   });
   if (rateLimited) return rateLimited;
 
-  const authToken = process.env.SMS_API_KEY;
-  const signatureHeader = request.headers.get("X-Twilio-Signature");
-  if (!authToken || !signatureHeader) {
-    return new Response("Forbidden", { status: 403 });
-  }
-
-  const rawBody = await request.text();
-  const params = new URLSearchParams(rawBody);
-  const paramsObject: Record<string, string> = {};
-  for (const [key, value] of params.entries()) paramsObject[key] = value;
-
-  const expectedSignature = computeTwilioSignature(getSignatureUrl(request), paramsObject, authToken);
-  if (!signaturesMatch(expectedSignature, signatureHeader)) {
+  const credentials = await getEffectiveTwilioCredentials();
+  const paramsObject = await verifyTwilioWebhookRequest(request, credentials?.authToken);
+  if (!paramsObject) {
     return new Response("Forbidden", { status: 403 });
   }
 

@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { getPlatformSmsSettings } from "@/lib/sms-credentials";
 
 export interface SmsEntitlement {
   allowed: boolean;
@@ -16,14 +17,24 @@ const ACTIVE_STATUSES = new Set(["active", "trialing", "past_due"]);
  * this, the same way auth-guards.ts never trusts a cached permission.
  */
 export async function getSmsEntitlement(organizationId: string): Promise<SmsEntitlement> {
-  const [settings, subscription] = await Promise.all([
+  const [settings, subscription, platformSettings] = await Promise.all([
     prisma.organizationSmsSettings.findUnique({ where: { organizationId } }),
     prisma.subscription.findFirst({
       where: { organizationId },
       orderBy: { updatedAt: "desc" },
       select: { status: true },
     }),
+    getPlatformSmsSettings(),
   ]);
+
+  if (!platformSettings.orgMessagingEnabled) {
+    return {
+      allowed: false,
+      reason: "Organization SMS messaging is currently disabled platform-wide.",
+      remaining: 0,
+      limit: 0,
+    };
+  }
 
   if (!settings || !settings.smsAddOnActive) {
     return {
@@ -31,6 +42,15 @@ export async function getSmsEntitlement(organizationId: string): Promise<SmsEnti
       reason: "Your organization does not have the SMS add-on enabled.",
       remaining: 0,
       limit: 0,
+    };
+  }
+
+  if (settings.suspendedAt) {
+    return {
+      allowed: false,
+      reason: "SMS messaging has been suspended for your organization by a platform administrator.",
+      remaining: 0,
+      limit: settings.smsMonthlyLimit,
     };
   }
 

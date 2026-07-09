@@ -7,76 +7,42 @@ export default async function PlatformAdminPage() {
   await requireSuperAdmin();
 
   const ACTIVELY_SUBSCRIBED_STATUSES = ["active", "trialing", "past_due"] as const;
-  const monthStart = new Date();
-  monthStart.setDate(1);
-  monthStart.setHours(0, 0, 0, 0);
 
-  const [
-    organizations,
-    organizationsCount,
-    activelySubscribedOrgsCount,
-    usersCount,
-    subscriptions,
-    subscriptionsCount,
-    recentAuditEvents,
-    smsEnabledOrgsCount,
-    smsSentThisMonthCount,
-    smsFailedThisMonthCount,
-    smsSentThisMonth,
-    activeSmsSettings,
-  ] = await Promise.all([
-    prisma.organization.findMany({
-      orderBy: [{ createdAt: "desc" }],
-      include: {
-        _count: {
-          select: {
-            members: true,
-            memberships: true,
-            contributions: true,
+  const [organizations, organizationsCount, activelySubscribedOrgsCount, usersCount, subscriptions, subscriptionsCount, recentAuditEvents, smsEnabledOrgsCount] =
+    await Promise.all([
+      prisma.organization.findMany({
+        orderBy: [{ createdAt: "desc" }],
+        include: {
+          _count: {
+            select: {
+              members: true,
+              memberships: true,
+              contributions: true,
+            },
           },
         },
-      },
-      take: 50,
-    }),
-    prisma.organization.count(),
-    // Distinct organizations with at least one currently-paying-or-trialing
-    // subscription — not a raw subscription-row count, since an org can
-    // accumulate multiple historical Subscription rows (old + new) and we
-    // don't want to double-count it.
-    prisma.organization.count({
-      where: { subscriptions: { some: { status: { in: [...ACTIVELY_SUBSCRIBED_STATUSES] } } } },
-    }),
-    prisma.user.count(),
-    prisma.subscription.findMany({
-      orderBy: [{ createdAt: "desc" }],
-      take: 50,
-    }),
-    prisma.subscription.count(),
-    prisma.auditEvent.findMany({
-      orderBy: [{ createdAt: "desc" }],
-      take: 50,
-    }),
-    prisma.organizationSmsSettings.count({ where: { smsAddOnActive: true } }),
-    prisma.smsMessage.count({ where: { status: { in: ["SENT", "DELIVERED"] }, createdAt: { gte: monthStart } } }),
-    prisma.smsMessage.count({ where: { status: "FAILED", createdAt: { gte: monthStart } } }),
-    prisma.smsMessage.findMany({
-      where: { status: { in: ["SENT", "DELIVERED"] }, createdAt: { gte: monthStart } },
-      select: { costEstimateCents: true },
-    }),
-    prisma.organizationSmsSettings.findMany({
-      where: { smsAddOnActive: true },
-      select: { organizationId: true, smsMonthlyLimit: true, smsUsedThisPeriod: true, smsOverageRateCents: true },
-    }),
-  ]);
-
-  const estimatedSmsCostCents = smsSentThisMonth.reduce((sum, row) => sum + (row.costEstimateCents ?? 0), 0);
-  const smsOverageRevenueCents = activeSmsSettings.reduce((sum, settings) => {
-    const overageCount = Math.max(0, settings.smsUsedThisPeriod - settings.smsMonthlyLimit);
-    return sum + overageCount * settings.smsOverageRateCents;
-  }, 0);
-  const orgsNearSmsLimit = activeSmsSettings.filter(
-    (settings) => settings.smsMonthlyLimit > 0 && settings.smsUsedThisPeriod / settings.smsMonthlyLimit >= 0.8
-  ).length;
+        take: 50,
+      }),
+      prisma.organization.count(),
+      // Distinct organizations with at least one currently-paying-or-trialing
+      // subscription — not a raw subscription-row count, since an org can
+      // accumulate multiple historical Subscription rows (old + new) and we
+      // don't want to double-count it.
+      prisma.organization.count({
+        where: { subscriptions: { some: { status: { in: [...ACTIVELY_SUBSCRIBED_STATUSES] } } } },
+      }),
+      prisma.user.count(),
+      prisma.subscription.findMany({
+        orderBy: [{ createdAt: "desc" }],
+        take: 50,
+      }),
+      prisma.subscription.count(),
+      prisma.auditEvent.findMany({
+        orderBy: [{ createdAt: "desc" }],
+        take: 50,
+      }),
+      prisma.organizationSmsSettings.count({ where: { smsAddOnActive: true } }),
+    ]);
 
   return (
     <main className="space-y-6">
@@ -94,14 +60,18 @@ export default async function PlatformAdminPage() {
         <StatCard label="Recent Audit Events" value={recentAuditEvents.length} />
       </div>
 
-      <SectionCard title="SMS (This Month)" description="Platform-wide SMS add-on usage — SMS is a paid add-on, never bundled free into any plan.">
-        <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
+      <SectionCard
+        title="SMS"
+        description="Platform-wide SMS add-on usage, global controls, credentials, billing, and delivery/cost tracking now live in the dedicated SMS Administration module."
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <StatCard label="SMS-Enabled Orgs" value={smsEnabledOrgsCount} />
-          <StatCard label="Sent This Month" value={smsSentThisMonthCount} />
-          <StatCard label="Failed" value={smsFailedThisMonthCount} />
-          <StatCard label="Est. SMS Cost" value={`$${(estimatedSmsCostCents / 100).toFixed(2)}`} helper="Our estimated Twilio cost" />
-          <StatCard label="Est. Overage Revenue" value={`$${(smsOverageRevenueCents / 100).toFixed(2)}`} helper="Billed at each org's overage rate" />
-          <StatCard label="Orgs Near Limit" value={orgsNearSmsLimit} helper="80%+ of monthly allowance used" />
+          <a
+            href="/admin/platform/sms"
+            className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800"
+          >
+            Open SMS Administration →
+          </a>
         </div>
       </SectionCard>
 

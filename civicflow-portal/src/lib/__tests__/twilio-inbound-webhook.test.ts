@@ -5,12 +5,27 @@ vi.mock("@/lib/rate-limit", () => ({ requireRateLimit: vi.fn().mockResolvedValue
 
 const updateManyOrgMember = vi.fn().mockResolvedValue({ count: 1 });
 const queryRawOrgMember = vi.fn().mockResolvedValue([{ id: "member-1" }]);
+// No credentials configured in the database — resolves via the env-var
+// fallback in getEffectiveTwilioCredentials(), same as before this route
+// started going through that resolver.
+const findFirstPlatformSmsSettings = vi.fn().mockResolvedValue({
+  id: "settings-1",
+  accountSidEncrypted: null,
+  authTokenEncrypted: null,
+  apiKeyEncrypted: null,
+  apiSecretEncrypted: null,
+  messagingServiceSidEncrypted: null,
+  tollFreeNumberEncrypted: null,
+});
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     orgMember: {
       updateMany: (...args: unknown[]) => updateManyOrgMember(...args),
     },
     $queryRaw: (...args: unknown[]) => queryRawOrgMember(...args),
+    platformSmsSettings: {
+      findFirst: (...args: unknown[]) => findFirstPlatformSmsSettings(...args),
+    },
   },
 }));
 
@@ -41,16 +56,20 @@ function makeRequest(params: Record<string, string>, options: { signature?: stri
 
 describe("Twilio inbound webhook", () => {
   const originalApiKey = process.env.SMS_API_KEY;
+  const originalAccountSid = process.env.TWILIO_ACCOUNT_SID;
 
   beforeEach(() => {
     updateManyOrgMember.mockClear();
     queryRawOrgMember.mockClear();
     queryRawOrgMember.mockResolvedValue([{ id: "member-1" }]);
+    findFirstPlatformSmsSettings.mockClear();
     process.env.SMS_API_KEY = AUTH_TOKEN;
+    process.env.TWILIO_ACCOUNT_SID = "ACtest";
   });
 
   afterEach(() => {
     process.env.SMS_API_KEY = originalApiKey;
+    process.env.TWILIO_ACCOUNT_SID = originalAccountSid;
   });
 
   it("rejects a request with no signature header", async () => {

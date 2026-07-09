@@ -47,6 +47,11 @@ const serverEnvSchema = z.object({
   RATE_LIMIT_REDIS_TOKEN: z.string().optional(),
   ENABLE_EMAIL_SEND: z.string().optional(),
   CRON_SECRET: z.string().optional(),
+  // Base64-encoded 32-byte AES-256-GCM key for encrypting Twilio credentials
+  // stored in PlatformSmsSettings (see lib/crypto-secrets.ts). Optional at
+  // boot like the other SMS_* vars — only required once a super admin
+  // actually configures credentials via /admin/platform/sms.
+  SMS_CREDENTIAL_ENCRYPTION_KEY: z.string().optional(),
 });
 
 const relaxedEnvSchema = serverEnvSchema.partial().extend({
@@ -94,6 +99,7 @@ export function getServerEnv(): ServerEnv {
     RATE_LIMIT_REDIS_URL: process.env.RATE_LIMIT_REDIS_URL,
     RATE_LIMIT_REDIS_TOKEN: process.env.RATE_LIMIT_REDIS_TOKEN,
     ENABLE_EMAIL_SEND: process.env.ENABLE_EMAIL_SEND,
+    SMS_CREDENTIAL_ENCRYPTION_KEY: process.env.SMS_CREDENTIAL_ENCRYPTION_KEY,
   };
 
   if (raw.NODE_ENV === "production") {
@@ -137,6 +143,7 @@ export function getServerEnv(): ServerEnv {
     RATE_LIMIT_REDIS_TOKEN: parsed.RATE_LIMIT_REDIS_TOKEN,
     ENABLE_EMAIL_SEND: parsed.ENABLE_EMAIL_SEND,
     CRON_SECRET: parsed.CRON_SECRET,
+    SMS_CREDENTIAL_ENCRYPTION_KEY: parsed.SMS_CREDENTIAL_ENCRYPTION_KEY,
   };
 
   return cached;

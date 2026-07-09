@@ -56,7 +56,7 @@ function failedRow(params: SendMemberSmsParams, errorMessage: string) {
 export async function sendMemberSms(params: SendMemberSmsParams): Promise<SmsMessage> {
   const { organizationId, memberId, phone, body, campaignId, sentById, required } = params;
 
-  if (!isSmsConfigured()) {
+  if (!(await isSmsConfigured())) {
     return failedRow(params, "SMS delivery is not configured.");
   }
 

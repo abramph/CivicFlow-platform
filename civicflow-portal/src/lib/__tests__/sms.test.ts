@@ -1,48 +1,107 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const getEffectiveTwilioCredentials = vi.fn();
+const getPlatformSmsSettings = vi.fn();
+vi.mock("@/lib/sms-credentials", () => ({
+  getEffectiveTwilioCredentials: (...args: unknown[]) => getEffectiveTwilioCredentials(...args),
+  getPlatformSmsSettings: (...args: unknown[]) => getPlatformSmsSettings(...args),
+}));
+
 import { isSmsConfigured, sendSms } from "@/lib/sms";
 
 const originalEnv = { ...process.env };
 
+function enabledSettings(overrides: Record<string, unknown> = {}) {
+  return {
+    platformEnabled: true,
+    testMode: false,
+    maintenanceMode: false,
+    outboundPaused: false,
+    testPhoneNumbers: [] as string[],
+    ...overrides,
+  };
+}
+
+function credentials(overrides: Record<string, unknown> = {}) {
+  return {
+    accountSid: "ACxxxx",
+    authToken: "auth-token",
+    apiKey: null,
+    apiSecret: null,
+    messagingServiceSid: null,
+    fromNumber: "+15550000000",
+    source: "database",
+    ...overrides,
+  };
+}
+
 describe("isSmsConfigured / sendSms", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    delete process.env.SMS_PROVIDER;
-    delete process.env.SMS_API_KEY;
-    delete process.env.SMS_FROM_NUMBER;
-    delete process.env.TWILIO_ACCOUNT_SID;
+    getEffectiveTwilioCredentials.mockReset();
+    getPlatformSmsSettings.mockReset();
+    process.env.NEXTAUTH_URL = "https://app.example.com";
   });
 
   afterEach(() => {
     process.env = { ...originalEnv };
   });
 
-  it("reports unconfigured and skips sending when env vars are missing", async () => {
+  it("reports unconfigured and skips sending when no credentials resolve", async () => {
+    getEffectiveTwilioCredentials.mockResolvedValue(null);
+    getPlatformSmsSettings.mockResolvedValue(enabledSettings());
+
+    expect(await isSmsConfigured()).toBe(false);
     const result = await sendSms({ to: "+15551234567", body: "hello" });
-    expect(isSmsConfigured()).toBe(false);
-    expect(result).toEqual({ sent: false, skipped: true, reason: "SMS provider is not configured", to: "+15551234567" });
+    expect(result).toEqual({ sent: false, skipped: true, reason: "SMS delivery is not configured", to: "+15551234567" });
   });
 
-  it("skips with a clear reason for an unsupported provider", async () => {
-    process.env.SMS_PROVIDER = "carrier-pigeon";
-    process.env.SMS_API_KEY = "key";
-    process.env.SMS_FROM_NUMBER = "+15550000000";
+  it("skips with a clear reason when the platform is disabled", async () => {
+    getEffectiveTwilioCredentials.mockResolvedValue(credentials());
+    getPlatformSmsSettings.mockResolvedValue(enabledSettings({ platformEnabled: false }));
 
     const result = await sendSms({ to: "+15551234567", body: "hello" });
     expect(result.sent).toBe(false);
     expect(result.skipped).toBe(true);
-    expect(result.reason).toMatch(/Unsupported SMS_PROVIDER/);
+    expect(result.reason).toMatch(/disabled/i);
   });
 
-  it("sends via Twilio's REST API when configured", async () => {
-    process.env.SMS_PROVIDER = "twilio";
-    process.env.SMS_API_KEY = "auth-token";
-    process.env.SMS_FROM_NUMBER = "+15550000000";
-    process.env.TWILIO_ACCOUNT_SID = "ACxxxx";
+  it("skips with a clear reason when in maintenance mode", async () => {
+    getEffectiveTwilioCredentials.mockResolvedValue(credentials());
+    getPlatformSmsSettings.mockResolvedValue(enabledSettings({ maintenanceMode: true }));
 
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ sid: "SM123" }),
-    });
+    const result = await sendSms({ to: "+15551234567", body: "hello" });
+    expect(result.skipped).toBe(true);
+    expect(result.reason).toMatch(/maintenance/i);
+  });
+
+  it("skips with a clear reason when outbound is paused", async () => {
+    getEffectiveTwilioCredentials.mockResolvedValue(credentials());
+    getPlatformSmsSettings.mockResolvedValue(enabledSettings({ outboundPaused: true }));
+
+    const result = await sendSms({ to: "+15551234567", body: "hello" });
+    expect(result.skipped).toBe(true);
+    expect(result.reason).toMatch(/paused/i);
+  });
+
+  it("Safe Launch Mode: in test mode, only allowlisted numbers get sent to", async () => {
+    getEffectiveTwilioCredentials.mockResolvedValue(credentials());
+    getPlatformSmsSettings.mockResolvedValue(enabledSettings({ testMode: true, testPhoneNumbers: ["+15559999999"] }));
+
+    const blocked = await sendSms({ to: "+15551234567", body: "hello" });
+    expect(blocked.skipped).toBe(true);
+    expect(blocked.reason).toMatch(/Safe Launch Mode/);
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ sid: "SM1" }) }));
+    const allowed = await sendSms({ to: "+15559999999", body: "hello" });
+    expect(allowed.sent).toBe(true);
+  });
+
+  it("sends via Twilio's REST API using a From number when no Messaging Service SID is configured", async () => {
+    getEffectiveTwilioCredentials.mockResolvedValue(credentials());
+    getPlatformSmsSettings.mockResolvedValue(enabledSettings());
+
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ sid: "SM123" }) });
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await sendSms({ to: "+15551234567", body: "your code is 123456" });
@@ -52,13 +111,29 @@ describe("isSmsConfigured / sendSms", () => {
       "https://api.twilio.com/2010-04-01/Accounts/ACxxxx/Messages.json",
       expect.objectContaining({ method: "POST" })
     );
+    const body = fetchMock.mock.calls[0][1].body as URLSearchParams;
+    expect(body.get("From")).toBe("+15550000000");
+    expect(body.get("MessagingServiceSid")).toBeNull();
+    expect(body.get("StatusCallback")).toBe("https://app.example.com/api/webhooks/twilio/status");
+  });
+
+  it("uses MessagingServiceSid instead of From when one is configured", async () => {
+    getEffectiveTwilioCredentials.mockResolvedValue(credentials({ messagingServiceSid: "MGxxxx" }));
+    getPlatformSmsSettings.mockResolvedValue(enabledSettings());
+
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ sid: "SM123" }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendSms({ to: "+15551234567", body: "hi" });
+
+    const body = fetchMock.mock.calls[0][1].body as URLSearchParams;
+    expect(body.get("MessagingServiceSid")).toBe("MGxxxx");
+    expect(body.get("From")).toBeNull();
   });
 
   it("surfaces a Twilio API error instead of throwing", async () => {
-    process.env.SMS_PROVIDER = "twilio";
-    process.env.SMS_API_KEY = "auth-token";
-    process.env.SMS_FROM_NUMBER = "+15550000000";
-    process.env.TWILIO_ACCOUNT_SID = "ACxxxx";
+    getEffectiveTwilioCredentials.mockResolvedValue(credentials());
+    getPlatformSmsSettings.mockResolvedValue(enabledSettings());
 
     vi.stubGlobal(
       "fetch",
