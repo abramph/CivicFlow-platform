@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { SmsOptInBanner } from "@/components/app/SmsOptInBanner";
+import { formatEnumLabel } from "@/lib/formatting";
 
 const NAV_ITEMS = [
   { href: "/m/dues", label: "Dues" },
@@ -30,11 +31,13 @@ export function MemberPortalShell({ children }: { children: ReactNode }) {
   // not rendering it until the session fetch completed.
   const [smsOptIn, setSmsOptIn] = useState(true);
 
-  // session.organizations carries every org this user belongs to (any
-  // role); the member portal switcher only ever offers the ones where
-  // they're a MEMBER — switching to a staff-role org belongs in the staff
-  // shell's own switcher, not here.
-  const memberOrgs = (session?.organizations ?? []).filter((o) => o.role === "MEMBER");
+  // session.organizations carries every org this user belongs to, any
+  // role. The switcher lists all of them (so you can get back to a
+  // staff-role org from here, not just hop between MEMBER-role orgs) — but
+  // "All Organizations" and the header logo/name only care about the
+  // MEMBER-role subset, since that's the data this surface actually shows.
+  const allOrgs = session?.organizations ?? [];
+  const memberOrgs = allOrgs.filter((o) => o.role === "MEMBER");
   const organizationId = session?.organizationId ?? null;
   const memberId = session?.memberId ?? null;
   const active = memberOrgs.find((o) => o.organizationId === organizationId) ?? memberOrgs[0] ?? null;
@@ -51,7 +54,7 @@ export function MemberPortalShell({ children }: { children: ReactNode }) {
     return org ? `${href}?org=${encodeURIComponent(org)}` : href;
   }
 
-  async function switchOrganization(nextOrganizationId: string) {
+  async function switchOrganization(nextOrganizationId: string, nextRole: string) {
     if (!organizationId || nextOrganizationId === organizationId) {
       setOpen(false);
       return;
@@ -65,11 +68,20 @@ export function MemberPortalShell({ children }: { children: ReactNode }) {
       });
       if (response.ok) {
         setOpen(false);
+        // Without this, useSession() keeps serving the stale pre-switch
+        // session, which would leave this shell (and PortalShell's role
+        // check on the other side) reading the wrong org/role.
         await update();
-        // Cookie now carries the choice — drop any ?org= so every future link
-        // (including ones that don't set it explicitly) uses the new org.
-        router.replace(pathname);
-        router.refresh();
+        if (nextRole === "MEMBER") {
+          // Cookie now carries the choice — drop any ?org= so every future
+          // link (including ones that don't set it explicitly) uses the new org.
+          router.replace(pathname);
+          router.refresh();
+        } else {
+          // Not a member here — nothing in /m/* to show, so hand off to the
+          // staff dashboard for this org instead.
+          router.push("/dashboard");
+        }
       }
     } finally {
       setSwitching(false);
@@ -113,15 +125,15 @@ export function MemberPortalShell({ children }: { children: ReactNode }) {
               </button>
             </div>
 
-            {memberOrgs.length > 1 ? (
+            {allOrgs.length > 1 ? (
               <div className="space-y-1 border-b border-slate-200 pb-4">
                 <p className="px-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Organization</p>
-                {memberOrgs.map((option) => (
+                {allOrgs.map((option) => (
                   <button
                     key={option.organizationId}
                     type="button"
                     disabled={switching}
-                    onClick={() => switchOrganization(option.organizationId)}
+                    onClick={() => switchOrganization(option.organizationId, option.role)}
                     className={`block w-full rounded-lg px-3 py-2 text-left text-sm font-medium disabled:opacity-60 ${
                       option.organizationId === organizationId
                         ? "bg-emerald-600 text-white"
@@ -129,6 +141,13 @@ export function MemberPortalShell({ children }: { children: ReactNode }) {
                     }`}
                   >
                     {option.organizationName}
+                    <span
+                      className={`ml-1.5 text-xs font-normal ${
+                        option.organizationId === organizationId ? "text-emerald-100" : "text-slate-400"
+                      }`}
+                    >
+                      {formatEnumLabel(option.role)}
+                    </span>
                   </button>
                 ))}
               </div>
