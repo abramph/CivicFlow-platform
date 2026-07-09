@@ -20,16 +20,22 @@ vi.mock("@/lib/role-permissions", () => ({
   getEffectivePermissions: (...args: unknown[]) => getEffectivePermissions(...args),
 }));
 
+import type { Session } from "next-auth";
 import { authOptions } from "@/lib/authOptions";
 
-const sessionCallback = authOptions.callbacks!.session!;
+const sessionCallback = authOptions.callbacks!.session! as unknown as (args: {
+  session: Session;
+  token: never;
+  user: never;
+  trigger: undefined;
+}) => Promise<Session>;
 
-function emptySession() {
+function emptySession(): Session {
   return {
     org_id: "",
     api_key: "",
     api_base: "",
-  } as never;
+  } as Session;
 }
 
 describe("authOptions session callback — multi-org resolution", () => {
