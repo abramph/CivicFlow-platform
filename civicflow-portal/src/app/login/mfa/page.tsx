@@ -16,7 +16,7 @@ function formatCountdown(seconds: number) {
 }
 
 export default function MfaChallengePage() {
-  const { data: session } = useSession();
+  const { data: session, status: sessionStatus } = useSession();
   const [code, setCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,8 +37,17 @@ export default function MfaChallengePage() {
   // Verify/Text-me submission, which is how this previously looked like the
   // page was just silently stuck with no way out.
   useEffect(() => {
-    const expiresAt = session?.mfaChallengeExpiresAt;
-    if (!expiresAt) return;
+    if (sessionStatus !== "authenticated" || !session?.mfaPending) return;
+
+    const expiresAt = session.mfaChallengeExpiresAt;
+    if (!expiresAt) {
+      // mfaPending is true but there's no matching challenge row at all
+      // (e.g. it was already consumed/deleted, or this is a stale session
+      // cookie from a much earlier attempt) — just as terminal as a timed-out
+      // one, so treat it the same rather than waiting for a failed submit.
+      markExpired();
+      return;
+    }
 
     const target = new Date(expiresAt).getTime();
     const tick = () => {
@@ -53,7 +62,7 @@ export default function MfaChallengePage() {
     tick();
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
-  }, [session?.mfaChallengeExpiresAt, markExpired]);
+  }, [sessionStatus, session?.mfaPending, session?.mfaChallengeExpiresAt, markExpired]);
 
   // Auto-restart once expired, so the user isn't left staring at a dead
   // page. Must go through signOut(), not a plain navigation — the pending
