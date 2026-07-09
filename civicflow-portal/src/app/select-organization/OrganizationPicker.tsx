@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { useState } from "react";
 import type { OrgRole } from "@prisma/client";
 
@@ -24,6 +25,7 @@ const ROLE_LABELS: Record<OrgRole, string> = {
 
 export function OrganizationPicker({ memberships }: { memberships: MembershipOption[] }) {
   const router = useRouter();
+  const { update } = useSession();
   const [pendingOrgId, setPendingOrgId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -42,6 +44,13 @@ export function OrganizationPicker({ memberships }: { memberships: MembershipOpt
         setPendingOrgId(null);
         return;
       }
+      // The client-side session (useSession(), backed by PortalShell's role
+      // check) doesn't auto-refresh just from router.push/refresh — without
+      // this, PortalShell keeps rendering bare children using the stale
+      // pre-switch role (e.g. hiding the whole staff shell because the old
+      // session still said "MEMBER") even though the server-rendered page
+      // underneath is already correct for the new org.
+      await update();
       router.push(role === "MEMBER" ? "/m/dues" : "/dashboard");
       router.refresh();
     } catch {
