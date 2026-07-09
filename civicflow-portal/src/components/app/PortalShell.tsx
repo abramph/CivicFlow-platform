@@ -1,15 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { LogoutButton } from "@/components/LogoutButton";
 
 function isHiddenPath(pathname: string) {
   // Member-facing pages render their own chrome — never wrap them in the
   // staff sidebar shell.
-  return pathname === "/login" || pathname === "/buy" || pathname === "/accept-invite" || pathname.startsWith("/m/");
+  return (
+    pathname === "/login" ||
+    pathname === "/buy" ||
+    pathname === "/accept-invite" ||
+    pathname === "/select-organization" ||
+    pathname.startsWith("/m/")
+  );
 }
 
 function isActive(pathname: string, href: string) {
@@ -20,7 +26,34 @@ function isActive(pathname: string, href: string) {
 
 export function PortalShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const { data: session, status } = useSession();
+  const router = useRouter();
+  const { data: session, status, update } = useSession();
+  const [switching, setSwitching] = useState(false);
+
+  async function switchOrganization(organizationId: string) {
+    if (!session?.organizations || organizationId === session.organizationId) return;
+    const target = session.organizations.find((o) => o.organizationId === organizationId);
+    if (!target) return;
+
+    setSwitching(true);
+    try {
+      const response = await fetch("/api/organization/select", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ organizationId }),
+      });
+      if (!response.ok) return;
+
+      await update();
+      if (target.role === "MEMBER") {
+        router.push("/m/dues");
+      } else {
+        router.refresh();
+      }
+    } finally {
+      setSwitching(false);
+    }
+  }
 
   if (isHiddenPath(pathname)) {
     return <>{children}</>;
@@ -217,7 +250,23 @@ export function PortalShell({ children }: { children: ReactNode }) {
             <div className="flex flex-col gap-4 px-6 py-4 md:flex-row md:items-center md:justify-between">
               <div>
                 <p className="text-sm font-medium text-slate-600">Organization</p>
-                <p className="text-lg font-semibold text-slate-950">{orgLabel}</p>
+                {hasSaasSession && session?.organizations && session.organizations.length > 1 ? (
+                  <select
+                    aria-label="Switch organization"
+                    value={session.organizationId ?? ""}
+                    disabled={switching}
+                    onChange={(event) => switchOrganization(event.target.value)}
+                    className="mt-0.5 rounded-lg border border-slate-300 bg-white px-2 py-1 text-lg font-semibold text-slate-950 disabled:opacity-60"
+                  >
+                    {session.organizations.map((option) => (
+                      <option key={option.organizationId} value={option.organizationId}>
+                        {option.organizationName}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <p className="text-lg font-semibold text-slate-950">{orgLabel}</p>
+                )}
                 {hasSaasSession && session?.role ? (
                   <p className="mt-1 text-sm text-slate-700">Role: {session.role}</p>
                 ) : null}

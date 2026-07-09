@@ -2,19 +2,17 @@ import { cookies } from "next/headers";
 import { withApiErrorHandling } from "@/lib/api-route";
 import { requireAuth } from "@/lib/auth-guards";
 import { ACTIVE_ORG_COOKIE, getUserOrgMemberships } from "@/lib/org-context";
-import { MEMBER_ORG_COOKIE } from "@/lib/member-web-session";
 import { parseJsonBody, z } from "@/lib/validation";
 
 const bodySchema = z.object({ organizationId: z.string().min(1) });
 
 /**
- * POST /api/member-portal/select-organization — legacy alias for
- * /api/organization/select, kept for the mobile app and any existing
- * bookmarks rather than removed. Delegates to the same membership check
- * and sets the unified cf_active_org cookie (plus the legacy cf_member_org
- * cookie, so any code still reading it directly keeps working).
- * organizationId is re-verified against the caller's actual memberships
- * before being trusted, never taken from the request body blindly.
+ * POST /api/organization/select — the canonical org-switch endpoint for
+ * both staff (dashboard/admin) and member (/m/*) surfaces. Persists the
+ * chosen organization as the cf_active_org cookie so authOptions.ts's
+ * session() callback resolves it on the very next request. organizationId
+ * is re-verified against the caller's real OrganizationMembership rows
+ * before being trusted — never taken from the request body blindly.
  */
 export async function POST(request: Request) {
   return withApiErrorHandling(async () => {
@@ -27,17 +25,14 @@ export async function POST(request: Request) {
       return Response.json({ ok: false, error: "You are not a member of that organization." }, { status: 403 });
     }
 
-    const cookieStore = await cookies();
-    const cookieOptions = {
+    (await cookies()).set(ACTIVE_ORG_COOKIE, organizationId, {
       httpOnly: true,
-      sameSite: "lax" as const,
+      sameSite: "lax",
       secure: process.env.NODE_ENV === "production",
       path: "/",
       maxAge: 60 * 60 * 24 * 365,
-    };
-    cookieStore.set(ACTIVE_ORG_COOKIE, organizationId, cookieOptions);
-    cookieStore.set(MEMBER_ORG_COOKIE, organizationId, cookieOptions);
+    });
 
-    return Response.json({ ok: true });
+    return Response.json({ ok: true, role: match.role, memberId: match.memberId });
   });
 }

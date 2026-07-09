@@ -31,6 +31,19 @@ declare module "next-auth" {
     orgName?: string | null;
     role?: OrgRole | null;
     userEmail?: string;
+    // The active org's OrgMember.id for this user, if a constituent record
+    // exists there — lets /m/* pages skip their own separate lookup.
+    memberId?: string | null;
+    // Every org this user actively belongs to (for org switchers) — see
+    // OrgMembershipSummary in src/lib/org-context.ts.
+    organizations?: {
+      organizationId: string;
+      organizationName: string;
+      organizationLogoUrl: string | null;
+      role: OrgRole;
+      memberId: string | null;
+      memberStatus: string | null;
+    }[];
     // Effective (org-customized) permission set for the current role
     permissions?: string[];
     // MFA pending state

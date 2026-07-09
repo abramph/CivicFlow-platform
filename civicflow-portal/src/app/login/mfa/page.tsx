@@ -147,7 +147,7 @@ export default function MfaChallengePage() {
         return;
       }
 
-      router.push("/dashboard");
+      router.push("/select-organization");
       router.refresh();
     } catch {
       setError("Unable to connect. Please try again.");

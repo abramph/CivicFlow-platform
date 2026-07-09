@@ -1,6 +1,6 @@
 "use client";
 
-import { signOut } from "next-auth/react";
+import { signOut, useSession } from "next-auth/react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
@@ -17,50 +17,55 @@ const NAV_ITEMS = [
   { href: "/m/notifications", label: "Notification Settings" },
 ];
 
-interface MemberSessionSummary {
-  organizationId: string;
-  memberId: string;
-  organizationName: string;
-  organizationLogoUrl: string | null;
-  organizations: { organizationId: string; organizationName: string; organizationLogoUrl: string | null }[];
-  smsOptIn: boolean;
-}
-
 export function MemberPortalShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const org = searchParams.get("org");
   const [open, setOpen] = useState(false);
-  const [session, setSession] = useState<MemberSessionSummary | null>(null);
+  const { data: session, update } = useSession();
   const [switching, setSwitching] = useState(false);
+  // Defaults to opted-in (banner hidden) until the fetch resolves, so the
+  // banner doesn't flash on every load — matches the previous behavior of
+  // not rendering it until the session fetch completed.
+  const [smsOptIn, setSmsOptIn] = useState(true);
+
+  // session.organizations carries every org this user belongs to (any
+  // role); the member portal switcher only ever offers the ones where
+  // they're a MEMBER — switching to a staff-role org belongs in the staff
+  // shell's own switcher, not here.
+  const memberOrgs = (session?.organizations ?? []).filter((o) => o.role === "MEMBER");
+  const organizationId = session?.organizationId ?? null;
+  const memberId = session?.memberId ?? null;
+  const active = memberOrgs.find((o) => o.organizationId === organizationId) ?? memberOrgs[0] ?? null;
 
   useEffect(() => {
     const query = org ? `?org=${encodeURIComponent(org)}` : "";
     fetch(`/api/member-portal/session${query}`)
       .then((response) => response.json())
-      .then((payload) => setSession(payload?.ok ? payload.data : null))
-      .catch(() => setSession(null));
+      .then((payload) => setSmsOptIn(payload?.ok ? Boolean(payload.data?.smsOptIn) : true))
+      .catch(() => setSmsOptIn(true));
   }, [org]);
 
   function linkHref(href: string) {
     return org ? `${href}?org=${encodeURIComponent(org)}` : href;
   }
 
-  async function switchOrganization(organizationId: string) {
-    if (!session || organizationId === session.organizationId) {
+  async function switchOrganization(nextOrganizationId: string) {
+    if (!organizationId || nextOrganizationId === organizationId) {
       setOpen(false);
       return;
     }
     setSwitching(true);
     try {
-      const response = await fetch("/api/member-portal/select-organization", {
+      const response = await fetch("/api/organization/select", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ organizationId }),
+        body: JSON.stringify({ organizationId: nextOrganizationId }),
       });
       if (response.ok) {
         setOpen(false);
+        await update();
         // Cookie now carries the choice — drop any ?org= so every future link
         // (including ones that don't set it explicitly) uses the new org.
         router.replace(pathname);
@@ -84,11 +89,11 @@ export function MemberPortalShell({ children }: { children: ReactNode }) {
             <path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
           </svg>
         </button>
-        {session?.organizationLogoUrl ? (
+        {active?.organizationLogoUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={session.organizationLogoUrl} alt="" className="h-7 w-7 rounded object-cover" />
+          <img src={active.organizationLogoUrl} alt="" className="h-7 w-7 rounded object-cover" />
         ) : null}
-        <span className="truncate font-semibold text-slate-900">{session?.organizationName ?? "CivicFlow"}</span>
+        <span className="truncate font-semibold text-slate-900">{active?.organizationName ?? "CivicFlow"}</span>
       </header>
 
       {open ? (
@@ -108,17 +113,17 @@ export function MemberPortalShell({ children }: { children: ReactNode }) {
               </button>
             </div>
 
-            {session && session.organizations.length > 1 ? (
+            {memberOrgs.length > 1 ? (
               <div className="space-y-1 border-b border-slate-200 pb-4">
                 <p className="px-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Organization</p>
-                {session.organizations.map((option) => (
+                {memberOrgs.map((option) => (
                   <button
                     key={option.organizationId}
                     type="button"
                     disabled={switching}
                     onClick={() => switchOrganization(option.organizationId)}
                     className={`block w-full rounded-lg px-3 py-2 text-left text-sm font-medium disabled:opacity-60 ${
-                      option.organizationId === session.organizationId
+                      option.organizationId === organizationId
                         ? "bg-emerald-600 text-white"
                         : "text-slate-700 hover:bg-slate-100"
                     }`}
@@ -131,20 +136,31 @@ export function MemberPortalShell({ children }: { children: ReactNode }) {
 
             <nav className="space-y-1">
               {NAV_ITEMS.map((item) => {
-                const active = pathname === item.href;
+                const isActive = pathname === item.href;
                 return (
                   <Link
                     key={item.href}
                     href={linkHref(item.href)}
                     onClick={() => setOpen(false)}
                     className={`block rounded-lg px-3 py-2 text-sm font-medium ${
-                      active ? "bg-emerald-600 text-white" : "text-slate-700 hover:bg-slate-100"
+                      isActive ? "bg-emerald-600 text-white" : "text-slate-700 hover:bg-slate-100"
                     }`}
                   >
                     {item.label}
                   </Link>
                 );
               })}
+              {memberOrgs.length > 1 ? (
+                <Link
+                  href="/m/all-organizations"
+                  onClick={() => setOpen(false)}
+                  className={`block rounded-lg px-3 py-2 text-sm font-medium ${
+                    pathname === "/m/all-organizations" ? "bg-emerald-600 text-white" : "text-slate-700 hover:bg-slate-100"
+                  }`}
+                >
+                  All Organizations
+                </Link>
+              ) : null}
             </nav>
 
             <button
@@ -164,8 +180,8 @@ export function MemberPortalShell({ children }: { children: ReactNode }) {
         </div>
       ) : null}
 
-      {session && !session.smsOptIn ? (
-        <SmsOptInBanner organizationId={session.organizationId} memberId={session.memberId} />
+      {!smsOptIn && organizationId && memberId ? (
+        <SmsOptInBanner organizationId={organizationId} memberId={memberId} />
       ) : null}
 
       {children}
