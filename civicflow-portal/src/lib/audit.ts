@@ -12,13 +12,15 @@ export type AuditAction =
   | string;
 
 interface CreateAuditEventInput {
-  organizationId: string;
+  /** Null for platform-level actions with no owning organization (e.g. SUPER_ADMIN SMS Administration changes). */
+  organizationId: string | null;
   actorUserId?: string | null;
   actorEmail?: string | null;
   action: AuditAction;
   entityType: string;
   entityId?: string | null;
   metadata?: Prisma.InputJsonValue;
+  ipAddress?: string | null;
 }
 
 /**
@@ -34,6 +36,7 @@ export async function createAuditEvent(input: CreateAuditEventInput) {
       resource: input.entityType,
       resourceId: input.entityId ?? null,
       after: input.metadata ?? undefined,
+      ipAddress: input.ipAddress ?? null,
     },
   });
 }

@@ -16,6 +16,11 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
+const getPlatformSmsSettings = vi.fn();
+vi.mock("@/lib/sms-credentials", () => ({
+  getPlatformSmsSettings: (...args: unknown[]) => getPlatformSmsSettings(...args),
+}));
+
 import { getSmsEntitlement, recordSmsUsage } from "@/lib/sms-entitlement";
 
 describe("getSmsEntitlement", () => {
@@ -23,6 +28,30 @@ describe("getSmsEntitlement", () => {
     findUniqueSmsSettings.mockReset();
     findFirstSubscription.mockReset();
     updateSmsSettings.mockClear();
+    getPlatformSmsSettings.mockReset();
+    getPlatformSmsSettings.mockResolvedValue({ orgMessagingEnabled: true });
+  });
+
+  it("denies every org when org messaging is disabled platform-wide", async () => {
+    getPlatformSmsSettings.mockResolvedValue({ orgMessagingEnabled: false });
+    findUniqueSmsSettings.mockResolvedValueOnce({ smsAddOnActive: true, smsMonthlyLimit: 1000, smsUsedThisPeriod: 0 });
+    const result = await getSmsEntitlement("org-a");
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toMatch(/disabled platform-wide/);
+  });
+
+  it("denies an org suspended by a platform administrator, even with an active subscription", async () => {
+    findUniqueSmsSettings.mockResolvedValueOnce({
+      smsAddOnActive: true,
+      smsMonthlyLimit: 1000,
+      smsUsedThisPeriod: 10,
+      smsBillingPeriodEnd: new Date(Date.now() + 100_000),
+      suspendedAt: new Date(),
+    });
+    findFirstSubscription.mockResolvedValueOnce({ status: "active" });
+    const result = await getSmsEntitlement("org-a");
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toMatch(/suspended/);
   });
 
   it("denies an organization with no SMS settings row at all", async () => {

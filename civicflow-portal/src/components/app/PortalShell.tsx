@@ -73,6 +73,7 @@ export function PortalShell({ children }: { children: ReactNode }) {
     { href: "/payments/imports", label: "Payment Imports" },
     { href: "/payments/reconciliation", label: "Reconciliation" },
     { href: "/audit-logs", label: "Audit Logs" },
+    { href: "/settings/sms-consent", label: "SMS Consent" },
     { href: "/payment-links", label: "Payment Links" },
     { href: "/settings", label: "Settings" },
     { href: "/settings/organization", label: "Organization" },
@@ -188,12 +189,24 @@ export function PortalShell({ children }: { children: ReactNode }) {
               <Link
                 href="/admin/platform"
                 className={`block rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
-                  isActive(pathname, "/admin/platform")
+                  pathname === "/admin/platform"
                     ? "bg-slate-900 text-white shadow-sm"
                     : "text-slate-800 hover:bg-slate-100"
                 }`}
               >
                 Platform Admin
+              </Link>
+            ) : null}
+            {canSeePlatformAdmin ? (
+              <Link
+                href="/admin/platform/sms"
+                className={`block rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
+                  isActive(pathname, "/admin/platform/sms")
+                    ? "bg-slate-900 text-white shadow-sm"
+                    : "text-slate-800 hover:bg-slate-100"
+                }`}
+              >
+                SMS Administration
               </Link>
             ) : null}
           </nav>

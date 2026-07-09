@@ -311,9 +311,21 @@ enum PaymentLinkStatus {
 
 enum SmsMessageStatus {
   QUEUED
+  SENDING
   SENT
   DELIVERED
   FAILED
+  RETRYING
+}
+
+/// Status of a submission to Twilio's toll-free verification program.
+/// CivicFlow only displays/refreshes status here — the actual submission
+/// (business profile, use case, opt-in proof) happens in the Twilio Console.
+enum TollFreeVerificationStatus {
+  NOT_SUBMITTED
+  PENDING
+  VERIFIED
+  REJECTED
 }
 
 // ─── SaaS Core Models ────────────────────────────────────────────────────────
@@ -893,10 +905,28 @@ model OrganizationSmsSettings {
   smsAddOnActive              Boolean   @default(false)
   smsMonthlyLimit             Int       @default(0)
   smsUsedThisPeriod           Int       @default(0)
-  smsOverageRateCents         Int       @default(2)
+  /// Float, not Int — internal tiers (see SMS_PLAN_TIERS in
+  /// lib/sms-admin-pricing.ts) need fractional-cent rates (e.g. Growth's
+  /// $0.015/message); existing whole-cent values (2 = $0.02) remain exact.
+  smsOverageRateCents         Float     @default(2)
   smsBillingPeriodStart       DateTime?
   smsBillingPeriodEnd         DateTime?
   stripeSmsSubscriptionItemId String?
+  /// Internal cost-tracking tier label ("STARTER" | "GROWTH" | "ENTERPRISE") —
+  /// see SMS_PLAN_TIERS in lib/sms-admin-pricing.ts. Purely for the admin
+  /// cost/profit dashboard; smsMonthlyLimit/smsOverageRateCents above (set
+  /// from this tier, or typed directly for ENTERPRISE) remain the actual
+  /// enforced entitlement values, and the real Stripe SMS add-on billing is
+  /// unaffected by this field.
+  plan                        String    @default("STARTER")
+  planPriceCents               Int       @default(1000)
+  /// Super-admin kill switch for a single org, independent of smsAddOnActive
+  /// (which reflects purchase status) — set via the SMS Administration
+  /// "Suspend messaging" action. Checked in getSmsEntitlement().
+  suspendedAt                   DateTime?
+  /// Last usage-percentage threshold (0/50/80/90/100) an admin was emailed
+  /// about this billing period — dedupes notifyOrgAdminsOfSmsUsageThresholds().
+  lastUsageThresholdNotified   Int       @default(0)
   createdAt                   DateTime  @default(now())
   updatedAt                   DateTime  @updatedAt
 
@@ -916,6 +946,12 @@ model SmsMessage {
   provider          String           @default("twilio")
   providerMessageId String?
   costEstimateCents Int?
+  /// Real Twilio Price from the delivery-status webhook (api/webhooks/twilio/status),
+  /// distinct from costEstimateCents (our flat billing-time estimate) — populated
+  /// once Twilio reports a terminal status, null until then.
+  actualCostCents   Int?
+  retryCount        Int              @default(0)
+  nextRetryAt       DateTime?
   campaignId        String?
   sentById          String?
   sentAt            DateTime?
@@ -933,6 +969,51 @@ model SmsMessage {
   @@index([status])
   @@index([createdAt])
   @@index([memberId])
+  @@index([providerMessageId])
+}
+
+/// Platform-wide SMS control plane for the SUPER_ADMIN "SMS Administration"
+/// module — singleton row (always looked up/created via getPlatformSmsSettings()
+/// in lib/sms-credentials.ts; never query this model directly). Distinct from
+/// OrganizationSmsSettings, which is per-org entitlement/usage.
+model PlatformSmsSettings {
+  id String @id @default(cuid())
+
+  platformEnabled     Boolean @default(false)
+  testMode            Boolean @default(true)
+  maintenanceMode     Boolean @default(false)
+  outboundPaused      Boolean @default(false)
+  mfaSmsEnabled       Boolean @default(true)
+  orgMessagingEnabled Boolean @default(false)
+
+  /// AES-256-GCM ciphertext (iv+authTag+ciphertext, base64) — see
+  /// lib/crypto-secrets.ts. Null until an admin configures credentials via
+  /// the UI; sendSms() falls back to the legacy env vars until then.
+  accountSidEncrypted          String?
+  authTokenEncrypted           String?
+  apiKeyEncrypted               String?
+  apiSecretEncrypted            String?
+  messagingServiceSidEncrypted  String?
+  tollFreeNumberEncrypted       String?
+  verifyServiceSidEncrypted     String?
+
+  tollFreeVerificationSid           String?
+  tollFreeVerificationStatus        TollFreeVerificationStatus @default(NOT_SUBMITTED)
+  tollFreeVerificationSubmittedAt   DateTime?
+  tollFreeVerificationApprovedAt    DateTime?
+  tollFreeVerificationLastCheckedAt DateTime?
+
+  /// Safe Launch Mode allowlist — while testMode is true, sendSms() only
+  /// delivers to numbers in this list.
+  testPhoneNumbers String[] @default([])
+
+  /// Configurable estimate, since Twilio's basic Messages API doesn't expose
+  /// carrier fees as a separate line item from the message Price.
+  carrierFeePercent Int @default(0)
+
+  updatedByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }
 
 /// Per-organization override of a role's permission set — lets an ORG_OWNER

@@ -25,8 +25,12 @@ out*/
 .env.*
 !.env.example
 
-# Logs
-logs/
+# Logs — anchored to actual runtime log directories, not "logs/" anywhere
+# (an unanchored "logs/" previously matched any directory named "logs" in the
+# whole tree, which silently swallowed civicflow-portal/src/app/api/admin/sms/logs/,
+# a real Next.js route folder that was never getting committed as a result).
+/cloud-api/logs/
+/logs/
 *.log
 
 # OS
