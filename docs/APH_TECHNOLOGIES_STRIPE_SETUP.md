@@ -1,12 +1,12 @@
-# APH Technologies, LLC — CivicFlow Stripe Setup
+# APH Technologies, LLC — Unestra Stripe Setup
 
-CivicFlow is a product of **APH Technologies, LLC**. This document is the manual, one-time setup
-guide for making APH Technologies' own Stripe account the platform account for all CivicFlow
+Unestra is a product of **APH Technologies, LLC**. This document is the manual, one-time setup
+guide for making APH Technologies' own Stripe account the platform account for all Unestra
 billing — SaaS subscriptions (`civicflow-portal`) and desktop license sales
 (`civicflow-license-server`).
 
-**Scope of this pass:** platform billing only (APH Technologies as seller of CivicFlow itself).
-Stripe Connect — letting individual CivicFlow customer organizations (e.g. a future ThrivePath
+**Scope of this pass:** platform billing only (APH Technologies as seller of Unestra itself).
+Stripe Connect — letting individual Unestra customer organizations (e.g. a future ThrivePath
 Mental Health Services org, a union, a nonprofit) collect their own member dues/donations into
 their *own* Stripe account — does **not exist in the codebase today** and is out of scope for this
 document. See [Future work: Stripe Connect](#future-work-stripe-connect) at the bottom.
@@ -19,12 +19,12 @@ An audit of the deployed production configuration (`.do/app-secrets.yaml`) found
 confirmed directly via Stripe's `/v1/account` API, not assumed.
 
 **The good news:** that account has **zero completed charges and zero active subscriptions** tied
-to CivicFlow — every CivicFlow-related checkout session on it (16 total) is `unpaid`/abandoned. No
-customer has ever actually paid through it for CivicFlow. That means the cutover below can happen
+to Unestra — every Unestra-related checkout session on it (16 total) is `unpaid`/abandoned. No
+customer has ever actually paid through it for Unestra. That means the cutover below can happen
 cleanly, with no subscriber migration, no billing-continuity risk, and no need to touch real
 customer payment methods.
 
-That account *does* however contain at least one product unrelated to CivicFlow entirely ("SAS
+That account *does* however contain at least one product unrelated to Unestra entirely ("SAS
 First Communion Photo Access") — confirming it's ThrivePath's own general-purpose business account,
 not one that should be billing on APH Technologies' behalf.
 
@@ -54,22 +54,22 @@ not one that should be billing on APH Technologies' behalf.
 4. Complete identity verification (Stripe will prompt for this once enough business details are
    entered) — required before `charges_enabled` will be `true` in live mode.
 
-## 3. Configure CivicFlow branding
+## 3. Configure Unestra branding
 
 Settings → Branding:
-- Icon/logo: CivicFlow logo.
-- Accent color: match CivicFlow's brand color.
+- Icon/logo: Unestra logo.
+- Accent color: match Unestra's brand color.
 - Business name shown to customers: keep as "APH Technologies, LLC" (the legal/billing entity) —
-  CivicFlow is the product name, APH Technologies is who's charging the card, and Stripe Checkout
+  Unestra is the product name, APH Technologies is who's charging the card, and Stripe Checkout
   will show both when `product_data.description` is set (see checkout code — already does this).
 
 Settings → Customer emails: enable "Email customers about successful payments" and "Email
 customers about failed payments" so receipts go out automatically with this branding.
 
-## 4. Create CivicFlow Products & Prices
+## 4. Create Unestra Products & Prices
 
-The live ThrivePath account's catalog has drifted (3 duplicate "CivicFlow Essential" products, 2
-duplicate "CivicFlow Additional Seat" products). Don't recreate that mess — create exactly this set
+The live ThrivePath account's catalog has drifted (3 duplicate "Unestra Essential" products, 2
+duplicate "Unestra Additional Seat" products). Don't recreate that mess — create exactly this set
 under the new APH account. Amounts below are extracted directly from `civicflow-portal/src/lib/plans.ts`
 (source of truth) and cross-checked against the currently-live prices, which matched exactly.
 
@@ -77,10 +77,10 @@ under the new APH account. Amounts below are extracted directly from `civicflow-
 
 | Product | Price nickname | Amount | Interval | Env var |
 | --- | --- | --- | --- | --- |
-| CivicFlow Essential | Essential Monthly | $49.00 | month | `STRIPE_PRICE_ESSENTIAL_MONTHLY` |
-| CivicFlow Essential | Essential Yearly | $539.00 | year | `STRIPE_PRICE_ESSENTIAL_YEARLY` |
-| CivicFlow Elite | Elite Monthly | $99.00 | month | `STRIPE_PRICE_ELITE_MONTHLY` |
-| CivicFlow Elite | Elite Yearly | $1,089.00 | year | `STRIPE_PRICE_ELITE_YEARLY` |
+| Unestra Essential | Essential Monthly | $49.00 | month | `STRIPE_PRICE_ESSENTIAL_MONTHLY` |
+| Unestra Essential | Essential Yearly | $539.00 | year | `STRIPE_PRICE_ESSENTIAL_YEARLY` |
+| Unestra Elite | Elite Monthly | $99.00 | month | `STRIPE_PRICE_ELITE_MONTHLY` |
+| Unestra Elite | Elite Yearly | $1,089.00 | year | `STRIPE_PRICE_ELITE_YEARLY` |
 | Additional Seat (Essential) | Essential Seat Monthly | $8.00 | month | `STRIPE_PRICE_ESSENTIAL_SEAT_MONTHLY` |
 | Additional Seat (Essential) | Essential Seat Yearly | $88.00 | year | `STRIPE_PRICE_ESSENTIAL_SEAT_YEARLY` |
 | Additional Seat (Elite) | Elite Seat Monthly | $5.00 | month | `STRIPE_PRICE_ELITE_SEAT_MONTHLY` |
@@ -104,9 +104,9 @@ per-message/overage numbers, create the matching recurring Price, and set
 
 | Product | Price nickname | Amount | Type | Env var |
 | --- | --- | --- | --- | --- |
-| CivicFlow Professional Desktop License | 5 seats, perpetual | $599.00 | one-time | `STRIPE_PRICE_ID_PERPETUAL_ESSENTIAL` **and** `STRIPE_PRICE_ID_PERPETUAL_ELITE` (see warning) |
-| CivicFlow Annual Maintenance | annual support renewal | $199.00 | one-time | `STRIPE_PRICE_ID_ANNUAL_ESSENTIAL` **and** `STRIPE_PRICE_ID_ANNUAL_ELITE` (see warning) |
-| CivicFlow Additional Seat | per seat add-on | $99.00 | one-time | `STRIPE_PRICE_ID_ADDITIONAL_SEAT` |
+| Unestra Professional Desktop License | 5 seats, perpetual | $599.00 | one-time | `STRIPE_PRICE_ID_PERPETUAL_ESSENTIAL` **and** `STRIPE_PRICE_ID_PERPETUAL_ELITE` (see warning) |
+| Unestra Annual Maintenance | annual support renewal | $199.00 | one-time | `STRIPE_PRICE_ID_ANNUAL_ESSENTIAL` **and** `STRIPE_PRICE_ID_ANNUAL_ELITE` (see warning) |
+| Unestra Additional Seat | per seat add-on | $99.00 | one-time | `STRIPE_PRICE_ID_ADDITIONAL_SEAT` |
 
 > **Confirmed bug — read before creating these.** In the current ThrivePath deployment,
 > `STRIPE_PRICE_ID_PERPETUAL_ESSENTIAL` and `STRIPE_PRICE_ID_PERPETUAL_ELITE` point at the *same*
@@ -233,7 +233,7 @@ Once everything above is verified in test mode:
    webhook endpoints are separate in Stripe — the test ones from step 6 don't carry over).
 5. Run one real, low-value live subscription test and one real desktop-license test before
    considering the cutover complete.
-6. Only after that succeeds, revoke/deactivate the ThrivePath key's usage for CivicFlow — do **not**
+6. Only after that succeeds, revoke/deactivate the ThrivePath key's usage for Unestra — do **not**
    delete or disable the ThrivePath Stripe account itself; it remains ThrivePath's own account for
    its own business (including that unrelated "SAS First Communion Photo Access" product).
 
@@ -264,7 +264,7 @@ If the APH cutover causes problems in production:
 
 Not built in this pass. Today, every organization payment link
 (`civicflow-portal/src/app/api/pay/[slug]/checkout/route.ts`) creates a Checkout Session on the
-**same platform account** as CivicFlow's own subscription revenue — there is no per-organization
+**same platform account** as Unestra's own subscription revenue — there is no per-organization
 connected account, no `application_fee_amount`, and no tenant isolation for where the money
 actually settles. That means, as built today, a ThrivePath-the-customer-organization's member dues
 would land in APH Technologies' own Stripe balance, not a ThrivePath-controlled account — which

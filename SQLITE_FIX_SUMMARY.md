@@ -42,7 +42,7 @@ C:\Users\<YourUsername>\AppData\Roaming\Civicflow\app.db
 ```
 
 **Steps:**
-1. Close CivicFlow app completely
+1. Close Unestra app completely
 2. Navigate to the directory above
 3. Delete the `Civicflow` folder (or just `app.db` inside it)
 4. App will recreate database with correct schema on next launch

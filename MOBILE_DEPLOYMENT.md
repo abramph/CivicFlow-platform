@@ -1,4 +1,4 @@
-# CivicFlow Mobile — Member App, Push Notifications & Deep Links
+# Unestra Mobile — Member App, Push Notifications & Deep Links
 
 This covers the member-facing mobile app (`civicflow-mobile/`, Expo/React Native) and the
 supporting backend added to `civicflow-portal/`: member authentication, dues reminders,

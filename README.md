@@ -22,8 +22,8 @@ npm run build:mac
 ```
 
 Produces:
-- **Windows**: `release/CivicFlow Setup <version>.exe`
-- **macOS**: `release/CivicFlow-<version>.dmg` (must be built on macOS)
+- **Windows**: `release/Unestra Setup <version>.exe`
+- **macOS**: `release/Unestra-<version>.dmg` (must be built on macOS)
 
 ## License system
 
@@ -290,12 +290,12 @@ curl -X POST https://api.civicflowapp.com/api/store/checkout \
 
 Activation steps:
 
-1. Open CivicFlow.
+1. Open Unestra.
 2. Choose **Activate License** from onboarding or from Settings.
 3. Enter the customer email address and license key from the delivery email.
 4. Complete activation while online so the device receives its server-managed activation token.
 
-Offline grace still applies to valid server-issued licenses. Deactivation now waits for the server release to succeed; if the server is unreachable, CivicFlow keeps the local license file and queues the release for retry.
+Offline grace still applies to valid server-issued licenses. Deactivation now waits for the server release to succeed; if the server is unreachable, Unestra keeps the local license file and queues the release for retry.
 
 ## Data location
 
@@ -324,7 +324,7 @@ The Electron app is **self-contained and offline-capable**. All member, finance,
 Runs on a VPS behind nginx, managed by PM2. Handles license activation, refresh, deactivation, Stripe checkout, and webhook processing. See `civicflow-license-server/.env.example` for all required environment variables.
 
 ### SaaS portal
-`civicflow-portal/` is the hosted CivicFlow SaaS application on Next.js + Prisma/PostgreSQL. Legacy UnionFlow schema/routes/scripts have been removed from the portal so it can migrate cleanly to PostgreSQL.
+`civicflow-portal/` is the hosted Unestra SaaS application on Next.js + Prisma/PostgreSQL. Legacy UnionFlow schema/routes/scripts have been removed from the portal so it can migrate cleanly to PostgreSQL.
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for full deployment instructions.  
 See [SECURITY.md](SECURITY.md) for secret handling and production safety guidance.

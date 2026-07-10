@@ -1,4 +1,4 @@
-# CivicFlow — Deployment Guide
+# Unestra — Deployment Guide
 
 This repository contains three deployable units:
 
@@ -18,13 +18,13 @@ This repository contains three deployable units:
 ```bash
 npm install
 npm run dist:win
-# Output: release/CivicFlow Setup <version>.exe
+# Output: release/Unestra Setup <version>.exe
 ```
 
 **Build for macOS** (must run on macOS):
 ```bash
 npm run build:mac
-# Output: release/CivicFlow-<version>.dmg
+# Output: release/Unestra-<version>.dmg
 ```
 
 **Environment variables** (desktop, set before building or at runtime):
@@ -113,7 +113,7 @@ Runs on port `8787` by default. Serve behind nginx or expose directly.
 
 ## 4. Portal / SaaS Platform — DigitalOcean App Platform
 
-The portal is the CivicFlow SaaS application (Next.js + Prisma/PostgreSQL) and is maintained without legacy UnionFlow models, scripts, or routes.
+The portal is the Unestra SaaS application (Next.js + Prisma/PostgreSQL) and is maintained without legacy UnionFlow models, scripts, or routes.
 
 ### Local environment file strategy
 - Use `civicflow-portal/.env.local` as the primary local secrets file.
@@ -162,7 +162,7 @@ cd civicflow-portal && npm run db:deploy && npm run start
 | `SMTP_PORT` | SMTP port (e.g. `587`) |
 | `SMTP_USER` | SMTP username |
 | `SMTP_PASS` | SMTP password |
-| `FROM_EMAIL` | Sender address, e.g. `CivicFlow <noreply@civicflowapp.com>` |
+| `FROM_EMAIL` | Sender address, e.g. `Unestra <noreply@civicflowapp.com>` |
 | `ENABLE_EMAIL_SEND` | `1` to enable real email sends (default safe mode is off) |
 | `CRON_SECRET` | Long random secret for authenticating cron endpoint calls |
 | `NEXT_PUBLIC_SENTRY_DSN` | Sentry DSN for error tracking (portal client + server) |

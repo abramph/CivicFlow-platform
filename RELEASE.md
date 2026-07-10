@@ -1,4 +1,4 @@
-# CivicFlow Windows Release Guide
+# Unestra Windows Release Guide
 
 ## Prerequisites
 
@@ -24,7 +24,7 @@ npm run dist:win
 
 Installer output:
 
-- `release/CivicFlow Setup <version>.exe`
+- `release/Unestra Setup <version>.exe`
 
 ## 2) License server (local/dev)
 
@@ -86,8 +86,8 @@ Use the signing secret reported by `stripe listen` for `STRIPE_WEBHOOK_SECRET`.
 
 ## 3) Smoke test checklist (installed EXE)
 
-1. Install `CivicFlow Setup <version>.exe`.
-2. Launch CivicFlow and confirm onboarding appears when no paid license is present.
+1. Install `Unestra Setup <version>.exe`.
+2. Launch Unestra and confirm onboarding appears when no paid license is present.
 3. Confirm the welcome step explains trial vs paid activation.
 4. Activate online using the customer email and license key from the purchase email.
 5. Confirm the success step shows plan, license type, seat allowance, and expiry/support dates.
