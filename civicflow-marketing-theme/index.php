@@ -1,7 +1,7 @@
 <?php
 /**
  * Main Index Template (required fallback)
- * @package CivicFlow
+ * @package Unestra
  */
 get_header();
 ?>

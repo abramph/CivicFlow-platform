@@ -2,7 +2,7 @@
 /**
  * Template Part: Hero Section
  *
- * @package CivicFlow
+ * @package Unestra
  */
 ?>
 <section id="hero" aria-labelledby="hero-heading">
@@ -25,7 +25,7 @@
 			<?php echo esc_html( $plain ); ?> <span><?php echo esc_html( $green ); ?></span>
 		</h1>
 
-		<p class="hero-sub"><?php echo esc_html( cf_mod( 'hero_subtext', 'CivicFlow brings member management, dues, events, communications, finances, and reporting into one secure, easy-to-use platform — so you can focus on your mission, not your spreadsheets.' ) ); ?></p>
+		<p class="hero-sub"><?php echo esc_html( cf_mod( 'hero_subtext', 'Unestra brings member management, dues, events, communications, finances, and reporting into one secure, easy-to-use platform — so you can focus on your mission, not your spreadsheets.' ) ); ?></p>
 
 		<div class="hero-btns">
 			<a href="https://app.civicflowapp.com/signup" class="btn btn-primary" target="_blank" rel="noopener">

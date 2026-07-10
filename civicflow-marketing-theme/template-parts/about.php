@@ -2,7 +2,7 @@
 /**
  * Template Part: About Section
  *
- * @package CivicFlow
+ * @package Unestra
  */
 
 $points = [
@@ -54,7 +54,7 @@ $dashboard_rows = [
 			<div class="about-content">
 				<p class="section-label"><?php esc_html_e( 'About', 'civicflow' ); ?></p>
 				<h2 class="section-title" id="about-heading"><?php esc_html_e( 'Built for the organizations that build communities', 'civicflow' ); ?></h2>
-				<p><?php esc_html_e( 'CivicFlow was created to solve a real problem: nonprofits, churches, civic associations, and advocacy groups were losing time and money managing members across disconnected tools. We built a unified platform that makes administration effortless so leaders can focus on what matters — their people and their mission.', 'civicflow' ); ?></p>
+				<p><?php esc_html_e( 'Unestra was created to solve a real problem: nonprofits, churches, civic associations, and advocacy groups were losing time and money managing members across disconnected tools. We built a unified platform that makes administration effortless so leaders can focus on what matters — their people and their mission.', 'civicflow' ); ?></p>
 
 				<div class="about-points">
 					<?php foreach ( $points as $point ) : ?>

@@ -2,7 +2,7 @@
 /**
  * Template Part: Stats Bar
  *
- * @package CivicFlow
+ * @package Unestra
  */
 
 $stats = [

@@ -3,7 +3,7 @@
  * Template Part: Platform Section
  * Updated: Desktop card now includes download links and license portal
  *
- * @package CivicFlow
+ * @package Unestra
  */
 
 $check = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>';
@@ -13,7 +13,7 @@ $check = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="cu
 		<div class="section-header">
 			<p class="section-label"><?php esc_html_e( 'Platform', 'civicflow' ); ?></p>
 			<h2 class="section-title" id="platform-heading"><?php esc_html_e( 'Cloud or desktop — your choice', 'civicflow' ); ?></h2>
-			<p class="section-sub"><?php esc_html_e( 'CivicFlow meets your organization where you are, with full-featured access on any device or your local network.', 'civicflow' ); ?></p>
+			<p class="section-sub"><?php esc_html_e( 'Unestra meets your organization where you are, with full-featured access on any device or your local network.', 'civicflow' ); ?></p>
 		</div>
 
 		<div class="platform-grid">
@@ -51,7 +51,7 @@ $check = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="cu
 			<div class="platform-card platform-card-desktop-full">
 				<span class="platform-tag tag-desktop"><?php esc_html_e( 'Desktop version', 'civicflow' ); ?></span>
 				<h3><?php esc_html_e( 'Run on your own network', 'civicflow' ); ?></h3>
-				<p><?php esc_html_e( 'Install CivicFlow on your local server or workstation. Ideal for organizations that require local data control or offline capability.', 'civicflow' ); ?></p>
+				<p><?php esc_html_e( 'Install Unestra on your local server or workstation. Ideal for organizations that require local data control or offline capability.', 'civicflow' ); ?></p>
 				<ul class="platform-features">
 					<?php
 					$desktop_features = [
@@ -79,12 +79,12 @@ $check = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="cu
 					<div class="platform-download-btns">
 <a href="https://github.com/abramph/CivicFlow-platform/releases/download/v1.0.8/CivicFlow-Setup-1.0.8.exe"						   
    class="platform-dl-btn"
-						   aria-label="<?php esc_attr_e( 'Download CivicFlow for Windows', 'civicflow' ); ?>">
+						   aria-label="<?php esc_attr_e( 'Download Unestra for Windows', 'civicflow' ); ?>">
 							<?php esc_html_e( 'Windows', 'civicflow' ); ?>
 						</a>
 <a href="https://github.com/abramph/CivicFlow-platform/releases/download/v1.0.8/CivicFlow-1.0.8-mac-arm64.dmg"						   
    class="platform-dl-btn"
-						   aria-label="<?php esc_attr_e( 'Download CivicFlow for macOS', 'civicflow' ); ?>">
+						   aria-label="<?php esc_attr_e( 'Download Unestra for macOS', 'civicflow' ); ?>">
 							<?php esc_html_e( 'macOS', 'civicflow' ); ?>
 						</a>
 					</div>

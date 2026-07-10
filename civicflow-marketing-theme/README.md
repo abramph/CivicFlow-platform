@@ -1,10 +1,10 @@
-# CivicFlow WordPress Theme — v1.0.0
+# Unestra WordPress Theme — v1.0.0
 
 ## Installation on Hostinger
 1. Log in to Hostinger hPanel
 2. Go to Website → WordPress → Manage → WP Admin
 3. Appearance → Themes → Add New → Upload Theme
-4. Upload civicflow-theme.zip and Activate
+4. Upload unestra-theme.zip and Activate
 
 ## First-time setup
 
@@ -15,7 +15,7 @@ WordPress will use front-page.php automatically.
 ### Navigation menus
 Appearance → Menus → create "Primary" menu, assign to Primary Navigation location.
 Add custom links: #features, #platform, #pricing, #about, #contact
-Add sign-in link: https://civicflow-portal-iule6.ondigitalocean.app/signup
+Add sign-in link: https://app.civicflowapp.com/signup
 
 ### Customise text
 Appearance → Customize → Hero Section / Demo CTA Banner / Contact Info

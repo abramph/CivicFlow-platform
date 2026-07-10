@@ -2,7 +2,7 @@
 /**
  * Page template — inner pages (Privacy, Terms, Blog, etc.)
  *
- * @package CivicFlow
+ * @package Unestra
  */
 
 get_header();

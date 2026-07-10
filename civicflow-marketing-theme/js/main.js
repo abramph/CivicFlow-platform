@@ -1,5 +1,5 @@
 /**
- * CivicFlow Theme — main.js
+ * Unestra Theme — main.js
  */
 (function () {
   'use strict';

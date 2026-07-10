@@ -1,8 +1,8 @@
 <?php
 /**
- * CivicFlow Theme Functions
+ * Unestra Theme Functions
  *
- * @package CivicFlow
+ * @package Unestra
  * @version 1.0.0
  */
 
@@ -108,7 +108,7 @@ function civicflow_handle_contact() {
 	}
 
 	$to      = get_option( 'admin_email' );
-	$subject = sprintf( __( 'New CivicFlow inquiry from %s', 'civicflow' ), $name );
+	$subject = sprintf( __( 'New Unestra inquiry from %s', 'civicflow' ), $name );
 	$body    = sprintf(
 		"Name: %s\nEmail: %s\nOrganization: %s\nType: %s\nInterest: %s\n\nMessage:\n%s",
 		$name, $email, $org, $type, $interest, $message
@@ -143,7 +143,7 @@ function civicflow_customize_register( $wp_customize ) {
 	$hero_fields = [
 		'hero_badge'    => [ 'label' => 'Hero badge text',        'default' => 'Built for mission-driven organizations' ],
 		'hero_heading'  => [ 'label' => 'Hero heading',           'default' => 'Everything your organization needs to thrive together' ],
-		'hero_subtext'  => [ 'label' => 'Hero subtext',           'default' => 'CivicFlow brings member management, dues, events, communications, finances, and reporting into one secure, easy-to-use platform — so you can focus on your mission, not your spreadsheets.' ],
+		'hero_subtext'  => [ 'label' => 'Hero subtext',           'default' => 'Unestra brings member management, dues, events, communications, finances, and reporting into one secure, easy-to-use platform — so you can focus on your mission, not your spreadsheets.' ],
 		'hero_btn1'     => [ 'label' => 'Primary button label',   'default' => 'Schedule a demo' ],
 		'hero_btn1_url' => [ 'label' => 'Primary button URL',     'default' => '#contact' ],
 		'hero_btn2'     => [ 'label' => 'Secondary button label', 'default' => 'See pricing' ],
@@ -162,8 +162,8 @@ function civicflow_customize_register( $wp_customize ) {
 	] );
 
 	$cta_fields = [
-		'cta_heading'    => [ 'label' => 'CTA heading',         'default' => 'See CivicFlow in action' ],
-		'cta_subtext'    => [ 'label' => 'CTA subtext',         'default' => 'Book a free 30-minute demo and we\'ll walk you through how CivicFlow can work for your specific organization.' ],
+		'cta_heading'    => [ 'label' => 'CTA heading',         'default' => 'See Unestra in action' ],
+		'cta_subtext'    => [ 'label' => 'CTA subtext',         'default' => 'Book a free 30-minute demo and we\'ll walk you through how Unestra can work for your specific organization.' ],
 		'cta_btn1'       => [ 'label' => 'Primary button',      'default' => 'Book a demo' ],
 		'cta_btn1_url'   => [ 'label' => 'Primary button URL',  'default' => '#contact' ],
 		'cta_btn2'       => [ 'label' => 'Secondary button',    'default' => 'Start free trial' ],
@@ -183,7 +183,7 @@ function civicflow_customize_register( $wp_customize ) {
 
 	$contact_fields = [
 		'contact_email'   => [ 'label' => 'Contact email',   'default' => 'hello@civicflowapp.com' ],
-		'contact_phone'   => [ 'label' => 'Contact phone',   'default' => '1-800-CIVICFLOW' ],
+		'contact_phone'   => [ 'label' => 'Contact phone',   'default' => '1-800-UNESTRA' ],
 		'contact_hours'   => [ 'label' => 'Support hours',   'default' => 'Mon–Fri, 9am–6pm ET' ],
 	];
 

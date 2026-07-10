@@ -3,7 +3,7 @@
  * Template Name: Setup Guide
  * Template Post Type: page
  *
- * @package CivicFlow
+ * @package Unestra
  */
 
 get_header();
@@ -18,7 +18,7 @@ get_header();
 				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
 				Getting started
 			</p>
-			<h1>CivicFlow Setup Guide</h1>
+			<h1>Unestra Setup Guide</h1>
 			<p class="sg-hero-sub">Everything you need to get your organization up and running — whether you choose cloud or desktop.</p>
 
 			<!-- Tab switcher -->
@@ -64,7 +64,7 @@ get_header();
 					<div class="sg-step-num" aria-hidden="true">1</div>
 					<div class="sg-step-body">
 						<h3>Create your account</h3>
-						<p>Go to the CivicFlow portal and sign up with your email address. You'll be the organization owner/admin.</p>
+						<p>Go to the Unestra portal and sign up with your email address. You'll be the organization owner/admin.</p>
 						<a href="https://app.civicflowapp.com/signup" class="sg-btn sg-btn-primary" target="_blank" rel="noopener">
 							<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
 							Sign up free
@@ -76,7 +76,7 @@ get_header();
 					<div class="sg-step-num" aria-hidden="true">2</div>
 					<div class="sg-step-body">
 						<h3>Confirm your email</h3>
-						<p>Check your inbox for a confirmation email from CivicFlow. Click the link to verify your address and activate your account. If you don't see it within a minute, check your spam folder.</p>
+						<p>Check your inbox for a confirmation email from Unestra. Click the link to verify your address and activate your account. If you don't see it within a minute, check your spam folder.</p>
 					</div>
 				</li>
 
@@ -148,7 +148,7 @@ get_header();
 					<div class="sg-step-num" aria-hidden="true">6</div>
 					<div class="sg-step-body">
 						<h3>Import your existing members</h3>
-						<p>Navigate to <strong>Members → Import</strong>. Download the CSV template, fill in your existing member data, and upload. CivicFlow maps common column names automatically.</p>
+						<p>Navigate to <strong>Members → Import</strong>. Download the CSV template, fill in your existing member data, and upload. Unestra maps common column names automatically.</p>
 						<p>Supported import columns: First name, Last name, Email, Phone, Address, Join date, Membership type, Dues amount, Notes.</p>
 					</div>
 				</li>
@@ -236,7 +236,7 @@ get_header();
 						<div class="sg-step-num" aria-hidden="true">3</div>
 						<div class="sg-step-body">
 							<h3>Purchase a license (if you haven't already)</h3>
-							<p>CivicFlow Desktop requires a license key. Each license includes 5 seats. Additional seats can be purchased separately.</p>
+							<p>Unestra Desktop requires a license key. Each license includes 5 seats. Additional seats can be purchased separately.</p>
 							<div class="sg-dl-row">
 								<a href="https://buy.stripe.com/6oUcN61g54W92wL9ik3VC01" class="sg-btn sg-btn-outline" target="_blank" rel="noopener">
 									Purchase a license key →
@@ -250,13 +250,13 @@ get_header();
 						<div class="sg-step-num" aria-hidden="true">4</div>
 						<div class="sg-step-body">
 							<h3>Activate your license</h3>
-							<p>Launch CivicFlow. On the activation screen:</p>
+							<p>Launch Unestra. On the activation screen:</p>
 							<ul class="sg-list">
 								<li>Enter your <strong>license key</strong> (format: CF-XXXX-XXXX-XXXX-XXXX)</li>
 								<li>Enter the <strong>email address</strong> you used to purchase</li>
 								<li>Click <strong>Activate</strong></li>
 							</ul>
-							<p>The app contacts the CivicFlow license server to validate your key. An internet connection is required for this step only.</p>
+							<p>The app contacts the Unestra license server to validate your key. An internet connection is required for this step only.</p>
 							<div class="sg-callout sg-callout-info">
 								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
 								<span>You can also activate and manage licenses at <a href="https://api.civicflowapp.com/admin" target="_blank" rel="noopener">api.civicflowapp.com/admin</a>.</span>
@@ -282,11 +282,11 @@ get_header();
 						<div class="sg-step-num" aria-hidden="true">6</div>
 						<div class="sg-step-body">
 							<h3>Invite team members (multi-user setup)</h3>
-							<p>CivicFlow Desktop supports up to 5 users on your local network (more with additional seats). To add another user:</p>
+							<p>Unestra Desktop supports up to 5 users on your local network (more with additional seats). To add another user:</p>
 							<ul class="sg-list">
 								<li>Go to <strong>Settings → Users</strong></li>
 								<li>Click <strong>Add user</strong> and assign a role</li>
-								<li>The new user opens CivicFlow on their computer and points to your server's local IP address</li>
+								<li>The new user opens Unestra on their computer and points to your server's local IP address</li>
 							</ul>
 						</div>
 					</li>
@@ -314,8 +314,8 @@ get_header();
 						<div class="sg-step-num" aria-hidden="true">2</div>
 						<div class="sg-step-body">
 							<h3>Open the DMG</h3>
-							<p>Double-click the downloaded <code>CivicFlow-1.0.3-mac-arm64.dmg</code> file to mount it. A Finder window will open showing the CivicFlow app icon.</p>
-							<p>Drag the <strong>CivicFlow</strong> icon into the <strong>Applications</strong> folder shortcut shown in the same window.</p>
+							<p>Double-click the downloaded <code>CivicFlow-1.0.3-mac-arm64.dmg</code> file to mount it. A Finder window will open showing the Unestra app icon.</p>
+							<p>Drag the <strong>Unestra</strong> icon into the <strong>Applications</strong> folder shortcut shown in the same window.</p>
 						</div>
 					</li>
 
@@ -323,27 +323,27 @@ get_header();
 						<div class="sg-step-num" aria-hidden="true">3</div>
 						<div class="sg-step-body">
 							<h3>First launch — macOS security notice</h3>
-							<p>The first time you open CivicFlow from your Applications folder, macOS may show a security warning because the app is not yet notarized through the Apple Developer Program. This is expected.</p>
+							<p>The first time you open Unestra from your Applications folder, macOS may show a security warning because the app is not yet notarized through the Apple Developer Program. This is expected.</p>
 
 							<div class="sg-callout sg-callout-warn">
 								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-								<span>If macOS says <em>"CivicFlow can't be opened because Apple cannot check it for malicious software"</em> — follow the steps below to allow it.</span>
+								<span>If macOS says <em>"Unestra can't be opened because Apple cannot check it for malicious software"</em> — follow the steps below to allow it.</span>
 							</div>
 
 							<p class="sg-sub-heading">Option A — Right-click to open (easiest)</p>
 							<ol class="sg-list sg-list-alpha">
-								<li>In your <strong>Applications</strong> folder, <strong>right-click</strong> (or Ctrl-click) the CivicFlow icon</li>
+								<li>In your <strong>Applications</strong> folder, <strong>right-click</strong> (or Ctrl-click) the Unestra icon</li>
 								<li>Select <strong>Open</strong> from the context menu</li>
 								<li>A dialog appears — click <strong>Open</strong> again to confirm</li>
-								<li>CivicFlow will launch. You only need to do this once.</li>
+								<li>Unestra will launch. You only need to do this once.</li>
 							</ol>
 
 							<p class="sg-sub-heading">Option B — Allow via System Settings</p>
 							<ol class="sg-list sg-list-alpha">
-								<li>Try to open CivicFlow normally (double-click). It will be blocked.</li>
+								<li>Try to open Unestra normally (double-click). It will be blocked.</li>
 								<li>Open <strong>System Settings</strong> (Apple menu → System Settings)</li>
 								<li>Go to <strong>Privacy &amp; Security</strong></li>
-								<li>Scroll down to the Security section — you'll see a message: <em>"CivicFlow was blocked from use because it is not from an identified developer."</em></li>
+								<li>Scroll down to the Security section — you'll see a message: <em>"Unestra was blocked from use because it is not from an identified developer."</em></li>
 								<li>Click <strong>Open Anyway</strong></li>
 								<li>Confirm by clicking <strong>Open</strong> in the prompt that appears</li>
 							</ol>
@@ -359,7 +359,7 @@ get_header();
 						<div class="sg-step-num" aria-hidden="true">4</div>
 						<div class="sg-step-body">
 							<h3>Purchase a license (if you haven't already)</h3>
-							<p>CivicFlow Desktop requires a license key. Each license includes 5 seats.</p>
+							<p>Unestra Desktop requires a license key. Each license includes 5 seats.</p>
 							<a href="https://buy.stripe.com/6oUcN61g54W92wL9ik3VC01" class="sg-btn sg-btn-outline" target="_blank" rel="noopener">
 								Purchase a license key →
 							</a>
@@ -371,7 +371,7 @@ get_header();
 						<div class="sg-step-num" aria-hidden="true">5</div>
 						<div class="sg-step-body">
 							<h3>Activate your license</h3>
-							<p>On the CivicFlow activation screen:</p>
+							<p>On the Unestra activation screen:</p>
 							<ul class="sg-list">
 								<li>Enter your <strong>license key</strong> (format: CF-XXXX-XXXX-XXXX-XXXX)</li>
 								<li>Enter the <strong>email address</strong> used for purchase</li>
@@ -413,12 +413,12 @@ get_header();
 
 				<div class="sg-faq-item">
 					<h3>Is my data backed up?</h3>
-					<p>Cloud data is automatically backed up daily by CivicFlow. Desktop data is stored locally — you are responsible for backups. We recommend using the built-in export feature weekly and storing backups offsite.</p>
+					<p>Cloud data is automatically backed up daily by Unestra. Desktop data is stored locally — you are responsible for backups. We recommend using the built-in export feature weekly and storing backups offsite.</p>
 				</div>
 
 				<div class="sg-faq-item">
 					<h3>Can I import data from another system?</h3>
-					<p>Yes. CivicFlow accepts CSV imports for members, dues history, and transactions. Go to <strong>Settings → Import</strong> and download the template for the data type you need to import.</p>
+					<p>Yes. Unestra accepts CSV imports for members, dues history, and transactions. Go to <strong>Settings → Import</strong> and download the template for the data type you need to import.</p>
 				</div>
 
 				<div class="sg-faq-item">
@@ -428,12 +428,12 @@ get_header();
 
 				<div class="sg-faq-item">
 					<h3>Does the desktop version need internet?</h3>
-					<p>Only for the initial license activation. Once activated, CivicFlow Desktop runs fully offline. No ongoing internet connection is required for day-to-day use.</p>
+					<p>Only for the initial license activation. Once activated, Unestra Desktop runs fully offline. No ongoing internet connection is required for day-to-day use.</p>
 				</div>
 
 				<div class="sg-faq-item">
 					<h3>Can I try before I buy?</h3>
-					<p>Cloud plans offer a free trial — no credit card required. Desktop purchases are covered by a 30-day refund policy; contact support within 30 days of purchase if CivicFlow doesn't meet your needs.</p>
+					<p>Cloud plans offer a free trial — no credit card required. Desktop purchases are covered by a 30-day refund policy; contact support within 30 days of purchase if Unestra doesn't meet your needs.</p>
 				</div>
 
 				<div class="sg-faq-item">

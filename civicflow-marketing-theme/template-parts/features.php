@@ -2,7 +2,7 @@
 /**
  * Template Part: Features Section
  *
- * @package CivicFlow
+ * @package Unestra
  */
 
 $features = [
@@ -58,7 +58,7 @@ $features = [
 		<div class="section-header">
 			<p class="section-label"><?php esc_html_e( 'Features', 'civicflow' ); ?></p>
 			<h2 class="section-title" id="features-heading"><?php esc_html_e( 'Everything under one roof', 'civicflow' ); ?></h2>
-			<p class="section-sub"><?php esc_html_e( 'No more juggling tools. CivicFlow handles every aspect of organizational management in one connected system.', 'civicflow' ); ?></p>
+			<p class="section-sub"><?php esc_html_e( 'No more juggling tools. Unestra handles every aspect of organizational management in one connected system.', 'civicflow' ); ?></p>
 		</div>
 
 		<div class="features-grid">
