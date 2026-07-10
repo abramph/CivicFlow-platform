@@ -109,7 +109,9 @@ export async function middleware(req: NextRequest) {
     // instead of being bounced to the staff login page.
     pathname.startsWith("/m/");
   const isAuthApi = pathname.startsWith("/api/auth");
-  const isPublicApi = pathname === "/api/health";
+  // Anonymous desktop-license purchases from the marketing site create a
+  // Checkout Session with no CivicFlow account involved — never gate it.
+  const isPublicApi = pathname === "/api/health" || pathname === "/api/store/checkout";
 
   if (!token && !isPublicPage && !isAuthApi && !isPublicApi) {
     return withNoStore(NextResponse.redirect(new URL("/login", req.url)));
