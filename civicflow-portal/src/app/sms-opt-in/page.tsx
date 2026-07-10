@@ -23,7 +23,7 @@ export default async function SmsOptInPage({ searchParams }: { searchParams: Pro
       <div className="w-full max-w-md space-y-6 rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <div className="space-y-2 text-center">
           <h1 className="text-2xl font-bold text-slate-900">Stay Connected by Text</h1>
-          <p className="text-sm text-slate-600">Turn on SMS notifications from CivicFlow and your organization.</p>
+          <p className="text-sm text-slate-600">Turn on SMS notifications from Unestra and your organization.</p>
         </div>
 
         <ul className="space-y-2 text-sm text-slate-700">
@@ -38,7 +38,7 @@ export default async function SmsOptInPage({ searchParams }: { searchParams: Pro
         <div className="border-t border-slate-200 pt-6">
           {!session?.userId ? (
             <div className="space-y-3">
-              <p className="text-sm text-slate-600">Sign in to your CivicFlow account to turn on SMS notifications.</p>
+              <p className="text-sm text-slate-600">Sign in to your Unestra account to turn on SMS notifications.</p>
               <Link
                 href={`/login?callbackUrl=${encodeURIComponent(org ? `/sms-opt-in?org=${org}` : "/sms-opt-in")}`}
                 className="block w-full rounded-lg bg-emerald-600 px-4 py-2 text-center text-sm font-semibold text-white hover:bg-emerald-700"

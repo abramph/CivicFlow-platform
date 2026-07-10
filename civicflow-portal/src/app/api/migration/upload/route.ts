@@ -243,7 +243,7 @@ export async function POST(request: Request) {
       }
       if (data.schema !== "civicflow-desktop-export") {
         throw new ValidationError(
-          "Unrecognized export format. Export the file from CivicFlow desktop (Settings → Export for Cloud Migration)."
+          "Unrecognized export format. Export the file from Unestra desktop (Settings → Export for Cloud Migration)."
         );
       }
     } else if (ext === "db" || ext === "sqlite") {

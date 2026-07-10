@@ -12,7 +12,7 @@ const START_KEYWORDS = new Set(["START", "YES", "UNSTOP"]);
 const HELP_KEYWORDS = new Set(["HELP", "INFO"]);
 
 const HELP_MESSAGE =
-  "CivicFlow: For help, contact support@civicflowapp.com. Msg&data rates may apply. Reply STOP to unsubscribe.";
+  "Unestra: For help, contact support@civicflowapp.com. Msg&data rates may apply. Reply STOP to unsubscribe.";
 
 const EMPTY_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>';
 

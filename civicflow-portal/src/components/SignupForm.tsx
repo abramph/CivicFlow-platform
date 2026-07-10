@@ -115,7 +115,7 @@ export function SignupForm() {
   return (
     <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
       <h1 className="text-2xl font-bold text-slate-900">Create your account</h1>
-      <p className="mt-1 text-sm text-slate-600">Get started with CivicFlow.</p>
+      <p className="mt-1 text-sm text-slate-600">Get started with Unestra.</p>
 
       {error ? (
         <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>

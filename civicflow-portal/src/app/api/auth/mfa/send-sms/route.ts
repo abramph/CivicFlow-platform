@@ -60,7 +60,7 @@ export async function POST(request: Request) {
     },
   });
 
-  const result = await sendSms({ to: user.phone, body: `Your CivicFlow sign-in code is ${code}. It expires in 10 minutes.` });
+  const result = await sendSms({ to: user.phone, body: `Your Unestra sign-in code is ${code}. It expires in 10 minutes.` });
 
   return Response.json({ ok: true, sent: result.sent, skipped: result.skipped, maskedPhone: maskPhone(user.phone) });
 }

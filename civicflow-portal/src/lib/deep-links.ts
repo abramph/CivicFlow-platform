@@ -34,7 +34,7 @@ const ALLOWED_DEEP_LINK_PATTERNS: RegExp[] = [
 const ALLOWED_DEEP_LINK_HOST = "app.civicflowapp.com";
 
 /**
- * Accepts a civicflow://, https://app.civicflowapp.com/, or bare "/path"
+ * Accepts a unestra://, https://app.civicflowapp.com/, or bare "/path"
  * value and returns it unchanged if it resolves to an allow-listed in-app
  * path, otherwise null.
  */

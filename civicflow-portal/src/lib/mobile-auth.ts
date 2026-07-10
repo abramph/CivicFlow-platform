@@ -1,5 +1,5 @@
 /**
- * CivicFlow SaaS — Mobile (bearer-token) authentication
+ * Unestra SaaS — Mobile (bearer-token) authentication
  *
  * The portal's staff session is cookie-based NextAuth JWT (see authOptions.ts /
  * auth-guards.ts), which doesn't work for a native mobile client. Mobile members
@@ -104,7 +104,7 @@ export async function completeMobileLogin(user: {
     return {
       ok: false,
       status: 403,
-      error: "This account is not set up as a CivicFlow member. Ask your organization for an app invite.",
+      error: "This account is not set up as a Unestra member. Ask your organization for an app invite.",
     };
   }
 

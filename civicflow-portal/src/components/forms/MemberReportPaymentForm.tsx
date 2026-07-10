@@ -111,7 +111,7 @@ export function MemberReportPaymentForm({ organizationId }: { organizationId: st
         {submitting ? "Submitting..." : "Submit Payment Report"}
       </button>
       <p className="text-xs text-slate-500">
-        To attach a receipt photo, use the CivicFlow mobile app.
+        To attach a receipt photo, use the Unestra mobile app.
       </p>
     </form>
   );

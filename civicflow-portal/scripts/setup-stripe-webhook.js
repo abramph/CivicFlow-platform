@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Registers (or updates) the CivicFlow portal webhook endpoint in Stripe.
+ * Registers (or updates) the Unestra portal webhook endpoint in Stripe.
  *
  * Usage:
  *   node scripts/setup-stripe-webhook.js --url https://app.civicflow.com
@@ -81,7 +81,7 @@ async function listEndpoints() {
 async function createEndpoint(url) {
   const body = {
     url,
-    description: "CivicFlow SaaS portal",
+    description: "Unestra SaaS portal",
   };
   WEBHOOK_EVENTS.forEach((e, i) => {
     body[`enabled_events[${i}]`] = e;

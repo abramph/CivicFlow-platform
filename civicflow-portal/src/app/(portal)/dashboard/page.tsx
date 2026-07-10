@@ -279,7 +279,7 @@ export default async function DashboardPage() {
         )}
         <div>
           <h2 className="text-2xl font-bold text-slate-800">Dashboard</h2>
-          <p className="text-slate-600">Welcome to CivicFlow. Overview metrics below.</p>
+          <p className="text-slate-600">Welcome to Unestra. Overview metrics below.</p>
         </div>
       </div>
 

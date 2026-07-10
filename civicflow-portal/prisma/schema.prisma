@@ -1,5 +1,5 @@
 // ============================================================
-// CivicFlow SaaS Portal — Prisma Schema (PostgreSQL)
+// Unestra SaaS Portal — Prisma Schema (PostgreSQL)
 //
 // Provider:  postgresql
 // DB env:    DATABASE_URL (DigitalOcean Managed PostgreSQL)
@@ -319,7 +319,7 @@ enum SmsMessageStatus {
 }
 
 /// Status of a submission to Twilio's toll-free verification program.
-/// CivicFlow only displays/refreshes status here — the actual submission
+/// Unestra only displays/refreshes status here — the actual submission
 /// (business profile, use case, opt-in proof) happens in the Twilio Console.
 enum TollFreeVerificationStatus {
   NOT_SUBMITTED
@@ -330,7 +330,7 @@ enum TollFreeVerificationStatus {
 
 // ─── SaaS Core Models ────────────────────────────────────────────────────────
 
-/// A tenant organization on the CivicFlow SaaS platform.
+/// A tenant organization on the Unestra SaaS platform.
 model Organization {
   id               String    @id @default(cuid())
   slug             String    @unique

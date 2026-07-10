@@ -80,7 +80,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
       success_url: `${baseUrl}/pay/${slug}/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${baseUrl}/pay/${slug}`,
       metadata: {
-        product: "CivicFlow",
+        product: "Unestra",
         platformOwner: "APH Technologies, LLC",
         paymentType: link.campaign?.name ? "campaign" : link.event?.title ? "event" : "dues",
         paymentLinkId: link.id,

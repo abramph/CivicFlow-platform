@@ -2,7 +2,7 @@ import Link from "next/link";
 import { PLANS } from "@/lib/plans";
 
 export const metadata = {
-  title: "Pricing — CivicFlow",
+  title: "Pricing — Unestra",
   description: "Simple, transparent pricing for community and nonprofit organizations.",
 };
 

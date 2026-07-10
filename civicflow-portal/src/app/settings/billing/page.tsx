@@ -169,7 +169,7 @@ export default async function BillingSettingsPage({
       </div>
 
       <p className="text-xs text-slate-400">
-        CivicFlow is a product of APH Technologies, LLC. Subscription charges appear on your statement
+        Unestra is a product of APH Technologies, LLC. Subscription charges appear on your statement
         as billed by APH Technologies, LLC.
       </p>
     </main>

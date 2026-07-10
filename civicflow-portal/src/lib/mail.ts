@@ -68,7 +68,7 @@ export async function sendReceiptEmail(params: {
   date: string;
   downloadUrl?: string;
 }) {
-  const subject = `Your CivicFlow Receipt ${params.receiptNumber}`;
+  const subject = `Your Unestra Receipt ${params.receiptNumber}`;
   const text = [
     `Receipt Number: ${params.receiptNumber}`,
     `Amount: ${params.amount}`,
@@ -93,24 +93,24 @@ export async function sendReminderEmail(params: {
 }) {
   return sendEmail({
     to: params.to,
-    subject: params.subject ?? `CivicFlow Reminder: ${params.reminderType}`,
+    subject: params.subject ?? `Unestra Reminder: ${params.reminderType}`,
     text: params.body,
   });
 }
 
 export async function sendVerificationEmail(params: { to: string; verifyUrl: string }) {
-  const subject = "Verify your CivicFlow email address";
+  const subject = "Verify your Unestra email address";
   const text = [
-    "Welcome to CivicFlow!",
+    "Welcome to Unestra!",
     "",
     "Click the link below to verify your email address. The link expires in 24 hours.",
     "",
     params.verifyUrl,
     "",
-    "If you did not create a CivicFlow account, you can safely ignore this email.",
+    "If you did not create a Unestra account, you can safely ignore this email.",
   ].join("\n");
   const html = `
-    <p>Welcome to <strong>CivicFlow</strong>!</p>
+    <p>Welcome to <strong>Unestra</strong>!</p>
     <p>Click the button below to verify your email address. The link expires in 24 hours.</p>
     <p style="margin:24px 0">
       <a href="${params.verifyUrl}" style="background:#059669;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:600">
@@ -118,15 +118,15 @@ export async function sendVerificationEmail(params: { to: string; verifyUrl: str
       </a>
     </p>
     <p style="color:#6b7280;font-size:13px">Or copy this link: ${params.verifyUrl}</p>
-    <p style="color:#6b7280;font-size:13px">If you did not create a CivicFlow account, you can safely ignore this email.</p>
+    <p style="color:#6b7280;font-size:13px">If you did not create a Unestra account, you can safely ignore this email.</p>
   `.trim();
   return sendEmail({ to: params.to, subject, text, html });
 }
 
 export async function sendPasswordResetEmail(params: { to: string; resetUrl: string }) {
-  const subject = "Reset your CivicFlow password";
+  const subject = "Reset your Unestra password";
   const text = [
-    "You requested a password reset for your CivicFlow account.",
+    "You requested a password reset for your Unestra account.",
     "",
     "Click the link below to set a new password. The link expires in 30 minutes.",
     "",
@@ -135,7 +135,7 @@ export async function sendPasswordResetEmail(params: { to: string; resetUrl: str
     "If you did not request a password reset, you can safely ignore this email.",
   ].join("\n");
   const html = `
-    <p>You requested a password reset for your <strong>CivicFlow</strong> account.</p>
+    <p>You requested a password reset for your <strong>Unestra</strong> account.</p>
     <p>Click the button below to set a new password. The link expires in 30 minutes.</p>
     <p style="margin:24px 0">
       <a href="${params.resetUrl}" style="background:#059669;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:600">

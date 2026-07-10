@@ -34,7 +34,7 @@ export async function notifyNewMessageParticipants(params: {
   const preview = truncate(params.body, 140);
   const deepLink = `/messages/${params.conversationId}`;
   const subject = `New message from ${params.senderDisplayName}`;
-  const emailText = `${params.senderDisplayName} sent you a message in CivicFlow:\n\n${params.body}\n\nOpen CivicFlow to reply.`;
+  const emailText = `${params.senderDisplayName} sent you a message in Unestra:\n\n${params.body}\n\nOpen Unestra to reply.`;
 
   for (const participant of participants) {
     if (participant.role === "MEMBER") {

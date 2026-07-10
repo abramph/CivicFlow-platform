@@ -24,7 +24,7 @@ const serverEnvSchema = z.object({
   ANDROID_PACKAGE_NAME: z.string().optional(),
   ANDROID_SHA256_CERT_FINGERPRINTS: z.string().optional(),
 
-  // Platform billing (CivicFlow SaaS subscriptions) — belongs to the
+  // Platform billing (Unestra SaaS subscriptions) — belongs to the
   // APH Technologies, LLC Stripe account. See docs/APH_TECHNOLOGIES_STRIPE_SETUP.md.
   STRIPE_SECRET_KEY: z.string().min(1),
   STRIPE_WEBHOOK_SECRET: z.string().min(1),
@@ -157,7 +157,7 @@ export function getServerEnv(): ServerEnv {
     SMTP_PORT: parsed.SMTP_PORT ?? "587",
     SMTP_USER: parsed.SMTP_USER ?? "",
     SMTP_PASS: parsed.SMTP_PASS ?? "",
-    FROM_EMAIL: parsed.FROM_EMAIL ?? "CivicFlow <noreply@example.com>",
+    FROM_EMAIL: parsed.FROM_EMAIL ?? "Unestra <noreply@example.com>",
     CIVICFLOW_USE_MEMORY_RATE_LIMITER: parsed.CIVICFLOW_USE_MEMORY_RATE_LIMITER,
     RATE_LIMIT_REDIS_URL: parsed.RATE_LIMIT_REDIS_URL,
     RATE_LIMIT_REDIS_TOKEN: parsed.RATE_LIMIT_REDIS_TOKEN,

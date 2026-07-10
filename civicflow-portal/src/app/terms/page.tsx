@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-export const metadata = { title: "Terms of Service — CivicFlow" };
+export const metadata = { title: "Terms of Service — Unestra" };
 
 export default function TermsOfServicePage() {
   return (
@@ -12,12 +12,12 @@ export default function TermsOfServicePage() {
         </div>
 
         <p className="text-sm leading-6 text-slate-700">
-          These Terms of Service (&quot;Terms&quot;) govern your use of CivicFlow, including our website,
-          member portal, and mobile app. By creating an account or using CivicFlow, you agree to these Terms.
+          These Terms of Service (&quot;Terms&quot;) govern your use of Unestra, including our website,
+          member portal, and mobile app. By creating an account or using Unestra, you agree to these Terms.
         </p>
 
         <section className="space-y-2">
-          <h2 className="text-lg font-semibold text-slate-900">Using CivicFlow</h2>
+          <h2 className="text-lg font-semibold text-slate-900">Using Unestra</h2>
           <p className="text-sm leading-6 text-slate-700">
             You must provide accurate information when creating an account and are responsible for
             maintaining the confidentiality of your login credentials and for all activity under your account.
@@ -27,7 +27,7 @@ export default function TermsOfServicePage() {
         <section className="space-y-2">
           <h2 className="text-lg font-semibold text-slate-900">SMS / Text Messaging Program</h2>
           <p className="text-sm leading-6 text-slate-700">
-            By checking the SMS consent checkbox, you agree to receive text messages from CivicFlow and
+            By checking the SMS consent checkbox, you agree to receive text messages from Unestra and
             organizations you belong to for account verification, password resets, payment confirmations,
             membership renewals, event reminders, volunteer notifications, and organization announcements.
           </p>
@@ -44,7 +44,7 @@ export default function TermsOfServicePage() {
         <section className="space-y-2">
           <h2 className="text-lg font-semibold text-slate-900">Payments</h2>
           <p className="text-sm leading-6 text-slate-700">
-            Payments made through CivicFlow are processed by our third-party payment processor. You are
+            Payments made through Unestra are processed by our third-party payment processor. You are
             responsible for reviewing amounts before submitting a payment.
           </p>
         </section>
@@ -52,8 +52,8 @@ export default function TermsOfServicePage() {
         <section className="space-y-2">
           <h2 className="text-lg font-semibold text-slate-900">Termination</h2>
           <p className="text-sm leading-6 text-slate-700">
-            We may suspend or terminate access to CivicFlow for violations of these Terms or for conduct that
-            we determine is harmful to other users, organizations, or CivicFlow itself.
+            We may suspend or terminate access to Unestra for violations of these Terms or for conduct that
+            we determine is harmful to other users, organizations, or Unestra itself.
           </p>
         </section>
 
@@ -70,7 +70,7 @@ export default function TermsOfServicePage() {
         </p>
 
         <Link href="/" className="text-sm font-medium text-emerald-700 hover:underline">
-          ← Back to CivicFlow
+          ← Back to Unestra
         </Link>
       </div>
     </div>

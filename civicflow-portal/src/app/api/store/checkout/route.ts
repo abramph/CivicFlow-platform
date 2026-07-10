@@ -123,7 +123,7 @@ export async function POST(request: NextRequest) {
     const cancelUrl = requireAbsoluteHttpUrl(String(body?.cancelUrl || "").trim(), "cancelUrl");
 
     if (!productCode) {
-      return jsonError("productCode is required and must be a supported CivicFlow product.", 400);
+      return jsonError("productCode is required and must be a supported Unestra product.", 400);
     }
     if (!customerEmail) {
       return jsonError("customerEmail is required.", 400);
@@ -163,7 +163,7 @@ export async function POST(request: NextRequest) {
       });
     } catch (upstreamError) {
       return jsonError(
-        String((upstreamError as Error)?.message || "Unable to reach the CivicFlow license server."),
+        String((upstreamError as Error)?.message || "Unable to reach the Unestra license server."),
         502
       );
     }

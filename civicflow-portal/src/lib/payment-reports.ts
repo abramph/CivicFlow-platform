@@ -69,7 +69,7 @@ export async function createPaymentReportAndNotify(params: {
         text: [
           `${member?.firstName ?? ""} ${member?.lastName ?? ""}`.trim() || "A member",
           `reported a ${category.replace(/_/g, " ").toLowerCase()} payment of $${params.amount.toFixed(2)} via ${params.paymentMethod}.`,
-          "Review it in the CivicFlow portal under Payment Reports.",
+          "Review it in the Unestra portal under Payment Reports.",
         ].join(" "),
       }).catch(() => null)
     )

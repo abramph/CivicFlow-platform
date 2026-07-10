@@ -1,6 +1,6 @@
 # Multi-organization membership
 
-One CivicFlow login (`User`) can belong to more than one organization —
+One Unestra login (`User`) can belong to more than one organization —
 Admin at one, Member at another, Treasurer at a third. This doc explains how
 that's modeled, how the "active" organization is picked for a given request,
 and how to add a new org-scoped feature without leaking data across orgs.

@@ -14,7 +14,7 @@ export async function GET() {
 
   const secret = totpGenerateSecret();
   const email = session.userEmail ?? session.userId;
-  const otpauthUrl = totpKeyUri(email, "CivicFlow", secret);
+  const otpauthUrl = totpKeyUri(email, "Unestra", secret);
   const qrCodeDataUrl = await QRCode.toDataURL(otpauthUrl, { width: 200, margin: 2 });
 
   // Generate 8 backup codes (8 hex chars each)

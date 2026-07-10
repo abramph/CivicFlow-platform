@@ -64,7 +64,7 @@ export async function GET(request: Request) {
       filters: parseFilters(searchParams),
     });
     const format = formatParam as ReportExportFormat;
-    const body = await exportReport(report, format, organization?.name ?? "CivicFlow");
+    const body = await exportReport(report, format, organization?.name ?? "Unestra");
 
     await createAuditEvent({
       organizationId,

@@ -105,7 +105,7 @@ export function MemberPortalShell({ children }: { children: ReactNode }) {
           // eslint-disable-next-line @next/next/no-img-element
           <img src={active.organizationLogoUrl} alt="" className="h-7 w-7 rounded object-cover" />
         ) : null}
-        <span className="truncate font-semibold text-slate-900">{active?.organizationName ?? "CivicFlow"}</span>
+        <span className="truncate font-semibold text-slate-900">{active?.organizationName ?? "Unestra"}</span>
       </header>
 
       {open ? (

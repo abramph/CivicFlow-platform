@@ -64,7 +64,7 @@ export function PortalShell({ children }: { children: ReactNode }) {
       <div className="min-h-screen bg-slate-100 text-slate-900">
         <div className="mx-auto max-w-7xl px-6 py-10">
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <p className="text-sm font-medium text-slate-700">Loading CivicFlow…</p>
+            <p className="text-sm font-medium text-slate-700">Loading Unestra…</p>
           </div>
         </div>
       </div>
@@ -196,7 +196,7 @@ export function PortalShell({ children }: { children: ReactNode }) {
         <aside className="hidden w-72 border-r border-slate-200 bg-white lg:block">
           <div className="border-b border-slate-200 px-6 py-5">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-700">
-              CivicFlow
+              Unestra
             </p>
             <h1 className="mt-1 text-2xl font-semibold text-slate-950">SaaS Portal</h1>
             <p className="mt-2 text-sm leading-6 text-slate-700">

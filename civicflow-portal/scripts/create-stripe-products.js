@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Creates CivicFlow products and prices in Stripe.
+ * Creates Unestra products and prices in Stripe.
  * Safe to run multiple times — looks up existing products/prices by metadata
  * before creating, so it won't duplicate.
  *
@@ -15,12 +15,12 @@ const https = require("node:https");
 const PRODUCTS = [
   {
     key: "cloud",
-    name: "CivicFlow Cloud",
+    name: "Unestra Cloud",
     description: "Cloud-hosted membership and financial management for community organizations.",
     prices: [
       {
         key: "cloud_monthly",
-        nickname: "CivicFlow Cloud — Monthly",
+        nickname: "Unestra Cloud — Monthly",
         unitAmount: 4999, // $49.99
         currency: "usd",
         recurring: { interval: "month" },
@@ -30,12 +30,12 @@ const PRODUCTS = [
   },
   {
     key: "desktop",
-    name: "CivicFlow Desktop",
+    name: "Unestra Desktop",
     description: "Desktop application license for offline membership and financial management.",
     prices: [
       {
         key: "desktop_license",
-        nickname: "CivicFlow Desktop — License",
+        nickname: "Unestra Desktop — License",
         unitAmount: 59900, // $599.00
         currency: "usd",
         recurring: null, // one-time
@@ -43,7 +43,7 @@ const PRODUCTS = [
       },
       {
         key: "desktop_maintenance",
-        nickname: "CivicFlow Desktop — Maintenance & Updates",
+        nickname: "Unestra Desktop — Maintenance & Updates",
         unitAmount: 14900, // $149.00
         currency: "usd",
         recurring: { interval: "year" },

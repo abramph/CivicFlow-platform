@@ -1,5 +1,5 @@
 /**
- * CivicFlow SaaS — Server-side auth guard utilities
+ * Unestra SaaS — Server-side auth guard utilities
  *
  * All guards must be called from Server Components or Route Handlers only.
  * They derive organizationId from the session — never from client input.

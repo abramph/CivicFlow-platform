@@ -7,7 +7,7 @@ import { requireRateLimit } from "@/lib/rate-limit";
 import { ValidationError } from "@/lib/validation";
 
 /**
- * Admin-initiated invite for a member to create CivicFlow mobile/web login
+ * Admin-initiated invite for a member to create Unestra mobile/web login
  * credentials. No open self-signup surface — only staff with members:write
  * can trigger this, scoped to one specific member record.
  */

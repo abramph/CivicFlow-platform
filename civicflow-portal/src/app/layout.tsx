@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "CivicFlow Admin Portal",
-  description: "Multi-tenant CivicFlow admin web portal",
+  title: "Unestra Admin Portal",
+  description: "Multi-tenant Unestra admin web portal",
 };
 
 export default function RootLayout({

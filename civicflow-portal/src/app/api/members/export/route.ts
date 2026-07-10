@@ -229,7 +229,7 @@ export async function GET(request: Request) {
     metadata: { format, count: members.length, filters: filtersSummary },
   });
 
-  const filenameBase = `civicflow-members-filtered-${exportDateStamp()}`;
+  const filenameBase = `unestra-members-filtered-${exportDateStamp()}`;
   if (format === "print") {
     return Response.redirect(new URL(`/members/print?${url.searchParams.toString()}`, url.origin));
   }
@@ -245,7 +245,7 @@ export async function GET(request: Request) {
   if (format === "pdf") {
     try {
       const buffer = await buildPdf({
-        organizationName: organization?.name ?? "CivicFlow Organization",
+        organizationName: organization?.name ?? "Unestra Organization",
         filtersSummary,
         members,
       });

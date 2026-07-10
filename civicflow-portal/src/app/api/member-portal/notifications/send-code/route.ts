@@ -51,7 +51,7 @@ export async function POST(request: Request) {
       },
     });
 
-    const result = await sendSms({ to: phone, body: `Your CivicFlow verification code is ${code}. It expires in 10 minutes.` });
+    const result = await sendSms({ to: phone, body: `Your Unestra verification code is ${code}. It expires in 10 minutes.` });
 
     return Response.json({ ok: true, sent: result.sent, skipped: result.skipped });
   });

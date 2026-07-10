@@ -1,5 +1,5 @@
 /**
- * CivicFlow SaaS — Database Seed Script
+ * Unestra SaaS — Database Seed Script
  *
  * Run with:
  *   cd civicflow-portal
@@ -36,7 +36,7 @@ async function main() {
   const { PrismaClient } = await import("@prisma/client");
   prisma = new PrismaClient();
 
-  console.log("🌱  Seeding CivicFlow SaaS database...\n");
+  console.log("🌱  Seeding Unestra SaaS database...\n");
 
   // ── 1. SUPER_ADMIN user ─────────────────────────────────────────────────────
   const superAdmin = await prisma.user.upsert({

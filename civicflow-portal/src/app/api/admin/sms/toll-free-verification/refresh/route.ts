@@ -6,7 +6,7 @@ import { getEffectiveTwilioCredentials, getPlatformSmsSettings } from "@/lib/sms
 
 /**
  * Twilio's toll-free verification status values, mapped to our simpler
- * TollFreeVerificationStatus enum. CivicFlow only displays/refreshes status
+ * TollFreeVerificationStatus enum. Unestra only displays/refreshes status
  * here — submitting a new verification happens in the Twilio Console.
  */
 const STATUS_MAP: Record<string, "PENDING" | "VERIFIED" | "REJECTED"> = {

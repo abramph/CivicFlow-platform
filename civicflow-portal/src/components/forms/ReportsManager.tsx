@@ -89,8 +89,8 @@ export function ReportsManager({
     status: "",
     includeAttachment: true,
     includeSummary: true,
-    subject: "CivicFlow report",
-    body: "Attached is the requested CivicFlow report.",
+    subject: "Unestra report",
+    body: "Attached is the requested Unestra report.",
   });
   const [recipient, setRecipient] = useState<ReportRecipientSelectorValue>(defaultRecipient);
   const [saving, setSaving] = useState(false);

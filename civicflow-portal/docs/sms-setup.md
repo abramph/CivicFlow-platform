@@ -82,7 +82,7 @@ commit real values to the repo or to `.env` files tracked by git.
 The SMS add-on is billed as a separate Stripe Subscription Item on the org's existing subscription,
 not a new checkout flow:
 
-1. In the Stripe Dashboard, create a recurring Product (e.g. "CivicFlow SMS Add-On") with a
+1. In the Stripe Dashboard, create a recurring Product (e.g. "Unestra SMS Add-On") with a
    monthly Price matching `SMS_ADDON.monthlyPriceCents` in `src/lib/sms-pricing.ts` (currently
    $10.00/month, 1,000 included messages, $0.02/message overage — all three values live in that
    one file so pricing changes don't need to be hunted down across the codebase).

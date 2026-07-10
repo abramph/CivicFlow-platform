@@ -84,9 +84,9 @@ export async function sendMemberAppInviteEmail(params: {
 
   await sendEmail({
     to: params.member.email,
-    subject: `You're invited to the CivicFlow app — ${orgName}`,
+    subject: `You're invited to the Unestra app — ${orgName}`,
     text: [
-      `${orgName} has invited you to use the CivicFlow mobile app.`,
+      `${orgName} has invited you to use the Unestra mobile app.`,
       "",
       "Set up your login to check your dues status, report a payment, and receive announcements.",
       "",
@@ -95,7 +95,7 @@ export async function sendMemberAppInviteEmail(params: {
       "This invite link expires in 7 days.",
     ].join("\n"),
     html: `
-      <p><strong>${orgName}</strong> has invited you to use the CivicFlow mobile app.</p>
+      <p><strong>${orgName}</strong> has invited you to use the Unestra mobile app.</p>
       <p>Set up your login to check your dues status, report a payment, and receive announcements.</p>
       <p style="margin:24px 0">
         <a href="${acceptUrl}" style="background:#059669;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:600">

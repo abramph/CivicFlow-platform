@@ -21,7 +21,7 @@ export interface MemberWebSession {
 }
 
 /**
- * Resolves the logged-in web visitor as a CivicFlow member (role MEMBER),
+ * Resolves the logged-in web visitor as a Unestra member (role MEMBER),
  * for the member-facing web fallback pages (/m/*). Returns null if the
  * visitor isn't authenticated or isn't a member — callers should render
  * the "open in app / log in" fallback UI in that case.

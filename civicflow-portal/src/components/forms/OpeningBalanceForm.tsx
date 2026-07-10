@@ -44,7 +44,7 @@ export function OpeningBalanceForm({ initialAmountCents, initialDate, canWrite }
   return (
     <div className="space-y-4">
       <p className="text-sm text-slate-600">
-        If you migrated from another platform, enter the account balance you had on the day you switched to CivicFlow. Leave at $0.00 if you&apos;re starting fresh.
+        If you migrated from another platform, enter the account balance you had on the day you switched to Unestra. Leave at $0.00 if you&apos;re starting fresh.
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>

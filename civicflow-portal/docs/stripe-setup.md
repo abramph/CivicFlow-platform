@@ -1,12 +1,12 @@
 # Stripe Setup
 
-CivicFlow's SaaS portal bills organizations via Stripe Subscriptions. Production is confirmed
+Unestra's SaaS portal bills organizations via Stripe Subscriptions. Production is confirmed
 running in **live mode** (`STRIPE_PUBLISHABLE_KEY` is `pk_live_...`), with all plan/seat price IDs
 configured as real Stripe Price objects — not placeholders.
 
 > **Account ownership note:** the live key currently deployed belongs to ThrivePath Mental Health
-> Services' Stripe account, not APH Technologies, LLC (CivicFlow's actual owner/operator). Zero
-> completed charges or active subscriptions exist on it for CivicFlow, so cutover to a proper APH
+> Services' Stripe account, not APH Technologies, LLC (Unestra's actual owner/operator). Zero
+> completed charges or active subscriptions exist on it for Unestra, so cutover to a proper APH
 > Technologies account is low-risk. See
 > [`docs/APH_TECHNOLOGIES_STRIPE_SETUP.md`](../../docs/APH_TECHNOLOGIES_STRIPE_SETUP.md) at the repo
 > root for the full cutover plan.

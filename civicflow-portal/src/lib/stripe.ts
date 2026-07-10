@@ -105,7 +105,7 @@ export async function getOrCreateStripeCustomer(
   const customer = await stripe.customers.create({
     name,
     ...(email ? { email } : {}),
-    metadata: { product: "CivicFlow", platformOwner: "APH Technologies, LLC", organizationId },
+    metadata: { product: "Unestra", platformOwner: "APH Technologies, LLC", organizationId },
   });
 
   return customer.id;
@@ -136,7 +136,7 @@ export async function createCheckoutSession({
   }
 
   const metadata = {
-    product: "CivicFlow",
+    product: "Unestra",
     platformOwner: "APH Technologies, LLC",
     organizationId,
     environment: process.env.NODE_ENV ?? "development",

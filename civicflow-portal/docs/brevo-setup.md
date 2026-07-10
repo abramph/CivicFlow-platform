@@ -1,6 +1,6 @@
 # Brevo (Email/SMTP) Setup
 
-CivicFlow sends transactional email (verification, password reset, receipts, reminders,
+Unestra sends transactional email (verification, password reset, receipts, reminders,
 communication campaigns) via SMTP through `nodemailer` (`src/lib/mail.ts`) — there is no direct
 Brevo transactional-API integration, only SMTP relay.
 
@@ -12,7 +12,7 @@ Brevo transactional-API integration, only SMTP relay.
 | `SMTP_PORT` | `587` | STARTTLS port. `src/lib/mail.ts` sets `secure: true` only when the port is exactly `465` — for `587`, `nodemailer` upgrades via STARTTLS automatically |
 | `SMTP_USER` | your Brevo SMTP login (an email address, shown in Brevo's SMTP & API settings) | |
 | `SMTP_PASS` | your Brevo SMTP key (not your Brevo account password) | Generate under Brevo → SMTP & API → SMTP tab |
-| `FROM_EMAIL` | `CivicFlow <noreply@civicflowapp.com>` | Must be a **verified sender** in Brevo (see below) or Brevo will reject/bounce the send |
+| `FROM_EMAIL` | `Unestra <noreply@civicflowapp.com>` | Must be a **verified sender** in Brevo (see below) or Brevo will reject/bounce the send |
 | `ENABLE_EMAIL_SEND` | `"1"` | Safety switch — without this set to `"1"`/`"true"`, `sendEmail()` no-ops (`skipped: true`) instead of attempting delivery. Useful for staging/dev; must be `"1"` in production or no email of any kind (including password reset) will ever send. |
 
 ## Brevo account setup

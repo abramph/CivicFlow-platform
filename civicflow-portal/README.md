@@ -1,8 +1,8 @@
-# CivicFlow Portal (SaaS)
+# Unestra Portal (SaaS)
 
-Next.js SaaS portal for CivicFlow multi-tenant operations.
+Next.js SaaS portal for Unestra multi-tenant operations.
 
-Legacy UnionFlow schema models, scripts, and routes have been removed so the portal is PostgreSQL-focused and CivicFlow-only.
+Legacy UnionFlow schema models, scripts, and routes have been removed so the portal is PostgreSQL-focused and Unestra-only.
 
 ## Stack
 - Next.js App Router

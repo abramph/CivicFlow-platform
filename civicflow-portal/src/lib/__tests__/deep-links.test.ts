@@ -24,7 +24,7 @@ describe("validateDeepLink", () => {
   });
 
   it("accepts the custom scheme form", () => {
-    expect(validateDeepLink("civicflow://report-payment")).toBe("civicflow://report-payment");
+    expect(validateDeepLink("unestra://report-payment")).toBe("unestra://report-payment");
   });
 
   it("accepts the universal link form", () => {
@@ -32,12 +32,12 @@ describe("validateDeepLink", () => {
   });
 
   it("accepts an organization switch link with a valid-looking id", () => {
-    expect(validateDeepLink("civicflow://organization/abc123")).toBe("civicflow://organization/abc123");
+    expect(validateDeepLink("unestra://organization/abc123")).toBe("unestra://organization/abc123");
   });
 
   it("rejects unknown destinations", () => {
     expect(validateDeepLink("/settings/users")).toBeNull();
-    expect(validateDeepLink("civicflow://settings/users")).toBeNull();
+    expect(validateDeepLink("unestra://settings/users")).toBeNull();
     expect(validateDeepLink("https://evil.example.com/dues")).toBeNull();
   });
 
@@ -49,6 +49,6 @@ describe("validateDeepLink", () => {
   });
 
   it("rejects an organization link with extra path segments", () => {
-    expect(validateDeepLink("civicflow://organization/abc/extra")).toBeNull();
+    expect(validateDeepLink("unestra://organization/abc/extra")).toBeNull();
   });
 });

@@ -119,7 +119,7 @@ export default async function SmsAdministrationPage() {
         <SmsCredentialsPanel credentials={credentials} />
       </SectionCard>
 
-      <SectionCard title="Toll-Free Verification" description="CivicFlow displays and refreshes status here — submitting a new verification happens in the Twilio Console.">
+      <SectionCard title="Toll-Free Verification" description="Unestra displays and refreshes status here — submitting a new verification happens in the Twilio Console.">
         <SmsTollFreeVerificationCard
           status={settings.tollFreeVerificationStatus}
           submittedAt={settings.tollFreeVerificationSubmittedAt?.toISOString() ?? null}

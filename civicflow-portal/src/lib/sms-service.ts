@@ -14,7 +14,7 @@ function withOptOutSuffix(body: string): string {
 
 /**
  * Substitutes {organizationName}/{link} tokens in an SMS body, e.g.
- * "Reminder: Your {organizationName} dues are due. Open CivicFlow: {link}".
+ * "Reminder: Your {organizationName} dues are due. Open Unestra: {link}".
  * No other channel has templating today, so this stays a plain string
  * substitution rather than a general templating system.
  */

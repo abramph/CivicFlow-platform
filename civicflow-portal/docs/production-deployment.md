@@ -1,6 +1,6 @@
 # Production Deployment Guide
 
-CivicFlow's SaaS portal (`civicflow-portal`) runs on DigitalOcean App Platform, backed by a
+Unestra's SaaS portal (`civicflow-portal`) runs on DigitalOcean App Platform, backed by a
 DigitalOcean Managed PostgreSQL database and DigitalOcean Spaces for file storage.
 
 - **App Platform app ID**: `6e4f35b1-ad49-4c92-b025-97b7d12d7ace`

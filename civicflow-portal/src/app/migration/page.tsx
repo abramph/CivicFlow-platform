@@ -17,7 +17,7 @@ interface ImportCounts {
 const FORMAT_INFO = [
   {
     ext: ".json",
-    label: "CivicFlow Desktop Export (JSON)",
+    label: "Unestra Desktop Export (JSON)",
     desc: "Full migration — all data: members, events, campaigns, meetings, attendance, contributions, expenditures.",
     how: 'In the desktop app go to Settings → Export for Cloud Migration, then upload the saved .json file.',
     full: true,
@@ -26,7 +26,7 @@ const FORMAT_INFO = [
     ext: ".db / .sqlite",
     label: "SQLite Database File",
     desc: "Full migration — reads the raw desktop database directly. Same data as the JSON export.",
-    how: "Locate your CivicFlow database file (usually civicflow.db) and upload it directly.",
+    how: "Locate your Unestra database file (usually civicflow.db) and upload it directly.",
     full: true,
   },
   {
@@ -64,7 +64,7 @@ export default function MigrationPage() {
       try {
         json = await res.json();
       } catch {
-        setResult({ ok: false, error: `Server returned status ${res.status}. Check that the file is a valid CivicFlow export.` });
+        setResult({ ok: false, error: `Server returned status ${res.status}. Check that the file is a valid Unestra export.` });
         return;
       }
       if (res.ok && json.ok) {
@@ -74,7 +74,7 @@ export default function MigrationPage() {
       } else {
         const msg = typeof json.error === "string"
           ? json.error
-          : `Import failed (HTTP ${res.status}). Make sure the file was exported from CivicFlow desktop via Settings → Export for Cloud Migration.`;
+          : `Import failed (HTTP ${res.status}). Make sure the file was exported from Unestra desktop via Settings → Export for Cloud Migration.`;
         setResult({ ok: false, error: msg });
       }
     } catch {
@@ -92,7 +92,7 @@ export default function MigrationPage() {
       <div className="p-6 max-w-2xl">
         <h1 className="text-2xl font-bold text-slate-900 mb-1">Desktop Migration</h1>
         <p className="text-sm text-slate-600 mb-6">
-          Import your existing data into this SaaS account. Supports CivicFlow exports, SQLite databases, and spreadsheets.
+          Import your existing data into this SaaS account. Supports Unestra exports, SQLite databases, and spreadsheets.
         </p>
 
         {/* Format guide */}

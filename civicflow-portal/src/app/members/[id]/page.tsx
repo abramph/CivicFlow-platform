@@ -220,7 +220,7 @@ export default async function MemberProfilePage({
           <StatCard label="Gender" value={formatText(member.gender, "Not recorded")} />
           <StatCard label="Preferred Name" value={formatText(member.preferredName, "Matches first name")} />
           <StatCard label="Household" value={formatText(member.householdName, "No household assigned")} />
-          <StatCard label="Member Record" value={member.id} helper="Internal CivicFlow member identifier." />
+          <StatCard label="Member Record" value={member.id} helper="Internal Unestra member identifier." />
         </div>
         <div className="mt-4">
           <EvaluateMemberCategoryButton memberId={member.id} canWrite={can("members:write")} />
@@ -255,7 +255,7 @@ export default async function MemberProfilePage({
         <AttachmentManager entityType="MEMBER" entityId={member.id} canWrite={can("members:write")} />
       </SectionCard>
 
-      <SectionCard title="Mobile App Access" description="Lets this member log into the CivicFlow mobile app to view dues, report payments, and receive announcements.">
+      <SectionCard title="Mobile App Access" description="Lets this member log into the Unestra mobile app to view dues, report payments, and receive announcements.">
         <div className="grid gap-4 md:grid-cols-2">
           <StatCard
             label="App Login"

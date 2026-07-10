@@ -47,7 +47,7 @@ export default async function MembersPrintPage({
       `}</style>
       <div className="mb-5 flex flex-wrap items-start justify-between gap-4 border-b border-slate-300 pb-4">
         <div>
-          <h1 className="text-2xl font-bold">{organization?.name ?? "CivicFlow Organization"}</h1>
+          <h1 className="text-2xl font-bold">{organization?.name ?? "Unestra Organization"}</h1>
           <p className="mt-1 text-sm font-semibold">Filtered Member List</p>
           <p className="mt-1 text-xs text-slate-700">Generated {new Date().toLocaleString("en-US")}</p>
           <p className="mt-2 max-w-5xl text-xs text-slate-700">Filters: {describeMemberFilters(filters)}</p>

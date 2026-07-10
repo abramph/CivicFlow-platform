@@ -85,7 +85,7 @@ export async function GET(request: Request) {
       metadata: { format, count: rows.length, organizationId: organizationId ?? null, status: status ?? null },
     });
 
-    const filenameBase = `civicflow-sms-logs-${exportDateStamp()}`;
+    const filenameBase = `unestra-sms-logs-${exportDateStamp()}`;
 
     if (format === "xlsx") {
       const workbook = XLSX.utils.book_new();

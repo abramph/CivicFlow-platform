@@ -15,7 +15,7 @@ import type { SmsOptInMethod } from "@prisma/client";
 export const SMS_CONSENT_VERSION = "2026-07-08.1";
 
 export const SMS_CONSENT_TEXT =
-  "I agree to receive SMS messages from CivicFlow and organizations that I belong to for account " +
+  "I agree to receive SMS messages from Unestra and organizations that I belong to for account " +
   "verification, password resets, payment confirmations, membership renewals, event reminders, " +
   "volunteer notifications, and organization announcements. Message and data rates may apply. Reply " +
   "STOP to opt out and HELP for assistance. Consent is not a condition of purchase.";

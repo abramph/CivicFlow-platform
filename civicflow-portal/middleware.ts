@@ -110,7 +110,7 @@ export async function middleware(req: NextRequest) {
     pathname.startsWith("/m/");
   const isAuthApi = pathname.startsWith("/api/auth");
   // Anonymous desktop-license purchases from the marketing site create a
-  // Checkout Session with no CivicFlow account involved — never gate it.
+  // Checkout Session with no Unestra account involved — never gate it.
   const isPublicApi = pathname === "/api/health" || pathname === "/api/store/checkout";
 
   if (!token && !isPublicPage && !isAuthApi && !isPublicApi) {

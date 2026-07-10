@@ -39,7 +39,7 @@ function SubscriptionWall() {
         </div>
         <h1 className="text-2xl font-bold text-slate-950">Your free trial has ended</h1>
         <p className="mt-3 text-slate-600">
-          Subscribe to Essential or Elite to continue using CivicFlow. Your data is safe and waiting for you.
+          Subscribe to Essential or Elite to continue using Unestra. Your data is safe and waiting for you.
         </p>
 
         <div className="mt-8 grid gap-4 sm:grid-cols-2">

@@ -1,5 +1,5 @@
 /**
- * CivicFlow SaaS — Role-Based Access Control (RBAC)
+ * Unestra SaaS — Role-Based Access Control (RBAC)
  *
  * This file defines the canonical roles and permissions for the multi-tenant
  * SaaS platform. It is intentionally kept as pure data (no framework deps)

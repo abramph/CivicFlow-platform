@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-export const metadata = { title: "Privacy Policy — CivicFlow" };
+export const metadata = { title: "Privacy Policy — Unestra" };
 
 export default function PrivacyPolicyPage() {
   return (
@@ -12,8 +12,8 @@ export default function PrivacyPolicyPage() {
         </div>
 
         <p className="text-sm leading-6 text-slate-700">
-          This Privacy Policy describes how CivicFlow (&quot;CivicFlow,&quot; &quot;we,&quot; &quot;us&quot;)
-          collects, uses, and protects information about you when you use the CivicFlow platform, including
+          This Privacy Policy describes how Unestra (&quot;Unestra,&quot; &quot;we,&quot; &quot;us&quot;)
+          collects, uses, and protects information about you when you use the Unestra platform, including
           our website, member portal, and mobile app, and when you communicate with us or an organization
           you belong to by SMS text message.
         </p>
@@ -22,7 +22,7 @@ export default function PrivacyPolicyPage() {
           <h2 className="text-lg font-semibold text-slate-900">Information We Collect</h2>
           <p className="text-sm leading-6 text-slate-700">
             We collect information you provide directly, such as your name, email address, mailing address,
-            and mobile phone number, as well as information about your interactions with CivicFlow and the
+            and mobile phone number, as well as information about your interactions with Unestra and the
             organizations you belong to, including payment, event, and communication history.
           </p>
         </section>
@@ -48,7 +48,7 @@ export default function PrivacyPolicyPage() {
         <section className="space-y-2">
           <h2 className="text-lg font-semibold text-slate-900">How We Use Information</h2>
           <p className="text-sm leading-6 text-slate-700">
-            We use the information we collect to operate and improve CivicFlow, process payments, send the
+            We use the information we collect to operate and improve Unestra, process payments, send the
             communications you&apos;ve opted in to, comply with legal obligations, and prevent fraud and abuse.
           </p>
         </section>
@@ -58,7 +58,7 @@ export default function PrivacyPolicyPage() {
           <p className="text-sm leading-6 text-slate-700">
             You can review, update, or withdraw SMS consent at any time from Notification Settings. You can
             also request a copy of, or the deletion of, your personal information by contacting your
-            organization or CivicFlow support.
+            organization or Unestra support.
           </p>
         </section>
 
@@ -75,7 +75,7 @@ export default function PrivacyPolicyPage() {
         </p>
 
         <Link href="/" className="text-sm font-medium text-emerald-700 hover:underline">
-          ← Back to CivicFlow
+          ← Back to Unestra
         </Link>
       </div>
     </div>

@@ -100,11 +100,11 @@ export default function BuyPage() {
       <div style={{ maxWidth: 980, margin: "0 auto" }}>
         <div style={{ marginBottom: 28 }}>
           <p style={{ margin: 0, letterSpacing: "0.08em", textTransform: "uppercase", color: "#45604b", fontSize: 12 }}>
-            CivicFlow Software Purchase
+            Unestra Software Purchase
           </p>
-          <h1 style={{ margin: "8px 0 10px", fontSize: "2.5rem", lineHeight: 1.05 }}>Buy or renew a CivicFlow license</h1>
+          <h1 style={{ margin: "8px 0 10px", fontSize: "2.5rem", lineHeight: 1.05 }}>Buy or renew a Unestra license</h1>
           <p style={{ margin: 0, maxWidth: 720, color: "#506355", fontSize: 16 }}>
-            Pick the product, enter billing details, and we&apos;ll create a Stripe checkout session using the current CivicFlow licensing backend.
+            Pick the product, enter billing details, and we&apos;ll create a Stripe checkout session using the current Unestra licensing backend.
           </p>
         </div>
 

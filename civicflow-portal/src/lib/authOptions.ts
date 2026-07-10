@@ -18,7 +18,7 @@ export const authOptions: NextAuthOptions = {
     // ── SaaS: email + password ──
     CredentialsProvider({
       id: "saas-credentials",
-      name: "CivicFlow",
+      name: "Unestra",
       credentials: {
         email:    { label: "Email",    type: "email"    },
         password: { label: "Password", type: "password" },

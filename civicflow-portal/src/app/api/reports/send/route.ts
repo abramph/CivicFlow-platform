@@ -74,7 +74,7 @@ export async function POST(request: Request) {
       filters: input.filters,
     });
     const attachmentBuffer = input.includeAttachment
-      ? await exportReport(report, input.format, organization?.name ?? "CivicFlow")
+      ? await exportReport(report, input.format, organization?.name ?? "Unestra")
       : null;
 
     const result = await sendReportEmail({

@@ -10,7 +10,7 @@ function buildReminderBody(log: {
 }) {
   return (
     log.bodyPreview ||
-    `This is a CivicFlow reminder (${log.reminderType}). Please review your portal dashboard.`
+    `This is a Unestra reminder (${log.reminderType}). Please review your portal dashboard.`
   );
 }
 

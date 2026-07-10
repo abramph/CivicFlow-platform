@@ -83,7 +83,7 @@ services:
     type: SECRET
     value: "REPLACE_ME"
   - key: FROM_EMAIL
-    value: "CivicFlow <noreply@civicflowapp.com>"
+    value: "Unestra <noreply@civicflowapp.com>"
   - key: ENABLE_EMAIL_SEND
     value: "0"
   - key: CRON_SECRET

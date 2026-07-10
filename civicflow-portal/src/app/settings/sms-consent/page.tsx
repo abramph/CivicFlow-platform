@@ -76,7 +76,7 @@ export default async function SmsConsentPage() {
               <p className="break-all text-slate-600">{optInUrl}</p>
               <a
                 href={qrCodeDataUrl}
-                download="civicflow-sms-opt-in-qr.png"
+                download="unestra-sms-opt-in-qr.png"
                 className="inline-block rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-800"
               >
                 Download QR Code

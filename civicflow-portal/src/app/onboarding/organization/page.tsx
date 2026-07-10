@@ -19,7 +19,7 @@ export default async function OnboardingOrganizationPage() {
       <div className="mx-auto max-w-2xl space-y-6">
         <div>
           <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-700">
-            CivicFlow
+            Unestra
           </p>
           <h1 className="mt-1 text-2xl font-semibold text-slate-950">
             Welcome — let&apos;s set up your organization.

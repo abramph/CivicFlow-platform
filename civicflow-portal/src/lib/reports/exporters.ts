@@ -19,7 +19,7 @@ function fileDate() {
 }
 
 export function reportFileName(reportType: ReportType, format: ReportExportFormat) {
-  return `civicflow-${reportType.toLowerCase().replace(/_/g, "-")}-${fileDate()}.${format}`;
+  return `unestra-${reportType.toLowerCase().replace(/_/g, "-")}-${fileDate()}.${format}`;
 }
 
 export function reportContentType(format: ReportExportFormat) {

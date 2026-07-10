@@ -66,9 +66,9 @@ export function AcceptInviteForm({ token }: { token: string }) {
 
   return (
     <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-      <h1 className="text-2xl font-bold text-slate-900">Set up your CivicFlow account</h1>
+      <h1 className="text-2xl font-bold text-slate-900">Set up your Unestra account</h1>
       <p className="mt-1 text-sm text-slate-600">
-        Create a password to access your dues status and report payments — from this browser or the CivicFlow mobile app.
+        Create a password to access your dues status and report payments — from this browser or the Unestra mobile app.
       </p>
 
       {error ? (
