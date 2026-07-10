@@ -52,7 +52,7 @@ function buildLicenseSummary(license = {}) {
   const expires = formatDate(license.expiresAt || license.expiryDate);
   const supportExpires = formatDate(license.supportExpiresAt || license.supportExpiryDate);
   return {
-    organization: license.orgName || license.organization || "CivicFlow Customer",
+    organization: license.orgName || license.organization || "Unestra Customer",
     email: license.customerEmail || license.email || null,
     licenseKey: license.licenseKey || null,
     plan: license.plan || "Essential",
@@ -69,7 +69,7 @@ function buildLicenseSummary(license = {}) {
 function buildActivationInstructions(summary) {
   const lines = [
     "Activation steps:",
-    "1. Open CivicFlow.",
+    "1. Open Unestra.",
     "2. Go to the activation screen.",
     "3. Enter the email address used for purchase and your license key.",
     "4. Activate while online at least once so this device receives its server-managed activation token.",
@@ -81,7 +81,7 @@ function buildActivationInstructions(summary) {
     html: `
       <p><strong>Activation steps:</strong></p>
       <ol>
-        <li>Open CivicFlow.</li>
+        <li>Open Unestra.</li>
         <li>Go to the activation screen.</li>
         <li>Enter the email address used for purchase and your license key.</li>
         <li>Activate while online at least once so this device receives its server-managed activation token.</li>
@@ -147,15 +147,15 @@ function buildMessage({ subject, introLines, introHtml, summary, footerLines = [
 function buildNewLicenseMessage(license) {
   const summary = buildLicenseSummary(license);
   return buildMessage({
-    subject: "Your CivicFlow License Key",
+    subject: "Your Unestra License Key",
     introLines: [
       `Hello ${summary.organization},`,
-      "Thank you for purchasing CivicFlow.",
+      "Thank you for purchasing Unestra.",
       "Your new license is ready to activate.",
     ],
     introHtml: `
       <p>Hello ${summary.organization},</p>
-      <p>Thank you for purchasing <strong>CivicFlow</strong>.</p>
+      <p>Thank you for purchasing <strong>Unestra</strong>.</p>
       <p>Your new license is ready to activate.</p>
     `,
     summary,
@@ -167,15 +167,15 @@ function buildNewLicenseMessage(license) {
 function buildRenewalConfirmationMessage(license) {
   const summary = buildLicenseSummary(license);
   return buildMessage({
-    subject: "Your CivicFlow Renewal Is Confirmed",
+    subject: "Your Unestra Renewal Is Confirmed",
     introLines: [
       `Hello ${summary.organization},`,
-      "Your CivicFlow renewal has been applied to your existing license key.",
+      "Your Unestra renewal has been applied to your existing license key.",
       "Keep using the same key on your devices.",
     ],
     introHtml: `
       <p>Hello ${summary.organization},</p>
-      <p>Your <strong>CivicFlow</strong> renewal has been applied to your existing license key.</p>
+      <p>Your <strong>Unestra</strong> renewal has been applied to your existing license key.</p>
       <p>Keep using the same key on your devices.</p>
     `,
     summary,
@@ -187,16 +187,16 @@ function buildRenewalConfirmationMessage(license) {
 function buildReissuedLicenseMessage(license, previousLicenseKey = null) {
   const summary = buildLicenseSummary(license);
   return buildMessage({
-    subject: "Your CivicFlow License Has Been Reissued",
+    subject: "Your Unestra License Has Been Reissued",
     introLines: [
       `Hello ${summary.organization},`,
-      "Your CivicFlow license has been reissued.",
+      "Your Unestra license has been reissued.",
       previousLicenseKey ? `The previous key ${previousLicenseKey} is no longer active.` : "The previous key is no longer active.",
       "Use the replacement key below for future activations.",
     ],
     introHtml: `
       <p>Hello ${summary.organization},</p>
-      <p>Your <strong>CivicFlow</strong> license has been reissued.</p>
+      <p>Your <strong>Unestra</strong> license has been reissued.</p>
       <p>${previousLicenseKey ? `The previous key <code>${previousLicenseKey}</code> is no longer active.` : "The previous key is no longer active."}</p>
       <p>Use the replacement key below for future activations.</p>
     `,
@@ -209,14 +209,14 @@ function buildReissuedLicenseMessage(license, previousLicenseKey = null) {
 function buildLicenseResendMessage(license) {
   const summary = buildLicenseSummary(license);
   return buildMessage({
-    subject: "Your CivicFlow License Details",
+    subject: "Your Unestra License Details",
     introLines: [
       `Hello ${summary.organization},`,
-      "Here is a resend of your current CivicFlow license information.",
+      "Here is a resend of your current Unestra license information.",
     ],
     introHtml: `
       <p>Hello ${summary.organization},</p>
-      <p>Here is a resend of your current <strong>CivicFlow</strong> license information.</p>
+      <p>Here is a resend of your current <strong>Unestra</strong> license information.</p>
     `,
     summary,
     footerLines: [`Need help? Contact ${summary.supportEmail}.`],

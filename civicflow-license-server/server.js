@@ -445,7 +445,7 @@ function createApp() {
         return res.status(400).json({ success: false, error: "targetLicenseKey is required for renewals." });
       }
       if (!getPriceCatalog()[priceId]) {
-        return res.status(400).json({ success: false, error: "Unsupported CivicFlow priceId." });
+        return res.status(400).json({ success: false, error: "Unsupported Unestra priceId." });
       }
 
       const session = await createCheckoutSessionForLicensePurchase({
@@ -1096,7 +1096,7 @@ function createApp() {
   });
 
   app.get("/", (_req, res) => {
-    res.send("CivicFlow License Server is running");
+    res.send("Unestra License Server is running");
   });
 
   app.get("/health", (_req, res) => {
@@ -1121,7 +1121,7 @@ async function start(port = PORT) {
   const app = createApp();
   return new Promise((resolve) => {
     const server = app.listen(port, () => {
-      console.log(`CivicFlow License Server running on port ${port}`);
+      console.log(`Unestra License Server running on port ${port}`);
       resolve({ app, server });
     });
   });

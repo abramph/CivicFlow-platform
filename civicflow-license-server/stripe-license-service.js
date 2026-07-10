@@ -120,7 +120,7 @@ function resolvePriceConfigForPurchase({ priceId, purchaseKind, targetLicense = 
   const normalizedPriceId = String(priceId || "").trim();
   const priceConfig = catalog[normalizedPriceId];
   if (!priceConfig) {
-    throw new Error(`No CivicFlow license mapping is configured for Stripe price ${normalizedPriceId || "(missing)"}.`);
+    throw new Error(`No Unestra license mapping is configured for Stripe price ${normalizedPriceId || "(missing)"}.`);
   }
 
   const normalizedPurchaseKind = parsePurchaseKindArg(purchaseKind);
@@ -234,7 +234,7 @@ async function createCheckoutSessionForLicensePurchase(input = {}) {
     success_url: successUrl,
     cancel_url: cancelUrl,
     metadata: {
-      product: "CivicFlow",
+      product: "Unestra",
       platformOwner: "APH Technologies, LLC",
       priceId,
       purchaseKind,
@@ -288,7 +288,7 @@ async function extractPurchaseFromCheckoutSession(stripe, event, session) {
     || customFieldOrg
     || customer.name
     || session.customer_details?.name
-  ) || (customer.email ? `${customer.email.split("@")[0]} organization` : "CivicFlow Customer");
+  ) || (customer.email ? `${customer.email.split("@")[0]} organization` : "Unestra Customer");
 
   const quantityRaw = Number(metadata.quantity) || 1;
   const lineItemQuantity = session.line_items?.data?.[0]?.quantity || 1;

@@ -13,7 +13,7 @@ async function seedDemoLicenses() {
 
   await createLicense({
     licenseKey: "CF-A2F9-K7M3-P4Q8-T6W1",
-    orgName: "CivicFlow Demo Org",
+    orgName: "Unestra Demo Org",
     customerEmail: "demo@civicflow.app",
     plan: "Essential",
     licenseType: "annual",
@@ -32,7 +32,7 @@ async function seedDemoLicenses() {
 
   await createLicense({
     licenseKey: "CF-Z8R5-N2X4-H7V9-B3L6",
-    orgName: "CivicFlow Demo Org",
+    orgName: "Unestra Demo Org",
     customerEmail: "demo@civicflow.app",
     plan: "Elite",
     licenseType: "perpetual",

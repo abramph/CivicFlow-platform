@@ -163,7 +163,7 @@ function normalizeLicenseKey(value, label = "key") {
   const text = String(value || "").trim().toUpperCase();
   if (!text) return null;
   if (!LICENSE_KEY_PATTERN.test(text)) {
-    throw new Error(`${label} must match a valid CivicFlow license key format`);
+    throw new Error(`${label} must match a valid Unestra license key format`);
   }
   return text;
 }

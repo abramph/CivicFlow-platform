@@ -29,7 +29,7 @@ function layout({ title, body, user = null, flash = null }) {
     ? `
       <header class="topbar">
         <div>
-          <h1>CivicFlow Licensing Admin</h1>
+          <h1>Unestra Licensing Admin</h1>
           <p>Signed in as ${escapeHtml(user.username || "admin")}</p>
         </div>
         <nav>
@@ -291,7 +291,7 @@ function renderLoginPage({ error = null, next = "/admin/licenses", configured = 
   const body = `
     <section class="card" style="max-width: 480px; margin: 80px auto 0;">
       <h2>Admin Sign In</h2>
-      <p class="note">Use the environment-configured admin credentials to manage CivicFlow licenses.</p>
+      <p class="note">Use the environment-configured admin credentials to manage Unestra licenses.</p>
       ${!configured ? '<div class="flash error">ADMIN_USERNAME, ADMIN_PASSWORD, and ADMIN_SESSION_SECRET must be set before the dashboard can be used.</div>' : ""}
       ${error ? `<div class="flash error">${escapeHtml(error)}</div>` : ""}
       <form method="post" action="/admin/login" class="stack">
