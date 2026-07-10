@@ -6,7 +6,7 @@ import { ThemedView } from '@/components/themed-view';
 import { useAuth } from '@/lib/auth-context';
 
 /**
- * Deep link target for civicflow://organization/:organizationId — switches
+ * Deep link target for unestra://organization/:organizationId — switches
  * the active organization (if the caller actually belongs to it) and lands
  * on the dashboard.
  */

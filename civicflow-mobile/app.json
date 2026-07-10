@@ -1,20 +1,20 @@
 {
   "expo": {
-    "name": "CivicFlow",
-    "slug": "civicflow-mobile",
+    "name": "Unestra",
+    "slug": "unestra-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "civicflow",
+    "scheme": "unestra",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon",
-      "bundleIdentifier": "org.civicflowapp.mobile",
+      "bundleIdentifier": "com.aphtechnologies.unestra",
       "supportsTablet": true,
       "associatedDomains": ["applinks:app.civicflowapp.com"]
     },
     "android": {
-      "package": "org.civicflowapp.mobile",
+      "package": "com.aphtechnologies.unestra",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -58,7 +58,7 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "CivicFlow uses your photos to attach a receipt when you report a payment."
+          "photosPermission": "Unestra uses your photos to attach a receipt when you report a payment."
         }
       ]
     ],

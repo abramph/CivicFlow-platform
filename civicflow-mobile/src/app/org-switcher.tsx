@@ -20,7 +20,7 @@ export default function OrgSwitcherScreen() {
         Choose an Organization
       </ThemedText>
       <ThemedText type="subtitle" themeColor="textSecondary" style={styles.subtitle}>
-        You belong to more than one organization on CivicFlow.
+        You belong to more than one organization on Unestra.
       </ThemedText>
 
       <FlatList

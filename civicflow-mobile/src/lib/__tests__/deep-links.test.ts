@@ -2,14 +2,14 @@ import { resolveAllowedDeepLinkPath } from '@/lib/deep-links';
 
 describe('resolveAllowedDeepLinkPath', () => {
   it('resolves known custom-scheme destinations', () => {
-    expect(resolveAllowedDeepLinkPath('civicflow://report-payment')).toBe('/report-payment');
-    expect(resolveAllowedDeepLinkPath('civicflow://dues')).toBe('/dues');
-    expect(resolveAllowedDeepLinkPath('civicflow://announcements')).toBe('/announcements');
-    expect(resolveAllowedDeepLinkPath('civicflow://events')).toBe('/events');
+    expect(resolveAllowedDeepLinkPath('unestra://report-payment')).toBe('/report-payment');
+    expect(resolveAllowedDeepLinkPath('unestra://dues')).toBe('/dues');
+    expect(resolveAllowedDeepLinkPath('unestra://announcements')).toBe('/announcements');
+    expect(resolveAllowedDeepLinkPath('unestra://events')).toBe('/events');
   });
 
   it('resolves an organization switch link', () => {
-    expect(resolveAllowedDeepLinkPath('civicflow://organization/abc123')).toBe('/organization/abc123');
+    expect(resolveAllowedDeepLinkPath('unestra://organization/abc123')).toBe('/organization/abc123');
   });
 
   it('resolves a universal link from the trusted domain', () => {
@@ -21,7 +21,7 @@ describe('resolveAllowedDeepLinkPath', () => {
   });
 
   it('rejects unknown destinations', () => {
-    expect(resolveAllowedDeepLinkPath('civicflow://some-unknown-screen')).toBeNull();
+    expect(resolveAllowedDeepLinkPath('unestra://some-unknown-screen')).toBeNull();
   });
 
   it('rejects malformed input', () => {
@@ -29,12 +29,12 @@ describe('resolveAllowedDeepLinkPath', () => {
   });
 
   it('resolves the new member engagement destinations', () => {
-    expect(resolveAllowedDeepLinkPath('civicflow://inbox')).toBe('/inbox');
-    expect(resolveAllowedDeepLinkPath('civicflow://conversation/conv-abc123')).toBe('/conversation/conv-abc123');
-    expect(resolveAllowedDeepLinkPath('civicflow://announcement/campaign-abc123')).toBe('/announcement/campaign-abc123');
-    expect(resolveAllowedDeepLinkPath('civicflow://event/event-abc123')).toBe('/event/event-abc123');
-    expect(resolveAllowedDeepLinkPath('civicflow://payments')).toBe('/payments');
-    expect(resolveAllowedDeepLinkPath('civicflow://profile')).toBe('/profile');
+    expect(resolveAllowedDeepLinkPath('unestra://inbox')).toBe('/inbox');
+    expect(resolveAllowedDeepLinkPath('unestra://conversation/conv-abc123')).toBe('/conversation/conv-abc123');
+    expect(resolveAllowedDeepLinkPath('unestra://announcement/campaign-abc123')).toBe('/announcement/campaign-abc123');
+    expect(resolveAllowedDeepLinkPath('unestra://event/event-abc123')).toBe('/event/event-abc123');
+    expect(resolveAllowedDeepLinkPath('unestra://payments')).toBe('/payments');
+    expect(resolveAllowedDeepLinkPath('unestra://profile')).toBe('/profile');
   });
 
   it('resolves the new destinations from a universal link too', () => {
@@ -44,12 +44,12 @@ describe('resolveAllowedDeepLinkPath', () => {
   });
 
   it('resolves the Make a Payment destinations', () => {
-    expect(resolveAllowedDeepLinkPath('civicflow://make-payment')).toBe('/make-payment');
-    expect(resolveAllowedDeepLinkPath('civicflow://make-payment/dues')).toBe('/make-payment/dues');
-    expect(resolveAllowedDeepLinkPath('civicflow://make-payment/campaign/camp-abc123')).toBe(
+    expect(resolveAllowedDeepLinkPath('unestra://make-payment')).toBe('/make-payment');
+    expect(resolveAllowedDeepLinkPath('unestra://make-payment/dues')).toBe('/make-payment/dues');
+    expect(resolveAllowedDeepLinkPath('unestra://make-payment/campaign/camp-abc123')).toBe(
       '/make-payment/campaign/camp-abc123'
     );
-    expect(resolveAllowedDeepLinkPath('civicflow://make-payment/event/event-abc123')).toBe(
+    expect(resolveAllowedDeepLinkPath('unestra://make-payment/event/event-abc123')).toBe(
       '/make-payment/event/event-abc123'
     );
   });

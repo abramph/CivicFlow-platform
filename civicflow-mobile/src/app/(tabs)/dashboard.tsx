@@ -63,7 +63,7 @@ export default function DashboardScreen() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
     >
       <ThemedText type="title">
-        {selectedOrganization?.organizationName ?? 'CivicFlow'}
+        {selectedOrganization?.organizationName ?? 'Unestra'}
       </ThemedText>
       <ThemedText type="subtitle" themeColor="textSecondary">
         Welcome back, {selectedOrganization?.firstName ?? 'member'}

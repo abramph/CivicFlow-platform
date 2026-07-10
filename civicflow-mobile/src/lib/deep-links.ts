@@ -34,7 +34,7 @@ const ALLOWED_DEEP_LINK_PATTERNS: RegExp[] = [
 const ALLOWED_DEEP_LINK_HOST = 'app.civicflowapp.com';
 
 /**
- * Extracts the in-app path from a civicflow:// or https://app.civicflowapp.com
+ * Extracts the in-app path from a unestra:// or https://app.civicflowapp.com
  * URL, or a bare path already in that form, and returns it only if it matches
  * the allow-list — otherwise returns null.
  */
@@ -50,7 +50,7 @@ export function resolveAllowedDeepLinkPath(url: string): string | null {
         // Universal link — host is the domain, pathname is the in-app path.
         path = `/${parsed.pathname.replace(/^\/+/, '')}`;
       } else {
-        // Custom scheme (civicflow://report-payment or civicflow://organization/abc) —
+        // Custom scheme (unestra://report-payment or unestra://organization/abc) —
         // URL parsing puts the first path segment in `host`, the rest in `pathname`.
         path = `/${[parsed.host, parsed.pathname.replace(/^\/+/, '')].filter(Boolean).join('/')}`;
       }

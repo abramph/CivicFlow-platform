@@ -45,7 +45,7 @@ export default function LoginScreen() {
     <ScrollView contentContainerStyle={styles.container}>
       <ThemedView style={styles.card}>
         <ThemedText type="title" style={styles.title}>
-          CivicFlow
+          Unestra
         </ThemedText>
         <ThemedText type="subtitle" themeColor="textSecondary" style={styles.subtitle}>
           Member Sign In
