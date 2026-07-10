@@ -28,8 +28,14 @@ export default function ConversationThreadScreen() {
   }, [selectedOrganizationId, id]);
 
   useEffect(() => {
-    setLoading(true);
-    load().finally(() => setLoading(false));
+    (async () => {
+      setLoading(true);
+      try {
+        await load();
+      } finally {
+        setLoading(false);
+      }
+    })();
     const timer = setInterval(load, POLL_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [load]);

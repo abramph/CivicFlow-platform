@@ -21,8 +21,14 @@ export default function EventDetailScreen() {
   }, [selectedOrganizationId, id]);
 
   useEffect(() => {
-    setLoading(true);
-    load().finally(() => setLoading(false));
+    (async () => {
+      setLoading(true);
+      try {
+        await load();
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, [load]);
 
   if (loading) {

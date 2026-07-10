@@ -19,7 +19,9 @@ export default function EventsScreen() {
   }, [selectedOrganizationId]);
 
   useEffect(() => {
-    load();
+    (async () => {
+      await load();
+    })();
   }, [load]);
 
   async function handleRefresh() {

@@ -29,7 +29,9 @@ export default function MakePaymentScreen() {
   }, [selectedOrganizationId]);
 
   useEffect(() => {
-    load();
+    (async () => {
+      await load();
+    })();
   }, [load]);
 
   async function handleRefresh() {

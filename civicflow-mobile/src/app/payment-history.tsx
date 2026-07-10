@@ -76,7 +76,9 @@ export default function PaymentHistoryScreen() {
   }, [selectedOrganizationId]);
 
   useEffect(() => {
-    load();
+    (async () => {
+      await load();
+    })();
   }, [load]);
 
   const filteredRows = useMemo(() => rows.filter((row) => matchesFilter(row, filter)), [rows, filter]);

@@ -45,7 +45,9 @@ export default function DashboardScreen() {
   }, [selectedOrganizationId]);
 
   useEffect(() => {
-    load();
+    (async () => {
+      await load();
+    })();
   }, [load]);
 
   async function handleRefresh() {

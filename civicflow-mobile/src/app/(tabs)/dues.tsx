@@ -25,8 +25,14 @@ export default function DuesScreen() {
   }, [selectedOrganizationId]);
 
   useEffect(() => {
-    setLoading(true);
-    load().finally(() => setLoading(false));
+    (async () => {
+      setLoading(true);
+      try {
+        await load();
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, [load]);
 
   async function handleRefresh() {

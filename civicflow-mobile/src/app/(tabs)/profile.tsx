@@ -19,7 +19,9 @@ export default function ProfileScreen() {
   }, [selectedOrganizationId]);
 
   useEffect(() => {
-    load();
+    (async () => {
+      await load();
+    })();
   }, [load]);
 
   async function handleToggle(field: 'commsPushEnabled' | 'commsEmailEnabled' | 'commsSmsEnabled', value: boolean) {
