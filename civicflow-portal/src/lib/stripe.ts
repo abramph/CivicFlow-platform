@@ -105,7 +105,7 @@ export async function getOrCreateStripeCustomer(
   const customer = await stripe.customers.create({
     name,
     ...(email ? { email } : {}),
-    metadata: { organizationId },
+    metadata: { product: "CivicFlow", platformOwner: "APH Technologies, LLC", organizationId },
   });
 
   return customer.id;
@@ -135,14 +135,21 @@ export async function createCheckoutSession({
     lineItems.push({ price: seatPriceId, quantity: additionalSeats });
   }
 
+  const metadata = {
+    product: "CivicFlow",
+    platformOwner: "APH Technologies, LLC",
+    organizationId,
+    environment: process.env.NODE_ENV ?? "development",
+  };
+
   const session = await stripe.checkout.sessions.create({
     customer: stripeCustomerId,
     mode: "subscription",
     line_items: lineItems,
     success_url: successUrl,
     cancel_url: cancelUrl,
-    metadata: { organizationId },
-    subscription_data: { metadata: { organizationId } },
+    metadata,
+    subscription_data: { metadata },
     allow_promotion_codes: true,
   });
 

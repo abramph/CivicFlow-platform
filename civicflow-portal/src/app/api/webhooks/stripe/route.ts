@@ -166,6 +166,17 @@ export async function POST(request: Request) {
     return Response.json({ ok: false, error: "Invalid Stripe signature" }, { status: 400 });
   }
 
+  // Idempotency guard: Stripe may redeliver the same event. Insert a row
+  // keyed by event.id before processing; a unique-constraint violation means
+  // this event was already handled, so skip re-processing side effects.
+  try {
+    await prisma.stripeWebhookEvent.create({
+      data: { stripeEventId: event.id, type: event.type },
+    });
+  } catch {
+    return Response.json({ ok: true, duplicate: true });
+  }
+
   try {
     switch (event.type) {
       case "checkout.session.completed": {
@@ -286,6 +297,19 @@ export async function POST(request: Request) {
             where: { stripeSubscriptionId: subId },
             data: { status: "past_due" },
           });
+        }
+        break;
+      }
+
+      case "invoice.paid": {
+        const invoice = event.data.object as Stripe.Invoice;
+        const subId =
+          typeof invoice.subscription === "string"
+            ? invoice.subscription
+            : null;
+        if (subId) {
+          const sub = await stripe.subscriptions.retrieve(subId);
+          await upsertSubscriptionFromStripe(sub);
         }
         break;
       }

@@ -234,6 +234,8 @@ async function createCheckoutSessionForLicensePurchase(input = {}) {
     success_url: successUrl,
     cancel_url: cancelUrl,
     metadata: {
+      product: "CivicFlow",
+      platformOwner: "APH Technologies, LLC",
       priceId,
       purchaseKind,
       quantity: String(quantity),

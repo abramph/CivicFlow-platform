@@ -533,6 +533,16 @@ model Subscription {
   @@index([stripeCustomerId])
 }
 
+/// Idempotency guard for /api/webhooks/stripe. Stripe may redeliver the same
+/// event; a row is inserted before an event is processed, and a unique
+/// constraint violation on stripeEventId signals "already handled, skip."
+model StripeWebhookEvent {
+  id            String   @id @default(cuid())
+  stripeEventId String   @unique
+  type          String
+  processedAt   DateTime @default(now())
+}
+
 /// Platform-level audit trail.  One row per write operation.
 model AuditEvent {
   id             String   @id @default(cuid())

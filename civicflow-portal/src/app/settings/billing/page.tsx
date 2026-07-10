@@ -167,6 +167,11 @@ export default async function BillingSettingsPage({
         </Link>{" "}
         for a full feature comparison.
       </div>
+
+      <p className="text-xs text-slate-400">
+        CivicFlow is a product of APH Technologies, LLC. Subscription charges appear on your statement
+        as billed by APH Technologies, LLC.
+      </p>
     </main>
   );
 }
