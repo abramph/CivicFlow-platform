@@ -1,7 +1,7 @@
 {
   "name": "civicflow",
   "productName": "Unestra",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Unestra - Offline desktop app for community organizations",
   "main": "src/main.js",
   "private": true,
