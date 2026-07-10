@@ -90,6 +90,11 @@ jobs:
 
   build-mac:
     runs-on: macos-latest
+    # Depends on build-windows creating the GitHub release first — without
+    # this, the two jobs run in parallel and this job's "gh release upload"
+    # can race ahead of the release even existing (observed on the v1.0.9
+    # release: build-mac finished first and failed with "release not found").
+    needs: build-windows
     steps:
       - name: Checkout
         uses: actions/checkout@v4

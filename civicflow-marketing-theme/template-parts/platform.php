@@ -77,12 +77,12 @@ $check = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="cu
 						<?php esc_html_e( 'Download installer', 'civicflow' ); ?>
 					</p>
 					<div class="platform-download-btns">
-<a href="https://github.com/abramph/CivicFlow-platform/releases/download/v1.0.8/CivicFlow-Setup-1.0.8.exe"						   
+<a href="https://github.com/abramph/CivicFlow-platform/releases/download/v1.0.9/Unestra-Setup-1.0.9.exe"
    class="platform-dl-btn"
 						   aria-label="<?php esc_attr_e( 'Download Unestra for Windows', 'civicflow' ); ?>">
 							<?php esc_html_e( 'Windows', 'civicflow' ); ?>
 						</a>
-<a href="https://github.com/abramph/CivicFlow-platform/releases/download/v1.0.8/CivicFlow-1.0.8-mac-arm64.dmg"						   
+<a href="https://github.com/abramph/CivicFlow-platform/releases/download/v1.0.9/Unestra-1.0.9-mac-arm64.dmg"
    class="platform-dl-btn"
 						   aria-label="<?php esc_attr_e( 'Download Unestra for macOS', 'civicflow' ); ?>">
 							<?php esc_html_e( 'macOS', 'civicflow' ); ?>

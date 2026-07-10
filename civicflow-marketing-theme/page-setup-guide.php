@@ -216,7 +216,7 @@ get_header();
 						<div class="sg-step-body">
 							<h3>Download the installer</h3>
 							<p>Download the Windows installer (.exe). The file is approximately 143 MB.</p>
-							<a href="https://github.com/abramph/CivicFlow-platform/releases/latest/download/CivicFlow%20Setup%201.0.3.exe" class="sg-btn sg-btn-primary">
+							<a href="https://github.com/abramph/CivicFlow-platform/releases/latest/download/Unestra-Setup-1.0.9.exe" class="sg-btn sg-btn-primary">
 								<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
 								Download for Windows
 							</a>
@@ -227,7 +227,7 @@ get_header();
 						<div class="sg-step-num" aria-hidden="true">2</div>
 						<div class="sg-step-body">
 							<h3>Run the installer</h3>
-							<p>Double-click <code>CivicFlow Setup 1.0.3.exe</code> to launch the installer. If Windows SmartScreen shows a warning, click <strong>More info</strong> then <strong>Run anyway</strong>.</p>
+							<p>Double-click <code>Unestra-Setup-1.0.9.exe</code> to launch the installer. If Windows SmartScreen shows a warning, click <strong>More info</strong> then <strong>Run anyway</strong>.</p>
 							<p>Follow the installation wizard — choose your install directory, then click <strong>Install</strong>. A desktop shortcut is created automatically.</p>
 						</div>
 					</li>
@@ -303,7 +303,7 @@ get_header();
 						<div class="sg-step-body">
 							<h3>Download the installer</h3>
 							<p>Download the macOS disk image (.dmg). The file is approximately 171 MB. This build is optimized for Apple Silicon (M1, M2, M3).</p>
-							<a href="https://github.com/abramph/CivicFlow-platform/releases/latest/download/CivicFlow-1.0.3-mac-arm64.dmg" class="sg-btn sg-btn-primary">
+							<a href="https://github.com/abramph/CivicFlow-platform/releases/latest/download/Unestra-1.0.9-mac-arm64.dmg" class="sg-btn sg-btn-primary">
 								<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
 								Download for macOS (Apple Silicon)
 							</a>
@@ -314,7 +314,7 @@ get_header();
 						<div class="sg-step-num" aria-hidden="true">2</div>
 						<div class="sg-step-body">
 							<h3>Open the DMG</h3>
-							<p>Double-click the downloaded <code>CivicFlow-1.0.3-mac-arm64.dmg</code> file to mount it. A Finder window will open showing the Unestra app icon.</p>
+							<p>Double-click the downloaded <code>Unestra-1.0.9-mac-arm64.dmg</code> file to mount it. A Finder window will open showing the Unestra app icon.</p>
 							<p>Drag the <strong>Unestra</strong> icon into the <strong>Applications</strong> folder shortcut shown in the same window.</p>
 						</div>
 					</li>
