@@ -20,13 +20,27 @@ try {
   }
 } catch (_) {}
 
-/** Display / Electron product name — must match package.json productName and build.productName */
+/**
+ * Internal identity — DO NOT change. This drives app.setName() (see main.js),
+ * which determines the OS userData folder Electron resolves to. Existing
+ * installs' local SQLite DB and license.json live under a path derived from
+ * this value; changing it orphans that data for already-installed users.
+ * The product was originally called CivicFlow and is now marketed as
+ * Unestra — that rename is display-only (see APP_DISPLAY_NAME below).
+ */
 const APP_PRODUCT_NAME = 'CivicFlow';
 /** Legacy DB subdirectory under userData (kept for existing installs) */
 const APP_NAME = 'Civicflow';
 const APP_ID = 'com.civicflow.app';
 const APP_SLUG = 'civicflow';
 const APP_VERSION = version;
+
+/** Customer-facing product identity — safe to change freely, does not affect storage/updater identity. */
+const APP_DISPLAY_NAME = 'Unestra';
+const APP_TAGLINE = 'One organization. Fully connected.';
+const APP_ATTRIBUTION = 'An APH Technologies product';
+/** Prior public name, for one-time transition messaging only. */
+const APP_LEGACY_DISPLAY_NAME = 'CivicFlow';
 
 /** Prior Electron userData folder names to scan when migrating license.json */
 const LEGACY_USER_DATA_FOLDER_NAMES = [

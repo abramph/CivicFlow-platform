@@ -20,7 +20,7 @@ const api = window.civicflow;
 
 export function Sidebar({ activeView, onNavigate }) {
   const [logoPath, setLogoPath] = useState(null);
-  const [orgName, setOrgName] = useState('Civicflow');
+  const [orgName, setOrgName] = useState('Unestra');
   const [logoVersion, setLogoVersion] = useState(0); // Cache-busting version
   const [grantsEnabled, setGrantsEnabled] = useState(true);
   const [currentRole, setCurrentRole] = useState('Admin');
@@ -38,7 +38,7 @@ export function Sidebar({ activeView, onNavigate }) {
     ])
       .then(([org, branding]) => {
         const path = org?.logo_path || branding?.logoPath;
-        setOrgName(org?.name || branding?.cboName || 'Civicflow');
+        setOrgName(org?.name || branding?.cboName || 'Unestra');
         if (path) {
           try {
             const normalizedPath = normalizeLocalFilePath(path);
@@ -129,7 +129,7 @@ export function Sidebar({ activeView, onNavigate }) {
         )}
         <div className="min-w-0">
           <h1 className="text-lg font-semibold tracking-tight text-white truncate">{orgName}</h1>
-          <p className="text-xs text-slate-400 mt-0.5">Civicflow</p>
+          <p className="text-xs text-slate-400 mt-0.5">Unestra</p>
         </div>
       </div>
 
@@ -151,7 +151,7 @@ export function Sidebar({ activeView, onNavigate }) {
       </nav>
 
       <div className="p-3 border-t border-slate-700">
-        <p className="text-xs text-slate-500 px-3">Civicflow v1.0.3</p>
+        <p className="text-xs text-slate-500 px-3">Unestra v1.0.3</p>
       </div>
     </aside>
   );

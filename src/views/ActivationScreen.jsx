@@ -61,7 +61,7 @@ export function ActivationScreen({
   const handleActivate = async () => {
     setMessage(null);
     if (!licenseKey.trim()) {
-      setMessage({ type: 'error', text: 'Enter the CivicFlow license key from your purchase email.' });
+      setMessage({ type: 'error', text: 'Enter the Unestra license key from your purchase email.' });
       return;
     }
 
@@ -105,7 +105,7 @@ export function ActivationScreen({
 
   const welcomeBody = (() => {
     if (reason === 'trial_expired') {
-      return 'Your trial has ended. Enter the license key from your CivicFlow purchase email to unlock the app.';
+      return 'Your trial has ended. Enter the license key from your Unestra purchase email to unlock the app.';
     }
     if (reason === 'expired') {
       return 'This annual license has expired. Enter a renewed or replacement license key to continue.';
@@ -114,7 +114,7 @@ export function ActivationScreen({
       return 'This device can no longer use the previous license. Enter a valid replacement key to continue.';
     }
     if (reason === 'device_fingerprint_mismatch') {
-      return 'This install no longer matches the device fingerprint from activation. Re-activate with your license key or contact CivicFlow support if this computer was not replaced.';
+      return 'This install no longer matches the device fingerprint from activation. Re-activate with your license key or contact Unestra support if this computer was not replaced.';
     }
     if (reason === 'offline_grace_expired') {
       return 'This device has been offline too long since the last successful license check-in. Reconnect and validate your license to continue.';
@@ -132,11 +132,11 @@ export function ActivationScreen({
               <div>
                 <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-100">
                   <Sparkles className="h-3.5 w-3.5" />
-                  CivicFlow Onboarding
+                  Unestra Onboarding
                 </div>
-                <h1 className="max-w-xl text-4xl font-semibold leading-tight">Activate CivicFlow with the license key from your purchase email.</h1>
+                <h1 className="max-w-xl text-4xl font-semibold leading-tight">Activate Unestra with the license key from your purchase email.</h1>
                 <p className="mt-4 max-w-xl text-base leading-7 text-slate-200">
-                  Open CivicFlow, go to activation, then enter your email address and license key. The app will cache the license for offline grace and keep using the current production activation flow.
+                  Open Unestra, go to activation, then enter your email address and license key. The app will cache the license for offline grace and keep using the current production activation flow.
                 </p>
               </div>
 
@@ -182,7 +182,7 @@ export function ActivationScreen({
                 <div className="space-y-6">
                   <div>
                     <p className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-700">Step 1</p>
-                    <h2 className="mt-2 text-3xl font-semibold text-slate-900">Welcome to CivicFlow</h2>
+                    <h2 className="mt-2 text-3xl font-semibold text-slate-900">Welcome to Unestra</h2>
                     <p className="mt-3 text-base leading-7 text-slate-600">
                       Use the remaining trial time or activate the paid license you received after purchase.
                     </p>
@@ -196,7 +196,7 @@ export function ActivationScreen({
                   <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
                     <p className="text-sm font-semibold text-slate-800">Trial vs paid activation</p>
                     <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
-                      <li>Trial mode lets you keep evaluating CivicFlow until the trial ends.</li>
+                      <li>Trial mode lets you keep evaluating Unestra until the trial ends.</li>
                       <li>Paid activation unlocks the purchased Essential or Elite license on this device.</li>
                       <li>The activation email and in-app wording use the same activation steps.</li>
                     </ul>
@@ -231,7 +231,7 @@ export function ActivationScreen({
                     <p className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-700">Step 2</p>
                     <h2 className="mt-2 text-3xl font-semibold text-slate-900">Activate your license</h2>
                     <p className="mt-3 text-base leading-7 text-slate-600">
-                      Enter the same email and license key shown in your CivicFlow purchase email.
+                      Enter the same email and license key shown in your Unestra purchase email.
                     </p>
                   </div>
 
@@ -318,7 +318,7 @@ export function ActivationScreen({
                       Activation complete
                     </h2>
                     <p className="mt-3 text-base leading-7 text-slate-600">
-                      CivicFlow is activated on this device. Review the license details below, then continue to the app.
+                      Unestra is activated on this device. Review the license details below, then continue to the app.
                     </p>
                   </div>
 
@@ -334,7 +334,7 @@ export function ActivationScreen({
                   <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5 text-sm leading-6 text-slate-600">
                     <p className="font-semibold text-slate-800">What happens next</p>
                     <p className="mt-2">
-                      CivicFlow will keep validating the paid license in the background and will use its offline cache when the license server is temporarily unavailable.
+                      Unestra will keep validating the paid license in the background and will use its offline cache when the license server is temporarily unavailable.
                     </p>
                     {(activatedStatus || licenseStatus)?.expiresAt && (
                       <p className="mt-2 text-slate-700">{`Annual access expires on ${formatLicenseDate((activatedStatus || licenseStatus)?.expiresAt) || (activatedStatus || licenseStatus)?.expiresAt}.`}</p>
@@ -349,7 +349,7 @@ export function ActivationScreen({
                     onClick={handleContinue}
                     className="inline-flex items-center gap-2 rounded-full bg-emerald-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700"
                   >
-                    Continue to CivicFlow
+                    Continue to Unestra
                     <ArrowRight className="h-4 w-4" />
                   </button>
                 </div>

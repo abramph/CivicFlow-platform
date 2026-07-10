@@ -96,7 +96,7 @@ export function Communications({ onNavigate }) {
 
   const handleExportReminderCsv = () => {
     if (!reminderCsvRows.length) return;
-    downloadCsv('civicflow-delinquent-reminders.csv', reminderCsvRows);
+    downloadCsv('unestra-delinquent-reminders.csv', reminderCsvRows);
   };
 
   const handleOpenFirstMailto = () => {
@@ -255,7 +255,7 @@ export function Communications({ onNavigate }) {
             </select>
             <p className="text-xs text-slate-500 mt-1">
               {showReminderPreview
-                ? 'CivicFlow generates the reminder subject and body automatically using the member’s balance due.'
+                ? 'Unestra generates the reminder subject and body automatically using the member’s balance due.'
                 : 'Sends your message as-is.'}
             </p>
           </div>

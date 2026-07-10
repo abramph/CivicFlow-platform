@@ -909,7 +909,7 @@ function mapLicenseToStatus(license) {
 
     if (fingerprintMismatch) {
       warnings.push(
-        "This device fingerprint changed since activation. Re-validate online or contact CivicFlow support if this computer was not replaced."
+        "This device fingerprint changed since activation. Re-validate online or contact Unestra support if this computer was not replaced."
       );
     }
 
@@ -1096,7 +1096,7 @@ async function activateLicense(payload) {
     return {
       success: false,
       valid: false,
-      error: "Signed licenses are disabled in packaged builds. Activate against the CivicFlow license server instead.",
+      error: "Signed licenses are disabled in packaged builds. Activate against the Unestra license server instead.",
     };
   }
 
@@ -1149,7 +1149,7 @@ async function refreshLicense() {
       return {
         success: false,
         ...mapLicenseToStatus(current),
-        error: "Signed licenses are disabled in packaged builds. Activate against the CivicFlow license server instead.",
+        error: "Signed licenses are disabled in packaged builds. Activate against the Unestra license server instead.",
       };
     }
 

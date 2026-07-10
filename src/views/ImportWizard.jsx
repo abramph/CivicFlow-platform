@@ -301,7 +301,7 @@ export function ImportWizard({ onNavigate }) {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = result.filename || `civicflow_${type}_template.csv`;
+        a.download = result.filename || `unestra_${type}_template.csv`;
         a.click();
         URL.revokeObjectURL(url);
       }
@@ -610,7 +610,7 @@ export function ImportWizard({ onNavigate }) {
               <div>
                 <h2 className="text-lg font-semibold text-slate-800">Map Columns</h2>
                 <p className="text-sm text-slate-500 mt-1">
-                  Match your file columns to CivicFlow fields. <span className="text-red-500">*</span> = required
+                  Match your file columns to Unestra fields. <span className="text-red-500">*</span> = required
                 </p>
               </div>
               <button onClick={autoMapColumns} className="text-sm text-emerald-600 hover:text-emerald-700 font-medium">

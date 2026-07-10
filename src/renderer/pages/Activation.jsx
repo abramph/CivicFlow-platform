@@ -67,7 +67,7 @@ export default function Activation({ onLicensed }) {
 
   return (
     <div style={{ padding: 40, maxWidth: 500, margin: "0 auto" }}>
-      <h2>CivicFlow Activation</h2>
+      <h2>Unestra Activation</h2>
 
       <div style={{ marginBottom: 20 }}>
         <strong>Device ID:</strong>

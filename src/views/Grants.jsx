@@ -153,7 +153,7 @@ export function Grants({ onNavigate }) {
           </div>
           <h2 className="text-2xl font-bold text-slate-900 mb-2">Grants Module</h2>
           <p className="text-slate-600 mb-6">
-            Track grants, funding requests, and reporting deadlines with the CivicFlow Grants upgrade.
+            Track grants, funding requests, and reporting deadlines with the Unestra Grants upgrade.
           </p>
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
             <div className="flex items-center gap-2 text-amber-700">
@@ -161,7 +161,7 @@ export function Grants({ onNavigate }) {
               <span className="font-medium">Upgrade Required</span>
             </div>
             <p className="text-sm text-amber-600 mt-1">
-              Grants are available in the CivicFlow Upgrade. Contact support to upgrade your license.
+              Grants are available in the Unestra Upgrade. Contact support to upgrade your license.
             </p>
           </div>
           <button

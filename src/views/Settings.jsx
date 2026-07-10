@@ -10,10 +10,10 @@ function getActivationErrorMessage(rawError) {
   const lower = text.toLowerCase();
   if (!text) return 'Activation failed. Check the license key and try again.';
   if (lower.includes('not configured') || lower.includes('configuration') || lower.includes('invalid activation server url')) {
-    return 'CivicFlow does not have a valid license server URL configured. Check Licensing Diagnostics and update the activation server setting.';
+    return 'Unestra does not have a valid license server URL configured. Check Licensing Diagnostics and update the activation server setting.';
   }
-  if (lower.includes('seat limit')) return 'All seats for this license are already in use. Reset an activation or contact CivicFlow support.';
-  if (lower.includes('revoked')) return 'This license has been revoked. Contact CivicFlow support if you believe this is incorrect.';
+  if (lower.includes('seat limit')) return 'All seats for this license are already in use. Reset an activation or contact Unestra support.';
+  if (lower.includes('revoked')) return 'This license has been revoked. Contact Unestra support if you believe this is incorrect.';
   if (lower.includes('expired')) return 'This license is expired. Renew or replace it to continue.';
   if (lower.includes('invalid key') || lower.includes('invalid license')) return 'That license key was not recognized. Check the key and try again.';
   if (lower.includes('hostname could not be resolved')) return 'The configured license server hostname could not be resolved. Check the activation server URL.';
@@ -93,7 +93,7 @@ export function Settings({ onNavigate, onOpenActivation }) {
       api?.branding?.get?.(),
     ]).then(([org, b]) => {
       if (cancelled) return;
-      setCboName(org?.name ?? b?.cboName ?? 'Civicflow');
+      setCboName(org?.name ?? b?.cboName ?? 'Unestra');
       setLogoPath(org?.logo_path ?? b?.logoPath ?? '');
       setOrgEmailDisplayName(org?.email_display_name ?? '');
       setOrgEmailFromAddress(org?.email_from_address ?? '');
@@ -167,7 +167,7 @@ export function Settings({ onNavigate, onOpenActivation }) {
     setSaved(false);
     try {
       await api.organization.set({
-        name: cboName.trim() || 'Civicflow',
+        name: cboName.trim() || 'Unestra',
         logo_path: logoPath.trim() || null,
         email_display_name: orgEmailDisplayName.trim() || null,
         email_from_address: orgEmailFromAddress.trim() || null,
@@ -176,7 +176,7 @@ export function Settings({ onNavigate, onOpenActivation }) {
         venmo_handle: venmoHandle.trim() || null,
         auto_archive_enabled: autoArchiveEnabled ? 1 : 0,
       });
-      await api.branding.set({ cboName: cboName.trim() || 'Civicflow', logoPath: logoPath.trim() || null });
+      await api.branding.set({ cboName: cboName.trim() || 'Unestra', logoPath: logoPath.trim() || null });
       setSaved(true);
     } catch (_) {}
     finally {
@@ -189,7 +189,7 @@ export function Settings({ onNavigate, onOpenActivation }) {
     setPaymentsMessage(null);
     try {
       const result = await api.organization.set({
-        name: cboName.trim() || 'Civicflow',
+        name: cboName.trim() || 'Unestra',
         logo_path: logoPath.trim() || null,
         email_display_name: orgEmailDisplayName.trim() || null,
         email_from_address: orgEmailFromAddress.trim() || null,
@@ -240,7 +240,7 @@ export function Settings({ onNavigate, onOpenActivation }) {
     setAutoArchiveMessage(null);
     try {
       const result = await api?.organization?.set?.({
-        name: cboName.trim() || 'Civicflow',
+        name: cboName.trim() || 'Unestra',
         logo_path: logoPath.trim() || null,
         email_display_name: orgEmailDisplayName.trim() || null,
         email_from_address: orgEmailFromAddress.trim() || null,
@@ -487,7 +487,7 @@ export function Settings({ onNavigate, onOpenActivation }) {
         return;
       }
       if (saveResult?.ok) {
-        setMigrationMessage({ type: 'success', text: `Export saved to ${saveResult.filePath}. Upload this file in your CivicFlow SaaS portal to import your data.` });
+        setMigrationMessage({ type: 'success', text: `Export saved to ${saveResult.filePath}. Upload this file in your Unestra SaaS portal to import your data.` });
       } else {
         setMigrationMessage({ type: 'error', text: saveResult?.error || 'Failed to save export file.' });
       }
@@ -836,12 +836,12 @@ export function Settings({ onNavigate, onOpenActivation }) {
         </div>
         <div className="p-6 space-y-4">
           <p className="text-sm text-slate-600">
-            Export all your data to a JSON file that you can import into your CivicFlow SaaS account.
+            Export all your data to a JSON file that you can import into your Unestra SaaS account.
             This includes members, categories, events, campaigns, meetings, attendance, contributions, and expenditures.
           </p>
           <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
             <p className="text-blue-800 text-sm">
-              After exporting, log in to your CivicFlow SaaS portal and go to <strong>Migration</strong> to upload the file.
+              After exporting, log in to your Unestra SaaS portal and go to <strong>Migration</strong> to upload the file.
             </p>
           </div>
           <button
@@ -1095,7 +1095,7 @@ export function Settings({ onNavigate, onOpenActivation }) {
               type="text"
               value={cboName}
               onChange={(e) => setCboName(e.target.value)}
-              placeholder="Civicflow"
+              placeholder="Unestra"
               className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500"
             />
           </div>
@@ -1134,7 +1134,7 @@ export function Settings({ onNavigate, onOpenActivation }) {
               placeholder="Organization name"
               className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500"
             />
-            <p className="text-xs text-slate-500 mt-1">Shown as the sender name for emails. Defaults to "{cboName || 'Civicflow'} via CivicFlow".</p>
+            <p className="text-xs text-slate-500 mt-1">Shown as the sender name for emails. Defaults to "{cboName || 'Unestra'} via Unestra".</p>
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Email From Address</label>
@@ -1329,7 +1329,7 @@ export function Settings({ onNavigate, onOpenActivation }) {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">From Name</label>
-              <input type="text" value={emailForm.from_name} onChange={(e) => setEmailForm(f => ({...f, from_name: e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500" placeholder="CivicFlow" />
+              <input type="text" value={emailForm.from_name} onChange={(e) => setEmailForm(f => ({...f, from_name: e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500" placeholder="Unestra" />
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">From Email</label>
@@ -1444,7 +1444,7 @@ export function Settings({ onNavigate, onOpenActivation }) {
           <h3 className="text-lg font-semibold text-slate-800">About</h3>
         </div>
         <div className="p-6">
-          <p className="text-lg font-semibold text-slate-800">Civicflow</p>
+          <p className="text-lg font-semibold text-slate-800">Unestra</p>
           <p className="text-sm text-slate-600 mt-1">Offline desktop app for community organizations.</p>
           <p className="text-xs text-slate-500 mt-2">Version 1.0.0</p>
         </div>

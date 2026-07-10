@@ -1,7 +1,7 @@
 module.exports = {
   packagerConfig: {
     asar: true,
-    executableName: "CivicFlow",
+    executableName: "Unestra",
     icon: "build/icon",
     ignore: [
       /tools[\\/]private\.pem$/,

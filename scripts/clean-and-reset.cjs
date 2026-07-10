@@ -47,7 +47,7 @@ console.log('📁 Database Location Information:\n');
 console.log('The SQLite database is stored at:');
 console.log(`  ${appDataPath}/app.db\n`);
 console.log('To reset the database:');
-console.log('1. Close the CivicFlow app completely');
+console.log('1. Close the Unestra app completely');
 console.log('2. Navigate to the directory above');
 console.log('3. Delete the "Civicflow" folder (or just the app.db file inside it)');
 console.log('4. Restart the app - it will recreate the database with correct schema\n');

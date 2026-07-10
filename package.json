@@ -1,8 +1,8 @@
 {
   "name": "civicflow",
-  "productName": "CivicFlow",
+  "productName": "Unestra",
   "version": "1.0.8",
-  "description": "Civicflow - Offline desktop app for community organizations",
+  "description": "Unestra - Offline desktop app for community organizations",
   "main": "src/main.js",
   "private": true,
   "scripts": {
@@ -13,7 +13,7 @@
     "start": "electron-forge start",
     "build": "npm run build:app",
     "package": "electron-forge package",
-    "premake": "node -e \"if(process.platform==='win32'){try{require('child_process').execSync('taskkill /IM CivicFlow.exe /F',{stdio:'ignore'})}catch(e){try{require('child_process').execSync('taskkill /IM Civicflow.exe /F',{stdio:'ignore'})}catch(e2){}}}else{try{require('child_process').execSync('pkill -f CivicFlow',{stdio:'ignore'})}catch(e){}}\"",
+    "premake": "node -e \"if(process.platform==='win32'){try{require('child_process').execSync('taskkill /IM Unestra.exe /F',{stdio:'ignore'})}catch(e){try{require('child_process').execSync('taskkill /IM CivicFlow.exe /F',{stdio:'ignore'})}catch(e2){try{require('child_process').execSync('taskkill /IM Civicflow.exe /F',{stdio:'ignore'})}catch(e3){}}}}else{try{require('child_process').execSync('pkill -f Unestra',{stdio:'ignore'})}catch(e){try{require('child_process').execSync('pkill -f CivicFlow',{stdio:'ignore'})}catch(e2){}}}\"",
     "clean": "rimraf out dist dist-forge .vite .next release release-build",
     "clean:all": "rimraf out dist dist-forge .vite .next release release-build && node scripts/clean-and-reset.cjs",
     "make": "npm run clean && electron-forge make",
@@ -86,8 +86,8 @@
   },
   "build": {
     "appId": "com.civicflow.app",
-    "productName": "CivicFlow",
-    "executableName": "CivicFlow",
+    "productName": "Unestra",
+    "executableName": "Unestra",
     "artifactName": "${productName}-Setup-${version}.${ext}",
     "directories": {
       "output": "release",
@@ -114,7 +114,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "CivicFlow"
+      "shortcutName": "Unestra"
     },
     "mac": {
       "target": [

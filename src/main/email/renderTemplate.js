@@ -79,7 +79,7 @@ function renderPaymentReminder(input = {}) {
     invoice_id: String(input.invoice_id || "N/A").trim() || "N/A",
     amount_due: String(input.amount_due || "0.00").trim() || "0.00",
     due_date: String(input.due_date || "N/A").trim() || "N/A",
-    organization_name: String(input.organization_name || "CivicFlow").trim() || "CivicFlow",
+    organization_name: String(input.organization_name || "Unestra").trim() || "Unestra",
     report_payment_url: String(input.report_payment_url || PRODUCTION_REPORT_PAYMENT_URL).trim() || PRODUCTION_REPORT_PAYMENT_URL,
     deep_link_url: String(input.deep_link_url || CIVICFLOW_DEEP_LINK_URL).trim() || CIVICFLOW_DEEP_LINK_URL,
   };

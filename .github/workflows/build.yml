@@ -32,8 +32,8 @@ jobs:
         shell: bash
         run: |
           gh release create "${{ github.ref_name }}" \
-            --title "CivicFlow ${{ github.ref_name }}" \
-            --notes "CivicFlow Desktop ${{ github.ref_name }}" \
+            --title "Unestra ${{ github.ref_name }}" \
+            --notes "Unestra Desktop ${{ github.ref_name }}" \
             --draft || true
 
       - name: Build Windows installer (unsigned)

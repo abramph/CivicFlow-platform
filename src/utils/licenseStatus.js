@@ -12,10 +12,10 @@ export function getActivationErrorMessage(rawError) {
   const lower = text.toLowerCase();
   if (!text) return 'Activation failed. Check the license key and try again.';
   if (lower.includes('not configured') || lower.includes('configuration') || lower.includes('invalid activation server url')) {
-    return 'CivicFlow does not have a valid license server URL configured. Check Licensing Diagnostics and update the activation server setting.';
+    return 'Unestra does not have a valid license server URL configured. Check Licensing Diagnostics and update the activation server setting.';
   }
-  if (lower.includes('seat limit')) return 'All seats for this license are already in use. Reset an activation or contact CivicFlow support.';
-  if (lower.includes('revoked')) return 'This license has been revoked. Contact CivicFlow support if you believe this is incorrect.';
+  if (lower.includes('seat limit')) return 'All seats for this license are already in use. Reset an activation or contact Unestra support.';
+  if (lower.includes('revoked')) return 'This license has been revoked. Contact Unestra support if you believe this is incorrect.';
   if (lower.includes('expired')) return 'This license is expired. Renew or replace it to continue.';
   if (lower.includes('invalid key') || lower.includes('invalid license')) return 'That license key was not recognized. Check the key and try again.';
   if (lower.includes('hostname could not be resolved')) return 'The configured license server hostname could not be resolved. Check the activation server URL.';
@@ -29,7 +29,7 @@ export function getLicenseStatusPresentation(status) {
     return {
       tone: 'warning',
       title: 'License status unavailable',
-      body: 'CivicFlow could not read the current license state.',
+      body: 'Unestra could not read the current license state.',
     };
   }
 
@@ -38,13 +38,13 @@ export function getLicenseStatusPresentation(status) {
       return {
         tone: 'warning',
         title: 'Trial active',
-        body: `${status.daysRemaining ?? 0} day${status.daysRemaining === 1 ? '' : 's'} remaining in the CivicFlow trial. Activate your paid license at any time.`,
+        body: `${status.daysRemaining ?? 0} day${status.daysRemaining === 1 ? '' : 's'} remaining in the Unestra trial. Activate your paid license at any time.`,
       };
     }
     return {
       tone: 'danger',
       title: 'Trial expired',
-      body: 'The CivicFlow trial has ended. Enter a paid license key to continue.',
+      body: 'The Unestra trial has ended. Enter a paid license key to continue.',
     };
   }
 
@@ -80,7 +80,7 @@ export function getLicenseStatusPresentation(status) {
     return {
       tone: 'danger',
       title: 'Offline grace expired',
-      body: 'This device has been offline too long. Reconnect to CivicFlow licensing services and validate again.',
+      body: 'This device has been offline too long. Reconnect to Unestra licensing services and validate again.',
     };
   }
 
@@ -88,7 +88,7 @@ export function getLicenseStatusPresentation(status) {
     return {
       tone: 'danger',
       title: 'Device fingerprint changed',
-      body: 'This install no longer matches the device that was activated. Re-validate online with your license key or contact CivicFlow support if this computer was not replaced.',
+      body: 'This install no longer matches the device that was activated. Re-validate online with your license key or contact Unestra support if this computer was not replaced.',
     };
   }
 

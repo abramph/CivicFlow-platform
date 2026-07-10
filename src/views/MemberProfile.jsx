@@ -96,7 +96,7 @@ export function MemberProfile({ memberId, onBack }) {
   const [receiptGeneratingId, setReceiptGeneratingId] = useState(null);
   const [receiptMessage, setReceiptMessage] = useState(null);
   const [emailConfigured, setEmailConfigured] = useState(false);
-  const [orgName, setOrgName] = useState('Civicflow');
+  const [orgName, setOrgName] = useState('Unestra');
   const [organizationId, setOrganizationId] = useState(1);
   const [paymentsEnabled, setPaymentsEnabled] = useState(false);
   const [stripeAccountId, setStripeAccountId] = useState(null);

@@ -4,7 +4,7 @@
 const migrations = [
   {
     id: '001_initial_schema',
-    sql: `-- Civicflow initial schema per spec
+    sql: `-- Unestra initial schema per spec
 CREATE TABLE IF NOT EXISTS categories (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
@@ -116,7 +116,7 @@ CREATE TABLE IF NOT EXISTS organization (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-INSERT OR IGNORE INTO organization (id, name) VALUES (1, 'Civicflow');
+INSERT OR IGNORE INTO organization (id, name) VALUES (1, 'Unestra');
 
 -- Categories: monthly dues
 ALTER TABLE categories ADD COLUMN monthly_dues_cents INTEGER NOT NULL DEFAULT 0;

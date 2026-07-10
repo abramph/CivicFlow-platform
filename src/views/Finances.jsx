@@ -28,7 +28,7 @@ export function Finances() {
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [orgName, setOrgName] = useState('Civicflow');
+  const [orgName, setOrgName] = useState('Unestra');
   const [orgId, setOrgId] = useState(1);
   const [filters, setFilters] = useState(() => getDateRange(90));
   const [typeFilter, setTypeFilter] = useState('');

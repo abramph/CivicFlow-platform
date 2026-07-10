@@ -43,9 +43,9 @@ function startWebhookServer() {
   const getOrgName = (orgId = 1) => {
     try {
       const row = db.prepare('SELECT name FROM organization WHERE id = ?').get(orgId);
-      return row?.name || 'Civicflow';
+      return row?.name || 'Unestra';
     } catch (_) {
-      return 'Civicflow';
+      return 'Unestra';
     }
   };
 

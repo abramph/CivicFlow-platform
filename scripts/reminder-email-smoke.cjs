@@ -52,7 +52,7 @@ async function run() {
 
   db.prepare(`
     UPDATE email_settings
-    SET from_name = 'CivicFlow',
+    SET from_name = 'Unestra',
         from_email = 'noreply@example.com',
         smtp_host = 'smtp.example.com',
         smtp_port = 587,

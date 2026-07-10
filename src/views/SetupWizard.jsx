@@ -45,7 +45,7 @@ export function SetupWizard({ onComplete }) {
     ]).then(([s, org, cats]) => {
       if (cancelled) return;
       const merged = {
-        organization_name: s?.organization_name ?? org?.name ?? 'Civicflow',
+        organization_name: s?.organization_name ?? org?.name ?? 'Unestra',
         logo_path: s?.logo_path ?? org?.logo_path ?? '',
         email_from_name: org?.email_display_name ?? s?.email_from_name ?? '',
         email_from_address: org?.email_from_address ?? s?.email_from_address ?? '',
@@ -65,7 +65,7 @@ export function SetupWizard({ onComplete }) {
     setMessage(null);
     try {
       await api.organization.updateSettings({
-        organization_name: settings.organization_name.trim() || 'Civicflow',
+        organization_name: settings.organization_name.trim() || 'Unestra',
         logo_path: settings.logo_path || null,
         email_from_name: settings.email_from_name.trim() || null,
         email_from_address: settings.email_from_address.trim() || null,
@@ -76,7 +76,7 @@ export function SetupWizard({ onComplete }) {
         smtp_secure: settings.smtp_secure,
       });
       await api.organization.set({
-        name: settings.organization_name.trim() || 'Civicflow',
+        name: settings.organization_name.trim() || 'Unestra',
         logo_path: settings.logo_path || null,
         email_display_name: settings.email_from_name.trim() || null,
         email_from_address: settings.email_from_address.trim() || null,
@@ -151,7 +151,7 @@ export function SetupWizard({ onComplete }) {
     setMessage(null);
     try {
       await api.organization.updateSettings({
-        organization_name: settings.organization_name.trim() || 'Civicflow',
+        organization_name: settings.organization_name.trim() || 'Unestra',
         logo_path: settings.logo_path || null,
         email_from_name: settings.email_from_name.trim() || null,
         email_from_address: settings.email_from_address.trim() || null,
@@ -162,14 +162,14 @@ export function SetupWizard({ onComplete }) {
         smtp_secure: settings.smtp_secure,
       });
       await api.organization.set({
-        name: settings.organization_name.trim() || 'Civicflow',
+        name: settings.organization_name.trim() || 'Unestra',
         logo_path: settings.logo_path || null,
         email_display_name: settings.email_from_name.trim() || null,
         email_from_address: settings.email_from_address.trim() || null,
         auto_archive_enabled: 0,
       });
       await api.branding.set({
-        cboName: settings.organization_name.trim() || 'Civicflow',
+        cboName: settings.organization_name.trim() || 'Unestra',
         logoPath: settings.logo_path || null,
       });
       await api.organization.completeSetup();
@@ -191,7 +191,7 @@ export function SetupWizard({ onComplete }) {
 
   return (
     <div className="p-8 max-w-2xl mx-auto">
-      <h2 className="text-2xl font-bold text-slate-800 mb-2">Welcome to Civicflow</h2>
+      <h2 className="text-2xl font-bold text-slate-800 mb-2">Welcome to Unestra</h2>
       <p className="text-slate-600 mb-8">Complete these steps to configure your organization.</p>
 
       <div className="flex gap-2 mb-8 overflow-x-auto pb-2">
@@ -230,7 +230,7 @@ export function SetupWizard({ onComplete }) {
               type="text"
               value={settings.organization_name}
               onChange={(e) => setSettings((s) => ({ ...s, organization_name: e.target.value }))}
-              placeholder="Civicflow"
+              placeholder="Unestra"
               className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500"
             />
           </div>

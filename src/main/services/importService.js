@@ -295,7 +295,7 @@ class ImportService {
     const sampleLine = fields.map(() => '').join(',');
     const csv = `${headerLine}\\n${sampleLine}`;
     return {
-      filename: `civicflow_${importType}_template.csv`,
+      filename: `unestra_${importType}_template.csv`,
       mimeType: 'text/csv',
       buffer: Buffer.from(csv, 'utf8'),
     };

@@ -24,7 +24,7 @@ function initAutoUpdater(mainWindow) {
     dialog.showMessageBox(mainWindow, {
       type: "info",
       title: "Update Available",
-      message: `CivicFlow ${info.version} is available`,
+      message: `Unestra ${info.version} is available`,
       detail: `You're running ${app.getVersion()}. Download and install the update now?`,
       buttons: ["Download & Install", "Later"],
       defaultId: 0,
@@ -40,7 +40,7 @@ function initAutoUpdater(mainWindow) {
     dialog.showMessageBox(mainWindow, {
       type: "info",
       title: "Restart to Update",
-      message: "CivicFlow update downloaded",
+      message: "Unestra update downloaded",
       detail: "Restart now to install the update, or it will be applied next time you launch.",
       buttons: ["Restart Now", "Later"],
       defaultId: 0,
@@ -77,7 +77,7 @@ async function checkGitHubReleaseManually(mainWindow) {
     const latestVersion = await new Promise((resolve, reject) => {
       const req = https.get(
         "https://api.github.com/repos/abramph/CivicFlow-platform/releases/latest",
-        { headers: { "User-Agent": "CivicFlow-updater" } },
+        { headers: { "User-Agent": "Unestra-updater" } },
         (res) => {
           let data = "";
           res.on("data", (chunk) => { data += chunk; });
@@ -111,7 +111,7 @@ async function checkGitHubReleaseManually(mainWindow) {
     const { response } = await dialog.showMessageBox(mainWindow, {
       type: "info",
       title: "Update Available",
-      message: `CivicFlow ${latestVersion} is available`,
+      message: `Unestra ${latestVersion} is available`,
       detail: `You're running ${currentVersion}. Visit the download page to get the latest version.`,
       buttons: ["Download Now", "Later"],
       defaultId: 0,

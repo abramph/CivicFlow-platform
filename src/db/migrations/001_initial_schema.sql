@@ -1,4 +1,4 @@
--- Civicflow initial schema per spec
+-- Unestra initial schema per spec
 -- Categories first (members references it)
 CREATE TABLE IF NOT EXISTS categories (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

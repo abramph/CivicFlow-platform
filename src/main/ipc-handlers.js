@@ -900,8 +900,8 @@ function buildReportPaymentHttpsLink(invoiceId) {
 function buildReportPaymentBlocks(memberId) {
   const reportLink = buildReportPaymentHttpsLink(memberId);
   return {
-    text: `\n\nAfter sending Cash App, Zelle, or Venmo, report it in CivicFlow:\n${reportLink}\nIf your email app does not make that clickable, copy/paste it into your browser address bar, or open CivicFlow and go to Report Payment.`,
-    html: `<p>After sending Cash App, Zelle, or Venmo, report it in CivicFlow:<br/><a href="${reportLink}">Open Report Payment Form</a><br/><span>${escapeHtml(reportLink)}</span><br/>If your email app does not make that clickable, copy/paste it into your browser address bar, or open CivicFlow and go to <strong>Report Payment</strong>.</p>`,
+    text: `\n\nAfter sending Cash App, Zelle, or Venmo, report it in Unestra:\n${reportLink}\nIf your email app does not make that clickable, copy/paste it into your browser address bar, or open Unestra and go to Report Payment.`,
+    html: `<p>After sending Cash App, Zelle, or Venmo, report it in Unestra:<br/><a href="${reportLink}">Open Report Payment Form</a><br/><span>${escapeHtml(reportLink)}</span><br/>If your email app does not make that clickable, copy/paste it into your browser address bar, or open Unestra and go to <strong>Report Payment</strong>.</p>`,
   };
 }
 
@@ -1020,7 +1020,7 @@ function buildDuesReminderPreview(database, { recipientGroup = "active" } = {}) 
       invoice_id: invoiceId,
       amount_due: amountDue,
       due_date: dueDate,
-      organization_name: "CivicFlow",
+      organization_name: "Unestra",
     });
     recipients.push({
       id: Number(row.id || 0),
@@ -1550,7 +1550,7 @@ function registerIpcHandlers() {
 
   register(registry, "organization:get", () => {
     const row = database.prepare("SELECT * FROM organization WHERE id = 1").get();
-    return row || { id: 1, name: "Civicflow" };
+    return row || { id: 1, name: "Unestra" };
   });
 
   register(registry, "backup:db", async () => {
@@ -1564,7 +1564,7 @@ function registerIpcHandlers() {
       const sourcePath = getDbPath();
       const now = new Date();
       const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}-${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}`;
-      const suggestedName = `civicflow-backup-${stamp}.db`;
+      const suggestedName = `unestra-backup-${stamp}.db`;
 
       const save = await dialog.showSaveDialog({
         title: "Save Database Backup",
@@ -2053,7 +2053,7 @@ function registerIpcHandlers() {
           invoice_id: invoiceId,
           amount_due: amountDue,
           due_date: dueDate,
-          organization_name: String(org.name || "CivicFlow").trim() || "CivicFlow",
+          organization_name: String(org.name || "Unestra").trim() || "Unestra",
           payment_methods: paymentMethods,
           report_payment_url: reportPaymentUrl,
           deep_link_url: CIVICFLOW_DEEP_LINK_URL,
@@ -2108,9 +2108,9 @@ function registerIpcHandlers() {
       await transport.sendMail({
         from,
         to,
-        subject: "CivicFlow Test Email",
-        text: "This is a test email from CivicFlow.",
-        html: "<p>This is a test email from <strong>CivicFlow</strong>.</p>",
+        subject: "Unestra Test Email",
+        text: "This is a test email from Unestra.",
+        html: "<p>This is a test email from <strong>Unestra</strong>.</p>",
       });
       return { success: true };
     } catch (err) {
@@ -2288,7 +2288,7 @@ function registerIpcHandlers() {
         invoice_id: invoiceId,
         amount_due: amountDue,
         due_date: dueDate,
-        organization_name: String(org.name || "CivicFlow").trim() || "CivicFlow",
+        organization_name: String(org.name || "Unestra").trim() || "Unestra",
         payment_methods: paymentMethods,
         report_payment_url: reportPaymentUrl,
         deep_link_url: CIVICFLOW_DEEP_LINK_URL,
@@ -2431,7 +2431,7 @@ function registerIpcHandlers() {
             invoice_id: invoiceId,
             amount_due: amountDue,
             due_date: dueDate,
-            organization_name: String(org.name || "CivicFlow").trim() || "CivicFlow",
+            organization_name: String(org.name || "Unestra").trim() || "Unestra",
             payment_methods: paymentMethods,
             report_payment_url: reportPaymentUrl,
             deep_link_url: CIVICFLOW_DEEP_LINK_URL,
@@ -3688,11 +3688,11 @@ function registerIpcHandlers() {
 
   register(registry, "import:templates:list", () => {
     const templates = [
-      { importType: "members", filename: "civicflow_members_template.csv" },
-      { importType: "membership_periods", filename: "civicflow_membership_periods_template.csv" },
-      { importType: "financial_transactions", filename: "civicflow_financial_transactions_template.csv" },
-      { importType: "campaigns", filename: "civicflow_campaigns_template.csv" },
-      { importType: "grants", filename: "civicflow_grants_template.csv" },
+      { importType: "members", filename: "unestra_members_template.csv" },
+      { importType: "membership_periods", filename: "unestra_membership_periods_template.csv" },
+      { importType: "financial_transactions", filename: "unestra_financial_transactions_template.csv" },
+      { importType: "campaigns", filename: "unestra_campaigns_template.csv" },
+      { importType: "grants", filename: "unestra_grants_template.csv" },
     ];
     return { ok: true, templates };
   });
@@ -4274,7 +4274,7 @@ function registerIpcHandlers() {
   // look it over before deciding whether to save it — rather than
   // immediately prompting an OS save dialog.
   const previewGeneratedPdf = async (buffer, defaultPath) => {
-    const previewDir = path.join(app.getPath("temp"), "CivicFlowReportPreviews");
+    const previewDir = path.join(app.getPath("temp"), "UnestraReportPreviews");
     fs.mkdirSync(previewDir, { recursive: true });
     const safeName = String(defaultPath || "report.pdf").replace(/[^a-z0-9._-]/gi, "_");
     const filePath = path.join(previewDir, `${Date.now()}_${safeName}`);
@@ -4755,7 +4755,7 @@ function registerIpcHandlers() {
   });
 
   register(registry, "migration:saveExport", async (exportData) => {
-    const orgName = (exportData?.organizationName || "civicflow").replace(/[^a-z0-9]/gi, "_").toLowerCase();
+    const orgName = (exportData?.organizationName || "unestra").replace(/[^a-z0-9]/gi, "_").toLowerCase();
     const date = new Date().toISOString().slice(0, 10);
     const defaultPath = `${orgName}_migration_${date}.json`;
 

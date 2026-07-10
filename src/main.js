@@ -172,7 +172,7 @@ function ensureCriticalIpcHandlers() {
 
   forceRegister("organization:get", async () => {
     const row = database.prepare("SELECT * FROM organization WHERE id = 1").get();
-    return row || { id: 1, name: "Civicflow" };
+    return row || { id: 1, name: "Unestra" };
   });
 
   forceRegister("organization:set", async (_event, data = {}) => {
@@ -244,7 +244,7 @@ function ensureCriticalIpcHandlers() {
 
   if (!hasInvokeHandler("get-cbo-branding")) {
     ipcMain.removeHandler("get-cbo-branding");
-    ipcMain.handle("get-cbo-branding", async () => ({ cboName: "Civicflow", logoPath: null }));
+    ipcMain.handle("get-cbo-branding", async () => ({ cboName: "Unestra", logoPath: null }));
     logger.warn("ipc-fallback-registered", { channel: "get-cbo-branding" });
   }
 

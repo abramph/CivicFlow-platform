@@ -75,7 +75,7 @@ export function Reports({ initialReportType, initialMemberId, initialCampaignId,
   const [success,     setSuccess]     = useState(null);
   const [currentRole, setCurrentRole] = useState('Admin');
   const [emailReportModal, setEmailReportModal] = useState(null);
-  const [orgName, setOrgName] = useState('Civicflow');
+  const [orgName, setOrgName] = useState('Unestra');
   const [orgId,   setOrgId]   = useState(1);
   const [bulkSending, setBulkSending] = useState(false);
   const [sortBy,    setSortBy]    = useState('None');
