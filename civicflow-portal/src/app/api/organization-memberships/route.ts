@@ -66,6 +66,7 @@ export async function POST(request: Request) {
           displayName: input.displayName.trim(),
           passwordHash: await hash(input.temporaryPassword, 12),
           emailVerified: false,
+          mfaBackupCodes: [],
         },
       });
     } else if (!user.displayName && input.displayName.trim()) {

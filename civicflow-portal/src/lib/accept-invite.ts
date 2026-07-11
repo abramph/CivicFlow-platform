@@ -47,6 +47,7 @@ export async function acceptMemberInvite(
         displayName: `${member.firstName} ${member.lastName}`.trim(),
         passwordHash,
         emailVerified: true,
+        mfaBackupCodes: [],
       },
     });
   } else {

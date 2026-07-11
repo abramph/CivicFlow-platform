@@ -407,7 +407,7 @@ model User {
   emailVerified      Boolean  @default(false)
   mfaEnabled         Boolean  @default(false)
   mfaSecret          String?
-  mfaBackupCodes     String[]
+  mfaBackupCodes     String[] @default([])
   /// SMS-based MFA fallback for when the authenticator app/backup codes
   /// aren't available. Only trusted once verified (a code was actually sent
   /// to and confirmed from this number) — set together, never independently.
