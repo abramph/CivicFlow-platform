@@ -65,7 +65,7 @@ export default function DuesScreen() {
         <ThemedText type="link">View Payment History</ThemedText>
       </Pressable>
 
-      <Pressable style={styles.linkButton} onPress={() => router.push('/make-payment/index')}>
+      <Pressable style={styles.linkButton} onPress={() => router.push('/make-payment')}>
         <ThemedText type="link">Pay dues in advance, or contribute to a campaign or event</ThemedText>
       </Pressable>
 
