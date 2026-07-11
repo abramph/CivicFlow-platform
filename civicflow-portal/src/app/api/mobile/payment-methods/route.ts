@@ -19,7 +19,7 @@ export async function GET(request: Request) {
     const methods = await prisma.paymentMethodConfig.findMany({
       where: { organizationId: verifiedOrgId, isActive: true },
       orderBy: [{ sortOrder: "asc" }, { label: "asc" }],
-      select: { id: true, label: true, accountIdentifier: true, instructions: true },
+      select: { id: true, label: true, method: true, accountIdentifier: true, instructions: true },
     });
     // Only surface methods staff actually configured with a handle/instructions —
     // default seeded rows (e.g. "Cash", "Check") have neither and aren't actionable here.

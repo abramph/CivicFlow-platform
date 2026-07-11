@@ -8,6 +8,35 @@ import { Spacing } from '@/constants/theme';
 import { API_BASE_URL } from '@/lib/api-client';
 import type { PayableMethod, PaymentReportCategory } from '@/lib/mobile-api';
 
+/**
+ * Builds a tappable deep link for methods that have a real universal payment
+ * URL. Cash, check, Zelle, ACH, and card/OTHER methods have no such link (Zelle
+ * in particular only works from inside the sender's own banking app, with no
+ * public "pay to this handle" URL) — those stay as plain text with instructions.
+ */
+function buildPayLink(method: string, accountIdentifier: string): string | null {
+  const trimmed = accountIdentifier.trim();
+  if (!trimmed) return null;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+
+  switch (method) {
+    case 'CASH_APP': {
+      const cashtag = trimmed.replace(/^\$/, '');
+      return cashtag ? `https://cash.app/$${encodeURIComponent(cashtag)}` : null;
+    }
+    case 'VENMO': {
+      const username = trimmed.replace(/^@/, '');
+      return username ? `https://venmo.com/u/${encodeURIComponent(username)}` : null;
+    }
+    case 'PAYPAL': {
+      const handle = trimmed.replace(/^@/, '');
+      return handle ? `https://paypal.me/${encodeURIComponent(handle)}` : null;
+    }
+    default:
+      return null;
+  }
+}
+
 /** Shared "Pay Now via Card" + "Ways to Pay" + "Report a Payment" section for
  * the Make a Payment detail screens (campaign / event / dues-in-advance). */
 export function PaymentOptions({
@@ -34,14 +63,18 @@ export function PaymentOptions({
         <ThemedView type="backgroundElement" style={styles.methodsCard}>
           <ThemedText type="smallBold">Ways to Pay</ThemedText>
           {methods.map((method) => {
-            const isLink = method.accountIdentifier?.startsWith('http://') || method.accountIdentifier?.startsWith('https://');
+            const payLink = method.accountIdentifier ? buildPayLink(method.method, method.accountIdentifier) : null;
             return (
               <ThemedView key={method.id} style={styles.methodRow}>
                 <ThemedText type="smallBold">{method.label}</ThemedText>
                 {method.accountIdentifier ? (
-                  <ThemedText type="small" style={isLink ? styles.link : undefined}>
-                    {method.accountIdentifier}
-                  </ThemedText>
+                  payLink ? (
+                    <Pressable onPress={() => WebBrowser.openBrowserAsync(payLink)}>
+                      <ThemedText type="small" style={styles.link}>{method.accountIdentifier}</ThemedText>
+                    </Pressable>
+                  ) : (
+                    <ThemedText type="small">{method.accountIdentifier}</ThemedText>
+                  )
                 ) : null}
                 {method.instructions ? (
                   <ThemedText type="small" themeColor="textSecondary">{method.instructions}</ThemedText>

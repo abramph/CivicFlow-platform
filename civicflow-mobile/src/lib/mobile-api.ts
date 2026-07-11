@@ -210,6 +210,7 @@ export function getCampaigns(organizationId: string) {
 export interface PayableMethod {
   id: string;
   label: string;
+  method: string;
   accountIdentifier: string | null;
   instructions: string | null;
 }
