@@ -111,8 +111,11 @@ export default function DashboardScreen() {
 
       <ThemedText type="smallBold" style={styles.sectionLabel}>Quick Actions</ThemedText>
       <ThemedView style={styles.quickActionsRow}>
-        <Pressable style={styles.actionButton} onPress={() => router.push('/report-payment')}>
-          <ThemedText style={styles.actionButtonText}>Report a Payment</ThemedText>
+        <Pressable style={styles.actionButton} onPress={() => router.push('/make-payment')}>
+          <ThemedText style={styles.actionButtonText}>Make a Payment</ThemedText>
+        </Pressable>
+        <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/report-payment')}>
+          <ThemedText style={styles.actionButtonSecondaryText}>Report a Payment</ThemedText>
         </Pressable>
         <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/inbox')}>
           <ThemedText style={styles.actionButtonSecondaryText}>Inbox</ThemedText>

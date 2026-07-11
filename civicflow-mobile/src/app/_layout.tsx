@@ -5,6 +5,7 @@ import { useEffect } from 'react';
 import { useColorScheme } from 'react-native';
 
 import { AuthProvider } from '@/lib/auth-context';
+import { Colors } from '@/constants/theme';
 import { navigateToDeepLink } from '@/lib/deep-links';
 
 Notifications.setNotificationHandler({
@@ -18,6 +19,7 @@ Notifications.setNotificationHandler({
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
+  const theme = colorScheme === 'dark' ? Colors.dark : Colors.light;
 
   useEffect(() => {
     // Tapping a notification (dues reminder, announcement, payment
@@ -34,7 +36,23 @@ export default function RootLayout() {
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <AuthProvider>
-        <Stack screenOptions={{ headerShown: false }} />
+        <Stack
+          screenOptions={{
+            headerShown: true,
+            headerTitle: '',
+            headerShadowVisible: false,
+            headerTintColor: '#047857',
+            headerStyle: { backgroundColor: theme.background },
+            headerBackButtonDisplayMode: 'minimal',
+          }}
+        >
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen name="index" options={{ headerShown: false }} />
+          <Stack.Screen name="login" options={{ headerShown: false }} />
+          <Stack.Screen name="accept-invite" options={{ headerShown: false }} />
+          <Stack.Screen name="payments" options={{ headerShown: false }} />
+          <Stack.Screen name="organization/[organizationId]" options={{ headerShown: false }} />
+        </Stack>
       </AuthProvider>
     </ThemeProvider>
   );

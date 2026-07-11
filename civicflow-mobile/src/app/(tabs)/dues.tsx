@@ -57,16 +57,16 @@ export default function DuesScreen() {
         </ThemedView>
       ) : null}
 
+      <Pressable style={styles.payButton} onPress={() => router.push('/make-payment')}>
+        <ThemedText style={styles.payButtonText}>Make a Payment</ThemedText>
+      </Pressable>
+
       <Pressable style={styles.reportButton} onPress={() => router.push('/report-payment')}>
         <ThemedText style={styles.reportButtonText}>Report a Payment</ThemedText>
       </Pressable>
 
       <Pressable style={styles.linkButton} onPress={() => router.push('/payment-history')}>
         <ThemedText type="link">View Payment History</ThemedText>
-      </Pressable>
-
-      <Pressable style={styles.linkButton} onPress={() => router.push('/make-payment')}>
-        <ThemedText type="link">Pay dues in advance, or contribute to a campaign or event</ThemedText>
       </Pressable>
 
       <ThemedText type="smallBold" style={styles.sectionLabel}>Charges</ThemedText>
@@ -113,14 +113,24 @@ const styles = StyleSheet.create({
     color: '#B42318',
     marginTop: 4,
   },
-  reportButton: {
+  payButton: {
     backgroundColor: '#047857',
     borderRadius: 10,
     paddingVertical: Spacing.three,
     alignItems: 'center',
   },
-  reportButtonText: {
+  payButtonText: {
     color: '#fff',
+    fontWeight: '600',
+  },
+  reportButton: {
+    borderWidth: 1,
+    borderColor: '#D0D5DD',
+    borderRadius: 10,
+    paddingVertical: Spacing.three,
+    alignItems: 'center',
+  },
+  reportButtonText: {
     fontWeight: '600',
   },
   linkButton: {
