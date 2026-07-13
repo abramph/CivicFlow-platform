@@ -14,7 +14,7 @@ export default async function MeetingDetailPage({ params }: { params: Promise<{ 
   if (!meeting) return <main className="space-y-6"><PageHeader title="Meeting not found" description="The requested meeting is unavailable." actions={[{ href: "/meetings", label: "Back to Meetings" }]} /></main>;
   return (
     <main className="space-y-6">
-      <PageHeader title={meeting.title} description="Meeting details and attendance summary." actions={[{ href: `/meetings/${meeting.id}/attendance`, label: "Manage Attendance", tone: "primary" }, { href: "/meetings", label: "Back to Meetings" }, { href: "/dashboard", label: "Back to Dashboard" }]} />
+      <PageHeader title={meeting.title} description="Meeting details and attendance summary." actions={[{ href: `/meetings/${meeting.id}/attendance-session`, label: "QR Attendance", tone: "primary" }, { href: `/meetings/${meeting.id}/attendance`, label: "Bulk Entry Worksheet" }, { href: "/meetings", label: "Back to Meetings" }, { href: "/dashboard", label: "Back to Dashboard" }]} />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Date" value={formatDateTime(meeting.meetingDate)} />
         <StatCard label="Type" value={formatText(meeting.meetingType, "Not set")} />

@@ -8,13 +8,17 @@ import { LogoutButton } from "@/components/LogoutButton";
 
 function isHiddenPath(pathname: string) {
   // Member-facing pages render their own chrome — never wrap them in the
-  // staff sidebar shell.
+  // staff sidebar shell. The QR full-screen display and printable sheet are
+  // meant to fill a projector/printed page with no staff nav around them.
   return (
     pathname === "/login" ||
     pathname === "/buy" ||
     pathname === "/accept-invite" ||
     pathname === "/select-organization" ||
-    pathname.startsWith("/m/")
+    pathname === "/attendance/check-in" ||
+    pathname.startsWith("/m/") ||
+    pathname.endsWith("/attendance-session/display") ||
+    pathname.endsWith("/attendance-session/print")
   );
 }
 
