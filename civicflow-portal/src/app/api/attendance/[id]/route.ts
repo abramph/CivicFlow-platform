@@ -19,6 +19,9 @@ const updateAttendanceSchema = z.object({
   checkInTime: optionalDate,
   checkOutTime: optionalDate,
   notes: optionalText(4000),
+  /// Required whenever this PATCH changes attendanceStatus away from what's
+  /// currently stored, or sets it to EXCUSED — see the check below.
+  correctionReason: optionalText(2000),
 });
 
 function text(value: string | null | undefined) {
@@ -62,6 +65,19 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       return Response.json({ ok: false, error: "Meeting not found in organization" }, { status: 404 });
     }
 
+    // A correction reason is required whenever this changes an already-set
+    // status to something else, or sets EXCUSED — not for filling in
+    // previously-blank fields on an otherwise-unset record.
+    const changingStatus = input.attendanceStatus !== undefined && input.attendanceStatus !== existing.attendanceStatus;
+    const settingExcused = input.attendanceStatus === "EXCUSED";
+    const correctionReason = text(input.correctionReason);
+    if ((changingStatus || settingExcused) && !correctionReason) {
+      return Response.json(
+        { ok: false, error: "A reason is required when correcting attendance or marking it excused." },
+        { status: 400 }
+      );
+    }
+
     const updated = await prisma.attendanceRecord.update({
       where: { id },
       data: {
@@ -74,6 +90,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         ...(input.checkInTime !== undefined ? { checkInTime: input.checkInTime ? new Date(input.checkInTime) : null } : {}),
         ...(input.checkOutTime !== undefined ? { checkOutTime: input.checkOutTime ? new Date(input.checkOutTime) : null } : {}),
         ...(input.notes !== undefined ? { notes: text(input.notes) } : {}),
+        ...(correctionReason !== undefined ? { correctionReason } : {}),
+        method: "MANUAL",
       },
     });
 
