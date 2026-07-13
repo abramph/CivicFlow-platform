@@ -51,4 +51,9 @@ describe("validateDeepLink", () => {
   it("rejects an organization link with extra path segments", () => {
     expect(validateDeepLink("unestra://organization/abc/extra")).toBeNull();
   });
+
+  it("accepts the QR attendance destinations", () => {
+    expect(validateDeepLink("unestra://attendance-scan")).toBe("unestra://attendance-scan");
+    expect(validateDeepLink("unestra://attendance-history")).toBe("unestra://attendance-history");
+  });
 });
