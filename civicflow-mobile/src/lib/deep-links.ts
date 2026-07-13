@@ -28,6 +28,10 @@ const ALLOWED_DEEP_LINK_PATTERNS: RegExp[] = [
   /^\/make-payment\/dues$/,
   /^\/make-payment\/campaign\/[A-Za-z0-9_-]+$/,
   /^\/make-payment\/event\/[A-Za-z0-9_-]+$/,
+  // QR meeting attendance — lets a push notification ("check-in is open")
+  // deep-link straight to the scanner.
+  /^\/attendance-scan$/,
+  /^\/attendance-history$/,
 ];
 
 /** The only hostname https/http universal-link values are trusted from. */

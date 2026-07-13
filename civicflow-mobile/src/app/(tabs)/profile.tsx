@@ -67,6 +67,10 @@ export default function ProfileScreen() {
         </Pressable>
       ) : null}
 
+      <Pressable style={styles.secondaryButton} onPress={() => router.push('/attendance-history')}>
+        <ThemedText type="link">Attendance History</ThemedText>
+      </Pressable>
+
       <ThemedText type="smallBold" style={styles.sectionLabel}>Notifications</ThemedText>
       <ThemedView type="backgroundElement" style={styles.card}>
         <ThemedView style={styles.toggleRow}>

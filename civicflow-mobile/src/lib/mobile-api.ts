@@ -229,3 +229,40 @@ export function getPaymentLinkSlug(organizationId: string, target: PaymentLinkTa
 
   return apiFetch<{ slug: string | null }>(`/api/mobile/payment-link?${params.toString()}`);
 }
+
+export interface AttendanceCheckInResult {
+  alreadyCheckedIn: boolean;
+  attendanceRecordId: string;
+  attendanceStatus: 'PRESENT' | 'LATE';
+  checkInTime: string;
+  meetingTitle: string;
+  meetingDate: string;
+  organizationId: string;
+}
+
+/**
+ * organizationId is deliberately not sent — the server derives it from the
+ * scanned token's own attendance session, so a member with memberships in
+ * several organizations always checks in under whichever org the meeting
+ * actually belongs to, never whatever org happens to be selected in the app.
+ */
+export function checkInWithQrToken(qrToken: string) {
+  return apiFetch<AttendanceCheckInResult>('/api/mobile/attendance/check-in', {
+    method: 'POST',
+    body: JSON.stringify({ qrToken }),
+  });
+}
+
+export interface AttendanceHistoryRow {
+  id: string;
+  meetingId: string | null;
+  meetingTitle: string | null;
+  meetingDate: string;
+  attendanceStatus: 'PRESENT' | 'ABSENT' | 'EXCUSED' | 'LATE' | 'VIRTUAL';
+  checkInTime: string | null;
+  method: string;
+}
+
+export function getAttendanceHistory(organizationId: string) {
+  return apiFetch<AttendanceHistoryRow[]>(`/api/mobile/attendance/history?organizationId=${encodeURIComponent(organizationId)}`);
+}

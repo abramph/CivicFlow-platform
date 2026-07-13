@@ -33,6 +33,9 @@ export default function EventsScreen() {
   return (
     <ThemedView style={styles.container}>
       <ThemedText type="title">Events</ThemedText>
+      <Pressable style={styles.scanButton} onPress={() => router.push('/attendance-scan')}>
+        <ThemedText style={styles.scanButtonText}>Scan Attendance Code</ThemedText>
+      </Pressable>
       <FlatList
         data={events}
         keyExtractor={(item) => item.id}
@@ -67,6 +70,16 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: Spacing.four,
     gap: Spacing.three,
+  },
+  scanButton: {
+    borderWidth: 1,
+    borderColor: '#D0D5DD',
+    borderRadius: 10,
+    paddingVertical: Spacing.three,
+    alignItems: 'center',
+  },
+  scanButtonText: {
+    fontWeight: '600',
   },
   list: {
     gap: Spacing.two,

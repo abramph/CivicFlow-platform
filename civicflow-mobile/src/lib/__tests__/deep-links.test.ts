@@ -53,4 +53,10 @@ describe('resolveAllowedDeepLinkPath', () => {
       '/make-payment/event/event-abc123'
     );
   });
+
+  it('resolves the QR attendance destinations', () => {
+    expect(resolveAllowedDeepLinkPath('unestra://attendance-scan')).toBe('/attendance-scan');
+    expect(resolveAllowedDeepLinkPath('unestra://attendance-history')).toBe('/attendance-history');
+    expect(resolveAllowedDeepLinkPath('https://app.civicflowapp.com/attendance-scan')).toBe('/attendance-scan');
+  });
 });

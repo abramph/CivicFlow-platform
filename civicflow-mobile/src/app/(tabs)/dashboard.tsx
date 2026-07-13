@@ -114,6 +114,9 @@ export default function DashboardScreen() {
         <Pressable style={styles.actionButton} onPress={() => router.push('/make-payment')}>
           <ThemedText style={styles.actionButtonText}>Make a Payment</ThemedText>
         </Pressable>
+        <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/attendance-scan')}>
+          <ThemedText style={styles.actionButtonSecondaryText}>Scan Attendance Code</ThemedText>
+        </Pressable>
         <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/report-payment')}>
           <ThemedText style={styles.actionButtonSecondaryText}>Report a Payment</ThemedText>
         </Pressable>
