@@ -1,8 +1,15 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { Suspense, useState, useRef, useEffect, useCallback } from "react";
 import { signIn, signOut, useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+
+/** Mirrors the same allow-list in LoginForm.tsx — only the QR attendance
+ * check-in link survives the MFA detour, never an arbitrary destination. */
+function safeRedirectTo(raw: string | null): string | null {
+  if (!raw) return null;
+  return raw === "/attendance/check-in" || raw.startsWith("/attendance/check-in?") ? raw : null;
+}
 
 /** True for the "challenge no longer valid" responses from /challenge and /send-sms — treated as terminal, not just an invalid-code retry. */
 function isExpiredResponse(status: number, error: string | undefined) {
@@ -16,7 +23,16 @@ function formatCountdown(seconds: number) {
 }
 
 export default function MfaChallengePage() {
+  return (
+    <Suspense fallback={null}>
+      <MfaChallengeContent />
+    </Suspense>
+  );
+}
+
+function MfaChallengeContent() {
   const { data: session, status: sessionStatus } = useSession();
+  const destination = safeRedirectTo(useSearchParams().get("redirectTo")) ?? "/select-organization";
   const [code, setCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -147,7 +163,7 @@ export default function MfaChallengePage() {
         return;
       }
 
-      router.push("/select-organization");
+      router.push(destination);
       router.refresh();
     } catch {
       setError("Unable to connect. Please try again.");

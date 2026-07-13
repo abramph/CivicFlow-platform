@@ -80,12 +80,20 @@ export async function middleware(req: NextRequest) {
 
   const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
 
+  // Only ever preserved for this one allow-listed destination — a general
+  // "redirect anywhere after login" mechanism would widen the open-redirect
+  // surface across the whole app for a need that's specific to the QR
+  // attendance check-in link.
+  const isAttendanceCheckIn = pathname === "/attendance/check-in";
+
   // MFA pending: gate all non-auth routes behind the MFA challenge page
   if (token?.mfaPending) {
     const isMfaPage = pathname === "/login/mfa";
     const isAuthEndpoint = pathname.startsWith("/api/auth");
     if (!isMfaPage && !isAuthEndpoint) {
-      return withNoStore(NextResponse.redirect(new URL("/login/mfa", req.url)));
+      const mfaUrl = new URL("/login/mfa", req.url);
+      if (isAttendanceCheckIn) mfaUrl.searchParams.set("redirectTo", pathname + req.nextUrl.search);
+      return withNoStore(NextResponse.redirect(mfaUrl));
     }
     const response = NextResponse.next();
     response.headers.set("x-pathname", pathname);
@@ -114,7 +122,9 @@ export async function middleware(req: NextRequest) {
   const isPublicApi = pathname === "/api/health" || pathname === "/api/store/checkout";
 
   if (!token && !isPublicPage && !isAuthApi && !isPublicApi) {
-    return withNoStore(NextResponse.redirect(new URL("/login", req.url)));
+    const loginUrl = new URL("/login", req.url);
+    if (isAttendanceCheckIn) loginUrl.searchParams.set("redirectTo", pathname + req.nextUrl.search);
+    return withNoStore(NextResponse.redirect(loginUrl));
   }
 
   if (token && !token.mfaPending && pathname === "/login") {

@@ -2,8 +2,16 @@
 
 import { FormEvent, useState } from "react";
 import { signIn } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+
+/** Only the QR attendance check-in link ever needs to survive a login
+ * detour — validated strictly (exact pathname, nothing else) so this can't
+ * become a general open redirect. */
+function safeRedirectTo(raw: string | null): string | null {
+  if (!raw) return null;
+  return raw === "/attendance/check-in" || raw.startsWith("/attendance/check-in?") ? raw : null;
+}
 
 export function LoginForm({ verified }: { verified?: boolean } = {}) {
   const [email, setEmail] = useState("");
@@ -11,6 +19,8 @@ export function LoginForm({ verified }: { verified?: boolean } = {}) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+  const redirectTo = safeRedirectTo(useSearchParams().get("redirectTo"));
+  const destination = redirectTo ?? "/select-organization";
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -31,7 +41,7 @@ export function LoginForm({ verified }: { verified?: boolean } = {}) {
         redirect: false,
         email: emailInput,
         password: passwordInput,
-        callbackUrl: "/select-organization",
+        callbackUrl: destination,
       });
 
       if (!result || result.error) {
@@ -40,7 +50,7 @@ export function LoginForm({ verified }: { verified?: boolean } = {}) {
         return;
       }
 
-      router.push("/select-organization");
+      router.push(destination);
       router.refresh();
       return;
     } catch (err) {
