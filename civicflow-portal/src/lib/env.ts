@@ -11,6 +11,11 @@ const serverEnvSchema = z.object({
   // throws its own clear error if a mobile auth route is actually hit
   // without this configured.
   MOBILE_JWT_SECRET: z.string().min(1).optional(),
+  // Signs/verifies meeting-attendance QR check-in tokens (attendance-token.ts).
+  // Optional at the env-validation level for the same reason as MOBILE_JWT_SECRET
+  // above — attendance-token.ts throws its own clear error if a QR route is hit
+  // without this configured, rather than breaking unrelated requests app-wide.
+  ATTENDANCE_QR_SECRET: z.string().min(1).optional(),
   // Base URL for universal links / web fallback pages (app.civicflowapp.com in
   // production; falls back to the portal's own URL until that domain is wired up).
   MOBILE_APP_WEB_BASE_URL: z.string().url().optional(),
@@ -84,6 +89,7 @@ export function getServerEnv(): ServerEnv {
     NEXTAUTH_SECRET: process.env.NEXTAUTH_SECRET,
     NEXTAUTH_URL: process.env.NEXTAUTH_URL,
     MOBILE_JWT_SECRET: process.env.MOBILE_JWT_SECRET,
+    ATTENDANCE_QR_SECRET: process.env.ATTENDANCE_QR_SECRET,
     MOBILE_APP_WEB_BASE_URL: process.env.MOBILE_APP_WEB_BASE_URL,
     MOBILE_APP_WEB_HOST: process.env.MOBILE_APP_WEB_HOST,
     APPLE_APP_ID: process.env.APPLE_APP_ID,
@@ -133,6 +139,7 @@ export function getServerEnv(): ServerEnv {
     NEXTAUTH_SECRET: parsed.NEXTAUTH_SECRET ?? "",
     NEXTAUTH_URL: parsed.NEXTAUTH_URL ?? "http://localhost:3000",
     MOBILE_JWT_SECRET: parsed.MOBILE_JWT_SECRET ?? "dev-insecure-mobile-jwt-secret",
+    ATTENDANCE_QR_SECRET: parsed.ATTENDANCE_QR_SECRET ?? "dev-insecure-attendance-qr-secret",
     MOBILE_APP_WEB_BASE_URL: parsed.MOBILE_APP_WEB_BASE_URL,
     MOBILE_APP_WEB_HOST: parsed.MOBILE_APP_WEB_HOST,
     APPLE_APP_ID: parsed.APPLE_APP_ID,

@@ -154,6 +154,30 @@ enum AttendanceStatus {
   VIRTUAL
 }
 
+/// How an AttendanceRecord was captured.
+enum AttendanceMethod {
+  MANUAL
+  QR_APP
+  QR_WEB
+  KIOSK
+}
+
+enum AttendanceSessionStatus {
+  DRAFT
+  OPEN
+  CLOSED
+  CANCELLED
+}
+
+/// ROTATING_QR (recommended default) re-signs a new token every
+/// `rotationSeconds`; STATIC_QR issues one token for the whole window,
+/// chosen deliberately by an admin (e.g. for printed sheets or low-connectivity
+/// venues) and is explicitly labeled less resistant to sharing.
+enum AttendanceSessionMode {
+  ROTATING_QR
+  STATIC_QR
+}
+
 enum MemberTimelineEventType {
   CREATED
   UPDATED
@@ -359,40 +383,41 @@ model Organization {
   auditEvents   AuditEvent[]
 
   // Scoped data models
-  members                  OrgMember[]
-  campaigns                Campaign[]
-  events                   Event[]
-  meetings                 Meeting[]
-  expenditures             Expenditure[]
-  categories               Category[]
-  settings                 OrgSettings?
-  paymentLinks             PaymentLink[]
-  duesAccounts             DuesAccount[]
-  duesCharges              DuesCharge[]
-  duesPayments             DuesPayment[]
-  duesAdjustments          DuesAdjustment[]
-  paymentMethodConfigs     PaymentMethodConfig[]
-  contributions            Contribution[]
-  contributionReceipts     ContributionReceipt[]
-  communicationLogs        CommunicationLog[]
-  communicationCampaigns   CommunicationCampaign[]
-  communicationRecipients  CommunicationRecipient[]
-  paymentImportBatches     PaymentImportBatch[]
-  paymentImportItems       PaymentImportItem[]
-  attendanceRecords        AttendanceRecord[]
-  memberTimelineEvents     MemberTimelineEvent[]
-  reportExports            ReportExport[]
-  emailReminderLogs        EmailReminderLog[]
-  attachments              Attachment[]
-  memberInvites            MemberInvite[]
-  mobileDeviceTokens       MobileDeviceToken[]
-  paymentReports           PaymentReport[]
-  rolePermissionSets       OrgRolePermissionSet[]
-  smsMessages              SmsMessage[]
-  smsSettings              OrganizationSmsSettings?
-  conversations            Conversation[]
-  conversationParticipants ConversationParticipant[]
-  messages                 Message[]
+  members                   OrgMember[]
+  campaigns                 Campaign[]
+  events                    Event[]
+  meetings                  Meeting[]
+  expenditures              Expenditure[]
+  categories                Category[]
+  settings                  OrgSettings?
+  paymentLinks              PaymentLink[]
+  duesAccounts              DuesAccount[]
+  duesCharges               DuesCharge[]
+  duesPayments              DuesPayment[]
+  duesAdjustments           DuesAdjustment[]
+  paymentMethodConfigs      PaymentMethodConfig[]
+  contributions             Contribution[]
+  contributionReceipts      ContributionReceipt[]
+  communicationLogs         CommunicationLog[]
+  communicationCampaigns    CommunicationCampaign[]
+  communicationRecipients   CommunicationRecipient[]
+  paymentImportBatches      PaymentImportBatch[]
+  paymentImportItems        PaymentImportItem[]
+  attendanceRecords         AttendanceRecord[]
+  meetingAttendanceSessions MeetingAttendanceSession[]
+  memberTimelineEvents      MemberTimelineEvent[]
+  reportExports             ReportExport[]
+  emailReminderLogs         EmailReminderLog[]
+  attachments               Attachment[]
+  memberInvites             MemberInvite[]
+  mobileDeviceTokens        MobileDeviceToken[]
+  paymentReports            PaymentReport[]
+  rolePermissionSets        OrgRolePermissionSet[]
+  smsMessages               SmsMessage[]
+  smsSettings               OrganizationSmsSettings?
+  conversations             Conversation[]
+  conversationParticipants  ConversationParticipant[]
+  messages                  Message[]
 
   @@index([slug])
   @@index([status])
@@ -432,6 +457,9 @@ model User {
   communicationCampaigns     CommunicationCampaign[]    @relation("CommunicationCampaignCreatedBy")
   attendanceRecords          AttendanceRecord[]         @relation("AttendanceRecordedBy")
   meetings                   Meeting[]                  @relation("MeetingCreatedBy")
+  createdAttendanceSessions  MeetingAttendanceSession[] @relation("AttendanceSessionCreatedBy")
+  openedAttendanceSessions   MeetingAttendanceSession[] @relation("AttendanceSessionOpenedBy")
+  closedAttendanceSessions   MeetingAttendanceSession[] @relation("AttendanceSessionClosedBy")
   memberTimelineEvents       MemberTimelineEvent[]      @relation("MemberTimelineCreatedBy")
   reportExports              ReportExport[]             @relation("ReportExportCreatedBy")
   reminderLogs               EmailReminderLog[]         @relation("ReminderCreatedBy")
@@ -944,14 +972,14 @@ model OrganizationSmsSettings {
   /// enforced entitlement values, and the real Stripe SMS add-on billing is
   /// unaffected by this field.
   plan                        String    @default("STARTER")
-  planPriceCents               Int       @default(1000)
+  planPriceCents              Int       @default(1000)
   /// Super-admin kill switch for a single org, independent of smsAddOnActive
   /// (which reflects purchase status) — set via the SMS Administration
   /// "Suspend messaging" action. Checked in getSmsEntitlement().
-  suspendedAt                   DateTime?
+  suspendedAt                 DateTime?
   /// Last usage-percentage threshold (0/50/80/90/100) an admin was emailed
   /// about this billing period — dedupes notifyOrgAdminsOfSmsUsageThresholds().
-  lastUsageThresholdNotified   Int       @default(0)
+  lastUsageThresholdNotified  Int       @default(0)
   createdAt                   DateTime  @default(now())
   updatedAt                   DateTime  @updatedAt
 
@@ -1016,11 +1044,11 @@ model PlatformSmsSettings {
   /// the UI; sendSms() falls back to the legacy env vars until then.
   accountSidEncrypted          String?
   authTokenEncrypted           String?
-  apiKeyEncrypted               String?
-  apiSecretEncrypted            String?
-  messagingServiceSidEncrypted  String?
-  tollFreeNumberEncrypted       String?
-  verifyServiceSidEncrypted     String?
+  apiKeyEncrypted              String?
+  apiSecretEncrypted           String?
+  messagingServiceSidEncrypted String?
+  tollFreeNumberEncrypted      String?
+  verifyServiceSidEncrypted    String?
 
   tollFreeVerificationSid           String?
   tollFreeVerificationStatus        TollFreeVerificationStatus @default(NOT_SUBMITTED)
@@ -1495,33 +1523,49 @@ model Message {
 }
 
 model AttendanceRecord {
-  id               String           @id @default(cuid())
-  organizationId   String
-  memberId         String
-  eventId          String?
-  meetingId        String?
-  meetingTitle     String?
-  meetingDate      DateTime
-  attendanceStatus AttendanceStatus
-  checkInTime      DateTime?
-  checkOutTime     DateTime?
-  notes            String?
-  recordedByUserId String?
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
+  id                  String           @id @default(cuid())
+  organizationId      String
+  memberId            String
+  eventId             String?
+  meetingId           String?
+  meetingTitle        String?
+  meetingDate         DateTime
+  attendanceStatus    AttendanceStatus
+  checkInTime         DateTime?
+  checkOutTime        DateTime?
+  notes               String?
+  recordedByUserId    String?
+  /// How this record was captured. Defaults to MANUAL so existing/staff-entered
+  /// rows need no backfill. Self-service QR check-ins leave recordedByUserId
+  /// null (the member checked themselves in, no staff actor).
+  method              AttendanceMethod @default(MANUAL)
+  attendanceSessionId String?
+  /// Reason for a manual correction to an existing record, or for an
+  /// EXCUSED status — one free-text field covers both since they're the
+  /// same kind of "why does this record say what it says" annotation.
+  correctionReason    String?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  member       OrgMember    @relation(fields: [memberId], references: [id], onDelete: Cascade)
-  event        Event?       @relation(fields: [eventId], references: [id], onDelete: SetNull)
-  meeting      Meeting?     @relation(fields: [meetingId], references: [id], onDelete: SetNull)
-  recordedBy   User?        @relation("AttendanceRecordedBy", fields: [recordedByUserId], references: [id], onDelete: SetNull)
+  organization      Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  member            OrgMember                 @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  event             Event?                    @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  meeting           Meeting?                  @relation(fields: [meetingId], references: [id], onDelete: SetNull)
+  recordedBy        User?                     @relation("AttendanceRecordedBy", fields: [recordedByUserId], references: [id], onDelete: SetNull)
+  attendanceSession MeetingAttendanceSession? @relation(fields: [attendanceSessionId], references: [id], onDelete: SetNull)
 
+  /// Duplicate-prevention at the DB level (not just app logic) for meeting
+  /// attendance — Postgres treats each NULL meetingId as distinct, so this
+  /// only constrains rows that actually reference a Meeting; it doesn't
+  /// affect Event-only or freeform-title rows.
+  @@unique([organizationId, memberId, meetingId])
   @@index([organizationId])
   @@index([memberId])
   @@index([eventId])
   @@index([meetingId])
   @@index([meetingDate])
   @@index([attendanceStatus])
+  @@index([attendanceSessionId])
 }
 
 model Meeting {
@@ -1537,14 +1581,58 @@ model Meeting {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  organization           Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdBy              User?                   @relation("MeetingCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  organization           Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy              User?                      @relation("MeetingCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   attendanceRecords      AttendanceRecord[]
+  attendanceSessions     MeetingAttendanceSession[]
   communicationCampaigns CommunicationCampaign[]
 
   @@index([organizationId])
   @@index([meetingDate])
   @@index([createdByUserId])
+}
+
+/// QR check-in session/window for a Meeting. Does not store attendance rows
+/// itself (those are AttendanceRecord, linked via attendanceSessionId) and
+/// never stores a reusable plaintext QR secret — the signing key for this
+/// session's tokens is derived at verification time from the server-wide
+/// ATTENDANCE_QR_SECRET plus this row's id and tokenVersion, so bumping
+/// tokenVersion (regenerate/revoke) instantly invalidates every token issued
+/// under the old version without needing a stored secret to rotate.
+model MeetingAttendanceSession {
+  id                   String                  @id @default(cuid())
+  organizationId       String
+  meetingId            String
+  status               AttendanceSessionStatus @default(DRAFT)
+  mode                 AttendanceSessionMode   @default(ROTATING_QR)
+  opensAt              DateTime?
+  closesAt             DateTime?
+  /// Minutes after the meeting's scheduled start (Meeting.meetingDate) a
+  /// check-in is still considered PRESENT rather than LATE. Computed
+  /// server-side at check-in time — never trusts the scanning device's clock.
+  lateThresholdMinutes Int                     @default(10)
+  /// Rotating mode only: how often the displayed QR re-signs. Ignored for
+  /// STATIC_QR (one token covers the whole window).
+  rotationSeconds      Int                     @default(30)
+  /// Bumped by regenerate/revoke — see model doc above. Also the mechanism
+  /// that invalidates old tokens after the session is closed and reopened.
+  tokenVersion         Int                     @default(1)
+  createdByUserId      String?
+  openedByUserId       String?
+  closedByUserId       String?
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
+
+  organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  meeting           Meeting            @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  createdBy         User?              @relation("AttendanceSessionCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  openedBy          User?              @relation("AttendanceSessionOpenedBy", fields: [openedByUserId], references: [id], onDelete: SetNull)
+  closedBy          User?              @relation("AttendanceSessionClosedBy", fields: [closedByUserId], references: [id], onDelete: SetNull)
+  attendanceRecords AttendanceRecord[]
+
+  @@index([organizationId])
+  @@index([meetingId])
+  @@index([status])
 }
 
 model MemberTimelineEvent {
