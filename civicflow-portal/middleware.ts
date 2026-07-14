@@ -27,18 +27,24 @@ const MEMBER_WEB_FALLBACK_PATHS = new Set([
   "/payment-history",
 ]);
 
+// Behind DigitalOcean App Platform's edge, req.nextUrl.hostname is NOT the
+// external domain the browser requested (it resolves to the container's
+// internal address, e.g. "localhost") — confirmed in production 2026-07-14
+// while debugging why the legacy-redirect below silently never matched. The
+// real external Host survives on the Host header itself (and
+// X-Forwarded-Host), so every hostname-comparison in this file must read
+// from there instead of req.nextUrl.hostname. req.nextUrl.pathname/search
+// are unaffected (derived from the request line, not the Host header).
+export function requestHost(req: NextRequest): string {
+  return req.headers.get("host") ?? req.nextUrl.hostname;
+}
+
 // Single exit point for every request this middleware handles, so
 // applySecurityHeaders() is guaranteed to run on every response (redirects,
 // rewrites, rate-limit blocks, and pass-throughs alike) without having to
 // remember to wrap each individual return below.
 export async function middleware(req: NextRequest) {
-  const response = applySecurityHeaders(await handle(req));
-  // TEMP DIAGNOSTIC (domain-migration cutover) — remove after confirming
-  // req.nextUrl.hostname reflects the real external Host behind DO's edge.
-  response.headers.set("x-debug-nexturl-host", req.nextUrl.hostname);
-  response.headers.set("x-debug-header-host", req.headers.get("host") ?? "(none)");
-  response.headers.set("x-debug-xfh", req.headers.get("x-forwarded-host") ?? "(none)");
-  return response;
+  return applySecurityHeaders(await handle(req));
 }
 
 async function handle(req: NextRequest): Promise<Response> {
@@ -47,7 +53,7 @@ async function handle(req: NextRequest): Promise<Response> {
   // route, and is a no-op until LEGACY_APP_HOSTS is set (see legacy-redirect.ts)
   // — safe to ship before app.getunestra.com is live.
   const legacyTarget = computeLegacyRedirectTarget({
-    url: req.nextUrl.toString(),
+    url: `https://${requestHost(req)}${req.nextUrl.pathname}${req.nextUrl.search}`,
     legacyHosts: parseLegacyHosts(process.env.LEGACY_APP_HOSTS),
     canonicalBase: process.env.CANONICAL_APP_URL || process.env.NEXTAUTH_URL,
   });
@@ -56,7 +62,7 @@ async function handle(req: NextRequest): Promise<Response> {
   const pathname = req.nextUrl.pathname;
 
   const memberWebHost = process.env.MOBILE_APP_WEB_HOST;
-  if (memberWebHost && req.nextUrl.hostname === memberWebHost && MEMBER_WEB_FALLBACK_PATHS.has(pathname)) {
+  if (memberWebHost && requestHost(req) === memberWebHost && MEMBER_WEB_FALLBACK_PATHS.has(pathname)) {
     return NextResponse.rewrite(new URL(`/m${pathname}`, req.url));
   }
 
