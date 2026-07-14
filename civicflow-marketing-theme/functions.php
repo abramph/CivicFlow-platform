@@ -91,34 +91,78 @@ add_action( 'widgets_init', 'civicflow_widgets_init' );
 
 /* =============================================
    CONTACT FORM AJAX HANDLER
-   (Fallback if Contact Form 7 not installed)
+   Sends via Brevo's transactional API (the same
+   authenticated getunestra.com/mail.getunestra.com
+   domain the main application uses) rather than raw
+   PHP mail(), which has no SPF/DKIM alignment on this
+   server and is likely to land in spam or be dropped.
+   UNESTRA_BREVO_API_KEY is defined in wp-config.php,
+   not committed to this theme's repo.
    ============================================= */
 function civicflow_handle_contact() {
 	check_ajax_referer( 'civicflow_contact', 'nonce' );
 
-	$name    = sanitize_text_field( $_POST['cf_name'] ?? '' );
-	$email   = sanitize_email( $_POST['cf_email'] ?? '' );
-	$org     = sanitize_text_field( $_POST['cf_org'] ?? '' );
-	$type    = sanitize_text_field( $_POST['cf_type'] ?? '' );
+	$name     = sanitize_text_field( $_POST['cf_name'] ?? '' );
+	$email    = sanitize_email( $_POST['cf_email'] ?? '' );
+	$org      = sanitize_text_field( $_POST['cf_org'] ?? '' );
+	$type     = sanitize_text_field( $_POST['cf_type'] ?? '' );
 	$interest = sanitize_text_field( $_POST['cf_interest'] ?? '' );
-	$message = sanitize_textarea_field( $_POST['cf_message'] ?? '' );
+	$message  = sanitize_textarea_field( $_POST['cf_message'] ?? '' );
 
 	if ( empty( $name ) || ! is_email( $email ) ) {
 		wp_send_json_error( [ 'message' => __( 'Please provide your name and a valid email address.', 'civicflow' ) ] );
 	}
 
-	$to      = get_option( 'admin_email' );
-	$subject = sprintf( __( 'New Unestra inquiry from %s', 'civicflow' ), $name );
-	$body    = sprintf(
-		"Name: %s\nEmail: %s\nOrganization: %s\nType: %s\nInterest: %s\n\nMessage:\n%s",
-		$name, $email, $org, $type, $interest, $message
-	);
-	$headers = [
-		'Content-Type: text/plain; charset=UTF-8',
-		'Reply-To: ' . $name . ' <' . $email . '>',
-	];
+	// Rate limit: max 5 submissions per IP per hour, using a transient —
+	// no extra plugin/DB table needed for a low-volume marketing contact form.
+	$ip_key = 'cf_rl_' . md5( $_SERVER['REMOTE_ADDR'] ?? 'unknown' );
+	$count  = (int) get_transient( $ip_key );
+	if ( $count >= 5 ) {
+		wp_send_json_error( [ 'message' => __( 'Too many submissions — please try again later or email us directly.', 'civicflow' ) ] );
+	}
+	set_transient( $ip_key, $count + 1, HOUR_IN_SECONDS );
 
-	$sent = wp_mail( $to, $subject, $body, $headers );
+	$text_body = sprintf(
+		"New Unestra website inquiry\n\nName: %s\nEmail: %s\nOrganization: %s\nOrganization type: %s\nInterested in: %s\n\nMessage:\n%s",
+		$name, $email, $org, $type, $interest, $message ?: '(none)'
+	);
+
+	$sent = false;
+
+	if ( defined( 'UNESTRA_BREVO_API_KEY' ) && UNESTRA_BREVO_API_KEY ) {
+		$response = wp_remote_post( 'https://api.brevo.com/v3/smtp/email', [
+			'timeout' => 15,
+			'headers' => [
+				'api-key'      => UNESTRA_BREVO_API_KEY,
+				'Content-Type' => 'application/json',
+				'Accept'       => 'application/json',
+			],
+			'body' => wp_json_encode( [
+				'sender'    => [ 'name' => 'Unestra Website', 'email' => 'notifications@getunestra.com' ],
+				'to'        => [ [ 'email' => 'support@getunestra.com', 'name' => 'Unestra Support' ] ],
+				// The visitor's own address as Reply-To (never as the From/sender —
+				// that would be spoofing) so a direct reply reaches them.
+				'replyTo'   => [ 'email' => $email, 'name' => $name ],
+				'subject'   => sprintf( 'New Unestra inquiry from %s', $name ),
+				'textContent' => $text_body,
+			] ),
+		] );
+
+		$sent = ! is_wp_error( $response ) && wp_remote_retrieve_response_code( $response ) < 300;
+
+		if ( is_wp_error( $response ) ) {
+			error_log( 'Unestra contact form Brevo error: ' . $response->get_error_message() );
+		}
+	} else {
+		// No API key configured — fall back to PHP mail() rather than
+		// silently dropping the inquiry.
+		$sent = wp_mail(
+			get_option( 'admin_email' ),
+			sprintf( 'New Unestra inquiry from %s', $name ),
+			$text_body,
+			[ 'Content-Type: text/plain; charset=UTF-8', 'Reply-To: ' . $name . ' <' . $email . '>' ]
+		);
+	}
 
 	if ( $sent ) {
 		wp_send_json_success( [ 'message' => __( 'Thank you! We\'ll be in touch shortly.', 'civicflow' ) ] );
@@ -227,3 +271,155 @@ remove_action( 'wp_head', 'wlwmanifest_link' );
 remove_action( 'wp_head', 'rsd_link' );
 remove_action( 'wp_head', 'wp_shortlink_wp_head' );
 remove_action( 'wp_head', 'wp_generator' );
+
+/* =============================================
+   SEO: META DESCRIPTION, OPEN GRAPH, CANONICAL,
+   ORGANIZATION SCHEMA
+   WordPress already publishes /wp-sitemap.xml natively
+   since 5.5 — not disabled here. robots.txt is handled
+   by WordPress's virtual robots.txt (see the filter below)
+   since there's no physical robots.txt file to conflict
+   with it.
+   ============================================= */
+function unestra_seo_meta_description() {
+	if ( is_front_page() ) {
+		$desc = __( 'Unestra is a membership and organizational management platform for nonprofits, associations, unions, churches, and community organizations — members, payments, events, and communications in one place.', 'civicflow' );
+	} elseif ( is_singular() ) {
+		$excerpt = get_the_excerpt();
+		$desc = $excerpt ? wp_strip_all_tags( $excerpt ) : get_bloginfo( 'description' );
+	} else {
+		$desc = get_bloginfo( 'description' );
+	}
+	echo '<meta name="description" content="' . esc_attr( wp_trim_words( $desc, 30, '…' ) ) . '">' . "\n";
+}
+add_action( 'wp_head', 'unestra_seo_meta_description', 1 );
+
+function unestra_seo_canonical_and_og() {
+	$url   = is_front_page() ? home_url( '/' ) : ( is_singular() ? get_permalink() : home_url( add_query_arg( null, null ) ) );
+	$title = is_front_page() ? get_bloginfo( 'name' ) . ' — ' . get_bloginfo( 'description' ) : wp_get_document_title();
+
+	echo '<link rel="canonical" href="' . esc_url( $url ) . '">' . "\n";
+	echo '<meta property="og:site_name" content="Unestra">' . "\n";
+	echo '<meta property="og:type" content="website">' . "\n";
+	echo '<meta property="og:title" content="' . esc_attr( $title ) . '">' . "\n";
+	echo '<meta property="og:url" content="' . esc_url( $url ) . '">' . "\n";
+	echo '<meta name="twitter:card" content="summary_large_image">' . "\n";
+
+	$social_image = get_theme_mod( 'social_preview_image' );
+	if ( $social_image ) {
+		echo '<meta property="og:image" content="' . esc_url( $social_image ) . '">' . "\n";
+		echo '<meta name="twitter:image" content="' . esc_url( $social_image ) . '">' . "\n";
+	}
+}
+add_action( 'wp_head', 'unestra_seo_canonical_and_og', 2 );
+
+function unestra_organization_schema() {
+	if ( ! is_front_page() ) {
+		return;
+	}
+	$schema = [
+		'@context'    => 'https://schema.org',
+		'@type'       => 'Organization',
+		'name'        => 'Unestra',
+		'url'         => home_url( '/' ),
+		'logo'        => get_theme_mod( 'custom_logo' ) ? wp_get_attachment_image_url( get_theme_mod( 'custom_logo' ), 'full' ) : null,
+		'parentOrganization' => [
+			'@type' => 'Organization',
+			'name'  => 'APH Technologies LLC',
+			'url'   => 'https://aphtechgroup.com',
+		],
+		'sameAs' => [ 'https://app.getunestra.com' ],
+	];
+	echo '<script type="application/ld+json">' . wp_json_encode( array_filter( $schema ) ) . '</script>' . "\n";
+}
+add_action( 'wp_head', 'unestra_organization_schema', 3 );
+
+// noindex any internal/preview query args, just in case (defense in depth —
+// this theme has no staging pages today, but costs nothing to guard against).
+function unestra_noindex_previews() {
+	if ( is_preview() || ( isset( $_GET['preview'] ) && '1' === $_GET['preview'] ) ) {
+		echo '<meta name="robots" content="noindex,nofollow">' . "\n";
+	}
+}
+add_action( 'wp_head', 'unestra_noindex_previews', 0 );
+
+/* =============================================
+   SECURITY HEADERS
+   ============================================= */
+function unestra_security_headers() {
+	if ( headers_sent() ) {
+		return;
+	}
+	header( 'X-Content-Type-Options: nosniff' );
+	header( 'X-Frame-Options: SAMEORIGIN' );
+	header( 'Referrer-Policy: strict-origin-when-cross-origin' );
+	header( 'Permissions-Policy: camera=(), microphone=(), geolocation=()' );
+	// HSTS: only sent over an already-HTTPS connection, so this can never
+	// downgrade a plain-HTTP visitor — it just tells browsers to always use
+	// HTTPS for this host from now on. No "preload" — that's a near-
+	// irreversible opt-in and shouldn't ride along with a theme deploy.
+	if ( is_ssl() ) {
+		header( 'Strict-Transport-Security: max-age=31536000' );
+	}
+}
+add_action( 'send_headers', 'unestra_security_headers' );
+
+// Harden wp-config.php-adjacent editing surface: disable the in-dashboard
+// theme/plugin file editor (a common brute-force-to-RCE path if an admin
+// account is ever compromised).
+if ( ! defined( 'DISALLOW_FILE_EDIT' ) ) {
+	define( 'DISALLOW_FILE_EDIT', true );
+}
+
+/* =============================================
+   DOWNLOAD REDIRECTS
+   Stable getunestra.com/download/* URLs that 302 to the
+   current GitHub release asset — the actual binaries stay
+   on GitHub Releases (large files, already versioned/CDN'd
+   there) rather than being re-hosted through WordPress.
+   Uses template_redirect (not custom rewrite rules) so this
+   works immediately after an FTP deploy with no "flush
+   permalinks" step required.
+   ============================================= */
+function unestra_download_targets() {
+	$base = 'https://github.com/abramph/CivicFlow-platform/releases/download/v1.0.9/';
+	return [
+		'windows' => $base . 'Unestra-Setup-1.0.9.exe',
+		'macos'   => $base . 'Unestra-1.0.9-mac-arm64.dmg',
+	];
+}
+
+function unestra_handle_download_redirect() {
+	$path = trim( parse_url( $_SERVER['REQUEST_URI'], PHP_URL_PATH ), '/' );
+	$targets = unestra_download_targets();
+
+	// /download/windows, /download/macos, /download/latest/windows, /download/latest/macos
+	if ( preg_match( '#^download/(?:latest/)?(windows|macos)$#i', $path, $m ) ) {
+		$platform = strtolower( $m[1] );
+		if ( isset( $targets[ $platform ] ) ) {
+			wp_redirect( $targets[ $platform ], 302 );
+			exit;
+		}
+	}
+
+	// Legacy CivicFlow download paths, preserved for existing bookmarks/links.
+	$legacy_map = [
+		'download-windows'    => 'windows',
+		'download-mac'        => 'macos',
+		'download-macos'      => 'macos',
+		'civicflow-windows'   => 'windows',
+		'civicflow-mac'       => 'macos',
+	];
+	if ( isset( $legacy_map[ $path ] ) ) {
+		wp_redirect( $targets[ $legacy_map[ $path ] ], 302 );
+		exit;
+	}
+
+	// Old bare /downloads or /setup style entry points → the new Downloads page,
+	// preserving any query string (campaign/analytics params).
+	if ( in_array( $path, [ 'downloads', 'setup', 'download' ], true ) && ! empty( $_SERVER['QUERY_STRING'] ) ) {
+		wp_redirect( home_url( '/downloads/?' . $_SERVER['QUERY_STRING'] ), 301 );
+		exit;
+	}
+}
+add_action( 'template_redirect', 'unestra_handle_download_redirect', 1 );

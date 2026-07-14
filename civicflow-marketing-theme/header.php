@@ -63,13 +63,17 @@
  * Fallback nav when no menu is assigned.
  */
 function civicflow_fallback_nav() {
+	$home = home_url( '/' );
 	?>
 	<ul class="nav-menu" id="primary-menu" role="menubar">
-		<li role="none"><a href="#features" role="menuitem">Features</a></li>
-		<li role="none"><a href="#platform" role="menuitem">Platform</a></li>
-		<li role="none"><a href="#pricing"  role="menuitem">Pricing</a></li>
-		<li role="none"><a href="#about"    role="menuitem">About</a></li>
-		<li role="none"><a href="#contact"  role="menuitem">Contact</a></li>
+		<li role="none"><a href="<?php echo esc_url( $home . 'product/' ); ?>" role="menuitem">Product</a></li>
+		<li role="none"><a href="<?php echo esc_url( $home . 'solutions/' ); ?>" role="menuitem">Solutions</a></li>
+		<li role="none"><a href="<?php echo esc_url( $home . 'pricing/' ); ?>" role="menuitem">Pricing</a></li>
+		<li role="none"><a href="<?php echo esc_url( $home . 'security/' ); ?>" role="menuitem">Security</a></li>
+		<li role="none"><a href="<?php echo esc_url( $home . 'downloads/' ); ?>" role="menuitem">Downloads</a></li>
+		<li role="none"><a href="<?php echo esc_url( $home . 'about/' ); ?>" role="menuitem">About</a></li>
+		<li role="none"><a href="<?php echo esc_url( $home . 'support/' ); ?>" role="menuitem">Support</a></li>
+		<li role="none"><a href="https://app.getunestra.com/login" role="menuitem">Sign In</a></li>
 		<li role="none"><a href="https://app.getunestra.com/signup" class="nav-cta" role="menuitem">Get started &rarr;</a></li>
 	</ul>
 	<?php

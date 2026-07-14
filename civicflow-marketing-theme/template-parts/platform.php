@@ -8,7 +8,7 @@
 
 $check = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>';
 ?>
-<section id="platform" aria-labelledby="platform-heading">h
+<section id="platform" aria-labelledby="platform-heading">
 	<div class="container">
 		<div class="section-header">
 			<p class="section-label"><?php esc_html_e( 'Platform', 'civicflow' ); ?></p>
@@ -77,19 +77,20 @@ $check = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="cu
 						<?php esc_html_e( 'Download installer', 'civicflow' ); ?>
 					</p>
 					<div class="platform-download-btns">
-<a href="https://github.com/abramph/CivicFlow-platform/releases/download/v1.0.9/Unestra-Setup-1.0.9.exe"
-   class="platform-dl-btn"
+						<a href="<?php echo esc_url( home_url( '/download/windows' ) ); ?>"
+						   class="platform-dl-btn"
 						   aria-label="<?php esc_attr_e( 'Download Unestra for Windows', 'civicflow' ); ?>">
 							<?php esc_html_e( 'Windows', 'civicflow' ); ?>
 						</a>
-<a href="https://github.com/abramph/CivicFlow-platform/releases/download/v1.0.9/Unestra-1.0.9-mac-arm64.dmg"
-   class="platform-dl-btn"
+						<a href="<?php echo esc_url( home_url( '/download/macos' ) ); ?>"
+						   class="platform-dl-btn"
 						   aria-label="<?php esc_attr_e( 'Download Unestra for macOS', 'civicflow' ); ?>">
 							<?php esc_html_e( 'macOS', 'civicflow' ); ?>
 						</a>
 					</div>
 
 					<a class="platform-license-btn"
+					   href="https://api.civicflowapp.com/admin"
 					   target="_blank"
 					   rel="noopener noreferrer"
 					   aria-label="<?php esc_attr_e( 'Open license activation portal', 'civicflow' ); ?>">

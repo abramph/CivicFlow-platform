@@ -83,15 +83,22 @@
 
 function civicflow_footer_product_nav() {
 	echo '<ul>';
+	// Real bug fixed here 2026-07-14: '#platform' was used as the array key
+	// for both "Cloud version" and "Desktop version" — PHP silently kept
+	// only the last one, so "Cloud version" never actually rendered.
+	// Each array key must be a unique URL string — two entries pointing at
+	// the same URL will silently collide (that's exactly the bug fixed
+	// above), so a numerically-indexed list of pairs is used instead.
 	$links = [
-		'#features'                          => 'Features',
-		'#platform'                          => 'Cloud version',
-		'#platform'                          => 'Desktop version',
-		'#pricing'                           => 'Pricing',
-		esc_url( home_url( '/setup' ) )      => 'Setup guide',
+		[ home_url( '/product/' ), 'Product overview' ],
+		[ home_url( '/product/#platform' ), 'Cloud version' ],
+		[ home_url( '/downloads/' ), 'Desktop version' ],
+		[ home_url( '/pricing/' ), 'Pricing' ],
+		[ home_url( '/releases/' ), 'Release notes' ],
+		[ home_url( '/setup-guide/' ), 'Setup guide' ],
 	];
-	foreach ( $links as $url => $label ) {
-		echo '<li><a href="' . esc_url( $url ) . '">' . esc_html( $label ) . '</a></li>';
+	foreach ( $links as $link ) {
+		echo '<li><a href="' . esc_url( $link[0] ) . '">' . esc_html( $link[1] ) . '</a></li>';
 	}
 	echo '</ul>';
 }
@@ -99,13 +106,11 @@ function civicflow_footer_product_nav() {
 function civicflow_footer_company_nav() {
 	echo '<ul>';
 	$links = [
-		'#about'                         => 'About',
-		'#contact'                       => 'Contact',
-		esc_url( home_url( '/blog' ) )   => 'Blog',
-		// Neither docs.civicflowapp.com nor docs.getunestra.com resolve today —
-		// pre-existing dead link, not created by the domain migration. Pointed
-		// at the new domain for consistency; still needs an actual docs site.
-		'https://docs.getunestra.com'  => 'Documentation',
+		esc_url( home_url( '/about/' ) )        => 'About',
+		esc_url( home_url( '/solutions/' ) )    => 'Solutions',
+		esc_url( home_url( '/support/' ) )      => 'Support',
+		esc_url( home_url( '/support/#contact' ) ) => 'Contact',
+		'https://aphtechgroup.com'              => 'APH Technologies',
 	];
 	foreach ( $links as $url => $label ) {
 		echo '<li><a href="' . esc_url( $url ) . '">' . esc_html( $label ) . '</a></li>';
@@ -116,9 +121,10 @@ function civicflow_footer_company_nav() {
 function civicflow_footer_legal_nav() {
 	echo '<ul>';
 	$links = [
-		esc_url( home_url( '/privacy-policy' ) ) => 'Privacy policy',
-		esc_url( home_url( '/terms' ) )           => 'Terms of service',
-		esc_url( home_url( '/security' ) )        => 'Security',
+		esc_url( home_url( '/privacy-policy/' ) ) => 'Privacy policy',
+		esc_url( home_url( '/terms/' ) )           => 'Terms of service',
+		esc_url( home_url( '/security/' ) )        => 'Security',
+		'mailto:security@getunestra.com'           => 'Report a vulnerability',
 	];
 	foreach ( $links as $url => $label ) {
 		echo '<li><a href="' . esc_url( $url ) . '">' . esc_html( $label ) . '</a></li>';
