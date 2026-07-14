@@ -34,13 +34,18 @@ const ALLOWED_DEEP_LINK_PATTERNS: RegExp[] = [
   /^\/attendance-history$/,
 ];
 
-/** The only hostname https/http universal-link values are trusted from. */
-const ALLOWED_DEEP_LINK_HOST = 'app.civicflowapp.com';
+/**
+ * Hostnames https/http universal-link values are trusted from. Both the new
+ * canonical domain (app.getunestra.com) and the legacy one (app.civicflowapp.com)
+ * are accepted during the domain migration so links minted before the cutover
+ * keep resolving. Keep in sync with civicflow-portal/src/lib/deep-links.ts.
+ */
+const ALLOWED_DEEP_LINK_HOSTS = new Set(['app.getunestra.com', 'app.civicflowapp.com']);
 
 /**
- * Extracts the in-app path from a unestra:// or https://app.civicflowapp.com
- * URL, or a bare path already in that form, and returns it only if it matches
- * the allow-list — otherwise returns null.
+ * Extracts the in-app path from a unestra:// or https://app.getunestra.com
+ * (or legacy https://app.civicflowapp.com) URL, or a bare path already in that
+ * form, and returns it only if it matches the allow-list — otherwise returns null.
  */
 export function resolveAllowedDeepLinkPath(url: string): string | null {
   let path: string;
@@ -50,7 +55,7 @@ export function resolveAllowedDeepLinkPath(url: string): string | null {
     } else {
       const parsed = new URL(url);
       if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
-        if (parsed.hostname !== ALLOWED_DEEP_LINK_HOST) return null;
+        if (!ALLOWED_DEEP_LINK_HOSTS.has(parsed.hostname)) return null;
         // Universal link — host is the domain, pathname is the in-app path.
         path = `/${parsed.pathname.replace(/^\/+/, '')}`;
       } else {

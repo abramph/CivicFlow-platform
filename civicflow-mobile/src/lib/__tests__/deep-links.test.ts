@@ -12,7 +12,11 @@ describe('resolveAllowedDeepLinkPath', () => {
     expect(resolveAllowedDeepLinkPath('unestra://organization/abc123')).toBe('/organization/abc123');
   });
 
-  it('resolves a universal link from the trusted domain', () => {
+  it('resolves a universal link from the new canonical domain', () => {
+    expect(resolveAllowedDeepLinkPath('https://app.getunestra.com/dues')).toBe('/dues');
+  });
+
+  it('still resolves a universal link from the legacy domain during migration', () => {
     expect(resolveAllowedDeepLinkPath('https://app.civicflowapp.com/dues')).toBe('/dues');
   });
 

@@ -27,7 +27,11 @@ describe("validateDeepLink", () => {
     expect(validateDeepLink("unestra://report-payment")).toBe("unestra://report-payment");
   });
 
-  it("accepts the universal link form", () => {
+  it("accepts the universal link form on the new canonical domain", () => {
+    expect(validateDeepLink("https://app.getunestra.com/dues")).toBe("https://app.getunestra.com/dues");
+  });
+
+  it("still accepts the legacy universal link domain during migration", () => {
     expect(validateDeepLink("https://app.civicflowapp.com/dues")).toBe("https://app.civicflowapp.com/dues");
   });
 
