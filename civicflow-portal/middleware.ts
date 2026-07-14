@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
 import { requireRateLimit } from "@/lib/rate-limit";
+import { computeLegacyRedirectTarget, parseLegacyHosts } from "@/lib/legacy-redirect";
 
 // Every response below depends on live session/auth state (including which
 // pathname is even allowed), so none of it may ever be cached by the browser
@@ -26,6 +27,17 @@ const MEMBER_WEB_FALLBACK_PATHS = new Set([
 ]);
 
 export async function middleware(req: NextRequest) {
+  // Domain migration: 308 any request that arrives on a legacy host to the
+  // canonical host, preserving path + query. Runs first so it applies to every
+  // route, and is a no-op until LEGACY_APP_HOSTS is set (see legacy-redirect.ts)
+  // — safe to ship before app.getunestra.com is live.
+  const legacyTarget = computeLegacyRedirectTarget({
+    url: req.nextUrl.toString(),
+    legacyHosts: parseLegacyHosts(process.env.LEGACY_APP_HOSTS),
+    canonicalBase: process.env.CANONICAL_APP_URL || process.env.NEXTAUTH_URL,
+  });
+  if (legacyTarget) return withNoStore(NextResponse.redirect(legacyTarget, 308));
+
   const pathname = req.nextUrl.pathname;
 
   const memberWebHost = process.env.MOBILE_APP_WEB_HOST;
