@@ -65,7 +65,7 @@ get_header();
 					<div class="sg-step-body">
 						<h3>Create your account</h3>
 						<p>Go to the Unestra portal and sign up with your email address. You'll be the organization owner/admin.</p>
-						<a href="https://app.civicflowapp.com/signup" class="sg-btn sg-btn-primary" target="_blank" rel="noopener">
+						<a href="https://app.getunestra.com/signup" class="sg-btn sg-btn-primary" target="_blank" rel="noopener">
 							<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
 							Sign up free
 						</a>

@@ -41,7 +41,7 @@ $check = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="cu
 					<?php endforeach; ?>
 				</ul>
 				<div style="margin-top:1.5rem;">
-					<a href="https://app.civicflowapp.com/signup" class="btn btn-primary" target="_blank" rel="noopener" style="font-size:14px;padding:10px 20px;">
+					<a href="https://app.getunestra.com/signup" class="btn btn-primary" target="_blank" rel="noopener" style="font-size:14px;padding:10px 20px;">
 						<?php esc_html_e( 'Start free trial', 'civicflow' ); ?>
 					</a>
 				</div>

@@ -123,7 +123,7 @@ function civicflow_handle_contact() {
 	if ( $sent ) {
 		wp_send_json_success( [ 'message' => __( 'Thank you! We\'ll be in touch shortly.', 'civicflow' ) ] );
 	} else {
-		wp_send_json_error( [ 'message' => __( 'Sorry, there was an error. Please email us directly at hello@civicflowapp.com', 'civicflow' ) ] );
+		wp_send_json_error( [ 'message' => __( 'Sorry, there was an error. Please email us directly at support@getunestra.com', 'civicflow' ) ] );
 	}
 }
 add_action( 'wp_ajax_civicflow_contact',        'civicflow_handle_contact' );
@@ -167,7 +167,7 @@ function civicflow_customize_register( $wp_customize ) {
 		'cta_btn1'       => [ 'label' => 'Primary button',      'default' => 'Book a demo' ],
 		'cta_btn1_url'   => [ 'label' => 'Primary button URL',  'default' => '#contact' ],
 		'cta_btn2'       => [ 'label' => 'Secondary button',    'default' => 'Start free trial' ],
-		'cta_btn2_url'   => [ 'label' => 'Secondary button URL','default' => 'https://app.civicflowapp.com/signup' ],
+		'cta_btn2_url'   => [ 'label' => 'Secondary button URL','default' => 'https://app.getunestra.com/signup' ],
 	];
 
 	foreach ( $cta_fields as $key => $args ) {
@@ -182,7 +182,7 @@ function civicflow_customize_register( $wp_customize ) {
 	] );
 
 	$contact_fields = [
-		'contact_email'   => [ 'label' => 'Contact email',   'default' => 'hello@civicflowapp.com' ],
+		'contact_email'   => [ 'label' => 'Contact email',   'default' => 'support@getunestra.com' ],
 		'contact_phone'   => [ 'label' => 'Contact phone',   'default' => '1-800-UNESTRA' ],
 		'contact_hours'   => [ 'label' => 'Support hours',   'default' => 'Mon–Fri, 9am–6pm ET' ],
 	];

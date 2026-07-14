@@ -28,7 +28,7 @@
 		<p class="hero-sub"><?php echo esc_html( cf_mod( 'hero_subtext', 'Unestra brings member management, dues, events, communications, finances, and reporting into one secure, easy-to-use platform — so you can focus on your mission, not your spreadsheets.' ) ); ?></p>
 
 		<div class="hero-btns">
-			<a href="https://app.civicflowapp.com/signup" class="btn btn-primary" target="_blank" rel="noopener">
+			<a href="https://app.getunestra.com/signup" class="btn btn-primary" target="_blank" rel="noopener">
 				<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
 				<?php esc_html_e( 'Start free trial', 'civicflow' ); ?>
 			</a>

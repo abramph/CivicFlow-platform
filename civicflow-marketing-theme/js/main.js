@@ -78,7 +78,7 @@
           }
         })
         .catch(function () {
-          showError('Network error. Please email us directly at hello@civicflowapp.com');
+          showError('Network error. Please email us directly at support@getunestra.com');
           submit.disabled = false;
           submit.textContent = 'Send message';
         });

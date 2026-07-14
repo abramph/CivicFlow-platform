@@ -66,7 +66,7 @@
 			<p>
 				&copy; <?php echo esc_html( date( 'Y' ) ); ?>
 				<?php bloginfo( 'name' ); ?> &middot;
-				<a href="<?php echo esc_url( home_url( '/' ) ); ?>">civicflowapp.com</a>
+				<a href="<?php echo esc_url( home_url( '/' ) ); ?>">getunestra.com</a>
 			</p>
 			<p><?php esc_html_e( 'Built for organizations that build communities', 'civicflow' ); ?></p>
 		</div>
@@ -102,7 +102,10 @@ function civicflow_footer_company_nav() {
 		'#about'                         => 'About',
 		'#contact'                       => 'Contact',
 		esc_url( home_url( '/blog' ) )   => 'Blog',
-		'https://docs.civicflowapp.com'  => 'Documentation',
+		// Neither docs.civicflowapp.com nor docs.getunestra.com resolve today —
+		// pre-existing dead link, not created by the domain migration. Pointed
+		// at the new domain for consistency; still needs an actual docs site.
+		'https://docs.getunestra.com'  => 'Documentation',
 	];
 	foreach ( $links as $url => $label ) {
 		echo '<li><a href="' . esc_url( $url ) . '">' . esc_html( $label ) . '</a></li>';

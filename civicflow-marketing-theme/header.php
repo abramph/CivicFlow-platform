@@ -70,7 +70,7 @@ function civicflow_fallback_nav() {
 		<li role="none"><a href="#pricing"  role="menuitem">Pricing</a></li>
 		<li role="none"><a href="#about"    role="menuitem">About</a></li>
 		<li role="none"><a href="#contact"  role="menuitem">Contact</a></li>
-		<li role="none"><a href="https://app.civicflowapp.com/signup" class="nav-cta" role="menuitem">Get started &rarr;</a></li>
+		<li role="none"><a href="https://app.getunestra.com/signup" class="nav-cta" role="menuitem">Get started &rarr;</a></li>
 	</ul>
 	<?php
 }

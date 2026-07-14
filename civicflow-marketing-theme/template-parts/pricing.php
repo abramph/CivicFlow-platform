@@ -66,7 +66,7 @@ $dash  = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="cu
 					<span class="seat-annual" style="display:none;">+$88/yr each</span>
 				</p>
 
-				<a href="https://app.civicflowapp.com/signup" class="pricing-btn" target="_blank" rel="noopener"><?php esc_html_e( 'Start free trial', 'civicflow' ); ?></a>
+				<a href="https://app.getunestra.com/signup" class="pricing-btn" target="_blank" rel="noopener"><?php esc_html_e( 'Start free trial', 'civicflow' ); ?></a>
 				<p class="pricing-fine"><?php esc_html_e( '30-day free trial · No credit card required', 'civicflow' ); ?></p>
 			</div>
 
@@ -107,7 +107,7 @@ $dash  = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="cu
 					<span class="seat-annual" style="display:none;">+$55/yr each</span>
 				</p>
 
-				<a href="https://app.civicflowapp.com/signup" class="pricing-btn filled" target="_blank" rel="noopener"><?php esc_html_e( 'Start free trial', 'civicflow' ); ?></a>
+				<a href="https://app.getunestra.com/signup" class="pricing-btn filled" target="_blank" rel="noopener"><?php esc_html_e( 'Start free trial', 'civicflow' ); ?></a>
 				<p class="pricing-fine"><?php esc_html_e( '30-day free trial · No credit card required', 'civicflow' ); ?></p>
 			</div>
 

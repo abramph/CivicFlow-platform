@@ -15,7 +15,7 @@ WordPress will use front-page.php automatically.
 ### Navigation menus
 Appearance → Menus → create "Primary" menu, assign to Primary Navigation location.
 Add custom links: #features, #platform, #pricing, #about, #contact
-Add sign-in link: https://app.civicflowapp.com/signup
+Add sign-in link: https://app.getunestra.com/signup
 
 ### Customise text
 Appearance → Customize → Hero Section / Demo CTA Banner / Contact Info
@@ -50,4 +50,4 @@ civicflow-theme/
 - Wordfence          (security)
 
 ## Support
-hello@civicflowapp.com | https://docs.civicflowapp.com
+support@getunestra.com | https://docs.getunestra.com (not live yet)
