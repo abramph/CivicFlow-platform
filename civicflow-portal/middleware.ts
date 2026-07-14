@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { computeLegacyRedirectTarget, parseLegacyHosts } from "@/lib/legacy-redirect";
+import { applySecurityHeaders } from "@/lib/security-headers";
 
 // Every response below depends on live session/auth state (including which
 // pathname is even allowed), so none of it may ever be cached by the browser
@@ -26,7 +27,15 @@ const MEMBER_WEB_FALLBACK_PATHS = new Set([
   "/payment-history",
 ]);
 
+// Single exit point for every request this middleware handles, so
+// applySecurityHeaders() is guaranteed to run on every response (redirects,
+// rewrites, rate-limit blocks, and pass-throughs alike) without having to
+// remember to wrap each individual return below.
 export async function middleware(req: NextRequest) {
+  return applySecurityHeaders(await handle(req));
+}
+
+async function handle(req: NextRequest): Promise<Response> {
   // Domain migration: 308 any request that arrives on a legacy host to the
   // canonical host, preserving path + query. Runs first so it applies to every
   // route, and is a no-op until LEGACY_APP_HOSTS is set (see legacy-redirect.ts)
