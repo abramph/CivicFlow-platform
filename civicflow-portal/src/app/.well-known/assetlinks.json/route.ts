@@ -7,7 +7,10 @@ import { getServerEnv } from "@/lib/env";
  */
 export async function GET() {
   const env = getServerEnv();
-  const packageName = env.ANDROID_PACKAGE_NAME || "org.civicflowapp.mobile";
+  // Real package name (see civicflow-mobile/app.json). The SHA-256 fingerprint
+  // still must be supplied via ANDROID_SHA256_CERT_FINGERPRINTS once the app is
+  // signed for release — without it app-link verification cannot complete.
+  const packageName = env.ANDROID_PACKAGE_NAME || "com.aphtechnologies.unestra";
   const fingerprints = (env.ANDROID_SHA256_CERT_FINGERPRINTS || "")
     .split(",")
     .map((value) => value.trim())
