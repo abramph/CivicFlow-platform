@@ -212,9 +212,9 @@ describe("applySmsTemplateTokens", () => {
   it("substitutes organizationName and link tokens", () => {
     const result = applySmsTemplateTokens("Reminder: Your {organizationName} dues are due. Open Unestra: {link}", {
       organizationName: "ThrivePath Foundation",
-      link: "https://app.civicflowapp.com/report-payment",
+      link: "https://app.getunestra.com/report-payment",
     });
-    expect(result).toBe("Reminder: Your ThrivePath Foundation dues are due. Open Unestra: https://app.civicflowapp.com/report-payment");
+    expect(result).toBe("Reminder: Your ThrivePath Foundation dues are due. Open Unestra: https://app.getunestra.com/report-payment");
   });
 
   it("substitutes an empty string when no link is provided", () => {

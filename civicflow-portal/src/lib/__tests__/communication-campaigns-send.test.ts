@@ -58,7 +58,7 @@ vi.mock("@/lib/sms-service", () => ({
 }));
 
 vi.mock("@/lib/storage", () => ({ getSignedObjectUrl: vi.fn().mockResolvedValue("https://signed.example/file") }));
-vi.mock("@/lib/env", () => ({ getMobileAppWebBaseUrl: () => "https://app.civicflowapp.com" }));
+vi.mock("@/lib/env", () => ({ getMobileAppWebBaseUrl: () => "https://app.getunestra.com" }));
 
 import { processScheduledCampaigns, sendCommunicationCampaign } from "@/lib/communication-campaigns";
 

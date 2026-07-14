@@ -1,5 +1,14 @@
 name: civicflow-portal
 region: nyc
+# Domain migration: app.getunestra.com is the new canonical domain;
+# app.civicflowapp.com stays as a legacy alias that 308-redirects to it once
+# LEGACY_APP_HOSTS is set (see the web service envs below). Keep the legacy
+# domain in place until the new one is verified live in production.
+domains:
+- domain: app.getunestra.com
+  type: PRIMARY
+- domain: app.civicflowapp.com
+  type: ALIAS
 services:
 - name: web
   github:
@@ -23,8 +32,15 @@ services:
   envs:
   - key: NODE_ENV
     value: "production"
+  # Canonical public URL. DO NOT set this to the new domain until
+  # app.getunestra.com resolves with a valid certificate in production —
+  # flipping it early breaks NextAuth callbacks/cookies on the live domain.
   - key: NEXTAUTH_URL
-    value: "https://civicflow-portal-PLACEHOLDER.ondigitalocean.app"
+    value: "https://app.getunestra.com"
+  # Legacy hosts that 308-redirect to the canonical host. Set this in the SAME
+  # cutover step that flips NEXTAUTH_URL above; leave unset until then.
+  - key: LEGACY_APP_HOSTS
+    value: "app.civicflowapp.com"
   - key: NEXTAUTH_SECRET
     type: SECRET
     value: "REPLACE_ME"
