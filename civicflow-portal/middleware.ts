@@ -32,7 +32,13 @@ const MEMBER_WEB_FALLBACK_PATHS = new Set([
 // rewrites, rate-limit blocks, and pass-throughs alike) without having to
 // remember to wrap each individual return below.
 export async function middleware(req: NextRequest) {
-  return applySecurityHeaders(await handle(req));
+  const response = applySecurityHeaders(await handle(req));
+  // TEMP DIAGNOSTIC (domain-migration cutover) — remove after confirming
+  // req.nextUrl.hostname reflects the real external Host behind DO's edge.
+  response.headers.set("x-debug-nexturl-host", req.nextUrl.hostname);
+  response.headers.set("x-debug-header-host", req.headers.get("host") ?? "(none)");
+  response.headers.set("x-debug-xfh", req.headers.get("x-forwarded-host") ?? "(none)");
+  return response;
 }
 
 async function handle(req: NextRequest): Promise<Response> {
