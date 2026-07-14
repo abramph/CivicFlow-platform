@@ -99,7 +99,7 @@ services:
     type: SECRET
     value: "REPLACE_ME"
   - key: FROM_EMAIL
-    value: "Unestra <noreply@civicflowapp.com>"
+    value: "Unestra Notifications <notifications@getunestra.com>"
   - key: ENABLE_EMAIL_SEND
     value: "0"
   - key: CRON_SECRET

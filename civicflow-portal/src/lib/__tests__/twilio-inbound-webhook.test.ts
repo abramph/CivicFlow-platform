@@ -159,7 +159,7 @@ describe("Twilio inbound webhook", () => {
     expect(response.status).toBe(200);
     const text = await response.text();
     expect(text).toContain("<Message>");
-    expect(text).toContain("support@civicflowapp.com");
+    expect(text).toContain("support@getunestra.com");
     expect(queryRawOrgMember).not.toHaveBeenCalled();
     expect(updateManyOrgMember).not.toHaveBeenCalled();
   });

@@ -35,7 +35,7 @@ export default function TermsOfServicePage() {
             <li>Message frequency varies based on your activity and organization communications.</li>
             <li>Message and data rates may apply.</li>
             <li>Reply <strong>STOP</strong> at any time to immediately opt out of all SMS messages.</li>
-            <li>Reply <strong>HELP</strong> at any time for assistance, or contact support@civicflowapp.com.</li>
+            <li>Reply <strong>HELP</strong> at any time for assistance, or contact support@getunestra.com.</li>
             <li>Consent to receive SMS messages is not a condition of purchasing any goods or services.</li>
             <li>You can withdraw consent at any time from Notification Settings in the member portal.</li>
           </ul>
@@ -60,7 +60,7 @@ export default function TermsOfServicePage() {
         <section className="space-y-2">
           <h2 className="text-lg font-semibold text-slate-900">Contact Us</h2>
           <p className="text-sm leading-6 text-slate-700">
-            Questions about these Terms can be sent to support@civicflowapp.com.
+            Questions about these Terms can be sent to support@getunestra.com.
           </p>
         </section>
 

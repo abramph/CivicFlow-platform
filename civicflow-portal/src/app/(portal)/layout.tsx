@@ -72,7 +72,7 @@ function SubscriptionWall() {
           Choose a plan
         </Link>
         <p className="mt-3 text-xs text-slate-500">
-          Questions? Email <a href="mailto:support@civicflowapp.com" className="underline">support@civicflowapp.com</a>
+          Questions? Email <a href="mailto:support@getunestra.com" className="underline">support@getunestra.com</a>
         </p>
       </div>
     </div>

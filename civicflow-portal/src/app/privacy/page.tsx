@@ -65,7 +65,7 @@ export default function PrivacyPolicyPage() {
         <section className="space-y-2">
           <h2 className="text-lg font-semibold text-slate-900">Contact Us</h2>
           <p className="text-sm leading-6 text-slate-700">
-            Questions about this policy can be sent to support@civicflowapp.com.
+            Questions about this policy can be sent to support@getunestra.com.
           </p>
         </section>
 

@@ -1,5 +1,6 @@
 import nodemailer from "nodemailer";
 import { getServerEnv, isEmailSendEnabled } from "@/lib/env";
+import { SUPPORT_EMAIL } from "@/lib/brand";
 
 type SendEmailInput = {
   to: string;
@@ -47,6 +48,10 @@ export async function sendEmail(input: SendEmailInput) {
   const transporter = getTransporter();
   const result = await transporter.sendMail({
     from: env.FROM_EMAIL,
+    // Every automated send shares one Reply-To so a member replying to a
+    // notification (which sends FROM a no-reply-style address) lands in the
+    // monitored support inbox instead of bouncing or going nowhere.
+    replyTo: SUPPORT_EMAIL,
     to: input.to,
     subject: input.subject,
     text: input.text,

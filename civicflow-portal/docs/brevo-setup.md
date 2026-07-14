@@ -12,17 +12,20 @@ Brevo transactional-API integration, only SMTP relay.
 | `SMTP_PORT` | `587` | STARTTLS port. `src/lib/mail.ts` sets `secure: true` only when the port is exactly `465` — for `587`, `nodemailer` upgrades via STARTTLS automatically |
 | `SMTP_USER` | your Brevo SMTP login (an email address, shown in Brevo's SMTP & API settings) | |
 | `SMTP_PASS` | your Brevo SMTP key (not your Brevo account password) | Generate under Brevo → SMTP & API → SMTP tab |
-| `FROM_EMAIL` | `Unestra <noreply@civicflowapp.com>` | Must be a **verified sender** in Brevo (see below) or Brevo will reject/bounce the send |
+| `FROM_EMAIL` | `Unestra Notifications <notifications@getunestra.com>` | Must be a **verified sender** in Brevo (see below) or Brevo will reject/bounce the send |
 | `ENABLE_EMAIL_SEND` | `"1"` | Safety switch — without this set to `"1"`/`"true"`, `sendEmail()` no-ops (`skipped: true`) instead of attempting delivery. Useful for staging/dev; must be `"1"` in production or no email of any kind (including password reset) will ever send. |
 
 ## Brevo account setup
 
 1. **Verify the sending domain** (Brevo → Senders, Domains & Dedicated IPs → Domains): add
-   `civicflowapp.com` (or whatever domain `FROM_EMAIL` uses), and add the SPF/DKIM DNS records
-   Brevo provides at your DNS host. An unverified sending domain is the most common cause of
-   emails being silently dropped, bounced, or landing in spam even though the SMTP transaction
-   itself reports success — nodemailer/SMTP only confirms the message was *accepted* by Brevo's
-   relay, not that it was actually delivered to the recipient's inbox.
+   `getunestra.com` (or whatever domain `FROM_EMAIL` uses), and add the SPF/DKIM DNS records
+   Brevo provides at your DNS host. **This must happen before `FROM_EMAIL` is switched to
+   `notifications@getunestra.com` in production** — an unverified sending domain is the most
+   common cause of emails being silently dropped, bounced, or landing in spam even though the
+   SMTP transaction itself reports success — nodemailer/SMTP only confirms the message was
+   *accepted* by Brevo's relay, not that it was actually delivered to the recipient's inbox.
+   `civicflowapp.com` should stay verified in Brevo in parallel until the new domain is confirmed
+   working end-to-end.
 2. **Verify the sender address** itself (Brevo → Senders) if using single-sender verification
    instead of full domain verification.
 3. **Get SMTP credentials**: Brevo → SMTP & API → SMTP tab shows the SMTP login (usually your
