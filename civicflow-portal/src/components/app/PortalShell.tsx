@@ -13,6 +13,9 @@ function isHiddenPath(pathname: string) {
   return (
     pathname === "/login" ||
     pathname === "/signup" ||
+    pathname === "/forgot-password" ||
+    pathname === "/reset-password" ||
+    pathname === "/verify-email" ||
     pathname === "/buy" ||
     pathname === "/accept-invite" ||
     pathname === "/select-organization" ||
