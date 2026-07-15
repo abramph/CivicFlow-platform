@@ -12,6 +12,7 @@ function isHiddenPath(pathname: string) {
   // meant to fill a projector/printed page with no staff nav around them.
   return (
     pathname === "/login" ||
+    pathname === "/login/mfa" ||
     pathname === "/signup" ||
     pathname === "/forgot-password" ||
     pathname === "/reset-password" ||
