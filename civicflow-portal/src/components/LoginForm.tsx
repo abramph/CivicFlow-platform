@@ -78,7 +78,7 @@ export function LoginForm({ verified }: { verified?: boolean } = {}) {
         </div>
       ) : null}
 
-      <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
+      <form className="mt-6 space-y-4" method="post" onSubmit={handleSubmit}>
         <div>
           <label htmlFor="email" className="mb-1 block text-sm font-medium text-slate-700">Email</label>
           <input

@@ -65,7 +65,7 @@ export function ResetPasswordForm({ token }: { token: string }) {
         <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       ) : null}
 
-      <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
+      <form className="mt-6 space-y-4" method="post" onSubmit={handleSubmit}>
         <div>
           <label htmlFor="password" className="mb-1 block text-sm font-medium text-slate-700">New password</label>
           <input

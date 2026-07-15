@@ -204,7 +204,7 @@ export function MfaChallengeContent({ redirectTo }: { redirectTo: string | null 
           </div>
         ) : null}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form method="post" onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label htmlFor="code" className="mb-1 block text-sm font-medium text-slate-700">
               Authenticator code
