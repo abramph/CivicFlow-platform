@@ -2,6 +2,15 @@ import nodemailer from "nodemailer";
 import { getServerEnv, isEmailSendEnabled } from "@/lib/env";
 import { SUPPORT_EMAIL } from "@/lib/brand";
 
+/** Never log a complete recipient address — just enough to correlate log
+ * lines with a support ticket without exposing PII in shared logs/Sentry. */
+function maskEmail(email: string): string {
+  const [local, domain] = email.split("@");
+  if (!domain) return "***";
+  const maskedLocal = local.length <= 2 ? local[0] + "*" : local.slice(0, 2) + "***";
+  return `${maskedLocal}@${domain}`;
+}
+
 type SendEmailInput = {
   to: string;
   subject: string;
@@ -35,9 +44,11 @@ function getTransporter() {
 
 export async function sendEmail(input: SendEmailInput) {
   const env = getServerEnv();
+  const maskedTo = maskEmail(input.to);
 
   // Safe dev mode: never send emails unless explicitly enabled.
   if (!isEmailSendEnabled()) {
+    console.log(JSON.stringify({ event: "brevo_request_skipped", to: maskedTo, reason: "ENABLE_EMAIL_SEND is not enabled" }));
     return {
       sent: false,
       skipped: true,
@@ -45,25 +56,43 @@ export async function sendEmail(input: SendEmailInput) {
     };
   }
 
-  const transporter = getTransporter();
-  const result = await transporter.sendMail({
-    from: env.FROM_EMAIL,
-    // Every automated send shares one Reply-To so a member replying to a
-    // notification (which sends FROM a no-reply-style address) lands in the
-    // monitored support inbox instead of bouncing or going nowhere.
-    replyTo: SUPPORT_EMAIL,
-    to: input.to,
-    subject: input.subject,
-    text: input.text,
-    html: input.html,
-    attachments: input.attachments,
-  } as nodemailer.SendMailOptions);
+  console.log(JSON.stringify({ event: "brevo_request_started", to: maskedTo, subject: input.subject }));
 
-  return {
-    sent: true,
-    skipped: false,
-    messageId: (result as { messageId?: string }).messageId,
-  };
+  const transporter = getTransporter();
+  try {
+    const result = await transporter.sendMail({
+      from: env.FROM_EMAIL,
+      // Every automated send shares one Reply-To so a member replying to a
+      // notification (which sends FROM a no-reply-style address) lands in the
+      // monitored support inbox instead of bouncing or going nowhere.
+      replyTo: SUPPORT_EMAIL,
+      to: input.to,
+      subject: input.subject,
+      text: input.text,
+      html: input.html,
+      attachments: input.attachments,
+    } as nodemailer.SendMailOptions);
+
+    const messageId = (result as { messageId?: string }).messageId;
+    const accepted = (result as { accepted?: string[] }).accepted?.length ?? 0;
+    const rejected = (result as { rejected?: string[] }).rejected?.length ?? 0;
+    console.log(JSON.stringify({ event: "brevo_request_accepted", to: maskedTo, messageId, accepted, rejected }));
+
+    return { sent: true, skipped: false, messageId };
+  } catch (error) {
+    const err = error as { code?: string; responseCode?: number; response?: string; command?: string };
+    console.error(JSON.stringify({
+      event: "brevo_request_rejected",
+      to: maskedTo,
+      code: err.code,
+      responseCode: err.responseCode,
+      command: err.command,
+      // SMTP response text from the provider — safe to log (never contains
+      // secrets), and is exactly what tells us *why* Brevo rejected the send.
+      response: err.response?.slice(0, 300),
+    }));
+    throw error;
+  }
 }
 
 export async function sendReceiptEmail(params: {

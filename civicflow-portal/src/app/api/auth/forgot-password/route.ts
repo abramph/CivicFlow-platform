@@ -25,11 +25,14 @@ export async function POST(request: Request) {
   return withApiErrorHandling(async () => {
     const input = await parseJsonBody(request, forgotSchema);
     const email = input.email.toLowerCase();
+    console.log(JSON.stringify({ event: "password_reset_requested" }));
 
     const user = await prisma.user.findUnique({ where: { email } });
+    console.log(JSON.stringify({ event: "account_match_found", found: !!user }));
     if (!user) return okResponse();
 
     const token = await createPasswordResetToken(user.id);
+    console.log(JSON.stringify({ event: "reset_token_created", userId: user.id }));
     const resetUrl = `${appBaseUrl()}/reset-password?token=${token}`;
 
     // A transient SMTP/provider failure here must never surface as a 500 to
