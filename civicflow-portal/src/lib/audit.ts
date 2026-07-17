@@ -12,7 +12,7 @@ export type AuditAction =
   | string;
 
 interface CreateAuditEventInput {
-  /** Null for platform-level actions with no owning organization (e.g. SUPER_ADMIN SMS Administration changes). */
+  /** Null for platform-level actions with no owning organization (e.g. platform-admin SMS Administration changes, PlatformAccess grants/revocations). */
   organizationId: string | null;
   actorUserId?: string | null;
   actorEmail?: string | null;

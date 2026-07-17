@@ -7,7 +7,8 @@
  *   # or: npx prisma db seed
  *
  * This seed creates:
- *   - 1 SUPER_ADMIN user (platform operator)
+ *   - 1 platform admin user, with a global PlatformAccess grant (not tied
+ *     to any organization — see src/lib/platform-access.ts)
  *   - 1 sample organization
  *   - 5 org users: ORG_OWNER, ORG_ADMIN, FINANCE, STAFF, READ_ONLY
  *
@@ -38,8 +39,8 @@ async function main() {
 
   console.log("🌱  Seeding Unestra SaaS database...\n");
 
-  // ── 1. SUPER_ADMIN user ─────────────────────────────────────────────────────
-  const superAdmin = await prisma.user.upsert({
+  // ── 1. Platform admin user ──────────────────────────────────────────────────
+  const platformAdmin = await prisma.user.upsert({
     where: { email: "superadmin@civicflow.example" },
     update: {},
     create: {
@@ -49,7 +50,7 @@ async function main() {
       emailVerified: true,
     },
   });
-  console.log(`✅  SUPER_ADMIN user: ${superAdmin.email}  (id: ${superAdmin.id})`);
+  console.log(`✅  Platform admin user: ${platformAdmin.email}  (id: ${platformAdmin.id})`);
 
   // ── 2. Sample organization ──────────────────────────────────────────────────
   const org = await prisma.organization.upsert({
@@ -64,14 +65,18 @@ async function main() {
   });
   console.log(`✅  Organization: "${org.name}"  (id: ${org.id})`);
 
-  // ── 3. SUPER_ADMIN membership (owns the platform, not tied to one org) ──────
-  await prisma.organizationMembership.upsert({
-    where:  { organizationId_userId: { organizationId: org.id, userId: superAdmin.id } },
+  // ── 3. Global PlatformAccess grant — independent of any organization ───────
+  // membership; the platform admin above has zero OrganizationMembership rows
+  // and that's the correct, expected shape (browsing org-scoped pages would
+  // redirect to /onboarding/organization, same as production).
+  await prisma.platformAccess.upsert({
+    where:  { userId_role: { userId: platformAdmin.id, role: "SUPER_ADMIN" } },
     update: {},
     create: {
-      organizationId: org.id,
-      userId:         superAdmin.id,
-      role:           "SUPER_ADMIN",
+      userId: platformAdmin.id,
+      role:   "SUPER_ADMIN",
+      status: "ACTIVE",
+      reason: "Local seed data",
     },
   });
 

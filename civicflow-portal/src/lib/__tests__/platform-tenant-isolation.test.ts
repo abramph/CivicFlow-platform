@@ -86,6 +86,22 @@ describe("Tenant isolation — PlatformAccess must never substitute for organiza
     await expect(requireOrganization()).rejects.toThrow("NEXT_REDIRECT:/onboarding/organization");
   });
 
+  it("the legacy SUPER_ADMIN org role no longer bypasses requirePermission() — it's governed by effective permissions like any other role", async () => {
+    getServerSession.mockResolvedValueOnce({
+      userId: "legacy-holder",
+      userEmail: "legacy@example.com",
+      hasPlatformAccess: false,
+      platformRoles: [],
+      organizationId: "org-thrivepathmhs",
+      role: "SUPER_ADMIN",
+    });
+    // Effective permissions intentionally does NOT include members:write —
+    // if SUPER_ADMIN still short-circuited to `true`, this would incorrectly pass.
+    getEffectivePermissions.mockResolvedValueOnce(["members:read"]);
+
+    await expect(requirePermission("members:write", "throw")).rejects.toThrow(ForbiddenError);
+  });
+
   it("a real ORG_OWNER membership still passes requireOrganization() normally, platform access or not", async () => {
     getServerSession.mockResolvedValueOnce({
       userId: "user-1",

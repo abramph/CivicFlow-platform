@@ -30,7 +30,7 @@ export default async function RolePermissionsPage() {
     <main className="space-y-6">
       <PageHeader
         title="Role Permissions"
-        description="Customize exactly what each staff role can see and do in your organization. Owner and Super Admin always have full access and cannot be changed here; Member accounts always have zero staff access."
+        description="Customize exactly what each staff role can see and do in your organization. Owner always has full access and cannot be changed here; Member accounts always have zero staff access."
         actions={[
           { href: "/settings/users", label: "Users & Roles" },
           { href: "/settings", label: "Settings Hub" },

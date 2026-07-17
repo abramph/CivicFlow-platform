@@ -74,10 +74,9 @@ describe("canDoForOrg", () => {
     findUniqueOverride.mockReset();
   });
 
-  it("SUPER_ADMIN can do anything without even resolving an override", async () => {
-    const result = await canDoForOrg("org-a", "SUPER_ADMIN", PERMISSIONS.ALL_ORGS_MANAGE);
-    expect(result).toBe(true);
-    expect(findUniqueOverride).not.toHaveBeenCalled();
+  it("SUPER_ADMIN gets exactly ORG_OWNER's permissions — no unconditional bypass", async () => {
+    expect(await canDoForOrg("org-a", "SUPER_ADMIN", PERMISSIONS.ORG_SETTINGS_WRITE)).toBe(true);
+    expect(await canDoForOrg("org-a", "SUPER_ADMIN", PERMISSIONS.MEMBERS_DELETE)).toBe(true);
   });
 
   it("respects a narrowed override for a customizable role", async () => {
@@ -85,5 +84,23 @@ describe("canDoForOrg", () => {
     expect(await canDoForOrg("org-a", "FINANCE", PERMISSIONS.DUES_READ)).toBe(true);
     findUniqueOverride.mockResolvedValueOnce({ permissions: [PERMISSIONS.DUES_READ] });
     expect(await canDoForOrg("org-a", "FINANCE", PERMISSIONS.DUES_WRITE)).toBe(false);
+  });
+});
+
+describe("Organization roles never grant platform access", () => {
+  it("PERMISSIONS contains no cross-org/platform-scoped entries — platform authorization is modeled exclusively by PlatformAccess, never as an org-scoped Permission", () => {
+    const suspiciousNames = Object.values(PERMISSIONS).filter(
+      (p) => p.startsWith("all_orgs:") || p.startsWith("platform:")
+    );
+    expect(suspiciousNames).toEqual([]);
+  });
+
+  it("no role's permission set exceeds ORG_OWNER's — nothing can outrank the org owner within their own org", async () => {
+    const ownerSet = new Set(permissionsFor("ORG_OWNER"));
+    for (const role of ["SUPER_ADMIN", "ORG_ADMIN", "FINANCE", "STAFF", "READ_ONLY", "MEMBER"] as const) {
+      for (const permission of permissionsFor(role)) {
+        expect(ownerSet.has(permission)).toBe(true);
+      }
+    }
   });
 });
