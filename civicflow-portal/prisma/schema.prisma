@@ -405,6 +405,16 @@ model Organization {
   plan             String    @default("free") // "free" | "essential" | "elite"
   trialEndsAt      DateTime? // set at org creation; nil once subscribed or expired
   seatLimit        Int? // null = use plan default; set explicitly when seats are purchased
+  /// Marks an organization as internal/platform-owned — exempt from trial
+  /// expiration and subscription-required gating (see src/lib/plan-gate.ts).
+  /// Deliberately NOT part of updateOrganizationSchema in
+  /// src/app/api/organization/route.ts or any onboarding/settings form — an
+  /// ordinary ORG_OWNER/ORG_ADMIN must never be able to set this on their
+  /// own organization. Only ever set directly (migration or platform-admin
+  /// script), keyed by immutable organization id, never by name or slug
+  /// (both of those ARE user-editable). As of this field's introduction,
+  /// true for exactly one organization: APH Technologies, LLC.
+  billingExempt    Boolean   @default(false)
   status           OrgStatus @default(active)
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt

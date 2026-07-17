@@ -93,11 +93,14 @@ export default async function PortalLayout({ children }: { children: React.React
   if (organizationId && hasSaasSession) {
     const org = await prisma.organization.findUnique({
       where: { id: organizationId },
-      select: { plan: true, trialEndsAt: true },
+      select: { plan: true, trialEndsAt: true, billingExempt: true },
     });
 
     const now = new Date();
+    // Internal/platform-owned organizations (Organization.billingExempt)
+    // are never subject to the trial-expiration wall — see plan-gate.ts.
     const trialExpired =
+      !org?.billingExempt &&
       org?.plan === "free" &&
       (org.trialEndsAt === null || org.trialEndsAt <= now);
 
