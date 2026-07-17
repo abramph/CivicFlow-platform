@@ -74,6 +74,37 @@ describe("getBillingOperationsSummary — estimated MRR", () => {
       expect(summary.estimatedMrr.value.subscriptionsCounted).toBe(0);
     }
   });
+
+  it("counts an organization with two simultaneously-active Subscription rows only once, not twice", async () => {
+    // The schema has no constraint preventing this (e.g. a plan-change flow
+    // that creates a new row before the old one is marked cancelled).
+    subscriptionFindMany.mockResolvedValueOnce([
+      { organizationId: "org-1", plan: "elite", stripePriceId: null, createdAt: new Date("2026-02-01") },
+      { organizationId: "org-1", plan: "essential", stripePriceId: null, createdAt: new Date("2026-01-01") },
+    ]);
+    const { getBillingOperationsSummary } = await import("../billing");
+    const summary = await getBillingOperationsSummary();
+    expect(summary.estimatedMrr.status).toBe("ok");
+    if (summary.estimatedMrr.status === "ok") {
+      expect(summary.estimatedMrr.value.subscriptionsCounted).toBe(1);
+      // Takes the most recently created row (elite, $99), not both summed.
+      expect(summary.estimatedMrr.value.cents).toBe(9900);
+    }
+  });
+
+  it("counts two different organizations' active subscriptions independently", async () => {
+    subscriptionFindMany.mockResolvedValueOnce([
+      { organizationId: "org-1", plan: "essential", stripePriceId: null, createdAt: new Date("2026-01-01") },
+      { organizationId: "org-2", plan: "elite", stripePriceId: null, createdAt: new Date("2026-01-01") },
+    ]);
+    const { getBillingOperationsSummary } = await import("../billing");
+    const summary = await getBillingOperationsSummary();
+    expect(summary.estimatedMrr.status).toBe("ok");
+    if (summary.estimatedMrr.status === "ok") {
+      expect(summary.estimatedMrr.value.subscriptionsCounted).toBe(2);
+      expect(summary.estimatedMrr.value.cents).toBe(4900 + 9900);
+    }
+  });
 });
 
 describe("getBillingOperationsSummary — billing-exempt organizations", () => {

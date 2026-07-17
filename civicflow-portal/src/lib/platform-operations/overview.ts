@@ -1,7 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
-import { PLANS, type PlanId } from "@/lib/plans";
 import { DEFAULT_REPORTING_WINDOW_DAYS, type Metric } from "./types";
+import { estimateMrr } from "./billing";
 
 const ACTIVE_SUBSCRIPTION_STATUSES = ["active", "trialing", "past_due"] as const;
 
@@ -64,38 +64,6 @@ export interface PlatformOverview {
   operations: OperationsOverview;
   recentActivity: RecentActivityItem[];
   generatedAt: string;
-}
-
-/** Base-plan-only estimate: sum of PLANS[plan].monthlyPriceCents (annual plans normalized ÷12) across `active` (not `trialing`) subscriptions. Excludes seat add-ons, the SMS add-on, and any discount/proration — see docs/aph-operations-center.md for the full caveat list. */
-async function estimateMrr(): Promise<Metric<{ cents: number; subscriptionsCounted: number }>> {
-  const activeSubs = await prisma.subscription.findMany({
-    where: { status: "active" },
-    select: { plan: true, stripePriceId: true },
-  });
-
-  if (activeSubs.length === 0) {
-    return { status: "ok", value: { cents: 0, subscriptionsCounted: 0 }, source: "derived", asOf: new Date().toISOString() };
-  }
-
-  const yearlyPriceIds = new Set(
-    Object.values(PLANS)
-      .map((p) => p.yearlyPriceEnvKey && process.env[p.yearlyPriceEnvKey])
-      .filter((v): v is string => Boolean(v))
-  );
-
-  let cents = 0;
-  for (const sub of activeSubs) {
-    const plan = PLANS[(sub.plan as PlanId)] ?? PLANS.essential;
-    const isYearly = sub.stripePriceId ? yearlyPriceIds.has(sub.stripePriceId) : false;
-    cents += isYearly ? Math.round(plan.yearlyPriceCents / 12) : plan.monthlyPriceCents;
-  }
-
-  return {
-    status: "ok",
-    value: { cents, subscriptionsCounted: activeSubs.length },
-    source: "derived",
-    asOf: new Date().toISOString(),
-  };
 }
 
 export async function getPlatformOverview(): Promise<PlatformOverview> {

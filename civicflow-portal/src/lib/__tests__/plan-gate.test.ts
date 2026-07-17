@@ -27,6 +27,30 @@ vi.mock("@/lib/prisma", () => ({
 
 beforeEach(() => vi.clearAllMocks());
 
+describe("billing exemption does not transfer across an organization switch", () => {
+  it("isBillingExempt is re-queried fresh per organizationId — switching from an exempt org to a non-exempt one returns false, not a cached true", async () => {
+    findUnique.mockResolvedValueOnce({ billingExempt: true }); // APH Technologies
+    findUnique.mockResolvedValueOnce({ billingExempt: false }); // Thrivepathmhs, switched to next
+    const { isBillingExempt } = await import("../plan-gate");
+
+    expect(await isBillingExempt("aph-org")).toBe(true);
+    expect(await isBillingExempt("thrivepath-org")).toBe(false);
+    // Each call queries prisma directly by the given id — no module-level
+    // cache exists that could leak one organization's exemption into another.
+    expect(findUnique).toHaveBeenNthCalledWith(1, { where: { id: "aph-org" }, select: { billingExempt: true } });
+    expect(findUnique).toHaveBeenNthCalledWith(2, { where: { id: "thrivepath-org" }, select: { billingExempt: true } });
+  });
+
+  it("getOrgPlan resolves independently per organization even when called back-to-back for the same session flow", async () => {
+    findUnique.mockResolvedValueOnce({ plan: "free", trialEndsAt: null, billingExempt: true });
+    findUnique.mockResolvedValueOnce({ plan: "free", trialEndsAt: null, billingExempt: false });
+    const { getOrgPlan } = await import("../plan-gate");
+
+    expect(await getOrgPlan("aph-org")).toBe("elite");
+    expect(await getOrgPlan("thrivepath-org")).toBe("free");
+  });
+});
+
 describe("isBillingExempt", () => {
   it("is true only when the organization's billingExempt column is true", async () => {
     findUnique.mockResolvedValueOnce({ billingExempt: true });

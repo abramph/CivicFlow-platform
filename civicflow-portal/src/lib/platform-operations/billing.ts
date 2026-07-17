@@ -107,27 +107,65 @@ export interface BillingOperationsSummary {
   stripeIntegrationHealth: Metric<{ configured: boolean }>;
 }
 
-async function estimateMrr(): Promise<Metric<{ cents: number; subscriptionsCounted: number }>> {
+/**
+ * Base-plan-only estimate: sum of PLANS[plan].monthlyPriceCents (annual
+ * plans normalized ÷12) across `active` (not `trialing`) subscriptions, one
+ * per organization — see docs/aph-operations-center.md for the full caveat
+ * list. Excludes billing-exempt organizations (never a paying customer) and
+ * guards against double-counting an organization that has more than one
+ * simultaneously-active Subscription row — the schema has no constraint
+ * preventing this (no unique/partial-unique index on organizationId+status),
+ * and the original /admin/platform page already had to guard against
+ * exactly this ("an org can accumulate multiple historical Subscription
+ * rows ... we don't want to double-count it").
+ *
+ * Single source of truth — both the Overview page and the Billing page
+ * import this rather than each maintaining their own copy, specifically so
+ * a fix like this one only has to happen in one place.
+ */
+export async function estimateMrr(): Promise<Metric<{ cents: number; subscriptionsCounted: number }>> {
   // A billing-exempt organization (the internal, platform-owning org) should
   // never contribute to paid-customer MRR even in the defensive/hypothetical
   // case where it somehow acquired a Subscription row — exempt status means
   // "not a paying customer," full stop.
   const activeSubs = await prisma.subscription.findMany({
     where: { status: "active", organization: { billingExempt: false } },
-    select: { plan: true, stripePriceId: true },
+    select: { organizationId: true, plan: true, stripePriceId: true, createdAt: true },
+    orderBy: { createdAt: "desc" },
   });
+
+  // The schema has no constraint preventing an organization from having more
+  // than one Subscription row with status "active" simultaneously (e.g. a
+  // plan-change flow that creates a new row before the old one is marked
+  // cancelled) — the original /admin/platform page already had to guard
+  // against exactly this ("an org can accumulate multiple historical
+  // Subscription rows ... we don't want to double-count it"). Keep only the
+  // most recently created active row per organization so MRR never counts
+  // the same paying customer twice.
+  const mostRecentPerOrg = new Map<string, (typeof activeSubs)[number]>();
+  for (const sub of activeSubs) {
+    if (!mostRecentPerOrg.has(sub.organizationId)) {
+      mostRecentPerOrg.set(sub.organizationId, sub);
+    }
+  }
+
   const yearlyPriceIds = new Set(
     Object.values(PLANS)
       .map((p) => p.yearlyPriceEnvKey && process.env[p.yearlyPriceEnvKey])
       .filter((v): v is string => Boolean(v))
   );
   let cents = 0;
-  for (const sub of activeSubs) {
+  for (const sub of mostRecentPerOrg.values()) {
     const plan = PLANS[(sub.plan as PlanId)] ?? PLANS.essential;
     const isYearly = sub.stripePriceId ? yearlyPriceIds.has(sub.stripePriceId) : false;
     cents += isYearly ? Math.round(plan.yearlyPriceCents / 12) : plan.monthlyPriceCents;
   }
-  return { status: "ok", value: { cents, subscriptionsCounted: activeSubs.length }, source: "derived", asOf: new Date().toISOString() };
+  return {
+    status: "ok",
+    value: { cents, subscriptionsCounted: mostRecentPerOrg.size },
+    source: "derived",
+    asOf: new Date().toISOString(),
+  };
 }
 
 export async function getBillingOperationsSummary(): Promise<BillingOperationsSummary> {
