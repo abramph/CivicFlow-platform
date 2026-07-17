@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import type { AttendanceStatus, MembershipStatus } from "@prisma/client";
+import { checkMemberLimit } from "@/lib/plan-gate";
 
 // ---- Desktop export shape ----
 
@@ -112,6 +113,8 @@ export interface DesktopExport {
 export interface ImportCounts {
   categories: number;
   members: number;
+  /** Desktop members not imported because the organization's plan member limit was reached mid-import — see runMigrationImport's member loop. Upgrade the plan and re-run the import to bring in the rest (re-imports are safe/idempotent, deduped by email). */
+  membersSkippedDueToLimit: number;
   events: number;
   campaigns: number;
   meetings: number;
@@ -152,6 +155,7 @@ export async function runMigrationImport(
   const counts: ImportCounts = {
     categories: 0,
     members: 0,
+    membersSkippedDueToLimit: 0,
     events: 0,
     campaigns: 0,
     meetings: 0,
@@ -195,6 +199,17 @@ export async function runMigrationImport(
   }
 
   // 2. Members — upsert by email within org to prevent duplicates on re-import
+  // Limit resolved once up front, then tracked in-memory as new rows are
+  // created — mirrors the same pattern in src/app/api/import/route.ts's CSV
+  // importer. Updates to an existing (matched-by-email) member never
+  // consume a slot; only new inserts advance this counter. Rows beyond the
+  // limit are skipped (not created, not mapped) rather than failing the
+  // whole migration import — re-running the import after an upgrade picks
+  // up exactly the skipped rows, since the email-based dedup above makes
+  // this safe/idempotent.
+  const memberLimit = await checkMemberLimit(organizationId);
+  let newMemberCount = memberLimit.current;
+
   for (const m of data.members ?? []) {
     if (!m.first_name && !m.last_name) continue;
 
@@ -209,6 +224,10 @@ export async function runMigrationImport(
     if (existing) {
       memberMap.set(m.id, existing.id);
     } else {
+      if (newMemberCount >= memberLimit.limit) {
+        counts.membersSkippedDueToLimit++;
+        continue;
+      }
       const created = await prisma.orgMember.create({
         data: {
           organizationId,
@@ -230,6 +249,7 @@ export async function runMigrationImport(
       });
       memberMap.set(m.id, created.id);
       counts.members++;
+      newMemberCount++;
     }
   }
 

@@ -92,6 +92,19 @@ export async function requireMemberSlot(organizationId: string): Promise<void> {
   }
 }
 
+/**
+ * "Portal user seats" are staff logins (everything except the constituent-
+ * facing MEMBER role) — the only roles ever assignable through the Users &
+ * Roles UI (see UsersAndRolesManager.tsx's roleOptions, which excludes
+ * MEMBER entirely). A MEMBER-role OrganizationMembership is created when an
+ * existing OrgMember (constituent) accepts an app invite for their own
+ * portal access (see accept-invite.ts) — that's a constituent gaining
+ * self-service access to their own dues/payments, not a "portal user seat"
+ * in the marketed/billed sense, and must never consume from the same pool
+ * as real staff invites.
+ */
+const STAFF_SEAT_ROLES = ["SUPER_ADMIN", "ORG_OWNER", "ORG_ADMIN", "FINANCE", "STAFF", "READ_ONLY"] as const;
+
 export async function checkSeatLimit(
   organizationId: string
 ): Promise<{ allowed: boolean; current: number; limit: number }> {
@@ -103,7 +116,9 @@ export async function checkSeatLimit(
   const planId = await getOrgPlan(organizationId);
   const planConfig = getPlan(planId);
   const limit = org?.seatLimit ?? planConfig.includedSeats;
-  const current = await prisma.organizationMembership.count({ where: { organizationId } });
+  const current = await prisma.organizationMembership.count({
+    where: { organizationId, role: { in: [...STAFF_SEAT_ROLES] } },
+  });
 
   return { allowed: current < limit, current, limit };
 }
@@ -128,6 +143,64 @@ export async function requirePlanFeature(
       `Your ${config.name} plan does not include ${feature}. Upgrade to access this feature.`
     );
   }
+}
+
+export interface OrganizationEntitlements {
+  planId: PlanId;
+  planName: string;
+  /** True only for APH Technologies, LLC today — see isBillingExempt(). Not a paying customer; members/seats are still reported below (as unlimited, via getOrgPlan's elite resolution) for display consistency. */
+  billingExempt: boolean;
+  trial: TrialStatus;
+  members: { allowed: boolean; current: number; limit: number };
+  seats: { allowed: boolean; current: number; limit: number };
+  /**
+   * These four feature flags exist on every PlanConfig and are displayed on
+   * the public pricing page (see src/app/pricing/page.tsx), but as of this
+   * writing nothing anywhere calls requirePlanFeature() to actually gate
+   * emailCampaigns/pdfExport/advancedReports/apiAccess — they're informational
+   * only. Included here for a complete snapshot, not because they're enforced.
+   */
+  features: {
+    emailCampaigns: boolean;
+    pdfExport: boolean;
+    advancedReports: boolean;
+    apiAccess: boolean;
+  };
+}
+
+/**
+ * The single, consolidated entitlement snapshot for an organization — every
+ * UI surface that needs to *display* plan/limit/feature state (billing
+ * settings, the Operations Center, onboarding) should call this instead of
+ * hand-rolling its own combination of getOrgPlan()/checkMemberLimit()/etc.
+ * Enforcement (blocking a write) should still use the narrow, single-purpose
+ * guards below (requireMemberSlot, requireSeatSlot, requirePlanFeature) —
+ * this function is for reading/showing state, not gating an action.
+ */
+export async function getOrganizationEntitlements(organizationId: string): Promise<OrganizationEntitlements> {
+  const [planId, billingExempt, trial, members, seats] = await Promise.all([
+    getOrgPlan(organizationId),
+    isBillingExempt(organizationId),
+    getTrialStatus(organizationId),
+    checkMemberLimit(organizationId),
+    checkSeatLimit(organizationId),
+  ]);
+  const planConfig = getPlan(planId);
+
+  return {
+    planId,
+    planName: planConfig.name,
+    billingExempt,
+    trial,
+    members,
+    seats,
+    features: {
+      emailCampaigns: planConfig.limits.emailCampaigns,
+      pdfExport: planConfig.limits.pdfExport,
+      advancedReports: planConfig.limits.advancedReports,
+      apiAccess: planConfig.limits.apiAccess,
+    },
+  };
 }
 
 export class PlanLimitError extends Error {

@@ -1,6 +1,7 @@
 import { withApiErrorHandling } from "@/lib/api-route";
 import { requirePermission } from "@/lib/auth-guards";
 import { prisma } from "@/lib/prisma";
+import { importMembers, pickStr, parseDate } from "@/lib/member-import";
 import * as XLSX from "xlsx";
 import Database from "better-sqlite3";
 import { writeFileSync, unlinkSync } from "fs";
@@ -72,92 +73,15 @@ function parseFile(buffer: Buffer, filename: string, table?: string): Record<str
   return parseSpreadsheet(buffer);
 }
 
-function pickStr(row: Record<string, string>, key: string): string {
-  return String(row[key] ?? "").trim();
-}
-
-function parseDate(val: string): Date | null {
-  if (!val) return null;
-  const d = new Date(val);
-  return isNaN(d.getTime()) ? null : d;
-}
-
 function parseMoney(val: string): number | null {
   const n = parseFloat(String(val).replace(/[^0-9.\-]/g, ""));
   return isNaN(n) ? null : n;
 }
 
 // ── importers ─────────────────────────────────────────────────────────────────
-
-async function importMembers(
-  rows: Record<string, string>[],
-  mapping: Record<string, string>,
-  organizationId: string,
-  preview: boolean
-) {
-  const results: { row: number; status: "ok" | "error"; message?: string }[] = [];
-
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
-    const get = (field: string) => pickStr(row, mapping[field] ?? field);
-
-    const firstName = get("firstName");
-    const lastName = get("lastName");
-
-    if (!firstName && !lastName) {
-      results.push({ row: i + 2, status: "error", message: "First name and last name are both blank" });
-      continue;
-    }
-
-    if (preview) {
-      results.push({ row: i + 2, status: "ok" });
-      continue;
-    }
-
-    try {
-      const email = get("email") || null;
-      const existing = email
-        ? await prisma.orgMember.findFirst({ where: { organizationId, email } })
-        : null;
-
-      if (existing) {
-        await prisma.orgMember.update({
-          where: { id: existing.id },
-          data: {
-            firstName: firstName || existing.firstName,
-            lastName: lastName || existing.lastName,
-            phone: get("phone") || existing.phone,
-            addressLine1: get("address") || existing.addressLine1,
-            city: get("city") || existing.city,
-            state: get("state") || existing.state,
-            zipCode: get("zip") || existing.zipCode,
-            joinDate: parseDate(get("joinDate")) ?? existing.joinDate,
-          },
-        });
-      } else {
-        await prisma.orgMember.create({
-          data: {
-            organizationId,
-            firstName: firstName || "Unknown",
-            lastName: lastName || "Unknown",
-            email: email || null,
-            phone: get("phone") || null,
-            addressLine1: get("address") || null,
-            city: get("city") || null,
-            state: get("state") || null,
-            zipCode: get("zip") || null,
-            joinDate: parseDate(get("joinDate")),
-          },
-        });
-      }
-      results.push({ row: i + 2, status: "ok" });
-    } catch (err) {
-      results.push({ row: i + 2, status: "error", message: String(err) });
-    }
-  }
-
-  return results;
-}
+// importMembers lives in src/lib/member-import.ts (imported above) — Next.js's
+// App Router route type-checking only permits a fixed set of exports from a
+// route.ts file, so shared/testable logic can't be exported from here directly.
 
 async function importContributions(
   rows: Record<string, string>[],
