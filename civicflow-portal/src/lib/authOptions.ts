@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { getEffectivePermissions } from "@/lib/role-permissions";
 import { resolveActiveOrganization, getUserOrgMemberships } from "@/lib/org-context";
+import { getPlatformAccessForUser } from "@/lib/platform-access";
 
 const defaultApiBase = process.env.NEXT_PUBLIC_API_BASE || "https://api.civicflowapp.com/api";
 
@@ -208,13 +209,14 @@ export const authOptions: NextAuthOptions = {
       }
 
       if (token.userId) {
-        const [active, organizations, user] = await Promise.all([
+        const [active, organizations, user, platformAccess] = await Promise.all([
           resolveActiveOrganization(String(token.userId)),
           getUserOrgMemberships(String(token.userId)),
           prisma.user.findUnique({
             where: { id: String(token.userId) },
             select: { email: true },
           }),
+          getPlatformAccessForUser(String(token.userId)),
         ]);
 
         session.userId = String(token.userId);
@@ -224,11 +226,18 @@ export const authOptions: NextAuthOptions = {
         session.role = active?.role ?? null;
         session.memberId = active?.memberId ?? null;
         session.organizations = organizations;
+        // Global, active-organization-independent — resolved fresh here on
+        // every session read (never persisted in the JWT) so a revocation
+        // takes effect on the next request instead of lingering.
+        session.hasPlatformAccess = platformAccess.hasPlatformAccess;
+        session.platformRoles = platformAccess.platformRoles;
       } else {
         session.userId = token.userId;
         session.userEmail = token.userEmail;
         session.organizationId = token.organizationId ?? null;
         session.role = token.role ?? null;
+        session.hasPlatformAccess = false;
+        session.platformRoles = [];
       }
 
       // Effective (possibly org-customized) permission set, embedded so

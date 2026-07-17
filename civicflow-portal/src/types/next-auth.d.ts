@@ -1,6 +1,6 @@
 import "next-auth";
 import "next-auth/jwt";
-import type { OrgRole } from "@prisma/client";
+import type { OrgRole, PlatformRole } from "@prisma/client";
 
 declare module "next-auth" {
   interface User {
@@ -46,6 +46,15 @@ declare module "next-auth" {
     }[];
     // Effective (org-customized) permission set for the current role
     permissions?: string[];
+    // Global platform-operator access — independent of active organization
+    // (see PlatformAccess in schema.prisma). Resolved fresh from the
+    // database on every session read, never cached in the signed JWT, so a
+    // revocation takes effect on the next request rather than lingering
+    // until the token itself expires or rotates. Only the minimum derived
+    // fields are exposed here; the raw PlatformAccess row never reaches
+    // the client.
+    hasPlatformAccess?: boolean;
+    platformRoles?: PlatformRole[];
     // MFA pending state
     mfaPending?: boolean;
     mfaUserId?: string;

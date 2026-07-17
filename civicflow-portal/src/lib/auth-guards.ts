@@ -22,9 +22,11 @@
 import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import type { Session } from "next-auth";
+import type { PlatformRole } from "@prisma/client";
 import { authOptions } from "@/lib/authOptions";
 import type { Permission, Role } from "@/lib/rbac";
 import { getEffectivePermissions } from "@/lib/role-permissions";
+import { getPlatformAccessForUser, hasPlatformRole } from "@/lib/platform-access";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -160,14 +162,62 @@ export async function requireRole(
   return { session, organizationId, role, can };
 }
 
+/** Alias — makes explicit that these check the ACTIVE ORGANIZATION's role/permission, as opposed to requirePlatformRole()/requireSuperAdmin() below, which are global and organization-independent. */
+export const requireOrganizationRole = requireRole;
+export const requireOrganizationPermission = requirePermission;
+
+// ─── Platform guards (global, organization-independent) ─────────────────────
+//
+// A PlatformAccess grant (see schema.prisma) authorizes platform-operator
+// surfaces — /admin/platform and friends — regardless of which organization
+// is the user's active session org. Deliberately NOT built on requireRole()/
+// requireOrganization(): those require an active organization membership,
+// which platform access must not depend on. Keep these two guard families
+// separate rather than merging them into one permissive check.
+
+export interface PlatformSession {
+  userId: string;
+  userEmail: string;
+}
+
 /**
- * SUPER_ADMIN-only guard.
- * Use for /admin/platform routes.
+ * Requires an authenticated user holding an ACTIVE PlatformAccess grant for
+ * the given role. Independent of active organization / cf_active_org / any
+ * OrganizationMembership — a user can pass this with zero org memberships.
+ */
+export async function requirePlatformRole(
+  role: PlatformRole,
+  onForbidden: "redirect" | "throw" = "redirect"
+): Promise<{ session: PlatformSession }> {
+  const session = await getServerSession(authOptions);
+
+  if (!session?.userId) {
+    if (onForbidden === "throw") {
+      throw new ForbiddenError("Authentication required");
+    }
+    redirect("/login");
+  }
+
+  const access = await getPlatformAccessForUser(session.userId);
+  if (!hasPlatformRole(access, role)) {
+    if (onForbidden === "throw") {
+      throw new ForbiddenError(`Platform role denied: ${role}`);
+    }
+    redirect("/dashboard?error=forbidden");
+  }
+
+  return { session: { userId: session.userId, userEmail: session.userEmail ?? "" } };
+}
+
+/**
+ * SUPER_ADMIN-only guard. Use for /admin/platform routes.
+ * Checks global PlatformAccess — NOT active-organization role, NOT
+ * cf_active_org, NOT APH Technologies (or any other) membership.
  */
 export async function requireSuperAdmin(
   onForbidden: "redirect" | "throw" = "redirect"
-): Promise<{ session: OrgSession; organizationId: string; role: Role; can: PermissionChecker }> {
-  return requireRole("SUPER_ADMIN", onForbidden);
+): Promise<{ session: PlatformSession }> {
+  return requirePlatformRole("SUPER_ADMIN", onForbidden);
 }
 
 // ─── Error class for Route Handler usage ─────────────────────────────────────
