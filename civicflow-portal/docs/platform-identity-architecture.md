@@ -8,6 +8,13 @@ regardless of which organization — if any — they belong to). This doc
 describes both, the boundary between them, and how to bootstrap a new
 platform administrator.
 
+The primary consumer of platform authorization is the **APH Operations
+Center** (`/admin/platform` — see [aph-operations-center.md](./aph-operations-center.md)),
+the operational console built on top of everything described here. Every
+Operations Center page uses `requireSuperAdmin()` exactly as documented
+below; that doc covers the console's own routes, data sources, and
+tenant-boundary safeguards in detail.
+
 ## Platform Identity
 
 "Platform Identity" is the umbrella term for a user's platform-operator

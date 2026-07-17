@@ -238,12 +238,12 @@ export function PortalShell({ children }: { children: ReactNode }) {
               <Link
                 href="/admin/platform"
                 className={`block rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
-                  pathname === "/admin/platform"
+                  isActive(pathname, "/admin/platform") && !pathname.startsWith("/admin/platform/sms")
                     ? "bg-slate-900 text-white shadow-sm"
                     : "text-slate-800 hover:bg-slate-100"
                 }`}
               >
-                Platform Admin
+                APH Operations Center
               </Link>
             ) : null}
             {canSeePlatformAdmin ? (
