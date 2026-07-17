@@ -7,11 +7,34 @@ export interface TrialStatus {
   daysRemaining: number;
 }
 
+/**
+ * Whether an organization is exempt from ordinary trial/subscription
+ * gating — currently true for exactly one organization: APH Technologies,
+ * LLC, the internal platform-owning organization (see the migration that
+ * sets Organization.billingExempt). Never derived from the caller's
+ * identity, role, or PlatformAccess grant — a platform administrator
+ * opening any other (unpaid) organization must still see that
+ * organization's real billing state.
+ */
+export async function isBillingExempt(organizationId: string): Promise<boolean> {
+  const org = await prisma.organization.findUnique({
+    where: { id: organizationId },
+    select: { billingExempt: true },
+  });
+  return org?.billingExempt ?? false;
+}
+
 export async function getOrgPlan(organizationId: string): Promise<PlanId> {
   const org = await prisma.organization.findUnique({
     where: { id: organizationId },
-    select: { plan: true, trialEndsAt: true },
+    select: { plan: true, trialEndsAt: true, billingExempt: true },
   });
+  // Internal/platform-owned organizations (see Organization.billingExempt)
+  // get full-featured access with no plan limits or trial framing — they
+  // are not a paying customer and never will be. This is a narrow,
+  // explicit, ID-keyed exemption (see the migration that sets it), never
+  // inferred from the caller's identity, role, or PlatformAccess grant.
+  if (org?.billingExempt) return "elite";
   const plan = (org?.plan ?? "free") as PlanId;
   // During active trial, org gets Essential-tier access at no charge.
   if (plan === "free" && org?.trialEndsAt && org.trialEndsAt > new Date()) {
@@ -23,8 +46,15 @@ export async function getOrgPlan(organizationId: string): Promise<PlanId> {
 export async function getTrialStatus(organizationId: string): Promise<TrialStatus> {
   const org = await prisma.organization.findUnique({
     where: { id: organizationId },
-    select: { plan: true, trialEndsAt: true },
+    select: { plan: true, trialEndsAt: true, billingExempt: true },
   });
+
+  // A billing-exempt organization is never "in a trial" — it has permanent,
+  // unconditional access, so there is nothing counting down and no
+  // trial-ended state to reach.
+  if (org?.billingExempt) {
+    return { isInTrial: false, trialEndsAt: null, daysRemaining: 0 };
+  }
 
   const now = new Date();
   const trialEndsAt = org?.trialEndsAt ?? null;
