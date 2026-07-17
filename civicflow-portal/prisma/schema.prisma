@@ -35,6 +35,21 @@ enum OrgRole {
   MEMBER
 }
 
+/// Global, organization-independent platform roles. Deliberately separate
+/// from OrgRole — a PlatformAccess grant authorizes /admin/platform and
+/// related platform-operator surfaces regardless of which organization is
+/// the user's active session org. It must never be treated as (or expanded
+/// into) a substitute for organization membership on tenant routes.
+enum PlatformRole {
+  SUPER_ADMIN
+}
+
+enum PlatformAccessStatus {
+  ACTIVE
+  SUSPENDED
+  REVOKED
+}
+
 enum SubscriptionStatus {
   active
   trialing
@@ -473,7 +488,38 @@ model User {
   conversationParticipations ConversationParticipant[]
   sentMessages               Message[]                  @relation("MessageSender")
 
+  platformAccess         PlatformAccess[] @relation("PlatformAccessUser")
+  platformAccessGranted  PlatformAccess[] @relation("PlatformAccessGrantedBy")
+  platformAccessRevoked  PlatformAccess[] @relation("PlatformAccessRevokedBy")
+
   @@index([email])
+}
+
+/// Global platform-operator authorization, independent of any
+/// OrganizationMembership or the active-organization session context.
+/// A user may hold at most one ACTIVE record per PlatformRole
+/// (@@unique([userId, role])) — revoking access inserts no new row, it
+/// flips status + revokedAt/revokedById on the existing one, preserving
+/// the grant history for audit rather than deleting it.
+model PlatformAccess {
+  id          String               @id @default(cuid())
+  userId      String
+  role        PlatformRole
+  status      PlatformAccessStatus @default(ACTIVE)
+  grantedAt   DateTime             @default(now())
+  grantedById String?
+  revokedAt   DateTime?
+  revokedById String?
+  reason      String?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  user      User  @relation("PlatformAccessUser", fields: [userId], references: [id], onDelete: Cascade)
+  grantedBy User? @relation("PlatformAccessGrantedBy", fields: [grantedById], references: [id])
+  revokedBy User? @relation("PlatformAccessRevokedBy", fields: [revokedById], references: [id])
+
+  @@unique([userId, role])
+  @@index([role, status])
 }
 
 /// Short-lived token for two-phase MFA login flow, and (via the "sms_otp" /

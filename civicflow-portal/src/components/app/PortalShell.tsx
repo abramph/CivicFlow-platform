@@ -142,8 +142,11 @@ export function PortalShell({ children }: { children: ReactNode }) {
   ];
 
   const navItems = hasSaasSession ? saasNav : legacyNav;
+  // Global platform access (PlatformAccess), independent of the active
+  // organization's role — deliberately NOT session?.role, so switching
+  // organizations never hides or reveals this link.
   const canSeePlatformAdmin =
-    hasSaasSession && session?.role === "SUPER_ADMIN";
+    hasSaasSession && Boolean(session?.hasPlatformAccess);
   const can = (permission: string) => (session?.permissions ?? []).includes(permission);
 
   const visibleNavItems = hasSaasSession
@@ -282,6 +285,15 @@ export function PortalShell({ children }: { children: ReactNode }) {
                 )}
                 {hasSaasSession && session?.role ? (
                   <p className="mt-1 text-sm text-slate-700">Role: {session.role}</p>
+                ) : null}
+                {canSeePlatformAdmin ? (
+                  // Global identity, shown alongside — not instead of — the
+                  // active-organization context above, so it's clear these
+                  // are two independent things: who you are platform-wide,
+                  // and which tenant you're currently working in.
+                  <p className="mt-1 inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">
+                    Platform Administrator
+                  </p>
                 ) : null}
               </div>
               <div className="flex flex-wrap items-center gap-3">

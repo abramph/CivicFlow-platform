@@ -20,6 +20,14 @@ vi.mock("@/lib/role-permissions", () => ({
   getEffectivePermissions: (...args: unknown[]) => getEffectivePermissions(...args),
 }));
 
+// This file predates PlatformAccess; the session callback now also resolves
+// it on every call. Stub it out to a "no platform access" default so the
+// existing multi-org assertions below are unaffected — platform-specific
+// behavior has its own coverage in authOptions-platform-session.test.ts.
+vi.mock("@/lib/platform-access", () => ({
+  getPlatformAccessForUser: vi.fn().mockResolvedValue({ hasPlatformAccess: false, platformRoles: [] }),
+}));
+
 import type { Session } from "next-auth";
 import { authOptions } from "@/lib/authOptions";
 
