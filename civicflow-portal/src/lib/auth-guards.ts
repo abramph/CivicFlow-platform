@@ -45,6 +45,12 @@ export type PermissionChecker = (permission: Permission) => boolean;
 
 // ─── Role hierarchy ───────────────────────────────────────────────────────────
 
+// SUPER_ADMIN is ranked above ORG_OWNER for historical-data/type completeness
+// only — no OrganizationMembership is ever assigned this role (the Users &
+// Roles UI excludes it from assignable options), so in practice this rank is
+// unreachable. It grants no additional reach beyond ORG_OWNER; platform-wide
+// authorization comes exclusively from PlatformAccess (see requireSuperAdmin
+// below), never from this org-scoped rank table.
 const ROLE_RANK: Record<Role, number> = {
   MEMBER:      -1,
   READ_ONLY:   0,
@@ -103,8 +109,7 @@ export async function requireOrganization(): Promise<{
 
   const orgSession = session as OrgSession;
   const effectivePermissions = await getEffectivePermissions(orgSession.organizationId, orgSession.role);
-  const can: PermissionChecker = (permission) =>
-    orgSession.role === "SUPER_ADMIN" || effectivePermissions.includes(permission);
+  const can: PermissionChecker = (permission) => effectivePermissions.includes(permission);
 
   return {
     session:        orgSession,

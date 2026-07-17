@@ -13,9 +13,15 @@ describe("rbac: MEMBER role", () => {
   });
 });
 
-describe("rbac: SUPER_ADMIN role", () => {
-  it("has every defined permission", () => {
-    expect(permissionsFor("SUPER_ADMIN")).toEqual(Object.values(PERMISSIONS));
+describe("rbac: SUPER_ADMIN role (legacy org role, not platform authorization)", () => {
+  it("has exactly ORG_OWNER's permission set — no more, no less", () => {
+    expect(permissionsFor("SUPER_ADMIN")).toEqual(permissionsFor("ORG_OWNER"));
+  });
+
+  it("carries no permission ORG_OWNER doesn't already have", () => {
+    for (const permission of Object.values(PERMISSIONS)) {
+      expect(canDo("SUPER_ADMIN", permission)).toBe(canDo("ORG_OWNER", permission));
+    }
   });
 });
 

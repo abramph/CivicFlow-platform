@@ -13,7 +13,14 @@
 // ─── Roles ───────────────────────────────────────────────────────────────────
 
 export const ROLES = {
-  SUPER_ADMIN: "SUPER_ADMIN",   // Platform operator — full access across all orgs
+  // Legacy organization role. No longer confers platform-wide access —
+  // platform authorization is exclusively PlatformAccess (see
+  // src/lib/platform-access.ts) and is entirely independent of any
+  // organization membership. Kept here only for type/historical-data
+  // compatibility (old AuditEvent rows, etc.); functionally identical to
+  // ORG_OWNER within a single org. No membership should be assigned this
+  // role going forward — the Users & Roles UI already excludes it.
+  SUPER_ADMIN: "SUPER_ADMIN",
   ORG_OWNER:   "ORG_OWNER",    // Organization owner — full access within their org
   ORG_ADMIN:   "ORG_ADMIN",    // Organization admin — manage settings and users
   FINANCE:     "FINANCE",      // Finance officer — dues, contributions, expenditures
@@ -101,56 +108,58 @@ export const PERMISSIONS = {
 
   // SMS consent audit
   SMS_CONSENT_READ: "sms_consent:read",
-
-  // Super-admin only
-  ALL_ORGS_READ:   "all_orgs:read",
-  ALL_ORGS_MANAGE: "all_orgs:manage",
 } as const;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
 
 // ─── Role → Permission map ────────────────────────────────────────────────────
 
-const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
-  SUPER_ADMIN: Object.values(PERMISSIONS) as Permission[],
+// SUPER_ADMIN's org-scoped permissions equal ORG_OWNER's exactly — this
+// role must never carry any permission ORG_OWNER doesn't already have.
+// Cross-org ("platform") reach comes exclusively from PlatformAccess and is
+// never modeled as an entry in this org-scoped Permission set.
+const ORG_OWNER_PERMISSIONS: Permission[] = [
+  PERMISSIONS.MEMBERS_READ,
+  PERMISSIONS.MEMBERS_WRITE,
+  PERMISSIONS.MEMBERS_DELETE,
+  PERMISSIONS.DUES_READ,
+  PERMISSIONS.DUES_WRITE,
+  PERMISSIONS.CONTRIBUTIONS_READ,
+  PERMISSIONS.CONTRIBUTIONS_WRITE,
+  PERMISSIONS.RECEIPTS_READ,
+  PERMISSIONS.RECEIPTS_WRITE,
+  PERMISSIONS.CAMPAIGNS_READ,
+  PERMISSIONS.CAMPAIGNS_WRITE,
+  PERMISSIONS.EVENTS_READ,
+  PERMISSIONS.EVENTS_WRITE,
+  PERMISSIONS.COMMUNICATIONS_READ,
+  PERMISSIONS.COMMUNICATIONS_WRITE,
+  PERMISSIONS.ATTENDANCE_READ,
+  PERMISSIONS.ATTENDANCE_WRITE,
+  PERMISSIONS.MEETINGS_READ,
+  PERMISSIONS.MEETINGS_WRITE,
+  PERMISSIONS.EXPENDITURES_READ,
+  PERMISSIONS.EXPENDITURES_WRITE,
+  PERMISSIONS.REPORTS_READ,
+  PERMISSIONS.REPORTS_EXPORT,
+  PERMISSIONS.REMINDERS_READ,
+  PERMISSIONS.REMINDERS_SEND,
+  PERMISSIONS.ORG_SETTINGS_READ,
+  PERMISSIONS.ORG_SETTINGS_WRITE,
+  PERMISSIONS.USERS_READ,
+  PERMISSIONS.USERS_MANAGE,
+  PERMISSIONS.BILLING_READ,
+  PERMISSIONS.BILLING_MANAGE,
+  PERMISSIONS.MESSAGES_READ,
+  PERMISSIONS.MESSAGES_WRITE,
+  PERMISSIONS.AUDIT_LOGS_READ,
+  PERMISSIONS.SMS_CONSENT_READ,
+];
 
-  ORG_OWNER: [
-    PERMISSIONS.MEMBERS_READ,
-    PERMISSIONS.MEMBERS_WRITE,
-    PERMISSIONS.MEMBERS_DELETE,
-    PERMISSIONS.DUES_READ,
-    PERMISSIONS.DUES_WRITE,
-    PERMISSIONS.CONTRIBUTIONS_READ,
-    PERMISSIONS.CONTRIBUTIONS_WRITE,
-    PERMISSIONS.RECEIPTS_READ,
-    PERMISSIONS.RECEIPTS_WRITE,
-    PERMISSIONS.CAMPAIGNS_READ,
-    PERMISSIONS.CAMPAIGNS_WRITE,
-    PERMISSIONS.EVENTS_READ,
-    PERMISSIONS.EVENTS_WRITE,
-    PERMISSIONS.COMMUNICATIONS_READ,
-    PERMISSIONS.COMMUNICATIONS_WRITE,
-    PERMISSIONS.ATTENDANCE_READ,
-    PERMISSIONS.ATTENDANCE_WRITE,
-    PERMISSIONS.MEETINGS_READ,
-    PERMISSIONS.MEETINGS_WRITE,
-    PERMISSIONS.EXPENDITURES_READ,
-    PERMISSIONS.EXPENDITURES_WRITE,
-    PERMISSIONS.REPORTS_READ,
-    PERMISSIONS.REPORTS_EXPORT,
-    PERMISSIONS.REMINDERS_READ,
-    PERMISSIONS.REMINDERS_SEND,
-    PERMISSIONS.ORG_SETTINGS_READ,
-    PERMISSIONS.ORG_SETTINGS_WRITE,
-    PERMISSIONS.USERS_READ,
-    PERMISSIONS.USERS_MANAGE,
-    PERMISSIONS.BILLING_READ,
-    PERMISSIONS.BILLING_MANAGE,
-    PERMISSIONS.MESSAGES_READ,
-    PERMISSIONS.MESSAGES_WRITE,
-    PERMISSIONS.AUDIT_LOGS_READ,
-    PERMISSIONS.SMS_CONSENT_READ,
-  ],
+const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
+  SUPER_ADMIN: ORG_OWNER_PERMISSIONS,
+
+  ORG_OWNER: ORG_OWNER_PERMISSIONS,
 
   ORG_ADMIN: [
     PERMISSIONS.MEMBERS_READ,

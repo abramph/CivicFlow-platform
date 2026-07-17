@@ -5,7 +5,9 @@
  * instead of being stuck with the hardcoded defaults in rbac.ts.
  *
  * Hard safety rails, enforced here regardless of what's in the database:
- *   - SUPER_ADMIN and ORG_OWNER always have every permission.
+ *   - SUPER_ADMIN and ORG_OWNER always have every (org-scoped) permission —
+ *     the two are functionally identical here; SUPER_ADMIN carries no
+ *     platform-wide reach through this module (see rbac.ts).
  *   - MEMBER always has zero permissions (mobile members must never gain
  *     staff access — this is the exact invariant a prior security fix
  *     depends on; it must never become configurable).
@@ -21,14 +23,7 @@ export function isCustomizableRole(role: string): role is CustomizableRole {
   return (CUSTOMIZABLE_ROLES as readonly string[]).includes(role);
 }
 
-// Platform-level permissions (cross-org, SUPER_ADMIN only) are excluded here —
-// they're irrelevant within a single org's editor and are never granted via
-// requireSuperAdmin()'s rank check anyway, only via canDo()/can().
-const PLATFORM_ONLY_PERMISSIONS: Permission[] = [PERMISSIONS.ALL_ORGS_READ, PERMISSIONS.ALL_ORGS_MANAGE];
-
-export const ALL_PERMISSIONS: Permission[] = Object.values(PERMISSIONS).filter(
-  (permission) => !PLATFORM_ONLY_PERMISSIONS.includes(permission)
-);
+export const ALL_PERMISSIONS: Permission[] = Object.values(PERMISSIONS);
 
 /**
  * Resolves the actual permission set for a role in a specific org: the
@@ -47,7 +42,6 @@ export async function getEffectivePermissions(organizationId: string, role: Role
 }
 
 export async function canDoForOrg(organizationId: string, role: Role, permission: Permission): Promise<boolean> {
-  if (role === "SUPER_ADMIN") return true;
   const effective = await getEffectivePermissions(organizationId, role);
   return effective.includes(permission);
 }

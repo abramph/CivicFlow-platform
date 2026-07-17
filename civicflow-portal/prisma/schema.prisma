@@ -25,6 +25,22 @@ datasource db {
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
+/// SUPER_ADMIN is retained here deliberately, not removed, even though no
+/// OrganizationMembership should ever be assigned it going forward (the
+/// Users & Roles UI already excludes it, and application code treats it as
+/// functionally identical to ORG_OWNER — see src/lib/rbac.ts). Platform-wide
+/// authorization is exclusively PlatformAccess below; this enum value is
+/// pure legacy/historical-data compatibility.
+///
+/// Removal was evaluated and deferred (Global Platform Access Phase 2):
+/// Postgres has no native `DROP VALUE` for enums — removing one requires
+/// recreating the entire type (new type without the value, ALTER COLUMN
+/// ... USING, drop old type, rename) across every column that uses it
+/// (OrganizationMembership.role AND OrgRolePermissionSet.role). That's a
+/// materially riskier migration than anything else in this schema, for a
+/// value that — once no membership carries it — has zero functional or
+/// security effect on its own. Revisit only as part of a dedicated,
+/// low-traffic schema-cleanup release, not bundled with unrelated work.
 enum OrgRole {
   SUPER_ADMIN
   ORG_OWNER
