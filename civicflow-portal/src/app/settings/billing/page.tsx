@@ -22,7 +22,7 @@ export default async function BillingSettingsPage({
   const [organization, subscription, memberCheck, trial, seatCheck] = await Promise.all([
     prisma.organization.findUnique({
       where: { id: organizationId },
-      select: { id: true, name: true, plan: true, status: true, createdAt: true },
+      select: { id: true, name: true, plan: true, status: true, createdAt: true, billingExempt: true },
     }),
     prisma.subscription.findFirst({
       where: { organizationId },
@@ -36,6 +36,7 @@ export default async function BillingSettingsPage({
   const currentPlanId = organization?.plan ?? "free";
   const currentPlan = getPlan(currentPlanId);
   const canManageBilling = can("billing:manage");
+  const isBillingExemptOrg = organization?.billingExempt ?? false;
 
   // Org has an active Stripe subscription — plan changes must go through the
   // billing portal, not a new checkout session.
@@ -61,8 +62,16 @@ export default async function BillingSettingsPage({
         </div>
       ) : null}
 
-      {/* Trial banner */}
-      {trial.isInTrial ? (
+      {/* Internal/billing-exempt banner — takes the place of the trial banner and upgrade CTAs below, since neither applies. */}
+      {isBillingExemptOrg ? (
+        <div className="rounded-xl border border-slate-300 bg-slate-50 px-5 py-4">
+          <p className="text-sm font-semibold text-slate-900">Internal platform organization</p>
+          <p className="mt-1 text-sm text-slate-700">
+            Billing subscription not required. This organization is exempt from trial expiration and subscription
+            gating because it is the internal, platform-owning organization — not an ordinary tenant.
+          </p>
+        </div>
+      ) : trial.isInTrial ? (
         <div className="rounded-xl border border-blue-200 bg-blue-50 px-5 py-4">
           <p className="text-sm font-semibold text-blue-900">
             Free trial — {trial.daysRemaining} day{trial.daysRemaining === 1 ? "" : "s"} remaining
@@ -78,8 +87,8 @@ export default async function BillingSettingsPage({
       <div className="grid gap-4 md:grid-cols-4">
         <StatCard
           label="Current Plan"
-          value={trial.isInTrial ? "Essential (trial)" : currentPlan.name}
-          helper={trial.isInTrial ? `Trial ends ${formatDate(trial.trialEndsAt)}` : currentPlan.description}
+          value={isBillingExemptOrg ? "Internal (exempt)" : trial.isInTrial ? "Essential (trial)" : currentPlan.name}
+          helper={isBillingExemptOrg ? "Not a paying customer" : trial.isInTrial ? `Trial ends ${formatDate(trial.trialEndsAt)}` : currentPlan.description}
         />
         <StatCard
           label="Members"
@@ -91,7 +100,10 @@ export default async function BillingSettingsPage({
           value={`${seatCheck.current} / ${seatCheck.limit}`}
           helper={seatCheck.allowed ? `${seatCheck.limit - seatCheck.current} seat${seatCheck.limit - seatCheck.current === 1 ? "" : "s"} available` : "Seat limit reached"}
         />
-        <StatCard label="Subscription Status" value={subscription?.status ?? (trial.isInTrial ? "trial" : "none")} />
+        <StatCard
+          label="Subscription Status"
+          value={isBillingExemptOrg ? "Not required" : (subscription?.status ?? (trial.isInTrial ? "trial" : "none"))}
+        />
         <StatCard label="Your Role" value={role} />
       </div>
 
@@ -114,22 +126,24 @@ export default async function BillingSettingsPage({
         ) : null}
       </SectionCard>
 
-      {/* Plan comparison & actions */}
-      <SectionCard
-        title="Plans"
-        description={
-          hasActiveSubscription
-            ? "Use the billing portal below to change or cancel your plan."
-            : "Choose a plan and billing cycle. Changes take effect immediately after payment."
-        }
-      >
-        <BillingPlans
-          currentPlanId={currentPlanId}
-          isInTrial={trial.isInTrial}
-          hasActiveSubscription={hasActiveSubscription}
-          canManageBilling={canManageBilling}
-        />
-      </SectionCard>
+      {/* Plan comparison & actions — omitted entirely for a billing-exempt organization; there is nothing to buy or upgrade. */}
+      {!isBillingExemptOrg ? (
+        <SectionCard
+          title="Plans"
+          description={
+            hasActiveSubscription
+              ? "Use the billing portal below to change or cancel your plan."
+              : "Choose a plan and billing cycle. Changes take effect immediately after payment."
+          }
+        >
+          <BillingPlans
+            currentPlanId={currentPlanId}
+            isInTrial={trial.isInTrial}
+            hasActiveSubscription={hasActiveSubscription}
+            canManageBilling={canManageBilling}
+          />
+        </SectionCard>
+      ) : null}
 
       {/* SMS add-on */}
       <SectionCard title="SMS" description="SMS is a paid add-on — never bundled free into any plan, since each message costs real money to deliver.">
