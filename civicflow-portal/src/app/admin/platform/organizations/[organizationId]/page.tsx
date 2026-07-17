@@ -38,6 +38,13 @@ export default async function PlatformOrganizationDetailPage({
         description="Platform-operations view — not an impersonated tenant view. No tenant business records (members, dues, contributions) are shown here."
         actions={[{ href: "/admin/platform/audit?organizationId=" + identity.id, label: "View audit events" }]}
       />
+      {identity.billingExempt ? (
+        <div className="rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          <span className="font-semibold text-slate-900">Internal · Billing-exempt.</span>{" "}
+          This organization is exempt from trial expiration and subscription requirements — it is not a paying
+          customer and is excluded from paid-customer MRR and missing-Stripe-linkage checks.
+        </div>
+      ) : null}
 
       <SectionCard title="Identity">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -124,6 +131,11 @@ export default async function PlatformOrganizationDetailPage({
               )}
             </div>
           </div>
+        ) : identity.billingExempt ? (
+          <EmptyState
+            title="Subscription not required"
+            description="This is the internal platform-owning organization — it is exempt from billing, not missing a subscription."
+          />
         ) : (
           <EmptyState title="No subscription record" description="This organization has no Subscription row at all." />
         )}

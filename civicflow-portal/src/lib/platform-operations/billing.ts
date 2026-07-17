@@ -108,8 +108,12 @@ export interface BillingOperationsSummary {
 }
 
 async function estimateMrr(): Promise<Metric<{ cents: number; subscriptionsCounted: number }>> {
+  // A billing-exempt organization (the internal, platform-owning org) should
+  // never contribute to paid-customer MRR even in the defensive/hypothetical
+  // case where it somehow acquired a Subscription row — exempt status means
+  // "not a paying customer," full stop.
   const activeSubs = await prisma.subscription.findMany({
-    where: { status: "active" },
+    where: { status: "active", organization: { billingExempt: false } },
     select: { plan: true, stripePriceId: true },
   });
   const yearlyPriceIds = new Set(
@@ -147,12 +151,14 @@ export async function getBillingOperationsSummary(): Promise<BillingOperationsSu
     prisma.subscription.count({ where: { status: "unpaid" } }),
     prisma.subscription.groupBy({ by: ["plan"], _count: { _all: true } }),
     prisma.organization.findMany({
-      where: { trialEndsAt: { gte: new Date(), lte: trialWindowEnd } },
+      where: { billingExempt: false, trialEndsAt: { gte: new Date(), lte: trialWindowEnd } },
       select: { id: true, name: true, trialEndsAt: true },
       take: 100,
     }),
+    // billingExempt: false — an internal/platform-owned org intentionally
+    // has no Subscription row; that's not a "missing linkage" problem.
     prisma.organization.findMany({
-      where: { plan: { in: ["essential", "elite"] }, subscriptions: { none: {} } },
+      where: { billingExempt: false, plan: { in: ["essential", "elite"] }, subscriptions: { none: {} } },
       select: { id: true, name: true, plan: true },
       take: 100,
     }),

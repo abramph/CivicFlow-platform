@@ -18,17 +18,20 @@ describe("PortalLayout trial-expiration gate respects billingExempt", () => {
   );
 
   it("selects billingExempt from the database alongside plan/trialEndsAt", () => {
-    expect(source).toMatch(/select:\s*\{[^}]*billingExempt:\s*true[^}]*\}/s);
+    // [^}]/[^;] character classes already span newlines without needing the
+    // `s` (dotAll) flag, which requires an ES2018+ compile target — this repo
+    // targets ES2017.
+    expect(source).toMatch(/select:\s*\{[^}]*billingExempt:\s*true[^}]*\}/);
   });
 
   it("the trialExpired condition checks billingExempt before plan/trialEndsAt", () => {
-    const match = source.match(/const trialExpired\s*=\s*([^;]+);/s);
+    const match = source.match(/const trialExpired\s*=\s*([^;]+);/);
     expect(match).not.toBeNull();
     expect(match![1]).toMatch(/billingExempt/);
   });
 
   it("does not gate on plan/trialEndsAt without also referencing billingExempt in the same expression", () => {
-    const match = source.match(/const trialExpired\s*=\s*([^;]+);/s);
+    const match = source.match(/const trialExpired\s*=\s*([^;]+);/);
     const expression = match![1];
     expect(expression).toContain("org?.plan");
     expect(expression).toContain("billingExempt");

@@ -117,10 +117,17 @@ export default async function PlatformOrganizationsPage({
                         {org.name}
                       </Link>
                       <p className="text-xs text-slate-600">{org.slug}</p>
+                      {org.billingExempt ? (
+                        <span className="mt-1 inline-block rounded-full bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-700">
+                          Internal · Billing-exempt
+                        </span>
+                      ) : null}
                     </td>
                     <td className="px-4 py-3 text-slate-900">{formatEnumLabel(org.plan)}</td>
                     <td className="px-4 py-3"><StatusPill status={org.status} /></td>
-                    <td className="px-4 py-3 text-slate-900">{org.latestSubscriptionStatus ? formatEnumLabel(org.latestSubscriptionStatus) : "None"}</td>
+                    <td className="px-4 py-3 text-slate-900">
+                      {org.billingExempt ? "Not required" : org.latestSubscriptionStatus ? formatEnumLabel(org.latestSubscriptionStatus) : "None"}
+                    </td>
                     <td className="px-4 py-3 text-slate-900">{org.activeMemberCount}</td>
                     <td className="px-4 py-3 text-slate-900">{org.smsAddOnActive ? "Enabled" : "—"}</td>
                     <td className="px-4 py-3"><StatusPill status={org.health} /></td>

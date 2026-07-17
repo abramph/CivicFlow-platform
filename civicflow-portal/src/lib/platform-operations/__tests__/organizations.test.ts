@@ -116,4 +116,33 @@ describe("getOrganizationDetail — tenant-boundary safety", () => {
       expect.objectContaining({ where: expect.objectContaining({ organizationId: "org-1" }) })
     );
   });
+
+  it("surfaces billingExempt on the identity object so the UI can label an internal organization correctly", async () => {
+    organizationFindUnique.mockResolvedValueOnce({
+      id: "aph-org",
+      name: "APH Technologies, LLC",
+      slug: "aph-technologies",
+      organizationType: "Platform",
+      status: "active",
+      plan: "free",
+      createdAt: new Date(),
+      trialEndsAt: null,
+      billingExempt: true,
+    });
+    organizationMembershipFindMany.mockResolvedValueOnce([{ role: "ORG_OWNER", userId: "u1" }]);
+    memberInviteCount.mockResolvedValueOnce(0);
+    organizationMembershipCount.mockResolvedValueOnce(0);
+    subscriptionFindFirst.mockResolvedValueOnce(null);
+    organizationSmsSettingsFindUnique.mockResolvedValueOnce(null);
+    orgMemberCount.mockResolvedValueOnce(0);
+    smsMessageCount.mockResolvedValueOnce(0).mockResolvedValueOnce(0);
+    auditEventFindMany.mockResolvedValueOnce([]);
+    organizationMembershipFindFirst.mockResolvedValueOnce({ user: { id: "u1", email: "admin@example.com", displayName: null } });
+    organizationMembershipGroupBy.mockResolvedValueOnce([{ userId: "u1", _count: { _all: 1 } }]);
+
+    const { getOrganizationDetail } = await import("../organizations");
+    const result = await getOrganizationDetail("aph-org");
+
+    expect(result?.identity.billingExempt).toBe(true);
+  });
 });

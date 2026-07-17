@@ -48,6 +48,8 @@ export interface OrganizationListItem {
   smsAddOnActive: boolean;
   lastActivityAt: string | null;
   health: OrgHealthStatus;
+  /** Internal/platform-owned organization exempt from tenant billing (see Organization.billingExempt) — never inferred, only ever this stored column. */
+  billingExempt: boolean;
 }
 
 function buildWhere(filters: OrganizationListFilters): Prisma.OrganizationWhereInput {
@@ -100,6 +102,7 @@ export async function listOrganizations(
         plan: true,
         status: true,
         createdAt: true,
+        billingExempt: true,
         _count: { select: { memberships: true } },
         subscriptions: {
           orderBy: { createdAt: "desc" },
@@ -144,6 +147,7 @@ export async function listOrganizations(
       smsAddOnActive: org.smsSettings?.smsAddOnActive ?? false,
       lastActivityAt: lastActivityByOrg.get(org.id)?.toISOString() ?? null,
       health: deriveOrganizationHealth({ status: org.status, latestSubscriptionStatus, activeOwnerCount }),
+      billingExempt: org.billingExempt,
     };
   });
 
@@ -160,6 +164,8 @@ export interface OrganizationDetail {
     plan: string;
     createdAt: string;
     ownerSummary: { userId: string; email: string; displayName: string | null } | null;
+    /** Internal/platform-owned organization exempt from tenant billing (see Organization.billingExempt). */
+    billingExempt: boolean;
   };
   membership: {
     totalActive: number;
@@ -204,6 +210,7 @@ export async function getOrganizationDetail(organizationId: string): Promise<Org
       plan: true,
       createdAt: true,
       trialEndsAt: true,
+      billingExempt: true,
     },
   });
   if (!org) return null;
@@ -285,6 +292,7 @@ export async function getOrganizationDetail(organizationId: string): Promise<Org
       ownerSummary: ownerMembership?.user
         ? { userId: ownerMembership.user.id, email: ownerMembership.user.email, displayName: ownerMembership.user.displayName }
         : null,
+      billingExempt: org.billingExempt,
     },
     membership: {
       totalActive: memberships.length,

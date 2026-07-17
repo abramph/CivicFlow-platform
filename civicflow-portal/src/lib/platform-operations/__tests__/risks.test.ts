@@ -141,6 +141,24 @@ describe("getOperationalRisks", () => {
     expect(risks.some((r) => r.id === "sms-failure-spike")).toBe(false);
   });
 
+  it("excludes billing-exempt organizations from the missing-billing-linkage query", async () => {
+    const { getOperationalRisks } = await import("../risks");
+    await getOperationalRisks();
+    const linkageCall = organizationFindMany.mock.calls.find(
+      (call) => (call[0] as { where?: { subscriptions?: unknown } })?.where?.subscriptions
+    )?.[0] as { where?: { billingExempt?: boolean } };
+    expect(linkageCall?.where?.billingExempt).toBe(false);
+  });
+
+  it("excludes billing-exempt organizations from the trial-ending-soon query", async () => {
+    const { getOperationalRisks } = await import("../risks");
+    await getOperationalRisks();
+    const trialCall = organizationFindMany.mock.calls.find(
+      (call) => (call[0] as { where?: { trialEndsAt?: unknown } })?.where?.trialEndsAt
+    )?.[0] as { where?: { billingExempt?: boolean } };
+    expect(trialCall?.where?.billingExempt).toBe(false);
+  });
+
   it("surfaces a warning risk for a platform administrator without MFA", async () => {
     platformAccessFindMany.mockResolvedValueOnce([{ userId: "u1", user: { email: "admin@example.com", mfaEnabled: false } }]);
     const { getOperationalRisks } = await import("../risks");

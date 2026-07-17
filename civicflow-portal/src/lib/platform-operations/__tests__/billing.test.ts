@@ -76,6 +76,33 @@ describe("getBillingOperationsSummary — estimated MRR", () => {
   });
 });
 
+describe("getBillingOperationsSummary — billing-exempt organizations", () => {
+  it("excludes billing-exempt organizations from the estimated-MRR query", async () => {
+    const { getBillingOperationsSummary } = await import("../billing");
+    await getBillingOperationsSummary();
+    const call = subscriptionFindMany.mock.calls[0]?.[0] as { where?: { organization?: { billingExempt?: boolean } } };
+    expect(call.where?.organization?.billingExempt).toBe(false);
+  });
+
+  it("excludes billing-exempt organizations from the missing-Stripe-linkage query", async () => {
+    const { getBillingOperationsSummary } = await import("../billing");
+    await getBillingOperationsSummary();
+    const linkageCall = organizationFindMany.mock.calls.find(
+      (call) => (call[0] as { where?: { subscriptions?: unknown } })?.where?.subscriptions
+    )?.[0] as { where?: { billingExempt?: boolean } };
+    expect(linkageCall?.where?.billingExempt).toBe(false);
+  });
+
+  it("excludes billing-exempt organizations from the trials-ending-soon query", async () => {
+    const { getBillingOperationsSummary } = await import("../billing");
+    await getBillingOperationsSummary();
+    const trialCall = organizationFindMany.mock.calls.find(
+      (call) => (call[0] as { where?: { trialEndsAt?: unknown } })?.where?.trialEndsAt
+    )?.[0] as { where?: { billingExempt?: boolean } };
+    expect(trialCall?.where?.billingExempt).toBe(false);
+  });
+});
+
 describe("getBillingOperationsSummary — Stripe integration health", () => {
   it("reports not_configured when STRIPE_SECRET_KEY is unset", async () => {
     const original = process.env.STRIPE_SECRET_KEY;

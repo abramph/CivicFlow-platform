@@ -59,8 +59,11 @@ async function noActiveOwnerRisks(): Promise<OperationalRisk[]> {
 }
 
 async function trialsEndingSoonRisks(): Promise<OperationalRisk[]> {
+  // billingExempt orgs never have a real trialEndsAt anyway (see plan-gate.ts),
+  // but excluded explicitly here too so this stays correct-by-design rather
+  // than correct-by-accident-of-current-field-values.
   const orgs = await prisma.organization.findMany({
-    where: { trialEndsAt: { gte: new Date(), lte: FOURTEEN_DAYS_FROM_NOW() } },
+    where: { billingExempt: false, trialEndsAt: { gte: new Date(), lte: FOURTEEN_DAYS_FROM_NOW() } },
     select: { id: true, name: true, trialEndsAt: true },
     take: 50,
   });
@@ -77,8 +80,10 @@ async function trialsEndingSoonRisks(): Promise<OperationalRisk[]> {
 }
 
 async function missingBillingLinkageRisks(): Promise<OperationalRisk[]> {
+  // billingExempt: false — an internal/platform-owned organization has no
+  // Subscription row by design; that is not a missing-linkage problem.
   const orgs = await prisma.organization.findMany({
-    where: { plan: { in: ["essential", "elite"] }, subscriptions: { none: {} } },
+    where: { billingExempt: false, plan: { in: ["essential", "elite"] }, subscriptions: { none: {} } },
     select: { id: true, name: true, plan: true },
     take: 50,
   });
