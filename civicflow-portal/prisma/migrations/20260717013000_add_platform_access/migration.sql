@@ -38,11 +38,17 @@ ALTER TABLE "PlatformAccess" ADD CONSTRAINT "PlatformAccess_revokedById_fkey" FO
 
 -- Backfill: copy the current production SUPER_ADMIN OrganizationMembership
 -- (abramph1@me.com on APH Technologies, LLC) into a global PlatformAccess
--- record. Guarded so it never runs against unexpected state: fails loudly
--- (raises an exception, aborting the migration) if there are zero or more
--- than one SUPER_ADMIN memberships at migration time, rather than silently
--- backfilling the wrong thing. Safe to re-run: ON CONFLICT DO NOTHING
--- against the (userId, role) unique constraint makes this idempotent.
+-- record. Guarded against unexpected state:
+--   - Zero SUPER_ADMIN memberships: skips the backfill (RAISE NOTICE only)
+--     rather than failing. A migration that hard-failed here would block
+--     deploying this migration to any fresh/staging database, or any
+--     environment where the legacy membership has already been normalized
+--     away — neither is an error condition, both are valid starting states.
+--   - More than one SUPER_ADMIN membership: fails loudly (RAISE EXCEPTION,
+--     aborting the migration) rather than guessing which one is canonical.
+-- Safe to re-run either way: ON CONFLICT DO NOTHING against the
+-- (userId, role) unique constraint makes the backfill idempotent, and the
+-- paired audit-event insert is skipped (via FOUND) on a no-op re-run.
 DO $$
 DECLARE
   admin_count INTEGER;
