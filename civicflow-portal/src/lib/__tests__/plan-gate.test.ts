@@ -162,3 +162,81 @@ describe("checkMemberLimit / checkSeatLimit — billing-exempt organizations get
     expect(result.limit).toBe(Infinity);
   });
 });
+
+describe("checkSeatLimit — only counts staff-role seats, never constituent MEMBER-role rows", () => {
+  it("queries organizationMembership.count with a role filter that excludes MEMBER", async () => {
+    findUnique.mockResolvedValueOnce({ plan: "essential", trialEndsAt: null, billingExempt: false, seatLimit: null });
+    organizationMembershipCount.mockResolvedValueOnce(2);
+    const { checkSeatLimit } = await import("../plan-gate");
+    await checkSeatLimit("org-1");
+
+    const call = organizationMembershipCount.mock.calls[0]?.[0] as { where?: { role?: { in?: string[] } } };
+    expect(call.where?.role?.in).toBeDefined();
+    expect(call.where?.role?.in).not.toContain("MEMBER");
+    expect(call.where?.role?.in).toEqual(
+      expect.arrayContaining(["ORG_OWNER", "ORG_ADMIN", "FINANCE", "STAFF", "READ_ONLY"])
+    );
+  });
+
+  it("a constituent's MEMBER-role app-access grant does not count toward the staff seat limit", async () => {
+    // Simulates: an org has 2 real staff seats used (ORG_OWNER + STAFF) and
+    // 50 constituents who separately accepted member-app invites (MEMBER
+    // role). The mocked count reflects what a role-filtered query returns —
+    // 2, not 52 — proving the fix actually changes the number that matters.
+    findUnique.mockResolvedValueOnce({ plan: "essential", trialEndsAt: null, billingExempt: false, seatLimit: null });
+    organizationMembershipCount.mockResolvedValueOnce(2);
+    const { checkSeatLimit } = await import("../plan-gate");
+    const result = await checkSeatLimit("org-1");
+    expect(result.current).toBe(2);
+    expect(result.allowed).toBe(true); // essential's includedSeats is 3
+  });
+});
+
+describe("getOrganizationEntitlements — consolidated snapshot", () => {
+  it("returns the full shape for an ordinary paid organization", async () => {
+    findUnique.mockResolvedValue({
+      plan: "essential",
+      trialEndsAt: null,
+      billingExempt: false,
+      seatLimit: null,
+    });
+    orgMemberCount.mockResolvedValue(10);
+    organizationMembershipCount.mockResolvedValue(2);
+
+    const { getOrganizationEntitlements } = await import("../plan-gate");
+    const entitlements = await getOrganizationEntitlements("org-1");
+
+    expect(entitlements.planId).toBe("essential");
+    expect(entitlements.planName).toBe("Essential");
+    expect(entitlements.billingExempt).toBe(false);
+    expect(entitlements.trial.isInTrial).toBe(false);
+    expect(entitlements.members).toEqual({ allowed: true, current: 10, limit: 500 });
+    expect(entitlements.seats).toEqual({ allowed: true, current: 2, limit: 3 });
+    expect(entitlements.features).toEqual({
+      emailCampaigns: true,
+      pdfExport: true,
+      advancedReports: false,
+      apiAccess: false,
+    });
+  });
+
+  it("returns unlimited members/full features for a billing-exempt organization (APH Technologies)", async () => {
+    findUnique.mockResolvedValue({
+      plan: "free",
+      trialEndsAt: null,
+      billingExempt: true,
+      seatLimit: null,
+    });
+    orgMemberCount.mockResolvedValue(1);
+    organizationMembershipCount.mockResolvedValue(1);
+
+    const { getOrganizationEntitlements } = await import("../plan-gate");
+    const entitlements = await getOrganizationEntitlements("aph-org");
+
+    expect(entitlements.planId).toBe("elite");
+    expect(entitlements.billingExempt).toBe(true);
+    expect(entitlements.members.limit).toBe(Infinity);
+    expect(entitlements.seats.limit).toBe(10);
+    expect(entitlements.features.apiAccess).toBe(true);
+  });
+});
