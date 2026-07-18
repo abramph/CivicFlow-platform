@@ -3,6 +3,7 @@ import { createAuditEvent } from "@/lib/audit";
 import { buildMemberWhere, parseMemberFilters } from "@/lib/member-filters";
 import { createMemberTimelineEvent } from "@/lib/member-timeline";
 import { sendEmail } from "@/lib/mail";
+import { PlanFeatureError, requirePlanFeature } from "@/lib/plan-gate";
 import { prisma } from "@/lib/prisma";
 import { sendPushToTokens } from "@/lib/push";
 import { applySmsTemplateTokens, sendMemberSms } from "@/lib/sms-service";
@@ -282,6 +283,31 @@ export async function sendCommunicationCampaign(input: {
   if (!campaign) throw new Error("Communication campaign not found");
   if (campaign.status === "SENT" || campaign.status === "FAILED") {
     return { sent: 0, skipped: 0, failed: 0, remainingPending: 0, complete: true };
+  }
+
+  // Re-checked fresh on every call — not just at creation time — so a
+  // campaign scheduled while entitled but sent (by a "Send Now" click, the
+  // cron worker, or a resumed batch) after a downgrade doesn't slip through.
+  // Marked FAILED immediately (rather than left READY) so the cron worker
+  // doesn't retry it forever on every future tick.
+  if (emailEnabled(campaign.channel)) {
+    try {
+      await requirePlanFeature(input.organizationId, "emailCampaigns");
+    } catch (error) {
+      if (error instanceof PlanFeatureError) {
+        await prisma.communicationCampaign.update({ where: { id: campaign.id }, data: { status: "FAILED" } });
+        await createAuditEvent({
+          organizationId: input.organizationId,
+          actorUserId: input.actorUserId,
+          actorEmail: input.actorEmail,
+          action: "communication_campaign.blocked",
+          entityType: "communication_campaign",
+          entityId: campaign.id,
+          metadata: { reason: "plan_feature_required", feature: "emailCampaigns" },
+        });
+      }
+      throw error;
+    }
   }
 
   const pendingRecipients = await prisma.communicationRecipient.findMany({

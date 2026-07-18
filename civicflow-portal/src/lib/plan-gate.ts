@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { getPlan, type PlanId } from "@/lib/plans";
+import { getPlan, type FeatureKey, type PlanId } from "@/lib/plans";
 
 export interface TrialStatus {
   isInTrial: boolean;
@@ -132,15 +132,22 @@ export async function requireSeatSlot(organizationId: string): Promise<void> {
   }
 }
 
-export async function requirePlanFeature(
-  organizationId: string,
-  feature: "emailCampaigns" | "pdfExport" | "advancedReports" | "apiAccess"
-): Promise<void> {
+/**
+ * The authoritative backend gate for every plan-controlled feature
+ * (emailCampaigns, pdfExport, advancedReports, apiAccess today; future
+ * Unestra Labs keys later). Call this at the narrowest point that actually
+ * performs the gated action — campaign send, PDF generation, etc. — not
+ * just at a UI-adjacent layer, since UI hiding alone is never sufficient
+ * enforcement. Throws PlanFeatureError (never silently returns false) so
+ * callers can't accidentally ignore a denial.
+ */
+export async function requirePlanFeature(organizationId: string, feature: FeatureKey): Promise<void> {
   const planId = await getOrgPlan(organizationId);
   const config = getPlan(planId);
   if (!config.limits[feature]) {
-    throw new PlanLimitError(
-      `Your ${config.name} plan does not include ${feature}. Upgrade to access this feature.`
+    throw new PlanFeatureError(
+      feature,
+      `This feature is not included in your ${config.name} plan. Upgrade to access it.`
     );
   }
 }
@@ -154,11 +161,12 @@ export interface OrganizationEntitlements {
   members: { allowed: boolean; current: number; limit: number };
   seats: { allowed: boolean; current: number; limit: number };
   /**
-   * These four feature flags exist on every PlanConfig and are displayed on
-   * the public pricing page (see src/app/pricing/page.tsx), but as of this
-   * writing nothing anywhere calls requirePlanFeature() to actually gate
-   * emailCampaigns/pdfExport/advancedReports/apiAccess — they're informational
-   * only. Included here for a complete snapshot, not because they're enforced.
+   * emailCampaigns and pdfExport are backed by real requirePlanFeature()
+   * enforcement (see sendCommunicationCampaign, /api/reports/export,
+   * /api/reports/send, /api/members/export). advancedReports and apiAccess
+   * are exposed here for display only — see docs/entitlements.md for why
+   * neither has a corresponding capability in the product today to enforce
+   * against.
    */
   features: {
     emailCampaigns: boolean;
@@ -209,5 +217,21 @@ export class PlanLimitError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "PlanLimitError";
+  }
+}
+
+/**
+ * Thrown by requirePlanFeature() specifically — distinct from PlanLimitError
+ * (a usage-count ceiling like members/seats) so the UI and API consumers can
+ * tell "you're out of room" apart from "your plan doesn't include this at
+ * all." Carries the feature key so the denial response can name exactly
+ * what was blocked without the caller having to re-derive it.
+ */
+export class PlanFeatureError extends Error {
+  readonly status = 403;
+  readonly code = "PLAN_FEATURE_REQUIRED";
+  constructor(readonly feature: FeatureKey, message: string) {
+    super(message);
+    this.name = "PlanFeatureError";
   }
 }

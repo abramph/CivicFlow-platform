@@ -1,6 +1,8 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import * as XLSX from "xlsx";
 import { requirePermission } from "@/lib/auth-guards";
+import { withApiErrorHandling } from "@/lib/api-route";
+import { requirePlanFeature } from "@/lib/plan-gate";
 import { createAuditEvent } from "@/lib/audit";
 import {
   buildMemberOrderBy,
@@ -192,88 +194,93 @@ async function buildPdf(input: {
 }
 
 export async function GET(request: Request) {
-  const { session, organizationId } = await requirePermission("reports:export", "throw");
-  const url = new URL(request.url);
-  const format = (url.searchParams.get("format") || "csv").toLowerCase();
-  if (!formats.has(format)) {
-    return Response.json({ ok: false, error: "Unsupported export format." }, { status: 400 });
-  }
+  return withApiErrorHandling(async () => {
+    const { session, organizationId } = await requirePermission("reports:export", "throw");
+    const url = new URL(request.url);
+    const format = (url.searchParams.get("format") || "csv").toLowerCase();
+    if (!formats.has(format)) {
+      return Response.json({ ok: false, error: "Unsupported export format." }, { status: 400 });
+    }
+    if (format === "pdf") {
+      await requirePlanFeature(organizationId, "pdfExport");
+    }
 
-  const filters = parseMemberFilters(url.searchParams);
-  const where = buildMemberWhere(organizationId, filters);
-  const count = await prisma.orgMember.count({ where });
-  if (count > EXPORT_LIMIT) {
-    return Response.json(
-      { ok: false, error: `Export contains ${count} members. Narrow the filters to ${EXPORT_LIMIT} rows or fewer.` },
-      { status: 400 }
-    );
-  }
-
-  const [organization, members] = await Promise.all([
-    prisma.organization.findUnique({ where: { id: organizationId }, select: { name: true } }),
-    prisma.orgMember.findMany({
-      where,
-      orderBy: buildMemberOrderBy(filters.sort),
-      include: memberExportInclude,
-      take: EXPORT_LIMIT,
-    }),
-  ]);
-
-  const filtersSummary = describeMemberFilters(filters);
-  await createAuditEvent({
-    organizationId,
-    actorUserId: session.userId,
-    actorEmail: session.userEmail,
-    action: "export",
-    entityType: "members_export",
-    metadata: { format, count: members.length, filters: filtersSummary },
-  });
-
-  const filenameBase = `unestra-members-filtered-${exportDateStamp()}`;
-  if (format === "print") {
-    return Response.redirect(new URL(`/members/print?${url.searchParams.toString()}`, url.origin));
-  }
-  if (format === "xlsx") {
-    const buffer = buildXlsx(buildRows(members));
-    return new Response(new Uint8Array(buffer), {
-      headers: {
-        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "Content-Disposition": `attachment; filename="${filenameBase}.xlsx"`,
-      },
-    });
-  }
-  if (format === "pdf") {
-    try {
-      const buffer = await buildPdf({
-        organizationName: organization?.name ?? "Unestra Organization",
-        filtersSummary,
-        members,
-      });
-      const body = new ArrayBuffer(buffer.byteLength);
-      new Uint8Array(body).set(buffer);
-      return new Response(body, {
-        headers: {
-          "Content-Type": "application/pdf",
-          "Content-Disposition": `attachment; filename="${filenameBase}.pdf"`,
-        },
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "PDF export failed";
+    const filters = parseMemberFilters(url.searchParams);
+    const where = buildMemberWhere(organizationId, filters);
+    const count = await prisma.orgMember.count({ where });
+    if (count > EXPORT_LIMIT) {
       return Response.json(
-        {
-          ok: false,
-          error: process.env.NODE_ENV === "production" ? "PDF export failed." : message,
-        },
-        { status: 500 }
+        { ok: false, error: `Export contains ${count} members. Narrow the filters to ${EXPORT_LIMIT} rows or fewer.` },
+        { status: 400 }
       );
     }
-  }
 
-  const csv = buildCsv(buildRows(members));
-  return new Response(csv, {
-    headers: {
-      "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="${filenameBase}.csv"`,
-    },
+    const [organization, members] = await Promise.all([
+      prisma.organization.findUnique({ where: { id: organizationId }, select: { name: true } }),
+      prisma.orgMember.findMany({
+        where,
+        orderBy: buildMemberOrderBy(filters.sort),
+        include: memberExportInclude,
+        take: EXPORT_LIMIT,
+      }),
+    ]);
+
+    const filtersSummary = describeMemberFilters(filters);
+    await createAuditEvent({
+      organizationId,
+      actorUserId: session.userId,
+      actorEmail: session.userEmail,
+      action: "export",
+      entityType: "members_export",
+      metadata: { format, count: members.length, filters: filtersSummary },
+    });
+
+    const filenameBase = `unestra-members-filtered-${exportDateStamp()}`;
+    if (format === "print") {
+      return Response.redirect(new URL(`/members/print?${url.searchParams.toString()}`, url.origin));
+    }
+    if (format === "xlsx") {
+      const buffer = buildXlsx(buildRows(members));
+      return new Response(new Uint8Array(buffer), {
+        headers: {
+          "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "Content-Disposition": `attachment; filename="${filenameBase}.xlsx"`,
+        },
+      });
+    }
+    if (format === "pdf") {
+      try {
+        const buffer = await buildPdf({
+          organizationName: organization?.name ?? "Unestra Organization",
+          filtersSummary,
+          members,
+        });
+        const body = new ArrayBuffer(buffer.byteLength);
+        new Uint8Array(body).set(buffer);
+        return new Response(body, {
+          headers: {
+            "Content-Type": "application/pdf",
+            "Content-Disposition": `attachment; filename="${filenameBase}.pdf"`,
+          },
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "PDF export failed";
+        return Response.json(
+          {
+            ok: false,
+            error: process.env.NODE_ENV === "production" ? "PDF export failed." : message,
+          },
+          { status: 500 }
+        );
+      }
+    }
+
+    const csv = buildCsv(buildRows(members));
+    return new Response(csv, {
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${filenameBase}.csv"`,
+      },
+    });
   });
 }

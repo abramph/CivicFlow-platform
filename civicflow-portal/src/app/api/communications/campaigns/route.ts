@@ -5,6 +5,7 @@ import { createAuditEvent } from "@/lib/audit";
 import { resolveCommunicationRecipients, sendCommunicationCampaign } from "@/lib/communication-campaigns";
 import { validateDeepLink } from "@/lib/deep-links";
 import { getSmsEntitlement } from "@/lib/sms-entitlement";
+import { requirePlanFeature } from "@/lib/plan-gate";
 import { prisma } from "@/lib/prisma";
 import { parseJsonBody, ValidationError, z } from "@/lib/validation";
 
@@ -35,6 +36,10 @@ export async function POST(request: Request) {
   return withApiErrorHandling(async () => {
     const { session, organizationId } = await requirePermission("communications:write", "throw");
     const input = await parseJsonBody(request, createCampaignSchema);
+
+    if (input.channel === "EMAIL" || input.channel === "EMAIL_AND_SMS") {
+      await requirePlanFeature(organizationId, "emailCampaigns");
+    }
 
     if (input.channel === "SMS" || input.channel === "EMAIL_AND_SMS") {
       const entitlement = await getSmsEntitlement(organizationId);
