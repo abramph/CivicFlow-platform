@@ -31,3 +31,14 @@ describe("rbac: READ_ONLY role", () => {
     expect(canDo("READ_ONLY", "members:write")).toBe(false);
   });
 });
+
+describe("rbac: labs:read (Unestra Labs, organization-facing)", () => {
+  it("is granted to ORG_OWNER and ORG_ADMIN only — not FINANCE, STAFF, READ_ONLY, or MEMBER", () => {
+    expect(canDo("ORG_OWNER", "labs:read")).toBe(true);
+    expect(canDo("ORG_ADMIN", "labs:read")).toBe(true);
+    expect(canDo("FINANCE", "labs:read")).toBe(false);
+    expect(canDo("STAFF", "labs:read")).toBe(false);
+    expect(canDo("READ_ONLY", "labs:read")).toBe(false);
+    expect(canDo("MEMBER", "labs:read")).toBe(false);
+  });
+});

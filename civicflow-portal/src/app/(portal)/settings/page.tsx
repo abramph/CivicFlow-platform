@@ -84,6 +84,7 @@ export default async function SettingsPage() {
     { href: "/settings/users", label: "Users & Roles", visible: can("users:read") },
     { href: "/settings/roles", label: "Role Permissions", visible: role === "ORG_OWNER" || role === "SUPER_ADMIN" },
     { href: "/settings/billing", label: "Billing", visible: can("billing:read") },
+    { href: "/settings/labs", label: "Unestra Labs", visible: can("labs:read") },
     { href: "/settings/security", label: "Security (MFA)", visible: true },
     { href: "/onboarding/organization", label: "Onboarding", visible: true },
   ].filter((tile) => tile.visible);
