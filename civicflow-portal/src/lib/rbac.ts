@@ -108,6 +108,9 @@ export const PERMISSIONS = {
 
   // SMS consent audit
   SMS_CONSENT_READ: "sms_consent:read",
+
+  // Unestra Labs (organization-facing, read-only today — see docs/unestra-labs.md)
+  LABS_READ: "labs:read",
 } as const;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -154,6 +157,7 @@ const ORG_OWNER_PERMISSIONS: Permission[] = [
   PERMISSIONS.MESSAGES_WRITE,
   PERMISSIONS.AUDIT_LOGS_READ,
   PERMISSIONS.SMS_CONSENT_READ,
+  PERMISSIONS.LABS_READ,
 ];
 
 const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
@@ -195,6 +199,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.MESSAGES_WRITE,
     PERMISSIONS.AUDIT_LOGS_READ,
     PERMISSIONS.SMS_CONSENT_READ,
+    PERMISSIONS.LABS_READ,
   ],
 
   FINANCE: [

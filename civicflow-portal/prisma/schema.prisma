@@ -459,6 +459,8 @@ model Organization {
   conversations             Conversation[]
   conversationParticipants  ConversationParticipant[]
   messages                  Message[]
+  labFeatures               OrganizationLabFeature[]
+  labUsageEvents            LabUsageEvent[]
 
   @@index([slug])
   @@index([status])
@@ -517,6 +519,9 @@ model User {
   platformAccess         PlatformAccess[] @relation("PlatformAccessUser")
   platformAccessGranted  PlatformAccess[] @relation("PlatformAccessGrantedBy")
   platformAccessRevoked  PlatformAccess[] @relation("PlatformAccessRevokedBy")
+
+  labFeaturesEnabled  OrganizationLabFeature[] @relation("LabFeatureEnabledBy")
+  labFeaturesDisabled OrganizationLabFeature[] @relation("LabFeatureDisabledBy")
 
   @@index([email])
 }
@@ -664,6 +669,67 @@ model AuditEvent {
   @@index([organizationId, createdAt])
   @@index([actorId])
   @@index([resource, resourceId])
+}
+
+enum LabEnrollmentStatus {
+  ENABLED
+  DISABLED
+  PENDING
+  SUSPENDED
+}
+
+/// Unestra Labs organization-level enrollment record. `featureKey` is a
+/// String (validated at the application layer against the LAB_FEATURES
+/// registry in src/lib/labs/registry.ts), not a Prisma enum — the registry
+/// is expected to grow, and an enum would require a migration per new key.
+/// One row per organization+feature; absence of a row means "not enrolled"
+/// (equivalent to DISABLED) rather than requiring every org to have an
+/// explicit row for every feature. Never stores secrets, API keys, prompts,
+/// transcripts, recordings, or AI output — this is enrollment state only.
+model OrganizationLabFeature {
+  id               String              @id @default(cuid())
+  organizationId   String
+  featureKey       String
+  status           LabEnrollmentStatus @default(DISABLED)
+  enabledAt        DateTime?
+  disabledAt       DateTime?
+  enabledByUserId  String?
+  disabledByUserId String?
+  /// "operations_center" | "self_service" | "seed" — where the enrollment
+  /// decision originated, for audit/support context.
+  enrollmentSource String              @default("operations_center")
+  notes            String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  enabledByUser  User?        @relation("LabFeatureEnabledBy", fields: [enabledByUserId], references: [id], onDelete: SetNull)
+  disabledByUser User?        @relation("LabFeatureDisabledBy", fields: [disabledByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, featureKey])
+  @@index([featureKey])
+  @@index([status])
+}
+
+/// Append-only Labs usage metering foundation (Phase 10). No update/delete
+/// path is exposed anywhere in the app — only recordLabUsage() creates rows.
+/// Not connected to Stripe or billing in any way. `metadata` must only ever
+/// contain identifiers/counts (e.g. a meeting id, a duration), never
+/// transcripts, recordings, prompts, or other content — enforced at the
+/// recordLabUsage() call site, not by the schema itself.
+model LabUsageEvent {
+  id             String   @id @default(cuid())
+  organizationId String
+  featureKey     String
+  unit           String
+  quantity       Float
+  metadata       Json?
+  recordedAt     DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, featureKey, recordedAt])
+  @@index([featureKey])
 }
 
 // ─── Organization-scoped Data Models ─────────────────────────────────────────

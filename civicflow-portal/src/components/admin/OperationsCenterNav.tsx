@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { href: "/admin/platform/communications", label: "Communications" },
   { href: "/admin/platform/health", label: "System Health" },
   { href: "/admin/platform/jobs", label: "Background Operations" },
+  { href: "/admin/platform/labs", label: "Unestra Labs" },
   { href: "/admin/platform/audit", label: "Audit" },
 ];
 
