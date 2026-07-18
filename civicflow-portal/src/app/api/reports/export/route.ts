@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createAuditEvent } from "@/lib/audit";
-import { requirePermission, withForbiddenHandler } from "@/lib/auth-guards";
+import { requirePermission } from "@/lib/auth-guards";
+import { withApiErrorHandling } from "@/lib/api-route";
+import { requirePlanFeature } from "@/lib/plan-gate";
 import { prisma } from "@/lib/prisma";
 import { buildReport, isReportType, validateReportDateRange, type ReportType } from "@/lib/reports/report-builder";
 import { exportReport, reportContentType, reportFileName, type ReportExportFormat } from "@/lib/reports/exporters";
@@ -32,7 +34,7 @@ function parseFilters(params: URLSearchParams) {
 }
 
 export async function GET(request: Request) {
-  return withForbiddenHandler(async () => {
+  return withApiErrorHandling(async () => {
     const { session, organizationId, role } = await requirePermission("reports:export", "throw");
     const { searchParams } = new URL(request.url);
     const reportTypeParam = searchParams.get("reportType");
@@ -50,6 +52,9 @@ export async function GET(request: Request) {
     if (dateValidation.error) return NextResponse.json({ error: dateValidation.error }, { status: 400 });
     if (financialReportTypes.has(reportTypeParam) && !financialRoles.has(role)) {
       return NextResponse.json({ error: "Financial report export requires a finance or administrator role." }, { status: 403 });
+    }
+    if (formatParam === "pdf") {
+      await requirePlanFeature(organizationId, "pdfExport");
     }
 
     const organization = await prisma.organization.findFirst({

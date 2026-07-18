@@ -12,6 +12,7 @@ import { prisma } from "@/lib/prisma";
 import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { BulkInviteToAppButton } from "@/components/forms/BulkInviteToAppButton";
 import { formatDate, formatEnumLabel, formatPersonName, formatText } from "@/lib/formatting";
+import { getOrganizationEntitlements } from "@/lib/plan-gate";
 
 export default async function MembersPage({
   searchParams,
@@ -29,7 +30,7 @@ export default async function MembersPage({
   const exportPdfHref = `/api/members/export?${buildMemberFilterQuery(resolvedSearchParams, { format: "pdf" })}`;
   const printHref = `/members/print?${buildMemberFilterQuery(resolvedSearchParams)}`;
 
-  const [members, membershipCategories, duesCategories, totalMembers, activeMembers] = await Promise.all([
+  const [members, membershipCategories, duesCategories, totalMembers, activeMembers, entitlements] = await Promise.all([
     prisma.orgMember.findMany({
       where,
       orderBy: buildMemberOrderBy(filters.sort),
@@ -68,6 +69,7 @@ export default async function MembersPage({
         membershipStatus: "active",
       },
     }),
+    getOrganizationEntitlements(organizationId),
   ]);
 
   const isFiltered = hasActiveMemberFilters(filters);
@@ -279,9 +281,20 @@ export default async function MembersPage({
                 <Link href={exportXlsxHref} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50">
                   Export Excel/XLSX
                 </Link>
-                <Link href={exportPdfHref} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50">
-                  Export PDF
-                </Link>
+                {entitlements.features.pdfExport ? (
+                  <Link href={exportPdfHref} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50">
+                    Export PDF
+                  </Link>
+                ) : (
+                  <span
+                    role="note"
+                    aria-label="Export PDF — not included in your current plan. Upgrade in Billing Settings."
+                    title="Not included in your current plan — upgrade in Billing Settings"
+                    className="cursor-not-allowed rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-400"
+                  >
+                    Export PDF (upgrade required)
+                  </span>
+                )}
               </>
             ) : null}
             {canInviteBulk ? <BulkInviteToAppButton filters={filters} /> : null}

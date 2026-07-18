@@ -10,6 +10,7 @@ export function CommunicationCampaignForm({
   categories,
   initial,
   smsEnabled,
+  emailCampaignsEnabled,
 }: {
   categories: Option[];
   initial?: Partial<{
@@ -21,12 +22,13 @@ export function CommunicationCampaignForm({
     subject: string;
   }>;
   smsEnabled: boolean;
+  emailCampaignsEnabled: boolean;
 }) {
   const router = useRouter();
   const [form, setForm] = useState({
     title: initial?.title ?? "",
     communicationType: initial?.communicationType ?? "GENERAL",
-    channel: "EMAIL",
+    channel: emailCampaignsEnabled ? "EMAIL" : smsEnabled ? "SMS" : "INTERNAL_LOG_ONLY",
     subject: initial?.subject ?? "",
     body: "",
     selector: initial?.selector ?? "active_with_email",
@@ -89,15 +91,26 @@ export function CommunicationCampaignForm({
         <label className="space-y-2 text-sm font-medium text-slate-900"><span>Type</span><select className={fieldClassName} value={form.communicationType} onChange={(event) => setForm((current) => ({ ...current, communicationType: event.target.value }))}><option value="GENERAL">General</option><option value="ANNOUNCEMENT">Announcement</option><option value="MEETING_MINUTES">Meeting minutes</option><option value="DUES_REMINDER">Dues reminder</option><option value="EVENT_NOTICE">Event notice</option><option value="CAMPAIGN_UPDATE">Campaign update</option><option value="OTHER">Other</option></select></label>
         <label className="space-y-2 text-sm font-medium text-slate-900">
           <span>Channel</span>
-          <select className={fieldClassName} value={form.channel} onChange={(event) => setForm((current) => ({ ...current, channel: event.target.value }))}>
-            <option value="EMAIL">Email</option>
+          <select
+            className={fieldClassName}
+            value={form.channel}
+            aria-describedby={!emailCampaignsEnabled || !smsEnabled ? "channel-plan-hint" : undefined}
+            onChange={(event) => setForm((current) => ({ ...current, channel: event.target.value }))}
+          >
+            <option value="EMAIL" disabled={!emailCampaignsEnabled}>Email{!emailCampaignsEnabled ? " (upgrade required)" : ""}</option>
             <option value="SMS" disabled={!smsEnabled}>SMS{!smsEnabled ? " (requires add-on)" : ""}</option>
-            <option value="EMAIL_AND_SMS" disabled={!smsEnabled}>Email and SMS{!smsEnabled ? " (requires add-on)" : ""}</option>
+            <option value="EMAIL_AND_SMS" disabled={!emailCampaignsEnabled || !smsEnabled}>
+              Email and SMS{!emailCampaignsEnabled ? " (upgrade required)" : !smsEnabled ? " (requires add-on)" : ""}
+            </option>
             <option value="INTERNAL_LOG_ONLY">Internal log only</option>
           </select>
-          {!smsEnabled ? (
-            <p className="text-xs text-slate-500">
-              SMS requires the SMS add-on — enable it in <a href="/settings/billing" className="text-emerald-700 hover:underline">Billing Settings</a>.
+          {!emailCampaignsEnabled || !smsEnabled ? (
+            <p id="channel-plan-hint" className="text-xs text-slate-500">
+              {!emailCampaignsEnabled ? (
+                <>Email campaigns aren&apos;t included in your current plan — <a href="/settings/billing" className="text-emerald-700 hover:underline">upgrade in Billing Settings</a>.</>
+              ) : (
+                <>SMS requires the SMS add-on — enable it in <a href="/settings/billing" className="text-emerald-700 hover:underline">Billing Settings</a>.</>
+              )}
             </p>
           ) : null}
         </label>

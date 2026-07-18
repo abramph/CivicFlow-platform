@@ -1,5 +1,7 @@
 import { z } from "zod";
-import { requirePermission, withForbiddenHandler } from "@/lib/auth-guards";
+import { requirePermission } from "@/lib/auth-guards";
+import { withApiErrorHandling } from "@/lib/api-route";
+import { requirePlanFeature } from "@/lib/plan-gate";
 import { prisma } from "@/lib/prisma";
 import { buildReport, isReportType, validateReportDateRange, type ReportType } from "@/lib/reports/report-builder";
 import { exportReport, reportContentType, reportFileName } from "@/lib/reports/exporters";
@@ -38,7 +40,7 @@ const sendReportSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  return withForbiddenHandler(async () => {
+  return withApiErrorHandling(async () => {
     const { session, organizationId, role } = await requirePermission("reports:export", "throw");
     await requirePermission("communications:write", "throw");
     const payload = sendReportSchema.safeParse(await request.json());
@@ -60,6 +62,9 @@ export async function POST(request: Request) {
     }
     if (input.recipientMode === "manual" && input.selectedMemberIds.length === 0) {
       return Response.json({ error: "Select at least one member recipient." }, { status: 400 });
+    }
+    if (input.includeAttachment && input.format === "pdf") {
+      await requirePlanFeature(organizationId, "pdfExport");
     }
 
     const organization = await prisma.organization.findFirst({

@@ -240,3 +240,71 @@ describe("getOrganizationEntitlements — consolidated snapshot", () => {
     expect(entitlements.features.apiAccess).toBe(true);
   });
 });
+
+describe("requirePlanFeature — the authoritative backend gate", () => {
+  it("resolves silently when the organization's plan includes the feature", async () => {
+    findUnique.mockResolvedValueOnce({ plan: "essential", trialEndsAt: null, billingExempt: false });
+    const { requirePlanFeature } = await import("../plan-gate");
+    await expect(requirePlanFeature("org-1", "emailCampaigns")).resolves.toBeUndefined();
+  });
+
+  it("throws PlanFeatureError when the organization's plan does not include the feature", async () => {
+    findUnique.mockResolvedValueOnce({ plan: "free", trialEndsAt: null, billingExempt: false });
+    const { requirePlanFeature, PlanFeatureError } = await import("../plan-gate");
+    await expect(requirePlanFeature("org-1", "emailCampaigns")).rejects.toBeInstanceOf(PlanFeatureError);
+  });
+
+  it("PlanFeatureError carries the feature key, a 403 status, and the PLAN_FEATURE_REQUIRED code", async () => {
+    findUnique.mockResolvedValueOnce({ plan: "free", trialEndsAt: null, billingExempt: false });
+    const { requirePlanFeature } = await import("../plan-gate");
+    await expect(requirePlanFeature("org-1", "advancedReports")).rejects.toMatchObject({
+      status: 403,
+      code: "PLAN_FEATURE_REQUIRED",
+      feature: "advancedReports",
+    });
+  });
+
+  it("advancedReports and apiAccess are denied on free and essential, allowed on elite", async () => {
+    const { requirePlanFeature } = await import("../plan-gate");
+    for (const feature of ["advancedReports", "apiAccess"] as const) {
+      findUnique.mockResolvedValueOnce({ plan: "free", trialEndsAt: null, billingExempt: false });
+      await expect(requirePlanFeature("org-1", feature)).rejects.toThrow();
+      findUnique.mockResolvedValueOnce({ plan: "essential", trialEndsAt: null, billingExempt: false });
+      await expect(requirePlanFeature("org-1", feature)).rejects.toThrow();
+      findUnique.mockResolvedValueOnce({ plan: "elite", trialEndsAt: null, billingExempt: false });
+      await expect(requirePlanFeature("org-1", feature)).resolves.toBeUndefined();
+    }
+  });
+
+  it("grants every feature to a billing-exempt organization regardless of its stored plan", async () => {
+    findUnique.mockResolvedValue({ plan: "free", trialEndsAt: null, billingExempt: true });
+    const { requirePlanFeature } = await import("../plan-gate");
+    for (const feature of ["emailCampaigns", "pdfExport", "advancedReports", "apiAccess"] as const) {
+      await expect(requirePlanFeature("aph-org", feature)).resolves.toBeUndefined();
+    }
+  });
+
+  it("grants Essential-tier features (emailCampaigns, pdfExport) to a free-plan org during an active trial", async () => {
+    findUnique.mockResolvedValue({
+      plan: "free",
+      trialEndsAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000),
+      billingExempt: false,
+    });
+    const { requirePlanFeature } = await import("../plan-gate");
+    await expect(requirePlanFeature("org-1", "emailCampaigns")).resolves.toBeUndefined();
+    await expect(requirePlanFeature("org-1", "pdfExport")).resolves.toBeUndefined();
+    // advancedReports/apiAccess are elite-only — a trial only elevates to Essential.
+    await expect(requirePlanFeature("org-1", "advancedReports")).rejects.toThrow();
+  });
+
+  it("is re-evaluated fresh per organizationId — one org's entitlement never leaks into another's check in the same batch of calls", async () => {
+    findUnique.mockResolvedValueOnce({ plan: "elite", trialEndsAt: null, billingExempt: false }); // org-entitled
+    findUnique.mockResolvedValueOnce({ plan: "free", trialEndsAt: null, billingExempt: false }); // org-not-entitled
+    const { requirePlanFeature } = await import("../plan-gate");
+
+    await expect(requirePlanFeature("org-entitled", "apiAccess")).resolves.toBeUndefined();
+    await expect(requirePlanFeature("org-not-entitled", "apiAccess")).rejects.toThrow();
+    expect(findUnique).toHaveBeenNthCalledWith(1, { where: { id: "org-entitled" }, select: { plan: true, trialEndsAt: true, billingExempt: true } });
+    expect(findUnique).toHaveBeenNthCalledWith(2, { where: { id: "org-not-entitled" }, select: { plan: true, trialEndsAt: true, billingExempt: true } });
+  });
+});

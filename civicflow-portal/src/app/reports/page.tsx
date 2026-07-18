@@ -4,6 +4,7 @@ import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { ReportsManager } from "@/components/forms/ReportsManager";
 import { buildReport, isReportType } from "@/lib/reports/report-builder";
 import { formatDate, formatDateTime } from "@/lib/formatting";
+import { getOrganizationEntitlements } from "@/lib/plan-gate";
 
 function getValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
@@ -40,7 +41,7 @@ export default async function ReportsPage({
   const startDate = getValue(resolvedSearchParams.startDate);
   const endDate = getValue(resolvedSearchParams.endDate);
 
-  const [rows, members, categories, campaigns, events, meetings, previewReport] = await Promise.all([
+  const [rows, members, categories, campaigns, events, meetings, previewReport, entitlements] = await Promise.all([
     prisma.reportExport.findMany({
       where: { organizationId },
       orderBy: [{ createdAt: "desc" }],
@@ -91,6 +92,7 @@ export default async function ReportsPage({
           metadata: { reportType, generatedAt: new Date().toISOString(), startDate: null, endDate: null, filters: {} },
         }))
       : Promise.resolve(null),
+    getOrganizationEntitlements(organizationId),
   ]);
   const reportAttachments = rows.length
     ? await prisma.attachment.findMany({
@@ -138,6 +140,7 @@ export default async function ReportsPage({
           initial={{ reportType: isReportType(reportType) ? reportType : "GENERAL_FINANCIAL", startDate: dateInputValue(startDate), endDate: dateInputValue(endDate) }}
           canExport={canExport}
           canSend={canSend}
+          pdfExportEnabled={entitlements.features.pdfExport}
         />
       </SectionCard>
 

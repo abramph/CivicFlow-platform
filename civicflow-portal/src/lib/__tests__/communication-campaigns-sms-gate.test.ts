@@ -17,6 +17,15 @@ vi.mock("@/lib/sms-entitlement", () => ({
   getSmsEntitlement: (...args: unknown[]) => getSmsEntitlement(...args),
 }));
 
+const requirePlanFeature = vi.fn().mockResolvedValue(undefined);
+vi.mock("@/lib/plan-gate", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/plan-gate")>();
+  return {
+    ...actual,
+    requirePlanFeature: (...args: unknown[]) => requirePlanFeature(...args),
+  };
+});
+
 const resolveCommunicationRecipients = vi.fn().mockResolvedValue([]);
 const sendCommunicationCampaign = vi.fn().mockResolvedValue(undefined);
 vi.mock("@/lib/communication-campaigns", () => ({
@@ -56,6 +65,8 @@ function campaignRequest(overrides: Record<string, unknown> = {}) {
 describe("POST /api/communications/campaigns — SMS entitlement gate", () => {
   beforeEach(() => {
     getSmsEntitlement.mockReset();
+    requirePlanFeature.mockReset();
+    requirePlanFeature.mockResolvedValue(undefined);
     createCampaign.mockClear();
     resolveCommunicationRecipients.mockClear();
   });
@@ -98,5 +109,36 @@ describe("POST /api/communications/campaigns — SMS entitlement gate", () => {
     expect(response.status).toBe(201);
     expect(getSmsEntitlement).not.toHaveBeenCalled();
     expect(createCampaign).toHaveBeenCalled();
+  });
+
+  it("checks the emailCampaigns plan feature for an EMAIL channel campaign", async () => {
+    await POST(campaignRequest({ channel: "EMAIL" }));
+    expect(requirePlanFeature).toHaveBeenCalledWith("org-a", "emailCampaigns");
+  });
+
+  it("checks the emailCampaigns plan feature for an EMAIL_AND_SMS channel campaign", async () => {
+    getSmsEntitlement.mockResolvedValueOnce({ allowed: true, remaining: 990, limit: 1000 });
+    await POST(campaignRequest({ channel: "EMAIL_AND_SMS" }));
+    expect(requirePlanFeature).toHaveBeenCalledWith("org-a", "emailCampaigns");
+  });
+
+  it("never checks the emailCampaigns plan feature for a pure SMS campaign", async () => {
+    getSmsEntitlement.mockResolvedValueOnce({ allowed: true, remaining: 990, limit: 1000 });
+    await POST(campaignRequest({ channel: "SMS" }));
+    expect(requirePlanFeature).not.toHaveBeenCalled();
+  });
+
+  it("rejects creating an EMAIL campaign with a standardized 403 when the organization lacks the emailCampaigns entitlement", async () => {
+    const { PlanFeatureError } = await import("@/lib/plan-gate");
+    requirePlanFeature.mockRejectedValueOnce(
+      new PlanFeatureError("emailCampaigns", "This feature is not included in your Free plan. Upgrade to access it.")
+    );
+
+    const response = await POST(campaignRequest({ channel: "EMAIL" }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(payload).toMatchObject({ ok: false, code: "PLAN_FEATURE_REQUIRED", feature: "emailCampaigns" });
+    expect(createCampaign).not.toHaveBeenCalled();
   });
 });

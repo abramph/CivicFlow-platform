@@ -7,7 +7,13 @@ const updateManyCampaign = vi.fn().mockResolvedValue({ count: 1 });
 const findManyRecipient = vi.fn().mockResolvedValue([]);
 const countRecipient = vi.fn().mockResolvedValue(0);
 const updateRecipient = vi.fn().mockResolvedValue(undefined);
-const findUniqueOrganization = vi.fn().mockResolvedValue({ name: "ThrivePath Foundation" });
+const findUniqueOrganization = vi.fn().mockResolvedValue({
+  name: "ThrivePath Foundation",
+  plan: "essential",
+  trialEndsAt: null,
+  billingExempt: false,
+  seatLimit: null,
+});
 const findManyAttachment = vi.fn().mockResolvedValue([]);
 const findManyDeviceToken = vi.fn().mockResolvedValue([]);
 const createCommunicationLog = vi.fn().mockResolvedValue(undefined);
@@ -239,6 +245,43 @@ describe("sendCommunicationCampaign", () => {
 
     expect(result.sent + result.failed).toBe(2);
     expect(result.failed).toBeGreaterThanOrEqual(1);
+  });
+
+  it("blocks an EMAIL-channel send and marks the campaign FAILED (not retried) when the org has since been downgraded off emailCampaigns", async () => {
+    findFirstCampaign.mockResolvedValueOnce(makeCampaign({ status: "READY" }));
+    findUniqueOrganization.mockResolvedValueOnce({
+      name: "ThrivePath Foundation",
+      plan: "free",
+      trialEndsAt: null,
+      billingExempt: false,
+      seatLimit: null,
+    });
+
+    await expect(
+      sendCommunicationCampaign({ organizationId: "org-a", campaignId: "campaign-1" })
+    ).rejects.toMatchObject({ code: "PLAN_FEATURE_REQUIRED", feature: "emailCampaigns" });
+
+    expect(updateCampaign).toHaveBeenCalledWith({ where: { id: "campaign-1" }, data: { status: "FAILED" } });
+    expect(createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "communication_campaign.blocked",
+        entityId: "campaign-1",
+        metadata: { reason: "plan_feature_required", feature: "emailCampaigns" },
+      })
+    );
+    // Never reached the recipient batch — nothing was (re)sent.
+    expect(findManyRecipient).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("does not check emailCampaigns for an INTERNAL_LOG_ONLY channel campaign", async () => {
+    findFirstCampaign.mockResolvedValueOnce(makeCampaign({ channel: "INTERNAL_LOG_ONLY" }));
+    findManyRecipient.mockResolvedValueOnce([]);
+    countRecipient.mockResolvedValueOnce(0);
+
+    await sendCommunicationCampaign({ organizationId: "org-a", campaignId: "campaign-1" });
+
+    expect(updateCampaign).not.toHaveBeenCalled();
   });
 });
 

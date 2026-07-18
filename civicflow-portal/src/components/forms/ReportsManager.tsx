@@ -63,6 +63,7 @@ export function ReportsManager({
   initial,
   canExport,
   canSend,
+  pdfExportEnabled,
 }: {
   rows: ReportRow[];
   members: Option[];
@@ -73,13 +74,14 @@ export function ReportsManager({
   initial: { reportType: string; startDate: string; endDate: string };
   canExport: boolean;
   canSend: boolean;
+  pdfExportEnabled: boolean;
 }) {
   const router = useRouter();
   const [form, setForm] = useState({
     reportType: initial.reportType || "GENERAL_FINANCIAL",
     startDate: initial.startDate,
     endDate: initial.endDate,
-    format: "pdf",
+    format: pdfExportEnabled ? "pdf" : "csv",
     deliveryAction: "preview",
     memberId: "",
     categoryId: "",
@@ -252,18 +254,36 @@ export function ReportsManager({
           <>
             <button type="button" onClick={() => download("csv")} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50">Export CSV</button>
             <button type="button" onClick={() => download("xlsx")} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50">Export XLSX</button>
-            <button type="button" onClick={() => download("pdf")} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50">Export PDF</button>
+            <button
+              type="button"
+              onClick={() => download("pdf")}
+              disabled={!pdfExportEnabled}
+              aria-describedby={!pdfExportEnabled ? "pdf-export-plan-hint" : undefined}
+              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400 disabled:hover:bg-white"
+            >
+              Export PDF{!pdfExportEnabled ? " (upgrade required)" : ""}
+            </button>
           </>
         ) : null}
       </div>
+      {canExport && !pdfExportEnabled ? (
+        <p id="pdf-export-plan-hint" className="text-xs text-slate-500">
+          PDF export isn&apos;t included in your current plan — <a href="/settings/billing" className="text-emerald-700 hover:underline">upgrade in Billing Settings</a>. CSV and XLSX remain available.
+        </p>
+      ) : null}
 
       {canSend ? (
         <form onSubmit={handleSend} className="space-y-4 rounded-lg border border-slate-200 bg-white p-4">
           <div className="grid gap-4 md:grid-cols-3">
             <label className="space-y-2 text-sm font-medium text-slate-900">
               <span>Email attachment format</span>
-              <select value={form.format} onChange={(event) => setForm((current) => ({ ...current, format: event.target.value }))} className={fieldClassName}>
-                <option value="pdf">PDF</option>
+              <select
+                value={form.format}
+                aria-describedby={!pdfExportEnabled ? "pdf-export-plan-hint" : undefined}
+                onChange={(event) => setForm((current) => ({ ...current, format: event.target.value }))}
+                className={fieldClassName}
+              >
+                <option value="pdf" disabled={!pdfExportEnabled}>PDF{!pdfExportEnabled ? " (upgrade required)" : ""}</option>
                 <option value="csv">CSV</option>
                 <option value="xlsx">XLSX</option>
               </select>

@@ -2,7 +2,7 @@ import * as Sentry from "@sentry/nextjs";
 import { ForbiddenError, withForbiddenHandler } from "@/lib/auth-guards";
 import { MobileAuthError, MobileForbiddenError } from "@/lib/mobile-auth";
 import { ValidationError, jsonError } from "@/lib/validation";
-import { PlanLimitError } from "@/lib/plan-gate";
+import { PlanFeatureError, PlanLimitError } from "@/lib/plan-gate";
 
 export async function withApiErrorHandling(
   fn: () => Promise<Response>
@@ -17,8 +17,14 @@ export async function withApiErrorHandling(
       if (error instanceof ForbiddenError) {
         return jsonError(error.message, error.status);
       }
+      if (error instanceof PlanFeatureError) {
+        return Response.json(
+          { ok: false, error: error.message, code: error.code, feature: error.feature },
+          { status: error.status }
+        );
+      }
       if (error instanceof PlanLimitError) {
-        return jsonError(error.message, error.status);
+        return Response.json({ ok: false, error: error.message, code: error.code }, { status: error.status });
       }
       if (error instanceof MobileAuthError || error instanceof MobileForbiddenError) {
         return jsonError(error.message, error.status);

@@ -9,6 +9,16 @@ export interface PlanLimits {
   apiAccess: boolean;
 }
 
+/**
+ * Every plan-gated boolean capability (everything in PlanLimits except the
+ * numeric `members` limit, which has its own checkMemberLimit/requireMemberSlot
+ * pair). Deriving this from PlanLimits instead of hand-listing the strings
+ * means adding a new Unestra Labs flag (meetingIntelligence, aiAnnouncements,
+ * etc.) to PlanLimits automatically makes it a valid requirePlanFeature()
+ * argument — no second list to keep in sync.
+ */
+export type FeatureKey = Exclude<keyof PlanLimits, "members">;
+
 export interface PlanConfig {
   id: PlanId;
   name: string;
