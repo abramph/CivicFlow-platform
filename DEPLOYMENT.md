@@ -203,23 +203,31 @@ Workers are exposed as authenticated HTTP endpoints and triggered on a schedule 
 |---|---|---|
 | `POST /api/cron/reminders` | Send queued email reminders | Every 10 minutes |
 | `POST /api/cron/reports` | Process queued CSV report exports | Every 5 minutes |
+| `POST /api/cron/meeting-intelligence` | Submit queued Meeting Intelligence recordings for transcription; poll in-flight transcriptions and generate draft minutes | Every 5 minutes — only needed once Meeting Intelligence is enrolled for a pilot org (internal-only, see docs/meeting-intelligence.md) |
+| `POST /api/cron/meeting-intelligence-retention` | Delete recording objects (not transcripts/minutes) for settled Meeting Intelligence jobs older than 30 days | Once daily — same activation condition as above |
 
 **Authentication:** `Authorization: Bearer <CRON_SECRET>`
 
 **Required env var:** `CRON_SECRET` — a long random string (e.g. `openssl rand -base64 32`). Add it to DO App Platform env vars alongside the other secrets.
 
+**Concurrency note:** none of these endpoints are DigitalOcean-scheduled jobs — there is no worker/job component in `.do/app.yaml`, only the single `web` service (`instance_count: 1`). They rely entirely on an external scheduler (cron-job.org or equivalent) POSTing to the endpoint on an interval, with no platform-level guarantee against two overlapping calls if one run takes longer than the interval. `/api/cron/meeting-intelligence` defends against this itself (an atomic per-job claim before any vendor submission — see `worker.ts`'s `claimQueuedJob`), so a duplicate/overlapping trigger is safe, not free of cost (a lost race just skips that job for the tick). The other endpoints (`reminders`, `reports`) do not have the same protection — avoid scheduling them faster than they can reliably complete.
+
 **Recommended: cron-job.org (free)**
 1. Create a free account at cron-job.org
-2. Add two jobs:
-   - URL: `https://app.civicflowapp.com/api/cron/reminders`, Method: POST, Header: `Authorization: Bearer <CRON_SECRET>`
-   - URL: `https://app.civicflowapp.com/api/cron/reports`, Method: POST, Header: `Authorization: Bearer <CRON_SECRET>`
-3. Set schedules (every 10 min / every 5 min respectively)
+2. Add jobs (only the first two are required by default; add the Meeting Intelligence pair once that internal pilot is enrolled):
+   - URL: `https://app.getunestra.com/api/cron/reminders`, Method: POST, Header: `Authorization: Bearer <CRON_SECRET>`
+   - URL: `https://app.getunestra.com/api/cron/reports`, Method: POST, Header: `Authorization: Bearer <CRON_SECRET>`
+   - URL: `https://app.getunestra.com/api/cron/meeting-intelligence`, Method: POST, Header: `Authorization: Bearer <CRON_SECRET>`
+   - URL: `https://app.getunestra.com/api/cron/meeting-intelligence-retention`, Method: POST, Header: `Authorization: Bearer <CRON_SECRET>`
+3. Set schedules per the table above
 
 **Alternative: run manually during development**
 ```bash
 cd civicflow-portal
 npm run worker:reminders
 npm run worker:reports
+npm run worker:meeting-intelligence
+npm run worker:meeting-intelligence-retention
 ```
 
 ### File uploads and exports: DigitalOcean Spaces (Phase 3 foundation)

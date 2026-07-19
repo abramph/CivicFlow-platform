@@ -519,18 +519,18 @@ model User {
   conversationParticipations ConversationParticipant[]
   sentMessages               Message[]                  @relation("MessageSender")
 
-  platformAccess         PlatformAccess[] @relation("PlatformAccessUser")
-  platformAccessGranted  PlatformAccess[] @relation("PlatformAccessGrantedBy")
-  platformAccessRevoked  PlatformAccess[] @relation("PlatformAccessRevokedBy")
+  platformAccess        PlatformAccess[] @relation("PlatformAccessUser")
+  platformAccessGranted PlatformAccess[] @relation("PlatformAccessGrantedBy")
+  platformAccessRevoked PlatformAccess[] @relation("PlatformAccessRevokedBy")
 
   labFeaturesEnabled  OrganizationLabFeature[] @relation("LabFeatureEnabledBy")
   labFeaturesDisabled OrganizationLabFeature[] @relation("LabFeatureDisabledBy")
 
-  meetingIntelligenceJobsUploaded          MeetingIntelligenceJob[] @relation("MeetingIntelligenceJobUploadedBy")
-  meetingIntelligenceJobsConsentConfirmed  MeetingIntelligenceJob[] @relation("MeetingIntelligenceJobConsentConfirmedBy")
-  meetingMinutesDraftsEdited               MeetingMinutesDraft[]    @relation("MeetingMinutesDraftLastEditedBy")
-  meetingMinutesDraftsApproved             MeetingMinutesDraft[]    @relation("MeetingMinutesDraftApprovedBy")
-  meetingMinutesDraftsRejected             MeetingMinutesDraft[]    @relation("MeetingMinutesDraftRejectedBy")
+  meetingIntelligenceJobsUploaded         MeetingIntelligenceJob[] @relation("MeetingIntelligenceJobUploadedBy")
+  meetingIntelligenceJobsConsentConfirmed MeetingIntelligenceJob[] @relation("MeetingIntelligenceJobConsentConfirmedBy")
+  meetingMinutesDraftsEdited              MeetingMinutesDraft[]    @relation("MeetingMinutesDraftLastEditedBy")
+  meetingMinutesDraftsApproved            MeetingMinutesDraft[]    @relation("MeetingMinutesDraftApprovedBy")
+  meetingMinutesDraftsRejected            MeetingMinutesDraft[]    @relation("MeetingMinutesDraftRejectedBy")
 
   @@index([email])
 }
@@ -1728,14 +1728,14 @@ model Meeting {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  organization              Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdBy                 User?                      @relation("MeetingCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  attendanceRecords         AttendanceRecord[]
-  attendanceSessions        MeetingAttendanceSession[]
-  communicationCampaigns    CommunicationCampaign[]
-  meetingIntelligenceJobs   MeetingIntelligenceJob[]
-  meetingTranscripts        MeetingTranscript[]
-  meetingMinutesDrafts      MeetingMinutesDraft[]
+  organization            Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy               User?                      @relation("MeetingCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  attendanceRecords       AttendanceRecord[]
+  attendanceSessions      MeetingAttendanceSession[]
+  communicationCampaigns  CommunicationCampaign[]
+  meetingIntelligenceJobs MeetingIntelligenceJob[]
+  meetingTranscripts      MeetingTranscript[]
+  meetingMinutesDrafts    MeetingMinutesDraft[]
 
   @@index([organizationId])
   @@index([meetingDate])
@@ -1796,6 +1796,14 @@ model MeetingIntelligenceJob {
   failureMessage           String?
   consentConfirmedAt       DateTime?
   consentConfirmedByUserId String?
+  /// Atomic claim marker for the QUEUED->submit step only (see worker.ts's
+  /// processQueuedMeetingIntelligenceJobs): set via a conditional update
+  /// (WHERE status = QUEUED AND claimedAt IS NULL) before calling the
+  /// vendor, so two overlapping cron/worker invocations can never both
+  /// submit the same recording. A claim older than the staleness threshold
+  /// is treated as an abandoned claim (worker crashed mid-submission) and
+  /// becomes reclaimable — see CLAIM_STALE_AFTER_MS.
+  claimedAt                DateTime?
   submittedAt              DateTime?
   processingStartedAt      DateTime?
   transcribedAt            DateTime?
@@ -1807,12 +1815,12 @@ model MeetingIntelligenceJob {
   createdAt                DateTime                  @default(now())
   updatedAt                DateTime                  @updatedAt
 
-  organization        Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  meeting             Meeting               @relation(fields: [meetingId], references: [id], onDelete: Cascade)
-  uploadedBy          User                  @relation("MeetingIntelligenceJobUploadedBy", fields: [uploadedByUserId], references: [id])
-  consentConfirmedBy  User?                 @relation("MeetingIntelligenceJobConsentConfirmedBy", fields: [consentConfirmedByUserId], references: [id], onDelete: SetNull)
-  transcript          MeetingTranscript?
-  minutesDrafts       MeetingMinutesDraft[]
+  organization       Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  meeting            Meeting               @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  uploadedBy         User                  @relation("MeetingIntelligenceJobUploadedBy", fields: [uploadedByUserId], references: [id])
+  consentConfirmedBy User?                 @relation("MeetingIntelligenceJobConsentConfirmedBy", fields: [consentConfirmedByUserId], references: [id], onDelete: SetNull)
+  transcript         MeetingTranscript?
+  minutesDrafts      MeetingMinutesDraft[]
 
   @@index([organizationId])
   @@index([meetingId])
@@ -1824,12 +1832,17 @@ model MeetingIntelligenceJob {
 /// is a display-only rename map ({"Speaker A": "Alex Chair"}) layered on top —
 /// `segmentsJson` (the original vendor evidence) is never altered by a rename,
 /// preserving an audit-safe original record.
+/// All FKs (organization/meeting/job) are onDelete: Restrict, not Cascade:
+/// deleting an Organization or Meeting must not silently destroy a transcript.
+/// Callers must explicitly delete via deleteMeetingIntelligenceTranscript()
+/// (which requires acknowledgeRegenerationImpossible: true) before the parent
+/// row can be removed; an attempted parent delete otherwise fails loudly.
 model MeetingTranscript {
   id                  String   @id @default(cuid())
   organizationId      String
   meetingId           String
   jobId               String   @unique
-  provider             String
+  provider            String
   language            String?
   speakerCount        Int?
   durationSeconds     Int?
@@ -1839,9 +1852,9 @@ model MeetingTranscript {
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
-  organization Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  meeting      Meeting                @relation(fields: [meetingId], references: [id], onDelete: Cascade)
-  job          MeetingIntelligenceJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  organization Organization           @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  meeting      Meeting                @relation(fields: [meetingId], references: [id], onDelete: Restrict)
+  job          MeetingIntelligenceJob @relation(fields: [jobId], references: [id], onDelete: Restrict)
 
   @@index([organizationId])
   @@index([meetingId])
@@ -1854,6 +1867,10 @@ model MeetingTranscript {
 /// snapshot is immutable by construction, not just by convention.
 /// `generatedContentJson` is the original AI output and is never modified
 /// after creation; `editableContentJson` is the working copy a secretary edits.
+/// All FKs (organization/meeting/job) are onDelete: Restrict, not Cascade —
+/// see MeetingTranscript's comment above; this is what makes the "immutable
+/// by construction" claim above actually true instead of only true until
+/// someone deletes the parent Meeting or Organization row.
 model MeetingMinutesDraft {
   id                   String                    @id @default(cuid())
   organizationId       String
@@ -1875,12 +1892,12 @@ model MeetingMinutesDraft {
   createdAt            DateTime                  @default(now())
   updatedAt            DateTime                  @updatedAt
 
-  organization    Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  meeting         Meeting                @relation(fields: [meetingId], references: [id], onDelete: Cascade)
-  job             MeetingIntelligenceJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  lastEditedBy    User?                  @relation("MeetingMinutesDraftLastEditedBy", fields: [lastEditedByUserId], references: [id], onDelete: SetNull)
-  approvedBy      User?                  @relation("MeetingMinutesDraftApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
-  rejectedBy      User?                  @relation("MeetingMinutesDraftRejectedBy", fields: [rejectedByUserId], references: [id], onDelete: SetNull)
+  organization Organization           @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  meeting      Meeting                @relation(fields: [meetingId], references: [id], onDelete: Restrict)
+  job          MeetingIntelligenceJob @relation(fields: [jobId], references: [id], onDelete: Restrict)
+  lastEditedBy User?                  @relation("MeetingMinutesDraftLastEditedBy", fields: [lastEditedByUserId], references: [id], onDelete: SetNull)
+  approvedBy   User?                  @relation("MeetingMinutesDraftApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  rejectedBy   User?                  @relation("MeetingMinutesDraftRejectedBy", fields: [rejectedByUserId], references: [id], onDelete: SetNull)
 
   @@index([organizationId])
   @@index([meetingId])

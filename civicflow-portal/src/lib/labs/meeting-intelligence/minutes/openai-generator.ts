@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { MeetingIntelligenceError } from "../errors";
+import { getOpenAiApiKey } from "../config";
 import { AI_GENERATED_DISCLAIMER, type MeetingMinutesGenerationInput, type MeetingMinutesGenerator, type StructuredMeetingMinutes } from "./types";
 
 /**
@@ -54,7 +55,7 @@ const responseSchema = z.object({
 });
 
 function getApiKey(): string {
-  const key = process.env.OPENAI_API_KEY;
+  const key = getOpenAiApiKey();
   if (!key) {
     throw new MeetingIntelligenceError(
       "MEETING_INTELLIGENCE_GENERATION_FAILED",

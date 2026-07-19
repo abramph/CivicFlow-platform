@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getOrganizationLabAccess } from "@/lib/labs/access";
 import { transitionJob } from "./state-machine";
@@ -32,6 +33,37 @@ import { MeetingIntelligenceError } from "./errors";
 
 const BATCH_LIMIT = 25;
 
+// If a claim is older than this and the job is still QUEUED, the worker that
+// claimed it is assumed to have crashed or been killed mid-submission (e.g.
+// a deploy restart) — the claim is treated as abandoned and becomes
+// reclaimable. Well above the AssemblyAI submit call's own realistic
+// duration so a merely-slow-but-alive worker is never preempted.
+const CLAIM_STALE_AFTER_MS = 10 * 60_000;
+
+/**
+ * Atomically claims a QUEUED job for submission — a conditional UPDATE
+ * (WHERE status = QUEUED AND (claimedAt IS NULL OR claimedAt < staleThreshold))
+ * that only one concurrent invocation of processQueuedMeetingIntelligenceJobs
+ * can win. This repo's cron endpoints are triggered by an external scheduler
+ * (see DEPLOYMENT.md) with no guarantee against overlapping invocations, so
+ * without this, two overlapping ticks could both read the same QUEUED job
+ * and both submit it to AssemblyAI — a real, billable duplicate vendor
+ * submission, not just a data race. Returns false if another invocation won
+ * the claim (not an error — the caller should just skip the job).
+ */
+async function claimQueuedJob(jobId: string): Promise<boolean> {
+  const staleThreshold = new Date(Date.now() - CLAIM_STALE_AFTER_MS);
+  const result = await prisma.meetingIntelligenceJob.updateMany({
+    where: {
+      id: jobId,
+      status: "QUEUED",
+      OR: [{ claimedAt: null }, { claimedAt: { lt: staleThreshold } }],
+    },
+    data: { claimedAt: new Date() },
+  });
+  return result.count === 1;
+}
+
 async function organizationLabsActive(organizationId: string): Promise<boolean> {
   const access = await getOrganizationLabAccess(organizationId, "meetingIntelligence");
   return access.available;
@@ -39,6 +71,10 @@ async function organizationLabsActive(organizationId: string): Promise<boolean> 
 
 async function failJob(jobId: string, organizationId: string, code: string, message: string) {
   await transitionJob({ jobId, organizationId, to: "FAILED", failureCode: code, failureMessage: message });
+}
+
+function isUniqueConstraintError(error: unknown) {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
 }
 
 /** Picks up QUEUED jobs, rechecks org/enrollment, submits to the provider, advances to TRANSCRIBING. */
@@ -50,6 +86,11 @@ export async function processQueuedMeetingIntelligenceJobs(limit = BATCH_LIMIT):
 
   for (const job of jobs) {
     try {
+      if (!(await claimQueuedJob(job.id))) {
+        // Lost the claim race to another concurrent invocation (or the job
+        // moved on already) — not a failure, just skip it this tick.
+        continue;
+      }
       if (!(await organizationLabsActive(job.organizationId))) {
         await failJob(job.id, job.organizationId, "MEETING_INTELLIGENCE_ENROLLMENT_DISABLED", "Labs enrollment was disabled before this job could be submitted for processing.");
         failed += 1;
@@ -128,19 +169,29 @@ export async function pollTranscribingMeetingIntelligenceJobs(limit = BATCH_LIMI
         const transcriptKey = buildMeetingIntelligenceTranscriptObjectKey(job.organizationId, job.meetingId, job.id);
         await uploadMeetingTranscriptArtifact({ key: transcriptKey, buffer: Buffer.from(JSON.stringify(result)) });
 
-        transcriptRow = await prisma.meetingTranscript.create({
-          data: {
-            organizationId: job.organizationId,
-            meetingId: job.meetingId,
-            jobId: job.id,
-            provider: job.provider,
-            language: result.language,
-            speakerCount: result.speakerCount,
-            durationSeconds: Math.round(result.durationMs / 1000),
-            content: result.fullText,
-            segmentsJson: result.segments as never,
-          },
-        });
+        try {
+          transcriptRow = await prisma.meetingTranscript.create({
+            data: {
+              organizationId: job.organizationId,
+              meetingId: job.meetingId,
+              jobId: job.id,
+              provider: job.provider,
+              language: result.language,
+              speakerCount: result.speakerCount,
+              durationSeconds: Math.round(result.durationMs / 1000),
+              content: result.fullText,
+              segmentsJson: result.segments as never,
+            },
+          });
+        } catch (createError) {
+          // A concurrent overlapping poll already created this transcript
+          // (MeetingTranscript.jobId is unique) between our existence check
+          // above and this insert — not a real failure, just lost a race.
+          // Adopt the row the other invocation created instead of failing
+          // the job over a duplicate-detection race.
+          if (!isUniqueConstraintError(createError)) throw createError;
+          transcriptRow = await prisma.meetingTranscript.findUniqueOrThrow({ where: { jobId: job.id } });
+        }
 
         await transitionJob({
           jobId: job.id,

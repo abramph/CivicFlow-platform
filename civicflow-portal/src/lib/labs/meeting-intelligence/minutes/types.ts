@@ -52,6 +52,16 @@ export interface StructuredMeetingMinutes {
 export const AI_GENERATED_DISCLAIMER =
   "AI-generated draft — requires human review. This content was produced automatically from a transcript and has not been verified for accuracy.";
 
+/**
+ * Used only by the deterministic (non-AI) generator — deliberately distinct
+ * text from AI_GENERATED_DISCLAIMER, not a reused/shared string. Calling a
+ * zero-inference, pattern-matched extraction "AI-generated" would be a false
+ * label a reviewer could reasonably rely on when deciding how much scrutiny
+ * to apply.
+ */
+export const DETERMINISTIC_FALLBACK_DISCLAIMER =
+  "Not AI-generated — extractive draft only. OPENAI_API_KEY is not configured, so this draft was produced by keyword/pattern matching with zero inference, not a language model. It will be far less complete than an AI-generated draft (most fields are left blank rather than guessed) and requires thorough human review before being treated as official.";
+
 export interface MeetingMinutesGenerationInput {
   meetingTitle: string;
   meetingDate?: string | null;

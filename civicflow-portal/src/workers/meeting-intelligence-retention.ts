@@ -2,7 +2,7 @@ import { runMeetingIntelligenceRetentionCleanup } from "@/lib/labs/meeting-intel
 
 async function main() {
   const result = await runMeetingIntelligenceRetentionCleanup();
-  console.log(`[meeting-intelligence-retention-worker] scanned=${result.scanned} deleted=${result.deleted}`);
+  console.log(`[meeting-intelligence-retention-worker] scanned=${result.scanned} deleted=${result.deleted} failed=${result.failed}`);
 }
 
 main()

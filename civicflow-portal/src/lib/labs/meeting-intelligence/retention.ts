@@ -22,7 +22,7 @@ import { isTerminalStage } from "./state-machine";
 
 const SETTLED_STAGES = ["DRAFT_READY", "IN_REVIEW", "APPROVED", "FAILED", "CANCELLED"] as const;
 
-export async function runMeetingIntelligenceRetentionCleanup(limit = 100): Promise<{ scanned: number; deleted: number }> {
+export async function runMeetingIntelligenceRetentionCleanup(limit = 100): Promise<{ scanned: number; deleted: number; failed: number }> {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - RECORDING_RETENTION_DAYS);
 
@@ -36,27 +36,36 @@ export async function runMeetingIntelligenceRetentionCleanup(limit = 100): Promi
   });
 
   let deleted = 0;
+  let failed = 0;
   for (const job of jobs) {
     if (!job.storageObjectKey) continue;
     if (isTerminalStage(job.status as never)) continue; // already DELETED — shouldn't match the query, but double-guarded
 
-    await deleteMeetingRecordingObject(job.storageObjectKey);
-    await prisma.meetingIntelligenceJob.update({
-      where: { id: job.id },
-      data: { storageObjectKey: null, recordingDeletedAt: new Date() },
-    });
+    // Each job is isolated: a single Spaces failure (transient network error,
+    // outage) must not abort the whole batch and block every job ordered
+    // after it in this tick — it just retries on the next scheduled run.
+    try {
+      await deleteMeetingRecordingObject(job.storageObjectKey);
+      await prisma.meetingIntelligenceJob.update({
+        where: { id: job.id },
+        data: { storageObjectKey: null, recordingDeletedAt: new Date() },
+      });
 
-    await createAuditEvent({
-      organizationId: job.organizationId,
-      actorUserId: null,
-      actorEmail: "system@retention-cleanup",
-      action: "meeting_intelligence.recording_deleted",
-      entityType: "meeting_intelligence_job",
-      entityId: job.id,
-      metadata: { reason: "retention_policy", retentionDays: RECORDING_RETENTION_DAYS },
-    });
-    deleted += 1;
+      await createAuditEvent({
+        organizationId: job.organizationId,
+        actorUserId: null,
+        actorEmail: "system@retention-cleanup",
+        action: "meeting_intelligence.recording_deleted",
+        entityType: "meeting_intelligence_job",
+        entityId: job.id,
+        metadata: { reason: "retention_policy", retentionDays: RECORDING_RETENTION_DAYS },
+      });
+      deleted += 1;
+    } catch (error) {
+      failed += 1;
+      console.error(`[meeting-intelligence-retention] failed to delete recording for job ${job.id}`, error);
+    }
   }
 
-  return { scanned: jobs.length, deleted };
+  return { scanned: jobs.length, deleted, failed };
 }

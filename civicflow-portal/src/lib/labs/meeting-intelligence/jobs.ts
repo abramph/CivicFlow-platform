@@ -4,7 +4,7 @@ import { requireOrganizationLabFeature } from "@/lib/labs/access";
 import { MeetingIntelligenceError } from "./errors";
 import { transitionJob } from "./state-machine";
 import { requireMeetingIntelligenceConsent, type MeetingIntelligenceConsentConfirmation } from "./consent";
-import { resolveMeetingIntelligenceProviderId } from "./providers/async-index";
+import { resolveMeetingIntelligenceProviderId } from "./config";
 import {
   buildMeetingIntelligenceSourceObjectKey,
   deleteMeetingRecordingObject,

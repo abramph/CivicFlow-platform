@@ -1,10 +1,9 @@
 import { withApiErrorHandling } from "@/lib/api-route";
 import { requireMeetingIntelligenceAccess } from "@/lib/labs/meeting-intelligence/guard";
 import { uploadMeetingIntelligenceRecording } from "@/lib/labs/meeting-intelligence/jobs";
+import { MAX_FILE_SIZE_BYTES } from "@/lib/labs/meeting-intelligence/upload-validation";
 import { ValidationError } from "@/lib/validation";
 import { requireRateLimit } from "@/lib/rate-limit";
-
-const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
 
 export async function POST(request: Request, { params }: { params: Promise<{ jobId: string }> }) {
   return withApiErrorHandling(async () => {
@@ -19,9 +18,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ job
     const { organizationId, session } = await requireMeetingIntelligenceAccess("meetingIntelligence:create");
     const { jobId } = await params;
 
+    // Fast-fail on the declared Content-Length before ever buffering the
+    // body — validateUploadedRecording() (called downstream) re-checks the
+    // real byte length against the same MAX_FILE_SIZE_BYTES regardless, so
+    // a spoofed/missing Content-Length can't bypass the limit, only skip
+    // this early exit.
     const contentLength = Number(request.headers.get("content-length") ?? 0);
-    if (contentLength > MAX_UPLOAD_BYTES) {
-      return Response.json({ ok: false, error: `File exceeds the ${MAX_UPLOAD_BYTES / (1024 * 1024)} MB limit.`, code: "MEETING_INTELLIGENCE_FILE_TOO_LARGE" }, { status: 400 });
+    if (contentLength > MAX_FILE_SIZE_BYTES) {
+      return Response.json({ ok: false, error: `File exceeds the ${MAX_FILE_SIZE_BYTES / (1024 * 1024)} MB limit.`, code: "MEETING_INTELLIGENCE_FILE_TOO_LARGE" }, { status: 400 });
     }
 
     const form = await request.formData();

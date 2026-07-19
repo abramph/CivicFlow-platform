@@ -28,14 +28,8 @@ export function getMeetingTranscriptionProvider(id: string): MeetingTranscriptio
   return provider;
 }
 
-/**
- * Selects the active provider via configuration — never hard-coded at a
- * call site. AssemblyAI is the only real adapter implemented in the MVP;
- * MEETING_INTELLIGENCE_PROVIDER exists so a second provider can be added
- * and switched to later without touching any calling code.
- */
-export function resolveMeetingIntelligenceProviderId(): MeetingIntelligenceProviderId {
-  const configured = process.env.MEETING_INTELLIGENCE_PROVIDER;
-  if (configured && isMeetingIntelligenceProviderId(configured)) return configured;
-  return "assemblyai";
-}
+// resolveMeetingIntelligenceProviderId() (reads MEETING_INTELLIGENCE_PROVIDER,
+// validates it) lives in ../config.ts, not here — see that file's comment on
+// why all Meeting Intelligence env reads are centralized in one place.
+// Not re-exported from here to avoid a circular import (config.ts imports
+// isMeetingIntelligenceProviderId from this file) — import it from ../config directly.

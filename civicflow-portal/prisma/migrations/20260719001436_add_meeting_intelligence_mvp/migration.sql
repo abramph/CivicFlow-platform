@@ -23,6 +23,7 @@ CREATE TABLE "MeetingIntelligenceJob" (
     "failureMessage" TEXT,
     "consentConfirmedAt" TIMESTAMP(3),
     "consentConfirmedByUserId" TEXT,
+    "claimedAt" TIMESTAMP(3),
     "submittedAt" TIMESTAMP(3),
     "processingStartedAt" TIMESTAMP(3),
     "transcribedAt" TIMESTAMP(3),
@@ -124,22 +125,27 @@ ALTER TABLE "MeetingIntelligenceJob" ADD CONSTRAINT "MeetingIntelligenceJob_uplo
 ALTER TABLE "MeetingIntelligenceJob" ADD CONSTRAINT "MeetingIntelligenceJob_consentConfirmedByUserId_fkey" FOREIGN KEY ("consentConfirmedByUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "MeetingTranscript" ADD CONSTRAINT "MeetingTranscript_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+-- Restrict (not Cascade): deleting an Organization or Meeting must not silently
+-- destroy a transcript. See MeetingTranscript model comment in schema.prisma.
+ALTER TABLE "MeetingTranscript" ADD CONSTRAINT "MeetingTranscript_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "MeetingTranscript" ADD CONSTRAINT "MeetingTranscript_meetingId_fkey" FOREIGN KEY ("meetingId") REFERENCES "Meeting"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "MeetingTranscript" ADD CONSTRAINT "MeetingTranscript_meetingId_fkey" FOREIGN KEY ("meetingId") REFERENCES "Meeting"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "MeetingTranscript" ADD CONSTRAINT "MeetingTranscript_jobId_fkey" FOREIGN KEY ("jobId") REFERENCES "MeetingIntelligenceJob"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "MeetingTranscript" ADD CONSTRAINT "MeetingTranscript_jobId_fkey" FOREIGN KEY ("jobId") REFERENCES "MeetingIntelligenceJob"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "MeetingMinutesDraft" ADD CONSTRAINT "MeetingMinutesDraft_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+-- Restrict (not Cascade): approved minutes are documented as immutable by
+-- construction; a Cascade here would let a Meeting/Organization delete
+-- silently destroy an approved official record. See model comment.
+ALTER TABLE "MeetingMinutesDraft" ADD CONSTRAINT "MeetingMinutesDraft_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "MeetingMinutesDraft" ADD CONSTRAINT "MeetingMinutesDraft_meetingId_fkey" FOREIGN KEY ("meetingId") REFERENCES "Meeting"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "MeetingMinutesDraft" ADD CONSTRAINT "MeetingMinutesDraft_meetingId_fkey" FOREIGN KEY ("meetingId") REFERENCES "Meeting"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "MeetingMinutesDraft" ADD CONSTRAINT "MeetingMinutesDraft_jobId_fkey" FOREIGN KEY ("jobId") REFERENCES "MeetingIntelligenceJob"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "MeetingMinutesDraft" ADD CONSTRAINT "MeetingMinutesDraft_jobId_fkey" FOREIGN KEY ("jobId") REFERENCES "MeetingIntelligenceJob"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "MeetingMinutesDraft" ADD CONSTRAINT "MeetingMinutesDraft_lastEditedByUserId_fkey" FOREIGN KEY ("lastEditedByUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;

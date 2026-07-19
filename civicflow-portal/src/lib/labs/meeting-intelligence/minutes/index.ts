@@ -1,9 +1,10 @@
 import { deterministicMinutesGenerator } from "./deterministic-generator";
 import { openAiMinutesGenerator } from "./openai-generator";
+import { getOpenAiApiKey } from "../config";
 import type { MeetingMinutesGenerationInput, MeetingMinutesGenerator, StructuredMeetingMinutes } from "./types";
 
 export type { MeetingMinutesGenerationInput, MeetingMinutesGenerator, StructuredMeetingMinutes, EvidenceReference, StructuredMotion, StructuredActionItem } from "./types";
-export { AI_GENERATED_DISCLAIMER } from "./types";
+export { AI_GENERATED_DISCLAIMER, DETERMINISTIC_FALLBACK_DISCLAIMER } from "./types";
 
 /**
  * Resolves the minutes generator to use: OpenAI when OPENAI_API_KEY is
@@ -13,7 +14,7 @@ export { AI_GENERATED_DISCLAIMER } from "./types";
  * (extraction-only, zero-inference) draft instead.
  */
 export function resolveMeetingMinutesGenerator(): MeetingMinutesGenerator {
-  return process.env.OPENAI_API_KEY ? openAiMinutesGenerator : deterministicMinutesGenerator;
+  return getOpenAiApiKey() ? openAiMinutesGenerator : deterministicMinutesGenerator;
 }
 
 export async function generateMeetingMinutes(input: MeetingMinutesGenerationInput): Promise<{ result: StructuredMeetingMinutes; generatorId: string }> {

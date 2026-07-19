@@ -17,12 +17,14 @@ export function MinutesEditor({
   status,
   canApprove,
   content,
+  generatedByProvider,
 }: {
   jobId: string;
   draftId: string;
   status: string;
   canApprove: boolean;
   content: StructuredMeetingMinutes;
+  generatedByProvider: string | null;
 }) {
   const router = useRouter();
   const editable = status === "DRAFT" || status === "IN_REVIEW" || status === "REJECTED";
@@ -69,10 +71,16 @@ export function MinutesEditor({
     }
   }
 
+  const isDeterministicFallback = generatedByProvider === "deterministic";
+
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-amber-300 bg-amber-50 px-5 py-4">
-        <p className="text-sm font-semibold text-amber-900">{content.aiDisclaimer}</p>
+      <div className={`rounded-xl border px-5 py-4 ${isDeterministicFallback ? "border-slate-400 bg-slate-100" : "border-amber-300 bg-amber-50"}`}>
+        <p className={`text-xs font-bold uppercase tracking-wide ${isDeterministicFallback ? "text-slate-700" : "text-amber-700"}`}>
+          {isDeterministicFallback ? "Fallback generator — not AI" : "AI-generated"}
+          {generatedByProvider ? ` (${generatedByProvider})` : ""}
+        </p>
+        <p className={`mt-1 text-sm font-semibold ${isDeterministicFallback ? "text-slate-900" : "text-amber-900"}`}>{content.aiDisclaimer}</p>
       </div>
 
       <div className="space-y-3">

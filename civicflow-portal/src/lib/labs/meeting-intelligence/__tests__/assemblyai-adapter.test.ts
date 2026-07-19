@@ -33,10 +33,11 @@ const request = {
 };
 
 describe("assemblyAiTranscriptionProvider.submit", () => {
-  it("throws MEETING_INTELLIGENCE_PROVIDER_UNAVAILABLE when ASSEMBLYAI_API_KEY is not configured", async () => {
+  it("throws a non-retryable MEETING_INTELLIGENCE_PROVIDER_MISCONFIGURED (not PROVIDER_UNAVAILABLE) when ASSEMBLYAI_API_KEY is not configured", async () => {
     delete process.env.ASSEMBLYAI_API_KEY;
     await expect(assemblyAiTranscriptionProvider.submit(request)).rejects.toMatchObject({
-      code: "MEETING_INTELLIGENCE_PROVIDER_UNAVAILABLE",
+      code: "MEETING_INTELLIGENCE_PROVIDER_MISCONFIGURED",
+      retryable: false,
     });
     expect(global.fetch).not.toHaveBeenCalled();
   });

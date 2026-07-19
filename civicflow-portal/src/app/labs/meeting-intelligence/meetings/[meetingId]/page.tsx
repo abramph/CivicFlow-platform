@@ -44,7 +44,7 @@ export default async function MeetingIntelligenceForMeetingPage({ params }: { pa
       <InternalPilotBanner />
 
       {can("meetingIntelligence:create") ? (
-        <SectionCard title="Upload a new recording" description="Supported formats: MP3, WAV, M4A, MP4, WEBM. Maximum 500 MB.">
+        <SectionCard title="Upload a new recording" description="Supported formats: MP3, WAV, M4A, MP4, WEBM. Maximum 150 MB.">
           <UploadRecordingForm meetingId={meetingId} />
         </SectionCard>
       ) : null}

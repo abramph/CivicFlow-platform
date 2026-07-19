@@ -1,6 +1,6 @@
 import type { TranscriptSegment } from "../providers/async-types";
 import {
-  AI_GENERATED_DISCLAIMER,
+  DETERMINISTIC_FALLBACK_DISCLAIMER,
   type EvidenceReference,
   type MeetingMinutesGenerationInput,
   type MeetingMinutesGenerator,
@@ -28,16 +28,33 @@ function toEvidence(index: number, segment: TranscriptSegment): EvidenceReferenc
   return { segmentIndex: index, startMs: segment.startMs, endMs: segment.endMs };
 }
 
-function extractMotions(segments: TranscriptSegment[], fullText: string): StructuredMotion[] {
-  const carried = /the motion carries|all in favor|motion passed/i.test(fullText);
-  const failed = /motion (fails|failed)|opposed/i.test(fullText) && !carried;
-  return findMatchingSegments(segments, ["motion to", "i move", "moved that"]).map(({ segment, index }) => ({
-    text: segment.text.trim(),
-    proposedBy: null,
-    secondedBy: null,
-    voteResult: carried ? "passed" : failed ? "failed" : "unrecorded",
-    evidence: [toEvidence(index, segment)],
-  }));
+/**
+ * Vote-outcome detection is scoped to the window between this motion and
+ * the next one (or the end of the transcript) — never the whole document.
+ * A meeting can contain several motions with different outcomes; matching
+ * a "the motion carries"/"motion failed" phrase anywhere in the full text
+ * and applying it to every motion would misattribute the wrong outcome to
+ * some of them. That's not extraction, it's a fabricated inference — and
+ * the whole point of this generator is to make none.
+ */
+function extractMotions(segments: TranscriptSegment[]): StructuredMotion[] {
+  const matches = findMatchingSegments(segments, ["motion to", "i move", "moved that"]);
+  return matches.map(({ segment, index }, matchPosition) => {
+    const nextMotionIndex = matches[matchPosition + 1]?.index ?? segments.length;
+    const windowText = segments
+      .slice(index, nextMotionIndex)
+      .map((s) => s.text)
+      .join(" ");
+    const carried = /the motion carries|all in favor|motion passed/i.test(windowText);
+    const failed = /motion (fails|failed)|opposed/i.test(windowText) && !carried;
+    return {
+      text: segment.text.trim(),
+      proposedBy: null,
+      secondedBy: null,
+      voteResult: carried ? "passed" : failed ? "failed" : "unrecorded",
+      evidence: [toEvidence(index, segment)],
+    };
+  });
 }
 
 function extractActionItems(segments: TranscriptSegment[]): StructuredActionItem[] {
@@ -73,7 +90,7 @@ export const deterministicMinutesGenerator: MeetingMinutesGenerator = {
       discussionSummaries: fullText
         ? [{ topic: "General discussion", summary: fullText.length > 500 ? `${fullText.slice(0, 500)}...` : fullText, evidence: [] }]
         : [],
-      motions: extractMotions(segments, fullText),
+      motions: extractMotions(segments),
       decisions: extractStrings(segments, ["approved", "the motion carries", "we agreed"]),
       actionItems: extractActionItems(segments),
       unresolvedIssues: extractStrings(segments, ["table this", "tabled", "revisit", "unresolved", "still need to decide"]),
@@ -81,7 +98,7 @@ export const deterministicMinutesGenerator: MeetingMinutesGenerator = {
       adjournmentTime: /adjourn/i.test(fullText) ? "mentioned in transcript, exact time not extracted" : null,
       executiveSummary: null,
       status: "draft",
-      aiDisclaimer: AI_GENERATED_DISCLAIMER,
+      aiDisclaimer: DETERMINISTIC_FALLBACK_DISCLAIMER,
     };
   },
 };

@@ -41,6 +41,7 @@ export default async function MeetingIntelligenceMinutesPage({ params }: { param
           status={draft.status}
           canApprove={can("meetingIntelligence:approve")}
           content={draft.editableContentJson as unknown as StructuredMeetingMinutes}
+          generatedByProvider={draft.generatedByProvider}
         />
       </SectionCard>
 

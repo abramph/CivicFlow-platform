@@ -14,7 +14,23 @@ import { MeetingIntelligenceError } from "./errors";
 export const SUPPORTED_EXTENSIONS = ["mp3", "wav", "m4a", "mp4", "webm"] as const;
 export type SupportedExtension = (typeof SUPPORTED_EXTENSIONS)[number];
 
-export const MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024; // 500 MB
+/**
+ * Verified-safe limit for the *current* architecture, not the originally
+ * targeted 500 MB. Uploads are fully proxied through the app server and
+ * buffered in memory multiple times over (request.formData() parses the
+ * whole multipart body, then .arrayBuffer(), then Buffer.from() — see
+ * the upload route) on a single apps-s-1vcpu-1gb (1 GB RAM) web instance
+ * that also serves all other portal traffic (.do/app.yaml has no separate
+ * worker component, instance_count: 1). A 500 MB upload could OOM-crash
+ * the entire portal for every organization, not just fail this feature.
+ * 150 MB keeps peak transient memory for one upload in the ~300-450 MB
+ * range even with 2-3x in-memory copies, leaving headroom for concurrent
+ * unrelated requests. Raising this back toward 500 MB requires switching
+ * to a direct client -> DigitalOcean Spaces signed upload (bypassing the
+ * app server's memory entirely) — tracked as required follow-up in
+ * docs/meeting-intelligence.md, not implemented in this pass.
+ */
+export const MAX_FILE_SIZE_BYTES = 150 * 1024 * 1024; // 150 MB
 
 const MIME_TO_FAMILY: Record<string, SupportedExtension> = {
   "audio/mpeg": "mp3",

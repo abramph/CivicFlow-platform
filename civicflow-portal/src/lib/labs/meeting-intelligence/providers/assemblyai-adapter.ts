@@ -1,4 +1,5 @@
 import { MeetingIntelligenceError } from "../errors";
+import { requireAssemblyAiApiKey } from "../config";
 import type {
   MeetingTranscriptionProvider,
   TranscriptSegment,
@@ -9,27 +10,16 @@ import type {
 
 /**
  * Real AssemblyAI adapter — the MVP's first production transcription
- * provider. No credentials are hardcoded; ASSEMBLYAI_API_KEY is read from
- * process.env only at call time (see env.ts's comment on this
- * convention), so a missing key never breaks app-wide boot, only this
- * feature when actually used. Uses `fetch` directly (no vendor SDK
- * dependency) so the request/response shape is fully visible and testable
- * with a mocked `fetch` — no real network call is ever made in tests.
+ * provider. No credentials are hardcoded; ASSEMBLYAI_API_KEY is read via
+ * config.ts's requireAssemblyAiApiKey() only at call time, so a missing key
+ * never breaks app-wide boot, only this feature when actually used. Uses
+ * `fetch` directly (no vendor SDK dependency) so the request/response shape
+ * is fully visible and testable with a mocked `fetch` — no real network call
+ * is ever made in tests.
  */
 
 const ASSEMBLYAI_BASE_URL = "https://api.assemblyai.com/v2";
 const REQUEST_TIMEOUT_MS = 30_000;
-
-function getApiKey(): string {
-  const key = process.env.ASSEMBLYAI_API_KEY;
-  if (!key) {
-    throw new MeetingIntelligenceError(
-      "MEETING_INTELLIGENCE_PROVIDER_UNAVAILABLE",
-      "ASSEMBLYAI_API_KEY is not configured. Meeting Intelligence transcription is unavailable until an APH platform operator configures it."
-    );
-  }
-  return key;
-}
 
 async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
   const controller = new AbortController();
@@ -63,7 +53,7 @@ export const assemblyAiTranscriptionProvider: MeetingTranscriptionProvider = {
   displayName: "AssemblyAI",
 
   async submit(request: TranscriptionRequest): Promise<TranscriptionSubmission> {
-    const apiKey = getApiKey();
+    const apiKey = requireAssemblyAiApiKey();
     const response = await fetchWithTimeout(`${ASSEMBLYAI_BASE_URL}/transcript`, {
       method: "POST",
       headers: { Authorization: apiKey, "Content-Type": "application/json" },
@@ -100,7 +90,7 @@ export const assemblyAiTranscriptionProvider: MeetingTranscriptionProvider = {
   },
 
   async getStatus(externalJobId: string): Promise<TranscriptionStatus> {
-    const apiKey = getApiKey();
+    const apiKey = requireAssemblyAiApiKey();
     const response = await fetchWithTimeout(`${ASSEMBLYAI_BASE_URL}/transcript/${encodeURIComponent(externalJobId)}`, {
       method: "GET",
       headers: { Authorization: apiKey },

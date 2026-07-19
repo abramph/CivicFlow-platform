@@ -63,4 +63,20 @@ describe("runMeetingIntelligenceRetentionCleanup", () => {
     expect(result.deleted).toBe(0);
     expect(deleteMeetingRecordingObject).not.toHaveBeenCalled();
   });
+
+  it("isolates a per-job Spaces failure — one failing job does not block deletion of the rest of the batch", async () => {
+    findManyJob.mockResolvedValueOnce([
+      { id: "job-1", organizationId: "aph-org", status: "APPROVED", storageObjectKey: "key-1" },
+      { id: "job-2", organizationId: "aph-org", status: "APPROVED", storageObjectKey: "key-2" },
+    ]);
+    deleteMeetingRecordingObject.mockRejectedValueOnce(new Error("Spaces network error")).mockResolvedValueOnce(undefined);
+
+    const { runMeetingIntelligenceRetentionCleanup } = await import("../retention");
+    const result = await runMeetingIntelligenceRetentionCleanup();
+
+    expect(result.failed).toBe(1);
+    expect(result.deleted).toBe(1);
+    expect(updateJob).toHaveBeenCalledTimes(1);
+    expect(updateJob).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "job-2" } }));
+  });
 });

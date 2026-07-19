@@ -9,14 +9,34 @@ function segment(overrides: Partial<TranscriptSegment>): TranscriptSegment {
 }
 
 describe("deterministicMinutesGenerator", () => {
-  it("always returns status 'draft' with the AI disclaimer attached", async () => {
+  it("always returns status 'draft' with a disclaimer attached", async () => {
     const result = await deterministicMinutesGenerator.generate({
       meetingTitle: "Board Meeting",
       segments: [segment({ text: "The meeting is now open." })],
       fullText: "The meeting is now open.",
     });
     expect(result.status).toBe("draft");
-    expect(result.aiDisclaimer).toMatch(/requires human review/i);
+    expect(result.aiDisclaimer).toMatch(/human review/i);
+  });
+
+  it("never claims to be AI-generated — it must not be mistaken for a genuine AI-produced summary", async () => {
+    const result = await deterministicMinutesGenerator.generate({
+      meetingTitle: "Board Meeting",
+      segments: [segment({ text: "The meeting is now open." })],
+      fullText: "The meeting is now open.",
+    });
+    expect(result.aiDisclaimer).not.toMatch(/AI-generated draft —/i);
+    expect(result.aiDisclaimer).toMatch(/not AI-generated/i);
+  });
+
+  it("uses a disclaimer distinct from the OpenAI generator's — the two must never share text a reviewer could conflate", async () => {
+    const { AI_GENERATED_DISCLAIMER } = await import("../minutes/types");
+    const result = await deterministicMinutesGenerator.generate({
+      meetingTitle: "Board Meeting",
+      segments: [segment({ text: "The meeting is now open." })],
+      fullText: "The meeting is now open.",
+    });
+    expect(result.aiDisclaimer).not.toBe(AI_GENERATED_DISCLAIMER);
   });
 
   it("extracts a motion with evidence pointing back to the source segment", async () => {
@@ -29,6 +49,33 @@ describe("deterministicMinutesGenerator", () => {
     expect(result.motions).toHaveLength(1);
     expect(result.motions[0].voteResult).toBe("passed");
     expect(result.motions[0].evidence[0]).toEqual({ segmentIndex: 0, startMs: 0, endMs: 1000 });
+  });
+
+  it("does not misattribute one motion's vote outcome to a different motion in the same transcript", async () => {
+    const segments = [
+      segment({ text: "I move to approve the budget." }),
+      segment({ text: "The motion carries." }),
+      segment({ text: "I move to table the rezoning request." }),
+      segment({ text: "Motion failed, opposed by three members." }),
+    ];
+    const result = await deterministicMinutesGenerator.generate({
+      meetingTitle: "Board Meeting",
+      segments,
+      fullText: segments.map((s) => s.text).join(" "),
+    });
+    expect(result.motions).toHaveLength(2);
+    expect(result.motions[0].voteResult).toBe("passed");
+    expect(result.motions[1].voteResult).toBe("failed");
+  });
+
+  it("leaves voteResult unrecorded rather than guessing when no outcome language follows the motion", async () => {
+    const segments = [segment({ text: "I move to approve the budget." }), segment({ text: "Let's move to the next agenda item." })];
+    const result = await deterministicMinutesGenerator.generate({
+      meetingTitle: "Board Meeting",
+      segments,
+      fullText: segments.map((s) => s.text).join(" "),
+    });
+    expect(result.motions[0].voteResult).toBe("unrecorded");
   });
 
   it("never fabricates a proposer/seconder/owner/due date it cannot support", async () => {
