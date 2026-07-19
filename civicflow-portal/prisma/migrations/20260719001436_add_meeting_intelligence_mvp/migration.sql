@@ -24,6 +24,7 @@ CREATE TABLE "MeetingIntelligenceJob" (
     "consentConfirmedAt" TIMESTAMP(3),
     "consentConfirmedByUserId" TEXT,
     "claimedAt" TIMESTAMP(3),
+    "pollClaimedAt" TIMESTAMP(3),
     "submittedAt" TIMESTAMP(3),
     "processingStartedAt" TIMESTAMP(3),
     "transcribedAt" TIMESTAMP(3),
@@ -110,7 +111,7 @@ CREATE INDEX "MeetingMinutesDraft_organizationId_idx" ON "MeetingMinutesDraft"("
 CREATE INDEX "MeetingMinutesDraft_meetingId_idx" ON "MeetingMinutesDraft"("meetingId");
 
 -- CreateIndex
-CREATE INDEX "MeetingMinutesDraft_jobId_version_idx" ON "MeetingMinutesDraft"("jobId", "version");
+CREATE UNIQUE INDEX "MeetingMinutesDraft_jobId_version_key" ON "MeetingMinutesDraft"("jobId", "version");
 
 -- AddForeignKey
 ALTER TABLE "MeetingIntelligenceJob" ADD CONSTRAINT "MeetingIntelligenceJob_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;

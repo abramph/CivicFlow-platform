@@ -1804,6 +1804,16 @@ model MeetingIntelligenceJob {
   /// is treated as an abandoned claim (worker crashed mid-submission) and
   /// becomes reclaimable — see CLAIM_STALE_AFTER_MS.
   claimedAt                DateTime?
+  /// Same pattern as claimedAt, but for the TRANSCRIBING->minutes-generation
+  /// step (see worker.ts's pollTranscribingMeetingIntelligenceJobs): a
+  /// separate column because a job's claimedAt from the QUEUED step is
+  /// still fresh (non-null, non-stale) by the time it reaches TRANSCRIBING,
+  /// so reusing that column would block every legitimate poll claim, not
+  /// just duplicates. Without this, two overlapping poll invocations could
+  /// both generate minutes for the same job — a duplicate, billable OpenAI
+  /// call and (absent the belt-and-suspenders unique constraint on
+  /// MeetingMinutesDraft below) a duplicate draft row.
+  pollClaimedAt            DateTime?
   submittedAt              DateTime?
   processingStartedAt      DateTime?
   transcribedAt            DateTime?
@@ -1899,9 +1909,9 @@ model MeetingMinutesDraft {
   approvedBy   User?                  @relation("MeetingMinutesDraftApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
   rejectedBy   User?                  @relation("MeetingMinutesDraftRejectedBy", fields: [rejectedByUserId], references: [id], onDelete: SetNull)
 
+  @@unique([jobId, version])
   @@index([organizationId])
   @@index([meetingId])
-  @@index([jobId, version])
 }
 
 /// QR check-in session/window for a Meeting. Does not store attendance rows

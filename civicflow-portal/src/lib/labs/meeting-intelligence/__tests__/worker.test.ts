@@ -186,6 +186,43 @@ describe("pollTranscribingMeetingIntelligenceJobs", () => {
     expect(transitionJob).not.toHaveBeenCalled();
   });
 
+  it("atomically claims the job (conditional UPDATE on status=TRANSCRIBING) before ever calling the provider", async () => {
+    findManyJob.mockResolvedValueOnce([transcribingJob()]);
+    getStatus.mockResolvedValueOnce({ status: "processing" });
+
+    const { pollTranscribingMeetingIntelligenceJobs } = await import("../worker");
+    await pollTranscribingMeetingIntelligenceJobs();
+
+    expect(updateManyJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: "job-1", status: "TRANSCRIBING" }),
+      })
+    );
+    const claimCallOrder = updateManyJob.mock.invocationCallOrder[0];
+    const getStatusCallOrder = getStatus.mock.invocationCallOrder[0];
+    expect(claimCallOrder).toBeLessThan(getStatusCallOrder);
+  });
+
+  it("skips a job it loses the poll-claim race for — another concurrent invocation already claimed it — without calling the provider or any downstream step", async () => {
+    findManyJob.mockResolvedValueOnce([transcribingJob()]);
+    updateManyJob.mockResolvedValueOnce({ count: 0 });
+
+    // Deliberately does NOT stub getStatus's return value — the claim
+    // failing must short-circuit before getStatus is ever called, so an
+    // unconsumed mockResolvedValueOnce here would leak into (and corrupt)
+    // whichever test runs next.
+    const { pollTranscribingMeetingIntelligenceJobs } = await import("../worker");
+    const result = await pollTranscribingMeetingIntelligenceJobs();
+
+    expect(getStatus).not.toHaveBeenCalled();
+    expect(transitionJob).not.toHaveBeenCalled();
+    expect(createTranscript).not.toHaveBeenCalled();
+    expect(generateMeetingMinutes).not.toHaveBeenCalled();
+    expect(createMeetingMinutesDraft).not.toHaveBeenCalled();
+    expect(result.completed).toBe(0);
+    expect(result.failed).toBe(0);
+  });
+
   it("fails the job when the provider reports an error", async () => {
     findManyJob.mockResolvedValueOnce([transcribingJob()]);
     getStatus.mockResolvedValueOnce({ status: "error", errorMessage: "invalid audio" });

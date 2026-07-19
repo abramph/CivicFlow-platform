@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { createAuditEvent } from "@/lib/audit";
 import { MeetingIntelligenceError } from "./errors";
@@ -7,6 +8,20 @@ import type { StructuredMeetingMinutes } from "./minutes";
 
 /** Draft statuses whose editableContentJson may still be changed — an APPROVED row is immutable by construction, a SUPERSEDED row is historical. */
 const EDITABLE_STATUSES = new Set(["DRAFT", "IN_REVIEW", "REJECTED"]);
+
+/**
+ * MeetingMinutesDraft has a unique constraint on (jobId, version) precisely
+ * to catch this: a check-then-act race (getLatestMeetingMinutesDraft then
+ * create()) can't be made fully atomic without a DB-level backstop, since
+ * this module is called from both the worker (protected by a claim, see
+ * worker.ts) and directly from the regenerate API route (not claim-
+ * protected — a double-click or two browser tabs can race it). Callers
+ * catch P2002 here and adopt the winning row instead of surfacing a raw
+ * Prisma error.
+ */
+function isUniqueConstraintError(error: unknown) {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+}
 
 export async function getLatestMeetingMinutesDraft(organizationId: string, jobId: string) {
   return prisma.meetingMinutesDraft.findFirst({
@@ -38,19 +53,29 @@ export async function createMeetingMinutesDraft(input: CreateDraftInput) {
     // version-1 draft.
     return existing;
   }
-  return prisma.meetingMinutesDraft.create({
-    data: {
-      organizationId: input.organizationId,
-      meetingId: (await prisma.meetingIntelligenceJob.findUniqueOrThrow({ where: { id: input.jobId }, select: { meetingId: true } })).meetingId,
-      jobId: input.jobId,
-      status: "DRAFT",
-      version: 1,
-      generatedContentJson: input.content as unknown as object,
-      editableContentJson: input.content as unknown as object,
-      generatedByProvider: input.generatorId,
-      generatedAt: new Date(),
-    },
-  });
+  try {
+    return await prisma.meetingMinutesDraft.create({
+      data: {
+        organizationId: input.organizationId,
+        meetingId: (await prisma.meetingIntelligenceJob.findUniqueOrThrow({ where: { id: input.jobId }, select: { meetingId: true } })).meetingId,
+        jobId: input.jobId,
+        status: "DRAFT",
+        version: 1,
+        generatedContentJson: input.content as unknown as object,
+        editableContentJson: input.content as unknown as object,
+        generatedByProvider: input.generatorId,
+        generatedAt: new Date(),
+      },
+    });
+  } catch (error) {
+    // Lost a race against another concurrent caller that already created
+    // version 1 for this job (see the module doc comment above) — adopt
+    // the winning row instead of failing.
+    if (!isUniqueConstraintError(error)) throw error;
+    const winner = await getLatestMeetingMinutesDraft(input.organizationId, input.jobId);
+    if (!winner) throw error;
+    return winner;
+  }
 }
 
 export interface EditDraftInput {
@@ -231,19 +256,31 @@ export async function regenerateMeetingMinutesDraft(input: RegenerateDraftInput)
 
   await prisma.meetingMinutesDraft.update({ where: { id: previous.id }, data: { status: "SUPERSEDED" } });
 
-  const created = await prisma.meetingMinutesDraft.create({
-    data: {
-      organizationId: input.organizationId,
-      meetingId: job.meetingId,
-      jobId: input.jobId,
-      status: "DRAFT",
-      version: previous.version + 1,
-      generatedContentJson: result as unknown as object,
-      editableContentJson: result as unknown as object,
-      generatedByProvider: generatorId,
-      generatedAt: new Date(),
-    },
-  });
+  let created;
+  try {
+    created = await prisma.meetingMinutesDraft.create({
+      data: {
+        organizationId: input.organizationId,
+        meetingId: job.meetingId,
+        jobId: input.jobId,
+        status: "DRAFT",
+        version: previous.version + 1,
+        generatedContentJson: result as unknown as object,
+        editableContentJson: result as unknown as object,
+        generatedByProvider: generatorId,
+        generatedAt: new Date(),
+      },
+    });
+  } catch (error) {
+    // Lost a race against a concurrent regenerate call (e.g. a double-click
+    // or two browser tabs) targeting the same next version number — see
+    // the module doc comment above. Adopt the winner's row rather than
+    // erroring; this call's freshly generated content is discarded.
+    if (!isUniqueConstraintError(error)) throw error;
+    const winner = await getLatestMeetingMinutesDraft(input.organizationId, input.jobId);
+    if (!winner) throw error;
+    created = winner;
+  }
 
   await transitionJob({ jobId: input.jobId, organizationId: input.organizationId, to: "DRAFT_READY", actorUserId: input.actorUserId, actorEmail: input.actorEmail });
 

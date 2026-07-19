@@ -64,6 +64,30 @@ async function claimQueuedJob(jobId: string): Promise<boolean> {
   return result.count === 1;
 }
 
+/**
+ * Same pattern as claimQueuedJob, for the TRANSCRIBING->minutes-generation
+ * step — a separate column (pollClaimedAt) because claimedAt from the
+ * QUEUED step is still fresh by the time a job reaches TRANSCRIBING, which
+ * would otherwise block every legitimate poll claim, not just duplicates.
+ * Without this, two overlapping poll invocations could both reach
+ * generateMeetingMinutes() for the same job — a duplicate, billable OpenAI
+ * call — which the MeetingMinutesDraft(jobId, version) unique constraint
+ * alone would only catch after the fact (rejecting the loser's insert, not
+ * preventing the duplicate vendor call in the first place).
+ */
+async function claimTranscribingJobForPoll(jobId: string): Promise<boolean> {
+  const staleThreshold = new Date(Date.now() - CLAIM_STALE_AFTER_MS);
+  const result = await prisma.meetingIntelligenceJob.updateMany({
+    where: {
+      id: jobId,
+      status: "TRANSCRIBING",
+      OR: [{ pollClaimedAt: null }, { pollClaimedAt: { lt: staleThreshold } }],
+    },
+    data: { pollClaimedAt: new Date() },
+  });
+  return result.count === 1;
+}
+
 async function organizationLabsActive(organizationId: string): Promise<boolean> {
   const access = await getOrganizationLabAccess(organizationId, "meetingIntelligence");
   return access.available;
@@ -139,6 +163,11 @@ export async function pollTranscribingMeetingIntelligenceJobs(limit = BATCH_LIMI
   let failed = 0;
 
   for (const job of jobs) {
+    if (!(await claimTranscribingJobForPoll(job.id))) {
+      // Lost the claim race to another concurrent invocation (or the job
+      // moved on already) — not a failure, just skip it this tick.
+      continue;
+    }
     if (!job.providerJobId) {
       await failJob(job.id, job.organizationId, "MEETING_INTELLIGENCE_INVALID_PROVIDER_RESPONSE", "No provider job id recorded for this job.");
       failed += 1;

@@ -11,6 +11,21 @@ const createAuditEvent = vi.fn().mockResolvedValue(undefined);
 const transitionJob = vi.fn().mockResolvedValue({});
 const generateMeetingMinutes = vi.fn();
 
+const { FakePrismaKnownError } = vi.hoisted(() => {
+  class FakePrismaKnownError extends Error {
+    code: string;
+    constructor(code: string) {
+      super("Prisma known request error");
+      this.code = code;
+    }
+  }
+  return { FakePrismaKnownError };
+});
+
+vi.mock("@prisma/client", () => ({
+  Prisma: { PrismaClientKnownRequestError: FakePrismaKnownError },
+}));
+
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     meetingMinutesDraft: {
@@ -134,5 +149,56 @@ describe("regenerateMeetingMinutesDraft", () => {
     expect(createDraft.mock.calls[0][0].data.version).toBe(2);
     expect(result.version).toBe(2);
     expect(transitionJob).toHaveBeenCalledWith(expect.objectContaining({ to: "DRAFT_READY" }));
+  });
+
+  it("adopts the winning row instead of throwing when a concurrent regenerate call (e.g. a double-click) already created the same next version — MeetingMinutesDraft(jobId, version) is a unique constraint", async () => {
+    findFirstTranscript.mockResolvedValueOnce({ jobId: "job-1", organizationId: "org-a", segmentsJson: [], content: "", speakerLabelMapJson: null });
+    // First getLatestMeetingMinutesDraft() call (inside regenerateMeetingMinutesDraft, finding "previous").
+    findFirstDraft.mockResolvedValueOnce(draftRow({ version: 1, status: "REJECTED" }));
+    findUniqueOrThrowJob.mockResolvedValueOnce({ id: "job-1", meetingId: "meeting-1" });
+    findUniqueOrThrowMeeting.mockResolvedValueOnce({ id: "meeting-1", title: "Board Meeting", meetingDate: new Date("2026-01-01") });
+    generateMeetingMinutes.mockResolvedValueOnce({ result: { status: "draft" }, generatorId: "deterministic" });
+    createDraft.mockRejectedValueOnce(new FakePrismaKnownError("P2002"));
+    // Second getLatestMeetingMinutesDraft() call (inside the catch block, fetching the winner).
+    findFirstDraft.mockResolvedValueOnce(draftRow({ id: "draft-2-winner", version: 2 }));
+
+    const { regenerateMeetingMinutesDraft } = await import("../minutes-review");
+    const result = await regenerateMeetingMinutesDraft({ organizationId: "org-a", jobId: "job-1", actorUserId: "user-1" });
+
+    expect(result.id).toBe("draft-2-winner");
+    expect(transitionJob).toHaveBeenCalledWith(expect.objectContaining({ to: "DRAFT_READY" }));
+  });
+});
+
+describe("createMeetingMinutesDraft", () => {
+  it("creates version 1 for a job with no existing draft", async () => {
+    findFirstDraft.mockResolvedValueOnce(null);
+    findUniqueOrThrowJob.mockResolvedValueOnce({ id: "job-1", meetingId: "meeting-1" });
+    createDraft.mockResolvedValueOnce(draftRow({ version: 1 }));
+
+    const { createMeetingMinutesDraft } = await import("../minutes-review");
+    const result = await createMeetingMinutesDraft({ organizationId: "org-a", jobId: "job-1", content: {} as never, generatorId: "deterministic" });
+
+    expect(createDraft.mock.calls[0][0].data.version).toBe(1);
+    expect(result.version).toBe(1);
+  });
+
+  it("duplicate-generation guard: returns the existing draft without creating a second one when a job is re-observed already at GENERATING_MINUTES/DRAFT_READY", async () => {
+    findFirstDraft.mockResolvedValueOnce(draftRow({ version: 1 }));
+    const { createMeetingMinutesDraft } = await import("../minutes-review");
+    await createMeetingMinutesDraft({ organizationId: "org-a", jobId: "job-1", content: {} as never, generatorId: "deterministic" });
+    expect(createDraft).not.toHaveBeenCalled();
+  });
+
+  it("adopts the winning row instead of throwing when a concurrent caller already created version 1 for this job — the unique-constraint backstop for the case the worker's poll-claim (see worker.ts) is meant to prevent in the first place", async () => {
+    findFirstDraft.mockResolvedValueOnce(null); // existence check sees nothing yet — the race window
+    findUniqueOrThrowJob.mockResolvedValueOnce({ id: "job-1", meetingId: "meeting-1" });
+    createDraft.mockRejectedValueOnce(new FakePrismaKnownError("P2002"));
+    findFirstDraft.mockResolvedValueOnce(draftRow({ id: "draft-winner", version: 1 })); // re-fetch after the conflict
+
+    const { createMeetingMinutesDraft } = await import("../minutes-review");
+    const result = await createMeetingMinutesDraft({ organizationId: "org-a", jobId: "job-1", content: {} as never, generatorId: "deterministic" });
+
+    expect(result.id).toBe("draft-winner");
   });
 });
