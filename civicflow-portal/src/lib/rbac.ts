@@ -111,6 +111,15 @@ export const PERMISSIONS = {
 
   // Unestra Labs (organization-facing, read-only today — see docs/unestra-labs.md)
   LABS_READ: "labs:read",
+
+  // Meeting Intelligence (Unestra Labs, internal APH pilot — see docs/meeting-intelligence.md).
+  // Gated additionally by requireOrganizationLabFeature() — holding one of
+  // these permissions is necessary but never sufficient by itself.
+  MEETING_INTELLIGENCE_READ:    "meetingIntelligence:read",
+  MEETING_INTELLIGENCE_CREATE:  "meetingIntelligence:create",
+  MEETING_INTELLIGENCE_REVIEW:  "meetingIntelligence:review",
+  MEETING_INTELLIGENCE_APPROVE: "meetingIntelligence:approve",
+  MEETING_INTELLIGENCE_DELETE:  "meetingIntelligence:delete",
 } as const;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -158,6 +167,11 @@ const ORG_OWNER_PERMISSIONS: Permission[] = [
   PERMISSIONS.AUDIT_LOGS_READ,
   PERMISSIONS.SMS_CONSENT_READ,
   PERMISSIONS.LABS_READ,
+  PERMISSIONS.MEETING_INTELLIGENCE_READ,
+  PERMISSIONS.MEETING_INTELLIGENCE_CREATE,
+  PERMISSIONS.MEETING_INTELLIGENCE_REVIEW,
+  PERMISSIONS.MEETING_INTELLIGENCE_APPROVE,
+  PERMISSIONS.MEETING_INTELLIGENCE_DELETE,
 ];
 
 const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
@@ -200,6 +214,11 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.AUDIT_LOGS_READ,
     PERMISSIONS.SMS_CONSENT_READ,
     PERMISSIONS.LABS_READ,
+    PERMISSIONS.MEETING_INTELLIGENCE_READ,
+    PERMISSIONS.MEETING_INTELLIGENCE_CREATE,
+    PERMISSIONS.MEETING_INTELLIGENCE_REVIEW,
+    PERMISSIONS.MEETING_INTELLIGENCE_APPROVE,
+    PERMISSIONS.MEETING_INTELLIGENCE_DELETE,
   ],
 
   FINANCE: [

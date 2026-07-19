@@ -67,6 +67,15 @@ const serverEnvSchema = z.object({
   SMS_CREDENTIAL_ENCRYPTION_KEY: z.string().optional(),
 });
 
+// Meeting Intelligence (Unestra Labs, internal APH pilot only — see
+// docs/meeting-intelligence.md) reads ASSEMBLYAI_API_KEY,
+// MEETING_INTELLIGENCE_PROVIDER, and OPENAI_API_KEY directly from
+// process.env rather than through getServerEnv() — the same convention
+// already used for CRON_SECRET (see cron-auth.ts): a narrow, feature-
+// specific, optional credential that must not block app-wide boot when
+// unset, with its own clear error thrown only when the feature is actually
+// invoked without it configured.
+
 const relaxedEnvSchema = serverEnvSchema.partial().extend({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 });

@@ -14,6 +14,14 @@ export const LAB_USAGE_UNITS = [
   "documents_analyzed",
   "reports_generated",
   "automation_executions",
+  // Meeting Intelligence MVP (see docs/meeting-intelligence.md) — cost
+  // estimate units record a dollar-cents quantity, not a duration/count.
+  "audio_minutes_uploaded",
+  "audio_minutes_transcribed",
+  "transcription_jobs",
+  "minutes_generation_jobs",
+  "transcription_provider_cost_estimate",
+  "generation_cost_estimate",
 ] as const;
 
 export type LabUsageUnit = (typeof LAB_USAGE_UNITS)[number];

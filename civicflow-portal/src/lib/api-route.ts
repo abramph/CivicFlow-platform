@@ -4,6 +4,7 @@ import { MobileAuthError, MobileForbiddenError } from "@/lib/mobile-auth";
 import { ValidationError, jsonError } from "@/lib/validation";
 import { PlanFeatureError, PlanLimitError } from "@/lib/plan-gate";
 import { LabFeatureError } from "@/lib/labs/access";
+import { MeetingIntelligenceError } from "@/lib/labs/meeting-intelligence/errors";
 
 export async function withApiErrorHandling(
   fn: () => Promise<Response>
@@ -30,6 +31,12 @@ export async function withApiErrorHandling(
       if (error instanceof LabFeatureError) {
         return Response.json(
           { ok: false, error: error.message, code: error.code, feature: error.feature },
+          { status: error.status }
+        );
+      }
+      if (error instanceof MeetingIntelligenceError) {
+        return Response.json(
+          { ok: false, error: error.message, code: error.code, retryable: error.retryable },
           { status: error.status }
         );
       }

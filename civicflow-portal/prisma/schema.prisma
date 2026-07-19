@@ -461,6 +461,9 @@ model Organization {
   messages                  Message[]
   labFeatures               OrganizationLabFeature[]
   labUsageEvents            LabUsageEvent[]
+  meetingIntelligenceJobs   MeetingIntelligenceJob[]
+  meetingTranscripts        MeetingTranscript[]
+  meetingMinutesDrafts      MeetingMinutesDraft[]
 
   @@index([slug])
   @@index([status])
@@ -522,6 +525,12 @@ model User {
 
   labFeaturesEnabled  OrganizationLabFeature[] @relation("LabFeatureEnabledBy")
   labFeaturesDisabled OrganizationLabFeature[] @relation("LabFeatureDisabledBy")
+
+  meetingIntelligenceJobsUploaded          MeetingIntelligenceJob[] @relation("MeetingIntelligenceJobUploadedBy")
+  meetingIntelligenceJobsConsentConfirmed  MeetingIntelligenceJob[] @relation("MeetingIntelligenceJobConsentConfirmedBy")
+  meetingMinutesDraftsEdited               MeetingMinutesDraft[]    @relation("MeetingMinutesDraftLastEditedBy")
+  meetingMinutesDraftsApproved             MeetingMinutesDraft[]    @relation("MeetingMinutesDraftApprovedBy")
+  meetingMinutesDraftsRejected             MeetingMinutesDraft[]    @relation("MeetingMinutesDraftRejectedBy")
 
   @@index([email])
 }
@@ -1719,15 +1728,163 @@ model Meeting {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  organization           Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdBy              User?                      @relation("MeetingCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  attendanceRecords      AttendanceRecord[]
-  attendanceSessions     MeetingAttendanceSession[]
-  communicationCampaigns CommunicationCampaign[]
+  organization              Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy                 User?                      @relation("MeetingCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  attendanceRecords         AttendanceRecord[]
+  attendanceSessions        MeetingAttendanceSession[]
+  communicationCampaigns    CommunicationCampaign[]
+  meetingIntelligenceJobs   MeetingIntelligenceJob[]
+  meetingTranscripts        MeetingTranscript[]
+  meetingMinutesDrafts      MeetingMinutesDraft[]
 
   @@index([organizationId])
   @@index([meetingDate])
   @@index([createdByUserId])
+}
+
+// ─── Meeting Intelligence (Unestra Labs, internal APH pilot) ─────────────────
+// Internal-only (see src/lib/labs/registry.ts's meetingIntelligence entry).
+// Never enabled for a customer organization. See docs/meeting-intelligence.md.
+
+enum MeetingIntelligenceStatus {
+  CREATED
+  UPLOAD_PENDING
+  UPLOADED
+  QUEUED
+  SUBMITTED_TO_PROVIDER
+  TRANSCRIBING
+  TRANSCRIBED
+  GENERATING_MINUTES
+  DRAFT_READY
+  IN_REVIEW
+  APPROVED
+  FAILED
+  CANCELLED
+  DELETED
+}
+
+enum MeetingMinutesDraftStatus {
+  DRAFT
+  IN_REVIEW
+  APPROVED
+  REJECTED
+  SUPERSEDED
+}
+
+/// One row per recording submitted for processing. `storageObjectKey` is a
+/// randomized DigitalOcean Spaces key (see src/lib/labs/meeting-intelligence/storage.ts)
+/// containing no names, titles, or other sensitive text — never the
+/// original filename. The binary recording itself is never stored in this
+/// table or anywhere in Postgres; only the object key reference.
+model MeetingIntelligenceJob {
+  id                       String                    @id @default(cuid())
+  organizationId           String
+  meetingId                String
+  uploadedByUserId         String
+  status                   MeetingIntelligenceStatus @default(CREATED)
+  /// App-validated against the provider registry (src/lib/labs/meeting-intelligence/providers) — not a Prisma enum, so adding a provider never needs a migration.
+  provider                 String
+  providerJobId            String?
+  /// Sanitized display name only — never used to build the storage key.
+  originalFilename         String
+  mimeType                 String
+  fileSizeBytes            Int
+  audioDurationSeconds     Int?
+  storageObjectKey         String?
+  transcriptObjectKey      String?
+  failureCode              String?
+  failureMessage           String?
+  consentConfirmedAt       DateTime?
+  consentConfirmedByUserId String?
+  submittedAt              DateTime?
+  processingStartedAt      DateTime?
+  transcribedAt            DateTime?
+  minutesGeneratedAt       DateTime?
+  completedAt              DateTime?
+  failedAt                 DateTime?
+  cancelledAt              DateTime?
+  recordingDeletedAt       DateTime?
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
+
+  organization        Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  meeting             Meeting               @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  uploadedBy          User                  @relation("MeetingIntelligenceJobUploadedBy", fields: [uploadedByUserId], references: [id])
+  consentConfirmedBy  User?                 @relation("MeetingIntelligenceJobConsentConfirmedBy", fields: [consentConfirmedByUserId], references: [id], onDelete: SetNull)
+  transcript          MeetingTranscript?
+  minutesDrafts       MeetingMinutesDraft[]
+
+  @@index([organizationId])
+  @@index([meetingId])
+  @@index([status])
+  @@index([organizationId, status])
+}
+
+/// Full transcript + structured speaker segments for one job. `speakerLabelMapJson`
+/// is a display-only rename map ({"Speaker A": "Alex Chair"}) layered on top —
+/// `segmentsJson` (the original vendor evidence) is never altered by a rename,
+/// preserving an audit-safe original record.
+model MeetingTranscript {
+  id                  String   @id @default(cuid())
+  organizationId      String
+  meetingId           String
+  jobId               String   @unique
+  provider             String
+  language            String?
+  speakerCount        Int?
+  durationSeconds     Int?
+  content             String
+  segmentsJson        Json
+  speakerLabelMapJson Json?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  organization Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  meeting      Meeting                @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  job          MeetingIntelligenceJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([meetingId])
+}
+
+/// One row per minutes draft *version*. Approving a draft freezes it in place
+/// (status: APPROVED) — the API layer refuses further edits to an approved
+/// row; requesting changes after approval creates a new row with
+/// version+1 rather than mutating the approved one, so the approved
+/// snapshot is immutable by construction, not just by convention.
+/// `generatedContentJson` is the original AI output and is never modified
+/// after creation; `editableContentJson` is the working copy a secretary edits.
+model MeetingMinutesDraft {
+  id                   String                    @id @default(cuid())
+  organizationId       String
+  meetingId            String
+  jobId                String
+  status               MeetingMinutesDraftStatus @default(DRAFT)
+  version              Int                       @default(1)
+  generatedContentJson Json
+  editableContentJson  Json
+  generatedByProvider  String?
+  generatedAt          DateTime?
+  lastEditedByUserId   String?
+  lastEditedAt         DateTime?
+  approvedByUserId     String?
+  approvedAt           DateTime?
+  rejectedByUserId     String?
+  rejectedAt           DateTime?
+  rejectionReason      String?
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
+
+  organization    Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  meeting         Meeting                @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  job             MeetingIntelligenceJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  lastEditedBy    User?                  @relation("MeetingMinutesDraftLastEditedBy", fields: [lastEditedByUserId], references: [id], onDelete: SetNull)
+  approvedBy      User?                  @relation("MeetingMinutesDraftApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  rejectedBy      User?                  @relation("MeetingMinutesDraftRejectedBy", fields: [rejectedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([meetingId])
+  @@index([jobId, version])
 }
 
 /// QR check-in session/window for a Meeting. Does not store attendance rows
