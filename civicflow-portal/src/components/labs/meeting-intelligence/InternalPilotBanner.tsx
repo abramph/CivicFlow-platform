@@ -8,6 +8,12 @@ export function InternalPilotBanner() {
         personnel matters, confidential legal advice, payment card information, or passwords/security credentials.
         AI-generated minutes are always a draft — a person must review and approve them before they become official.
       </p>
+      <p className="mt-2 text-sm text-sky-800">
+        Only upload a recording if every participant was notified of recording or has consented, as required. Audio
+        and transcript content are sent to third-party AI providers (transcription and, if configured, AI-generated
+        minutes) for processing. Recordings are retained temporarily and deleted automatically after the pilot&apos;s
+        retention window.
+      </p>
     </div>
   );
 }

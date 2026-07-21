@@ -37,6 +37,7 @@ export default async function PlatformLabsPage({
       <PageHeader
         title="Unestra Labs"
         description="Registered Labs features, their lifecycle, and per-organization enrollment. Enrollment changes here never touch an organization's paid plan, Stripe, or billing exemption."
+        actions={[{ href: "/admin/platform/meeting-intelligence", label: "Meeting Intelligence pilot status" }]}
       />
 
       <SectionCard title="Registered features" description="The full Labs feature registry — see src/lib/labs/registry.ts. Internal-only features can never be enabled for a non-billing-exempt organization.">

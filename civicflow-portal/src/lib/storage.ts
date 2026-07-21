@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadBucketCommand,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
@@ -69,6 +70,21 @@ export async function deleteObjectFromSpaces(key: string) {
       Key: key,
     })
   );
+}
+
+/**
+ * Live, read-only reachability check for the configured Spaces bucket — a
+ * HeadBucket call (no object read/write, no billable transfer), used only by
+ * the Meeting Intelligence pilot diagnostics page. Never logs or returns
+ * credentials; callers must catch and classify the thrown error themselves
+ * (see platform-operations/meeting-intelligence.ts) rather than surface it
+ * directly, since the AWS SDK's own error messages can include the endpoint
+ * URL and bucket name.
+ */
+export async function verifySpacesBucketAccess(): Promise<void> {
+  const env = getServerEnv();
+  const s3 = createS3Client();
+  await s3.send(new HeadBucketCommand({ Bucket: env.DO_SPACES_BUCKET }));
 }
 
 export async function getSignedObjectUrl(key: string, expiresInSeconds = 600) {

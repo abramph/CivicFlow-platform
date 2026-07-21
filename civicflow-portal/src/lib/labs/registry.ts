@@ -85,7 +85,8 @@ export const LAB_FEATURES = {
   meetingIntelligence: {
     key: "meetingIntelligence",
     name: "Meeting Intelligence",
-    description: "Registry placeholder for future AI-assisted meeting recording, transcription, and summarization. Not implemented.",
+    description:
+      "AI-assisted meeting recording upload, transcription, and draft-minutes generation. Implemented as an internal-only APH Technologies pilot (see docs/meeting-intelligence.md and docs/meeting-intelligence-pilot.md) — deployed but inert until an organization is explicitly enrolled via the Operations Center.",
     lifecycle: "INTERNAL",
     requiresEntitlement: true,
     requiresEnrollment: true,

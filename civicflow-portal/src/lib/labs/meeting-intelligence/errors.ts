@@ -32,6 +32,10 @@ export const MEETING_INTELLIGENCE_ERROR_CODES = [
   "MEETING_INTELLIGENCE_CONSENT_REQUIRED",
   "MEETING_INTELLIGENCE_DRAFT_NOT_EDITABLE",
   "MEETING_INTELLIGENCE_EXPORT_NOT_APPROVED",
+  // Pilot-readiness additions (see feedback.ts) — neither is retryable, both
+  // are operator/input errors, not transient failures.
+  "MEETING_INTELLIGENCE_FEEDBACK_INVALID",
+  "MEETING_INTELLIGENCE_FEEDBACK_NOT_ELIGIBLE",
 ] as const;
 
 export type MeetingIntelligenceErrorCode = (typeof MEETING_INTELLIGENCE_ERROR_CODES)[number];
@@ -67,6 +71,8 @@ const STATUS_FOR_CODE: Record<MeetingIntelligenceErrorCode, number> = {
   MEETING_INTELLIGENCE_CONSENT_REQUIRED: 400,
   MEETING_INTELLIGENCE_DRAFT_NOT_EDITABLE: 409,
   MEETING_INTELLIGENCE_EXPORT_NOT_APPROVED: 403,
+  MEETING_INTELLIGENCE_FEEDBACK_INVALID: 400,
+  MEETING_INTELLIGENCE_FEEDBACK_NOT_ELIGIBLE: 409,
 };
 
 export class MeetingIntelligenceError extends Error {
