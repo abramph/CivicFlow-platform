@@ -424,46 +424,47 @@ model Organization {
   auditEvents   AuditEvent[]
 
   // Scoped data models
-  members                   OrgMember[]
-  campaigns                 Campaign[]
-  events                    Event[]
-  meetings                  Meeting[]
-  expenditures              Expenditure[]
-  categories                Category[]
-  settings                  OrgSettings?
-  paymentLinks              PaymentLink[]
-  duesAccounts              DuesAccount[]
-  duesCharges               DuesCharge[]
-  duesPayments              DuesPayment[]
-  duesAdjustments           DuesAdjustment[]
-  paymentMethodConfigs      PaymentMethodConfig[]
-  contributions             Contribution[]
-  contributionReceipts      ContributionReceipt[]
-  communicationLogs         CommunicationLog[]
-  communicationCampaigns    CommunicationCampaign[]
-  communicationRecipients   CommunicationRecipient[]
-  paymentImportBatches      PaymentImportBatch[]
-  paymentImportItems        PaymentImportItem[]
-  attendanceRecords         AttendanceRecord[]
-  meetingAttendanceSessions MeetingAttendanceSession[]
-  memberTimelineEvents      MemberTimelineEvent[]
-  reportExports             ReportExport[]
-  emailReminderLogs         EmailReminderLog[]
-  attachments               Attachment[]
-  memberInvites             MemberInvite[]
-  mobileDeviceTokens        MobileDeviceToken[]
-  paymentReports            PaymentReport[]
-  rolePermissionSets        OrgRolePermissionSet[]
-  smsMessages               SmsMessage[]
-  smsSettings               OrganizationSmsSettings?
-  conversations             Conversation[]
-  conversationParticipants  ConversationParticipant[]
-  messages                  Message[]
-  labFeatures               OrganizationLabFeature[]
-  labUsageEvents            LabUsageEvent[]
-  meetingIntelligenceJobs   MeetingIntelligenceJob[]
-  meetingTranscripts        MeetingTranscript[]
-  meetingMinutesDrafts      MeetingMinutesDraft[]
+  members                     OrgMember[]
+  campaigns                   Campaign[]
+  events                      Event[]
+  meetings                    Meeting[]
+  expenditures                Expenditure[]
+  categories                  Category[]
+  settings                    OrgSettings?
+  paymentLinks                PaymentLink[]
+  duesAccounts                DuesAccount[]
+  duesCharges                 DuesCharge[]
+  duesPayments                DuesPayment[]
+  duesAdjustments             DuesAdjustment[]
+  paymentMethodConfigs        PaymentMethodConfig[]
+  contributions               Contribution[]
+  contributionReceipts        ContributionReceipt[]
+  communicationLogs           CommunicationLog[]
+  communicationCampaigns      CommunicationCampaign[]
+  communicationRecipients     CommunicationRecipient[]
+  paymentImportBatches        PaymentImportBatch[]
+  paymentImportItems          PaymentImportItem[]
+  attendanceRecords           AttendanceRecord[]
+  meetingAttendanceSessions   MeetingAttendanceSession[]
+  memberTimelineEvents        MemberTimelineEvent[]
+  reportExports               ReportExport[]
+  emailReminderLogs           EmailReminderLog[]
+  attachments                 Attachment[]
+  memberInvites               MemberInvite[]
+  mobileDeviceTokens          MobileDeviceToken[]
+  paymentReports              PaymentReport[]
+  rolePermissionSets          OrgRolePermissionSet[]
+  smsMessages                 SmsMessage[]
+  smsSettings                 OrganizationSmsSettings?
+  conversations               Conversation[]
+  conversationParticipants    ConversationParticipant[]
+  messages                    Message[]
+  labFeatures                 OrganizationLabFeature[]
+  labUsageEvents              LabUsageEvent[]
+  meetingIntelligenceJobs     MeetingIntelligenceJob[]
+  meetingTranscripts          MeetingTranscript[]
+  meetingMinutesDrafts        MeetingMinutesDraft[]
+  meetingIntelligenceFeedback MeetingIntelligenceFeedback[]
 
   @@index([slug])
   @@index([status])
@@ -526,11 +527,12 @@ model User {
   labFeaturesEnabled  OrganizationLabFeature[] @relation("LabFeatureEnabledBy")
   labFeaturesDisabled OrganizationLabFeature[] @relation("LabFeatureDisabledBy")
 
-  meetingIntelligenceJobsUploaded         MeetingIntelligenceJob[] @relation("MeetingIntelligenceJobUploadedBy")
-  meetingIntelligenceJobsConsentConfirmed MeetingIntelligenceJob[] @relation("MeetingIntelligenceJobConsentConfirmedBy")
-  meetingMinutesDraftsEdited              MeetingMinutesDraft[]    @relation("MeetingMinutesDraftLastEditedBy")
-  meetingMinutesDraftsApproved            MeetingMinutesDraft[]    @relation("MeetingMinutesDraftApprovedBy")
-  meetingMinutesDraftsRejected            MeetingMinutesDraft[]    @relation("MeetingMinutesDraftRejectedBy")
+  meetingIntelligenceJobsUploaded         MeetingIntelligenceJob[]      @relation("MeetingIntelligenceJobUploadedBy")
+  meetingIntelligenceJobsConsentConfirmed MeetingIntelligenceJob[]      @relation("MeetingIntelligenceJobConsentConfirmedBy")
+  meetingMinutesDraftsEdited              MeetingMinutesDraft[]         @relation("MeetingMinutesDraftLastEditedBy")
+  meetingMinutesDraftsApproved            MeetingMinutesDraft[]         @relation("MeetingMinutesDraftApprovedBy")
+  meetingMinutesDraftsRejected            MeetingMinutesDraft[]         @relation("MeetingMinutesDraftRejectedBy")
+  meetingIntelligenceFeedbackSubmitted    MeetingIntelligenceFeedback[] @relation("MeetingIntelligenceFeedbackSubmittedBy")
 
   @@index([email])
 }
@@ -1825,12 +1827,13 @@ model MeetingIntelligenceJob {
   createdAt                DateTime                  @default(now())
   updatedAt                DateTime                  @updatedAt
 
-  organization       Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  meeting            Meeting               @relation(fields: [meetingId], references: [id], onDelete: Cascade)
-  uploadedBy         User                  @relation("MeetingIntelligenceJobUploadedBy", fields: [uploadedByUserId], references: [id])
-  consentConfirmedBy User?                 @relation("MeetingIntelligenceJobConsentConfirmedBy", fields: [consentConfirmedByUserId], references: [id], onDelete: SetNull)
+  organization       Organization                  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  meeting            Meeting                       @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  uploadedBy         User                          @relation("MeetingIntelligenceJobUploadedBy", fields: [uploadedByUserId], references: [id])
+  consentConfirmedBy User?                         @relation("MeetingIntelligenceJobConsentConfirmedBy", fields: [consentConfirmedByUserId], references: [id], onDelete: SetNull)
   transcript         MeetingTranscript?
   minutesDrafts      MeetingMinutesDraft[]
+  feedback           MeetingIntelligenceFeedback[]
 
   @@index([organizationId])
   @@index([meetingId])
@@ -1912,6 +1915,42 @@ model MeetingMinutesDraft {
   @@unique([jobId, version])
   @@index([organizationId])
   @@index([meetingId])
+}
+
+/// Internal APH pilot feedback tied to one Meeting Intelligence job, captured
+/// from the person who reviewed/approved it — not a general customer-feedback
+/// platform. One row per (job, submitter): a second submission from the same
+/// user for the same job overwrites their own prior rating via upsert rather
+/// than creating a duplicate. Read only by platform admins (aggregated, on
+/// the Operations Center pilot dashboard) and by the submitting organization
+/// itself — never surfaced to any other tenant. `comments` is free text about
+/// the *tool's* output quality, not meeting content, so it is not treated as
+/// transcript-sensitive, but is still organization-scoped like every other
+/// row in this feature. All FKs Restrict, matching MeetingTranscript/
+/// MeetingMinutesDraft's "official record" cascade-protection rationale above.
+model MeetingIntelligenceFeedback {
+  id                         String   @id @default(cuid())
+  organizationId             String
+  jobId                      String
+  submittedByUserId          String
+  overallRating              Int
+  transcriptionQualityRating Int?
+  speakerLabelQualityRating  Int?
+  minutesAccuracyRating      Int?
+  timeSavedMinutes           Int?
+  correctionsRequired        Boolean?
+  issueCategory              String?
+  comments                   String?
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+
+  organization Organization           @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  job          MeetingIntelligenceJob @relation(fields: [jobId], references: [id], onDelete: Restrict)
+  submittedBy  User                   @relation("MeetingIntelligenceFeedbackSubmittedBy", fields: [submittedByUserId], references: [id])
+
+  @@unique([jobId, submittedByUserId])
+  @@index([organizationId])
+  @@index([jobId])
 }
 
 /// QR check-in session/window for a Meeting. Does not store attendance rows

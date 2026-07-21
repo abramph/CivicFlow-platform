@@ -6,8 +6,11 @@ import { StatusPill } from "@/components/admin/OperationsUI";
 import { getMeetingIntelligencePageGate } from "@/lib/labs/meeting-intelligence/page-gate";
 import { InternalPilotBanner } from "@/components/labs/meeting-intelligence/InternalPilotBanner";
 import { JobActions } from "@/components/labs/meeting-intelligence/JobActions";
+import { FeedbackForm } from "@/components/labs/meeting-intelligence/FeedbackForm";
 import { FAILURE_HANDLING, type MeetingIntelligenceStage } from "@/lib/labs/meeting-intelligence/state-machine";
 import { formatDateTime } from "@/lib/formatting";
+
+const FEEDBACK_ELIGIBLE_STAGES = new Set(["DRAFT_READY", "IN_REVIEW", "APPROVED", "FAILED"]);
 
 const STAGE_LABELS: Record<string, string> = {
   CREATED: "Waiting for upload",
@@ -27,7 +30,7 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 export default async function MeetingIntelligenceJobPage({ params }: { params: Promise<{ jobId: string }> }) {
-  const { organizationId, access } = await getMeetingIntelligencePageGate("meetingIntelligence:read");
+  const { organizationId, access, can } = await getMeetingIntelligencePageGate("meetingIntelligence:read");
   const { jobId } = await params;
 
   if (!access.available) {
@@ -87,6 +90,12 @@ export default async function MeetingIntelligenceJobPage({ params }: { params: P
               </Link>
             ) : null}
           </div>
+        </SectionCard>
+      ) : null}
+
+      {FEEDBACK_ELIGIBLE_STAGES.has(job.status) && can("meetingIntelligence:review") ? (
+        <SectionCard title="Pilot feedback" description="Internal pilot feedback about this job's output — helps decide what to improve next.">
+          <FeedbackForm jobId={job.id} />
         </SectionCard>
       ) : null}
     </main>

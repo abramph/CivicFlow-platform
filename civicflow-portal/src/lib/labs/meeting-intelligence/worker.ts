@@ -38,7 +38,7 @@ const BATCH_LIMIT = 25;
 // a deploy restart) — the claim is treated as abandoned and becomes
 // reclaimable. Well above the AssemblyAI submit call's own realistic
 // duration so a merely-slow-but-alive worker is never preempted.
-const CLAIM_STALE_AFTER_MS = 10 * 60_000;
+export const CLAIM_STALE_AFTER_MS = 10 * 60_000;
 
 /**
  * Atomically claims a QUEUED job for submission — a conditional UPDATE

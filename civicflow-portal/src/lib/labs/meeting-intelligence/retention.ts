@@ -20,7 +20,7 @@ import { isTerminalStage } from "./state-machine";
  * under the worker mid-processing.
  */
 
-const SETTLED_STAGES = ["DRAFT_READY", "IN_REVIEW", "APPROVED", "FAILED", "CANCELLED"] as const;
+export const SETTLED_STAGES = ["DRAFT_READY", "IN_REVIEW", "APPROVED", "FAILED", "CANCELLED"] as const;
 
 export async function runMeetingIntelligenceRetentionCleanup(limit = 100): Promise<{ scanned: number; deleted: number; failed: number }> {
   const cutoff = new Date();

@@ -115,6 +115,9 @@ export default async function PlatformOverviewPage() {
           <Link href="/admin/platform/health">
             <StatCard label="Integration health" value="View status →" helper="Live checks on the System Health page" />
           </Link>
+          <Link href="/admin/platform/meeting-intelligence">
+            <StatCard label="Meeting Intelligence pilot" value="View status →" helper="Enrollment, provider diagnostics, worker/job status, retry controls" />
+          </Link>
         </div>
       </SectionCard>
 
