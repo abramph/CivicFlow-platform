@@ -5,6 +5,7 @@ import { ValidationError, jsonError } from "@/lib/validation";
 import { PlanFeatureError, PlanLimitError } from "@/lib/plan-gate";
 import { LabFeatureError } from "@/lib/labs/access";
 import { MeetingIntelligenceError } from "@/lib/labs/meeting-intelligence/errors";
+import { PtaError } from "@/lib/labs/pta/errors";
 
 export async function withApiErrorHandling(
   fn: () => Promise<Response>
@@ -39,6 +40,9 @@ export async function withApiErrorHandling(
           { ok: false, error: error.message, code: error.code, retryable: error.retryable },
           { status: error.status }
         );
+      }
+      if (error instanceof PtaError) {
+        return Response.json({ ok: false, error: error.message, code: error.code }, { status: error.status });
       }
       if (error instanceof MobileAuthError || error instanceof MobileForbiddenError) {
         return jsonError(error.message, error.status);

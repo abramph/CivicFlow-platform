@@ -181,12 +181,21 @@ describe("entitlement requirement (requiresEntitlement features)", () => {
 });
 
 describe("listOrganizationLabAccess — organization-facing snapshot", () => {
-  it("excludes internal-only features entirely for an ordinary (non-billing-exempt) organization", async () => {
+  it("excludes internal-only features entirely for an ordinary (non-billing-exempt) organization, but still lists a non-internal-only feature (unavailable, for the right reason)", async () => {
     findUniqueOrganization.mockResolvedValue({ billingExempt: false, status: "active", plan: "essential", trialEndsAt: null });
     const { listOrganizationLabAccess } = await import("../access");
     const results = await listOrganizationLabAccess("org-1");
-    // Every registered feature today is internalOnly, so an ordinary org sees none of them.
-    expect(results).toHaveLength(0);
+    // Every internal-only feature (meetingIntelligence, aiAnnouncements, etc.)
+    // is excluded entirely — an ordinary org never even sees them listed.
+    expect(results.every((r) => r.featureKey !== "meetingIntelligence")).toBe(true);
+    // ptaVertical is the one registered feature that is NOT internal-only
+    // (see registry.ts's doc comment — it's a genuine future-customer
+    // vertical, not an APH-only tool), so it IS listed even for a
+    // non-billing-exempt org — just correctly marked unavailable, since this
+    // org's "essential" plan doesn't satisfy ptaVertical's requiresEntitlement.
+    const pta = results.find((r) => r.featureKey === "ptaVertical");
+    expect(pta).toBeDefined();
+    expect(pta?.available).toBe(false);
   });
 
   it("includes internal-only features for a billing-exempt organization", async () => {

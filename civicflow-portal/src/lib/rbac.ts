@@ -120,7 +120,39 @@ export const PERMISSIONS = {
   MEETING_INTELLIGENCE_REVIEW:  "meetingIntelligence:review",
   MEETING_INTELLIGENCE_APPROVE: "meetingIntelligence:approve",
   MEETING_INTELLIGENCE_DELETE:  "meetingIntelligence:delete",
+
+  // Unestra for PTA (Labs, "ptaVertical" — see docs/pta-labs-mvp.md). Gated
+  // additionally by requireOrganizationLabFeature() — holding one of these
+  // permissions is necessary but never sufficient by itself. Kept granular
+  // (directory vs. households vs. students vs. dues, etc.) so an org can map
+  // PTA officer titles (President, Treasurer, ...) onto different bundles via
+  // the existing OrgRolePermissionSet override system rather than needing new
+  // Role enum values.
+  PTA_DIRECTORY_READ:     "pta:directory:read",
+  PTA_HOUSEHOLDS_MANAGE:  "pta:households:manage",
+  PTA_STUDENTS_MANAGE:    "pta:students:manage",
+  PTA_DUES_MANAGE:        "pta:dues:manage",
+  PTA_EVENTS_MANAGE:      "pta:events:manage",
+  PTA_VOLUNTEERS_MANAGE:  "pta:volunteers:manage",
+  PTA_COMMITTEES_MANAGE:  "pta:committees:manage",
+  PTA_FUNDRAISING_MANAGE: "pta:fundraising:manage",
+  PTA_ANNOUNCEMENTS_PUBLISH: "pta:announcements:publish",
+  PTA_DOCUMENTS_MANAGE:   "pta:documents:manage",
+  PTA_MINUTES_REVIEW:     "pta:minutes:review",
+  PTA_MINUTES_APPROVE:    "pta:minutes:approve",
+  PTA_ANALYTICS_READ:     "pta:analytics:read",
 } as const;
+
+// Parent/household-adult self-service (view own household, RSVP, pay own
+// dues, claim a volunteer slot) is deliberately NOT modeled as a Permission
+// here — it goes through a dedicated guard scoped to the caller's own linked
+// PtaHouseholdAdult.userId (see src/lib/labs/pta/household-guard.ts),
+// mirroring the existing mobile/member-portal pattern documented on
+// ROLE_PERMISSIONS.MEMBER below: "All mobile/member data access goes through
+// dedicated ... guards scoped to the caller's own linked ... record, never
+// through canDo()/requirePermission()." A MEMBER-role user must continue to
+// hold zero entries in ROLE_PERMISSIONS — self-service PTA access is
+// authorized by household linkage, not by any permission grant.
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
 
@@ -172,6 +204,19 @@ const ORG_OWNER_PERMISSIONS: Permission[] = [
   PERMISSIONS.MEETING_INTELLIGENCE_REVIEW,
   PERMISSIONS.MEETING_INTELLIGENCE_APPROVE,
   PERMISSIONS.MEETING_INTELLIGENCE_DELETE,
+  PERMISSIONS.PTA_DIRECTORY_READ,
+  PERMISSIONS.PTA_HOUSEHOLDS_MANAGE,
+  PERMISSIONS.PTA_STUDENTS_MANAGE,
+  PERMISSIONS.PTA_DUES_MANAGE,
+  PERMISSIONS.PTA_EVENTS_MANAGE,
+  PERMISSIONS.PTA_VOLUNTEERS_MANAGE,
+  PERMISSIONS.PTA_COMMITTEES_MANAGE,
+  PERMISSIONS.PTA_FUNDRAISING_MANAGE,
+  PERMISSIONS.PTA_ANNOUNCEMENTS_PUBLISH,
+  PERMISSIONS.PTA_DOCUMENTS_MANAGE,
+  PERMISSIONS.PTA_MINUTES_REVIEW,
+  PERMISSIONS.PTA_MINUTES_APPROVE,
+  PERMISSIONS.PTA_ANALYTICS_READ,
 ];
 
 const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
@@ -219,8 +264,24 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.MEETING_INTELLIGENCE_REVIEW,
     PERMISSIONS.MEETING_INTELLIGENCE_APPROVE,
     PERMISSIONS.MEETING_INTELLIGENCE_DELETE,
+    PERMISSIONS.PTA_DIRECTORY_READ,
+    PERMISSIONS.PTA_HOUSEHOLDS_MANAGE,
+    PERMISSIONS.PTA_STUDENTS_MANAGE,
+    PERMISSIONS.PTA_DUES_MANAGE,
+    PERMISSIONS.PTA_EVENTS_MANAGE,
+    PERMISSIONS.PTA_VOLUNTEERS_MANAGE,
+    PERMISSIONS.PTA_COMMITTEES_MANAGE,
+    PERMISSIONS.PTA_FUNDRAISING_MANAGE,
+    PERMISSIONS.PTA_ANNOUNCEMENTS_PUBLISH,
+    PERMISSIONS.PTA_DOCUMENTS_MANAGE,
+    PERMISSIONS.PTA_MINUTES_REVIEW,
+    PERMISSIONS.PTA_MINUTES_APPROVE,
+    PERMISSIONS.PTA_ANALYTICS_READ,
   ],
 
+  // Maps naturally onto "Treasurer" via OrgRolePermissionSet if an org wants
+  // to trim this down further — dues/analytics is the natural FINANCE-shaped
+  // subset of the PTA bundle.
   FINANCE: [
     PERMISSIONS.MEMBERS_READ,
     PERMISSIONS.DUES_READ,
@@ -242,8 +303,16 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.MESSAGES_WRITE,
     PERMISSIONS.AUDIT_LOGS_READ,
     PERMISSIONS.SMS_CONSENT_READ,
+    PERMISSIONS.PTA_DIRECTORY_READ,
+    PERMISSIONS.PTA_HOUSEHOLDS_MANAGE,
+    PERMISSIONS.PTA_DUES_MANAGE,
+    PERMISSIONS.PTA_FUNDRAISING_MANAGE,
+    PERMISSIONS.PTA_ANALYTICS_READ,
   ],
 
+  // Maps naturally onto "Membership Chair" / "Volunteer Coordinator" /
+  // "Secretary" via OrgRolePermissionSet — the operational (non-financial)
+  // subset of the PTA bundle.
   STAFF: [
     PERMISSIONS.MEMBERS_READ,
     PERMISSIONS.MEMBERS_WRITE,
@@ -262,8 +331,19 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.REPORTS_READ,
     PERMISSIONS.MESSAGES_READ,
     PERMISSIONS.MESSAGES_WRITE,
+    PERMISSIONS.PTA_DIRECTORY_READ,
+    PERMISSIONS.PTA_HOUSEHOLDS_MANAGE,
+    PERMISSIONS.PTA_STUDENTS_MANAGE,
+    PERMISSIONS.PTA_EVENTS_MANAGE,
+    PERMISSIONS.PTA_VOLUNTEERS_MANAGE,
+    PERMISSIONS.PTA_COMMITTEES_MANAGE,
+    PERMISSIONS.PTA_ANNOUNCEMENTS_PUBLISH,
+    PERMISSIONS.PTA_DOCUMENTS_MANAGE,
+    PERMISSIONS.PTA_MINUTES_REVIEW,
   ],
 
+  // Maps onto "General Member" (an officer viewing without editing rights) —
+  // directory + analytics, read-only, no minutes-approval authority.
   READ_ONLY: [
     PERMISSIONS.MEMBERS_READ,
     PERMISSIONS.DUES_READ,
@@ -279,6 +359,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.REMINDERS_READ,
     PERMISSIONS.MESSAGES_READ,
     PERMISSIONS.AUDIT_LOGS_READ,
+    PERMISSIONS.PTA_DIRECTORY_READ,
+    PERMISSIONS.PTA_ANALYTICS_READ,
   ],
 
   // Members never get staff permissions — a MEMBER role must never see other
