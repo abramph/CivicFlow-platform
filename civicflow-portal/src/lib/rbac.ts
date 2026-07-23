@@ -146,7 +146,7 @@ export const PERMISSIONS = {
 // Parent/household-adult self-service (view own household, RSVP, pay own
 // dues, claim a volunteer slot) is deliberately NOT modeled as a Permission
 // here — it goes through a dedicated guard scoped to the caller's own linked
-// PtaHouseholdAdult.userId (see src/lib/labs/pta/household-guard.ts),
+// PtaHouseholdAdult.userId (see src/lib/labs/pta/guard.ts's requirePtaHouseholdSelfAccess()),
 // mirroring the existing mobile/member-portal pattern documented on
 // ROLE_PERMISSIONS.MEMBER below: "All mobile/member data access goes through
 // dedicated ... guards scoped to the caller's own linked ... record, never

@@ -253,13 +253,13 @@ CREATE INDEX "PtaHousehold_organizationId_schoolYear_idx" ON "PtaHousehold"("org
 CREATE UNIQUE INDEX "PtaHousehold_organizationId_displayName_schoolYear_key" ON "PtaHousehold"("organizationId", "displayName", "schoolYear");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "PtaHouseholdAdult_userId_key" ON "PtaHouseholdAdult"("userId");
-
--- CreateIndex
 CREATE INDEX "PtaHouseholdAdult_organizationId_idx" ON "PtaHouseholdAdult"("organizationId");
 
 -- CreateIndex
 CREATE INDEX "PtaHouseholdAdult_householdId_idx" ON "PtaHouseholdAdult"("householdId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "PtaHouseholdAdult_organizationId_userId_key" ON "PtaHouseholdAdult"("organizationId", "userId");
 
 -- CreateIndex
 CREATE INDEX "PtaStudent_organizationId_idx" ON "PtaStudent"("organizationId");

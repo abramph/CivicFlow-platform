@@ -30,6 +30,14 @@ export async function getPtaPageGate(permission: Permission) {
  * actually being a linked PtaHouseholdAdult in the active organization, not
  * from any role/permission grant. Mirrors the existing mobile-portal
  * convention of scoping strictly to the caller's own linked record.
+ *
+ * Requires the linked household's status to be ACTIVE — caught during the
+ * post-implementation hardening review: without this check, a parent whose
+ * household had been deactivated (e.g. left the PTA, membership lapsed)
+ * could still claim volunteer slots, RSVP, and view household data through
+ * every self-service route, since none of those routes re-checked household
+ * status themselves. Centralizing the check here (rather than in every
+ * caller) is what makes it actually enforced everywhere at once.
  */
 export async function requirePtaHouseholdSelfAccess() {
   const { organizationId, session } = await requireOrganization();
@@ -37,9 +45,13 @@ export async function requirePtaHouseholdSelfAccess() {
 
   const adult = await prisma.ptaHouseholdAdult.findFirst({
     where: { organizationId, userId: session.userId },
+    include: { household: { select: { id: true, status: true } } },
   });
   if (!adult) {
     throw new PtaError("PTA_NOT_A_HOUSEHOLD_MEMBER", "Your account is not linked to a PTA household in this organization.");
+  }
+  if (adult.household.status !== "ACTIVE") {
+    throw new PtaError("PTA_HOUSEHOLD_INACTIVE", "Your household's PTA membership is not currently active.");
   }
 
   return { organizationId, session, adult };

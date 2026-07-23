@@ -12,8 +12,20 @@ const findFirstOpportunity = vi.fn();
 const findFirstEvent = vi.fn();
 const createOpportunity = vi.fn();
 
+// claimPtaVolunteerSlot/cancelPtaVolunteerSignup wrap their writes in
+// prisma.$transaction(async (tx) => ...) — the mocked $transaction just
+// invokes the callback with the same mocked model methods, so existing
+// assertions against updateManySlot/upsertSignup/updateSignup keep working
+// whether the real code calls them via `prisma.X` or `tx.X`.
+const txClient = {
+  ptaVolunteerSlot: { updateMany: (...a: unknown[]) => updateManySlot(...a) },
+  ptaVolunteerSignup: { upsert: (...a: unknown[]) => upsertSignup(...a), update: (...a: unknown[]) => updateSignup(...a) },
+};
+const transaction = vi.fn((fn: (tx: typeof txClient) => unknown) => fn(txClient));
+
 vi.mock("@/lib/prisma", () => ({
   prisma: {
+    $transaction: (...a: Parameters<typeof transaction>) => transaction(...a),
     ptaVolunteerSlot: { findFirst: (...a: unknown[]) => findFirstSlot(...a), updateMany: (...a: unknown[]) => updateManySlot(...a), update: (...a: unknown[]) => updateSlot(...a) },
     ptaHouseholdAdult: { findFirst: (...a: unknown[]) => findFirstAdult(...a) },
     ptaVolunteerSignup: {

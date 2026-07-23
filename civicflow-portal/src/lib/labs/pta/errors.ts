@@ -21,6 +21,7 @@ export const PTA_ERROR_CODES = [
   "PTA_VALIDATION_ERROR",
   "PTA_NOT_A_HOUSEHOLD_MEMBER",
   "PTA_HOUSEHOLD_HAS_PAYMENT_HISTORY",
+  "PTA_HOUSEHOLD_INACTIVE",
 ] as const;
 
 export type PtaErrorCode = (typeof PTA_ERROR_CODES)[number];
@@ -43,6 +44,7 @@ const STATUS_FOR_CODE: Record<PtaErrorCode, number> = {
   PTA_VALIDATION_ERROR: 400,
   PTA_NOT_A_HOUSEHOLD_MEMBER: 403,
   PTA_HOUSEHOLD_HAS_PAYMENT_HISTORY: 409,
+  PTA_HOUSEHOLD_INACTIVE: 403,
 };
 
 export class PtaError extends Error {

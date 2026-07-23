@@ -25,7 +25,6 @@ export interface PtaDashboardMetrics {
 export async function getPtaDashboardMetrics(organizationId: string, schoolYear: string): Promise<PtaDashboardMetrics> {
   const [
     activeHouseholds,
-    profile,
     paidHouseholds,
     unpaidHouseholds,
     upcomingEventsCount,
@@ -38,7 +37,6 @@ export async function getPtaDashboardMetrics(organizationId: string, schoolYear:
     recentlyApprovedMinutesCount,
   ] = await Promise.all([
     prisma.ptaHousehold.count({ where: { organizationId, schoolYear, status: "ACTIVE" } }),
-    prisma.ptaProfile.findUnique({ where: { organizationId } }),
     prisma.ptaHousehold.count({ where: { organizationId, schoolYear, status: "ACTIVE", orgMember: { duesCharges: { some: { organizationId, status: "PAID" } } } } }),
     prisma.ptaHousehold.count({ where: { organizationId, schoolYear, status: "ACTIVE", orgMember: { duesCharges: { some: { organizationId, status: { in: ["PENDING", "PARTIAL"] } } } } } }),
     prisma.event.count({ where: { organizationId, startAt: { gte: new Date() } } }),
@@ -56,7 +54,8 @@ export async function getPtaDashboardMetrics(organizationId: string, schoolYear:
 
   return {
     activeHouseholds,
-    membershipGoal: profile?.defaultDuesAmountCents ? null : null, // no explicit membership-goal field in PtaProfile; reserved for a future setting
+    // No explicit membership-goal field exists on PtaProfile yet — reserved for a future setting.
+    membershipGoal: null,
     paidHouseholds,
     unpaidHouseholds,
     upcomingEventsCount,

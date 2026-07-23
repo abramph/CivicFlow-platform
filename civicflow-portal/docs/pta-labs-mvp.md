@@ -1,5 +1,9 @@
 # Unestra for PTA — Labs MVP
 
+## Hardening-review status (2026-07-22)
+
+This MVP went through an independent hardening review after initial implementation: a fresh adversarial code-review pass plus a hands-on smoke test executed directly against a real disposable Postgres instance (not just mocked unit tests). **Two real, critical defects were found and fixed**, and one significant usability gap (most officer-facing management functions had no HTTP route at all) was closed. See "Hardening-review findings" below for the full account, including what was found, what was fixed, and what remains an intentionally accepted limitation.
+
 ## Product goal
 
 Validate whether Unestra's existing multi-tenant association platform can support a parent-teacher association (PTA/PTO) — household/family membership, school-year-scoped students and classrooms, volunteer signups, dues, events, fundraising, and communications — without building a separate application or weakening tenant isolation. This is a **product-validation experiment**, not a full school-management system, and it is not a student information system.
@@ -31,7 +35,33 @@ Enable/disable via the existing Operations Center (`/admin/platform/labs`) — n
 | Audit | `createAuditEvent()` — unchanged |
 | API error handling | `withApiErrorHandling()`, extended with one new `PtaError` branch (mirrors `MeetingIntelligenceError`) |
 
-## New PTA-specific models (additive migration `20260722213428_add_pta_labs_mvp`)
+## Hardening-review findings
+
+An independent adversarial code review plus a hands-on smoke test (executed directly against a real disposable Postgres instance, exercising every lib function's real code path — not a UI click-through, but not mocked either) were run after the initial implementation. Results:
+
+### Critical defects found and fixed
+
+1. **`PtaHouseholdAdult.userId` was globally unique, not per-organization.** The original migration created `CREATE UNIQUE INDEX ... ON "PtaHouseholdAdult"("userId")` — a bare global constraint. This made it **impossible for the same user to ever be a household adult in a second PTA organization**, directly breaking the explicit multi-org-parent requirement. Caught by the hands-on smoke test (a real `P2002` constraint violation, not a mock), not by any of the original mocked unit tests — mocked Prisma clients don't enforce real constraints, so a wrong constraint *scope* is invisible to them. **Fixed**: the migration was regenerated (never applied anywhere persistent, so safe to amend) with `@@unique([organizationId, userId])`. A permanent real-database regression test now exists specifically for this (`household-adult-constraint.integration.test.ts`), proving both that the same user can join two organizations and that a duplicate within one organization is still correctly rejected.
+2. **`requirePtaHouseholdSelfAccess()` never checked household status.** A parent linked to a household an officer had deactivated (e.g., a family that left the PTA) retained full self-service access — claiming volunteer slots, RSVPing, viewing household data — indefinitely, since no self-service route re-checked `PtaHousehold.status`. **Fixed**: the guard now includes the household's status in its own query and throws `PTA_HOUSEHOLD_INACTIVE` (403) for anything other than `ACTIVE`, centralizing the check so every self-service route inherits it at once. Verified by both a mocked unit test and the hands-on smoke test against a real deactivated household.
+3. **`claimPtaVolunteerSlot()`/`cancelPtaVolunteerSignup()` were not transactional.** The atomic `claimedCount` update and the signup row write were two separate, non-transactional Prisma calls; a failure between them could permanently inflate/corrupt `claimedCount` with no matching signup, or leave a signup cancelled while the slot still showed it as occupied. **Fixed**: both are now wrapped in `prisma.$transaction(async (tx) => ...)`. Re-verified under real concurrent load after the fix — 10 concurrent claims against a slot with capacity 3 still resulted in exactly 3 successes (`volunteers-concurrency.integration.test.ts`).
+
+### Significant usability gap found and closed
+
+4. **Most officer-facing management functions had zero HTTP route.** `addPtaHouseholdAdult`, `addPtaStudent`, `deactivatePtaStudent`, the entire `committees.ts` module, the entire `academic.ts` module (grades/teachers/classrooms/enrollment), `addPtaVolunteerSlot`/`completePtaVolunteerSignup`, and the entire `dues.ts` module were implemented and unit-tested but reachable **only from tests and the seed script** (which bypasses them with raw Prisma writes) — not from any API route. A real officer using the deployed app could create an empty household shell via `/labs/pta/settings` and `/api/labs/pta/households`, but had no way, through the app itself, to add an adult or student to it, create a committee, set up grades/classrooms, add a volunteer slot, or create/record/waive a dues charge. **Fixed**: 18 new API routes were added, wiring every one of these functions through the existing `requirePtaAccess()`/`requirePtaHouseholdSelfAccess()` guards (see "API surface" below) — no new business logic, purely routing to already-tested functions.
+
+### Confirmed non-issues (reviewed, no defect found)
+
+- Household billing-identity bridge (`PtaHousehold.orgMemberId → OrgMember`), dues cross-tenant scoping, communications-targeting cross-tenant scoping, and audit/log privacy (no student/household names in any `createAuditEvent` call or `console.*` statement) were all independently re-verified and found correct.
+- No existing Group/Committee model was available for `PtaCommittee` to reuse instead (confirmed via schema search) — the new table is genuinely necessary.
+- RSVP (`PtaEventRsvp`) never writes to, or is confused with, `AttendanceRecord` — verified by test; they remain two deliberately separate, non-reconciled signals for the same event (see "Known limitations").
+
+### Accepted, documented limitations (not fixed — explicitly out of this PR's scope)
+
+- **No capacity field exists on `Event` or `PtaEventRsvp` at all.** The original task's "optional capacity" for events was never implemented — there is nothing to overbook, but also nothing to enforce if an officer wants a cap. This is different from volunteer slots (which do have real, race-safe capacity enforcement).
+- **Hard household delete (`deletePtaHousehold`) is intentionally not exposed via any HTTP route** — only `deactivatePtaHousehold` (soft) is reachable from the API. This is a deliberate safety choice (accidental hard deletes are a worse failure mode than an officer occasionally needing raw database access for the rare zero-history household), not an oversight.
+- Household merge, household split, and automatic membership-model (individual ↔ household) conversion are **not supported** by any function, and deliberately so — see "Household lifecycle" below.
+
+## New PTA-specific models (additive migration `20260722235539_add_pta_labs_mvp`)
 
 `PtaProfile`, `PtaHousehold`, `PtaHouseholdAdult`, `PtaStudent`, `PtaGrade`, `PtaTeacher`, `PtaClassroom`, `PtaStudentEnrollment`, `PtaVolunteerOpportunity`, `PtaVolunteerSlot`, `PtaVolunteerSignup`, `PtaCommittee`, `PtaCommitteeMember`, `PtaEventRsvp` — 14 tables, 9 enums. Every model carries `organizationId` directly.
 
@@ -49,7 +79,7 @@ Deliberately minimal: `displayName`, `status` (ACTIVE/INACTIVE) only. Grade/clas
 
 ### Volunteer overbooking prevention
 
-`PtaVolunteerSlot.claimedCount` is only ever changed via an atomic conditional `UPDATE ... WHERE claimedCount < capacity` (`claimPtaVolunteerSlot()`) — the same pattern Meeting Intelligence's worker uses for its job-claim mechanism. **Proven, not just claimed**: `volunteers-concurrency.integration.test.ts` fires 10 real concurrent claims (via `Promise.allSettled`, against a real disposable Postgres instance, not mocked) at a slot with capacity 3 and asserts exactly 3 succeed — see "Tests" below.
+`PtaVolunteerSlot.claimedCount` is only ever changed via an atomic conditional `UPDATE ... WHERE claimedCount < capacity` (`claimPtaVolunteerSlot()`) — the same pattern Meeting Intelligence's worker uses for its job-claim mechanism. The claim and its signup-row write (and the mirror-image cancellation) are wrapped in a single `prisma.$transaction(...)` — added during the hardening review after the two were found to be separate, non-transactional calls with a real partial-failure window (see "Hardening-review findings"). **Proven, not just claimed**: `volunteers-concurrency.integration.test.ts` fires 10 real concurrent claims (via `Promise.allSettled`, against a real disposable Postgres instance, not mocked) at a slot with capacity 3 and asserts exactly 3 succeed — re-run and re-verified after the transaction fix, same result. This test is skipped by default in a normal `vitest run` (it requires a live database); run it explicitly per the command in its own file header when validating a change to this code path.
 
 ## Permissions (RBAC)
 
@@ -64,7 +94,14 @@ Thirteen new granular permissions in `src/lib/rbac.ts`, namespaced `pta:*`: `dir
 - Every PTA lib function takes `organizationId` as an explicit required parameter and scopes every Prisma query by it (mirrors `meeting-intelligence/jobs.ts`'s convention) — verified by dedicated cross-tenant tests for households, students, classrooms, volunteer slots, committees, and event RSVPs.
 - A household adult never sees another household's data — the self-service guard resolves exactly one household per caller, and no route accepts a client-supplied household id for a self-service action (claim/cancel/RSVP all resolve the actor's own household/adult id server-side).
 - An officer's `pta:*` permissions are checked via the standard organization-scoped `requirePermission()` — they operate only within the officer's active organization, exactly like every other permission in this codebase.
-- Multi-organization: a parent belonging to two PTA organizations uses the existing `OrganizationMembership`/active-org-switching system unchanged — `requirePtaHouseholdSelfAccess()` always resolves the household for the *currently active* organization only, so switching orgs correctly changes which household (if any) is visible, with no leakage between them.
+- Multi-organization: a parent belonging to two PTA organizations uses the existing `OrganizationMembership`/active-org-switching system unchanged — `requirePtaHouseholdSelfAccess()` always resolves the household for the *currently active* organization only, so switching orgs correctly changes which household (if any) is visible, with no leakage between them. **This depends on `PtaHouseholdAdult.userId` being unique per-organization, not globally** — the original migration got this wrong (see "Hardening-review findings"); it is now `@@unique([organizationId, userId])` and covered by a dedicated real-database regression test.
+- A parent whose linked household has been deactivated (`status !== "ACTIVE"`) is blocked from every self-service action — `requirePtaHouseholdSelfAccess()` checks this centrally (added during the hardening review; see "Hardening-review findings").
+
+## Household lifecycle
+
+Supported: create household → add/remove adults → change primary/secondary contact → deactivate (soft) → hard-delete only if the household's billing-identity `OrgMember` has zero `DuesCharge` rows (verified by test on both the allowed and blocked path). Changing `PtaProfile.membershipModel` (individual/household/family) is an **organization-level display setting only** — verified by test that flipping it never mutates, deletes, or creates any existing `PtaHousehold` row as a side effect.
+
+**Not supported, deliberately**: merging two households, splitting one household into two, or automatically converting existing data when `membershipModel` changes. No function exists for any of these. This is enforced at the database level, not just by omission — `PtaHousehold.orgMemberId` is `@unique`, so even a manual attempt to point two households at the same billing identity fails with a real constraint violation (verified by test). If a real pilot needs household merge/split, that is new, carefully-scoped work for a future PR — implementing it now would risk silently corrupting dues history, which this MVP treats as sacrosanct.
 
 ## Payments and dues
 
@@ -86,7 +123,25 @@ Reuses `Campaign`/`Contribution`/`PaymentLink` unchanged — no new model, no ra
 
 ## Parent portal experience
 
-`/labs/pta/my-household` (view household/students, self-service only), `/labs/pta/volunteers` (browse + claim/cancel), and `GET /api/labs/pta/minutes` (approved minutes only — see below). Dues payment, contact updates, and committee-membership views are supported at the lib/API layer (`dues.ts`, `households.ts`, `committees.ts`) but do not yet have a dedicated parent-facing page in this MVP — see "Known limitations."
+`/labs/pta/my-household` (view household/students, self-service only), `/labs/pta/volunteers` (browse + claim/cancel), `GET /api/labs/pta/volunteers/my-commitments` (a parent's own past/present volunteer commitments), and `GET /api/labs/pta/minutes` (approved minutes only — see below). Dues payment and committee-membership views are supported at the lib/API layer (`dues.ts`, `committees.ts`) but still have no dedicated parent-facing **page** in this MVP — see "Known limitations." (Household adult/student management, committees, academic structure, and dues now all have real API routes as of the hardening pass — see "API surface" — but those routes are officer-facing, gated by `pta:*` permissions, not parent self-service.)
+
+## API surface
+
+All 26 API routes under `/api/labs/pta/*`, by area:
+
+| Area | Routes |
+|---|---|
+| Profile | `GET/PUT /profile` |
+| Households | `GET/POST /households`, `GET/PATCH/DELETE /households/[id]` (DELETE = deactivate, soft only — see "Hardening-review findings"), `POST /households/[id]/adults`, `DELETE /households/[id]/adults/[adultId]`, `POST /households/[id]/students`, `DELETE /households/[id]/students/[studentId]` (deactivate) |
+| Dues | `GET/POST /households/[id]/dues` (status / create charge), `POST /households/[id]/dues/[chargeId]/payments`, `POST /households/[id]/dues/[chargeId]/waive` |
+| Academic structure | `GET/POST /grades`, `GET/POST /teachers`, `GET/POST /classrooms`, `POST /students/[id]/enroll` |
+| Committees | `GET/POST /committees`, `GET/PATCH /committees/[id]` (set chair), `POST /committees/[id]/members`, `DELETE /committees/[id]/members/[adultId]` |
+| Volunteers | `GET/POST /volunteers/opportunities`, `POST /volunteers/opportunities/[id]/slots`, `POST /volunteers/slots/[id]/claim`, `POST /volunteers/slots/[id]/cancel`, `POST /volunteers/signups/[id]/complete`, `GET /volunteers/my-commitments` (self-service) |
+| Events | `POST /events/[id]/rsvp` (self-service) |
+| Minutes | `GET /minutes` (approved only, any enrolled member) |
+| Parent self-service | `GET /my-household` |
+
+Every officer route is gated by `requirePtaAccess(<pta:* permission>)`; every self-service route by `requirePtaHouseholdSelfAccess()`.
 
 ## Meeting and minutes behavior
 
@@ -129,16 +184,22 @@ See "Data minimization — PtaStudent" above for the explicit non-collection lis
 
 No real child, family, school, address, or payment information is used anywhere in this seed.
 
-## Smoke-test procedure
+## Smoke-test procedure and results
+
+**Methodology**: rather than a literal browser click-through (which would require constructing real NextAuth sessions for 3 personas), the hardening-review smoke test exercised every real lib function directly against a real disposable Postgres instance — seed the fictional org, then run 28 assertions covering enrollment, the full household lifecycle, parent self-access (including adversarial cases), RSVP, volunteer claim/cancel/cross-org denial, rollover, and communications-targeting cross-tenant safety. **Result: 28/28 passing** after the two critical fixes (before the fixes, 5 of 28 failed or confirmed a real gap — see "Hardening-review findings").
+
+Manual procedure for a human (or future browser-automation pass) to reproduce the UI-level experience:
 
 1. Run `npm run db:seed:pta-demo` against a local database.
-2. Confirm `ptaVertical` shows `ENABLED` for Pine Grove School PTA on `/admin/platform/labs`.
+2. Confirm `ptaVertical` shows `ENABLED` for Pine Grove School PTA on `/admin/platform/labs`, and confirm `meetingIntelligence` shows no enrollment row at all for that organization (PTA enrollment never implies it — verified by test).
 3. Log in as `president@pinegrovepta.example` — confirm `/labs/pta/dashboard` shows non-zero membership/volunteer/fundraising metrics and no student name anywhere on the page.
 4. Confirm `/labs/pta/households` lists all 5 fictional households with adult/student counts, no other organization's data.
-5. Log in as `member@pinegrovepta.example` (the seeded parent) — confirm `/labs/pta/my-household` shows only the Patel household, and confirm attempting to view another household id via a direct API call (`/api/labs/pta/households/<other-id>`) is denied (403/404, not the officer directory route since parents aren't gated by `pta:directory:read`).
-6. Claim and then cancel a volunteer slot as the parent account at `/labs/pta/volunteers`.
-7. Confirm `GET /api/labs/pta/minutes` returns the one seeded approved-minutes attachment.
-8. Disable `ptaVertical` for Pine Grove on `/admin/platform/labs` and confirm every PTA page/route now denies access immediately.
+5. Use the new API routes (`POST /api/labs/pta/households/[id]/adults`, `.../students`, `/api/labs/pta/committees`, `/api/labs/pta/grades`, `/api/labs/pta/households/[id]/dues`, etc.) to confirm an officer can actually build out a household/committee/academic structure/dues charge through the app, not just via direct database access.
+6. Log in as `member@pinegrovepta.example` (the seeded parent) — confirm `/labs/pta/my-household` shows only the Patel household, and confirm attempting to view another household id via a direct API call (`/api/labs/pta/households/<other-id>`) is denied.
+7. Claim and then cancel a volunteer slot as the parent account at `/labs/pta/volunteers`; confirm `GET /api/labs/pta/volunteers/my-commitments` reflects it.
+8. Confirm `GET /api/labs/pta/minutes` returns the one seeded approved-minutes attachment, and never a draft.
+9. Disable `ptaVertical` for Pine Grove on `/admin/platform/labs` and confirm every PTA page/route now denies access immediately; re-enable it and confirm all data (households, dues history, committees) is intact, unchanged.
+10. Confirm no production organization was touched at any point (the disposable database used for this entire smoke test is never the production database).
 
 ## School-year rollover
 
@@ -147,18 +208,23 @@ Create a new `PtaClassroom` row per grade for the new `schoolYear`, then call `e
 ## Dues workflow
 
 1. Officer configures `PtaProfile.defaultDuesAmountCents` and `currentSchoolYear` at `/labs/pta/settings`.
-2. Officer creates a household (`POST /api/labs/pta/households`) — this automatically creates the household's billing-identity `OrgMember`.
-3. Officer creates a dues charge for the household/school-year (`createPtaDuesCharge()`), or a future bulk-charge helper (not built in this MVP — see "Known limitations").
-4. Household pays via an existing `PaymentLink` (type `DUES`) or submits a `PaymentReport`, or an officer records a manual payment (`recordManualPtaDuesPayment()`), or waives it (`waivePtaDuesCharge()`).
+2. Officer creates a household (`POST /api/labs/pta/households`) — this automatically creates the household's billing-identity `OrgMember` — then adds adults (`POST .../adults`) and students (`POST .../students`).
+3. Officer creates a dues charge for the household/school-year (`POST /api/labs/pta/households/[id]/dues`) — one household at a time; a bulk-charge helper is not built in this MVP (see "Known limitations").
+4. Household pays via an existing `PaymentLink` (type `DUES`) or submits a `PaymentReport`, or an officer records a manual payment (`POST .../dues/[chargeId]/payments`), or waives it (`POST .../dues/[chargeId]/waive`).
 5. Dashboard reflects paid/unpaid counts in real time (`getPtaDashboardMetrics()`).
+6. There is still no parent-facing "view my balance / pay now" page — a parent's only way to see their own status today is asking an officer, or (for those with portal access) the generic `/payments`/`/payment-history` surfaces. This is the single highest-value next feature (see "Recommended next steps").
 
 ## Volunteer workflow
 
-Officer creates an opportunity + one or more slots (`POST /api/labs/pta/volunteers/opportunities`, `addPtaVolunteerSlot()`). Parents browse open opportunities at `/labs/pta/volunteers` and claim a slot for themselves (their own linked household-adult record only) — claim is atomic and race-safe (see above). A parent can cancel their own signup, releasing the seat. An officer marks a signup `COMPLETED` with optional hours logged (`completePtaVolunteerSignup()`).
+Officer creates an opportunity (`POST /api/labs/pta/volunteers/opportunities`) and one or more slots (`POST .../opportunities/[id]/slots`). Parents browse open opportunities at `/labs/pta/volunteers` and claim a slot for themselves (their own linked household-adult record only) — claim and cancellation are both atomic/transactional and race-safe (see "Volunteer overbooking prevention"). A parent can cancel their own signup, releasing the seat, and can see all their own commitments (`GET /api/labs/pta/volunteers/my-commitments`). An officer marks a signup `COMPLETED` with optional hours logged (`POST /api/labs/pta/volunteers/signups/[id]/complete`) — this is officer-only; a parent cannot mark their own hours (matches the task's explicit requirement that volunteer-hour recording can't be altered by unauthorized parents).
 
 ## Communications workflow
 
 Officer (or future dedicated PTA-communications UI — not built in this MVP) calls `resolvePtaTargetMemberIds()` with a targeting rule, then creates a `CommunicationCampaign` with `recipientFilter: { selector: "manual", memberIds: [...] }` via the existing communications API — no PTA-specific send logic.
+
+## Tests
+
+11 test files: `guard.test.ts`, `households.test.ts`, `volunteers.test.ts`, `academic.test.ts`, `committees-events.test.ts`, `communications.test.ts`, `dues.test.ts`, `minutes.test.ts` (unit, mocked Prisma — 47 tests total after the hardening pass), plus two real-database integration tests, skipped by default in a normal `vitest run` (require `DATABASE_URL` pointed at a disposable Postgres and `PTA_RUN_DB_INTEGRATION_TEST=1`): `volunteers-concurrency.integration.test.ts` (real concurrent claims) and `household-adult-constraint.integration.test.ts` (the multi-org-uniqueness regression — see "Hardening-review findings"). One pre-existing test (`src/lib/labs/__tests__/access.test.ts`) was updated because `ptaVertical` being the first non-`internalOnly` Labs feature made its old assumption ("every feature today is internal-only") factually outdated.
 
 ## Deletion and export
 
@@ -166,33 +232,43 @@ See "Data minimization and privacy limitations" above. No dedicated bulk data-ex
 
 ## Known limitations
 
-- **No parent-facing dues-payment page** — `dues.ts`'s functions exist and are tested, but `/labs/pta/my-household` does not yet render a "pay now" button; a parent currently pays via the existing generic `PaymentLink`/`PaymentReport` flows, not a PTA-branded page.
+- **No parent-facing dues-payment page** — dues functions have real API routes as of the hardening pass, but they're officer-facing (`pta:dues:manage`); `/labs/pta/my-household` does not render a "pay now" button or balance for the parent themselves. This is the recommended next PR (see below).
 - **No event-level QR check-in** — `MeetingAttendanceSession`/QR check-in is hardwired to `Meeting`, not `Event`. PTA events reuse `Event` (not `Meeting`), so QR check-in for a PTA event (e.g. a book fair) is not available in this MVP. A future PR could either model select PTA events as `Meeting` rows or make the QR session model polymorphic.
+- **No capacity field on `Event`/`PtaEventRsvp`** — confirmed during the hardening review; "optional capacity" from the original task spec was never implemented for events (volunteer *slots* do have real capacity enforcement — a different model).
+- **No household merge/split, no automatic membership-model conversion** — confirmed unsupported, and deliberately so (see "Household lifecycle"); enforced at the database level via `PtaHousehold.orgMemberId`'s unique constraint, not just by omission.
+- **Hard household delete has no HTTP route** — only soft-deactivate is reachable via the API; this is an intentional safety choice, not an oversight.
 - **No mobile app surface** — the mobile app (`civicflow-mobile/`) has no Labs-enrollment concept at all today (confirmed: zero references to `OrganizationLabFeature` anywhere in that codebase). Building PTA-for-mobile would require new mobile-side Labs plumbing from scratch, out of scope for this MVP.
 - **No teacher accounts** — `PtaTeacher` carries no `userId` at all; teachers are classroom-association records only, never authenticated, per the task's explicit scope.
 - **No deep committee-to-document/event linkage** — committees have a roster and a chair, but committee-scoped documents/events beyond communications targeting are not built (an officer manages documents/events generically today).
-- **No dedicated bulk dues-charge or bulk data-export tooling** — charges are created one household at a time via the lib function; a bulk "charge every active household for the new school year" helper is not built.
-- **No automated school-year rollover job** — rollover is a manual, per-student/per-household action (see above).
+- **No dedicated bulk dues-charge or bulk data-export tooling** — charges are created one household at a time via a real API route now; a bulk "charge every active household for the new school year" helper is not built.
+- **No automated school-year rollover job** — rollover is a manual, per-student/per-household action (see "School-year rollover"), though it is idempotent and confirmed to leave prior-year history untouched.
+- **RSVP and attendance remain two parallel, never-reconciled signals** for the same event — if an officer separately uses the generic attendance-tracking feature on a PTA event, nothing cross-checks "N households RSVP'd GOING" against actual `AttendanceRecord` check-ins.
 
 ## Pilot success criteria
 
-- [ ] One fictional PTA configured end-to-end (Pine Grove School PTA — done via seed).
-- [ ] At least 5 fictional households (done — 5 seeded).
-- [ ] Household and student isolation tests pass (done — see "Tests").
-- [ ] Membership dues workflow completes (charge → payment → PAID status) for at least one household (done — 3 of 5 seeded households are PAID).
-- [ ] At least two events created (done — Book Fair, Family Movie Night).
-- [ ] Volunteer slots can be claimed without overbooking under real concurrency (done — `volunteers-concurrency.integration.test.ts`, 10 concurrent claims vs. capacity 3, exactly 3 succeed).
-- [ ] Targeted announcements work (done at the resolver level — `communications.test.ts`; full send-pipeline integration not separately re-tested since `resolveCommunicationRecipients()` itself is unmodified and already tested elsewhere).
-- [ ] Approved minutes are visible to a member without exposing drafts (done — `minutes.test.ts`).
-- [ ] Parent multi-organization switching works without cross-tenant leakage (done — `requirePtaHouseholdSelfAccess()` re-resolves per active organization every call; no separate multi-org PTA test was added beyond the existing platform-wide multi-org test suite, since PTA adds no new organization-switching logic of its own).
-- [ ] No production organization enrolled (true — the only enrollment in this PR's diff is the local seed script).
-- [ ] No cross-tenant findings (true — see "Tenant-isolation findings" in the PR description).
-- [ ] No real student data used anywhere (true — seed data is entirely fictional).
+- [x] One fictional PTA configured end-to-end (Pine Grove School PTA — done via seed).
+- [x] At least 5 fictional households (done — 5 seeded).
+- [x] Household and student isolation tests pass (done — see "Tests"; re-verified independently during the hardening review).
+- [x] Membership dues workflow completes (charge → payment → PAID status) for at least one household (done — 3 of 5 seeded households are PAID; also independently re-verified with a partial-payment-then-waiver scenario during the hardening review).
+- [x] At least two events created (done — Book Fair, Family Movie Night).
+- [x] Volunteer slots can be claimed without overbooking under real concurrency (done — `volunteers-concurrency.integration.test.ts`, 10 concurrent claims vs. capacity 3, exactly 3 succeed; re-verified after the transaction-safety fix found during hardening).
+- [x] Targeted announcements work (done at the resolver level — `communications.test.ts`, including a cross-tenant-safety re-check during hardening; full send-pipeline integration not separately re-tested since `resolveCommunicationRecipients()` itself is unmodified and already tested elsewhere).
+- [x] Approved minutes are visible to a member without exposing drafts (done — `minutes.test.ts`).
+- [x] Parent multi-organization switching works without cross-tenant leakage (done, and this is exactly where the hardening review found the critical `PtaHouseholdAdult.userId` global-uniqueness bug — now fixed and covered by a permanent real-database regression test).
+- [x] No production organization enrolled (true — the only enrollment anywhere in this PR's diff or its review process is the local disposable-database seed).
+- [x] No cross-tenant findings remain unresolved (one was found — the multi-org unique-constraint bug — and fixed; re-verified with a real-database test).
+- [x] No real student data used anywhere (true — seed data is entirely fictional; re-confirmed during the hardening review's privacy audit).
 
 ## Recommended next steps
 
-1. Run the smoke test above locally to confirm the pilot actually behaves as documented.
-2. If proceeding: build the parent-facing dues-payment page (highest-value gap).
-3. Decide whether event-level QR check-in is worth the `MeetingAttendanceSession` schema change, based on real pilot feedback about whether officers actually want it.
+1. **Parent Membership and Dues Self-Service** (recommended next PR) — a parent-facing page/routes for viewing dues balance and paying, since `dues.ts` is now fully wired for officers but a parent still has no self-service view of their own household's financial status. This is the single highest-value gap remaining.
+2. Decide whether event-level QR check-in is worth the `MeetingAttendanceSession` schema change, based on real pilot feedback about whether officers actually want it.
+3. Consider whether an event-level capacity field is worth adding, based on real pilot feedback (confirmed absent during hardening review — see "Known limitations").
 4. Consider a bulk dues-charge/rollover helper once a real pilot has run one full school year.
 5. Do not expand to mobile, real customer enrollment, or billing changes until portal-side usage validates the concept.
+
+## Pilot-readiness conclusion
+
+**Safe for a fictional-data-only Labs demonstration**: yes. Tenant isolation, Labs gating, parent self-access authorization, and volunteer-claim concurrency are all independently re-verified against a real database, not just asserted. Two critical defects were found and fixed during this hardening pass specifically because real (not mocked) testing was used — this is itself evidence the review process is working, not evidence the feature is fragile.
+
+**Not yet ready for a real-family pilot.** Beyond the explicit "no compliance claim" caveat (see "Data minimization and privacy limitations"), the biggest practical gap is that a parent has no dues-payment surface of their own — a real pilot would need at least a read-only balance view before asking real families to participate meaningfully. The event-capacity gap and the RSVP/attendance non-reconciliation would also need a product decision (not just an engineering one) before a real pilot depends on them.

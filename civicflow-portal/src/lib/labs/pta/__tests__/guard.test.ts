@@ -76,11 +76,29 @@ describe("requirePtaHouseholdSelfAccess — parent self-service, not permission-
   it("resolves the household strictly from the caller's own userId, scoped to the active organization", async () => {
     requireOrganization.mockResolvedValueOnce({ organizationId: "org-a", session: { userId: "u1", userEmail: "a@example.com" } });
     requireOrganizationLabFeature.mockResolvedValueOnce(undefined);
-    findFirstAdult.mockResolvedValueOnce({ id: "adult-1", householdId: "household-1" });
+    findFirstAdult.mockResolvedValueOnce({ id: "adult-1", householdId: "household-1", household: { id: "household-1", status: "ACTIVE" } });
 
     const { requirePtaHouseholdSelfAccess } = await import("../guard");
     const result = await requirePtaHouseholdSelfAccess();
     expect(result.adult.householdId).toBe("household-1");
-    expect(findFirstAdult).toHaveBeenCalledWith({ where: { organizationId: "org-a", userId: "u1" } });
+    expect(findFirstAdult).toHaveBeenCalledWith(expect.objectContaining({ where: { organizationId: "org-a", userId: "u1" } }));
+  });
+
+  it("denies self-service for a parent linked to a DEACTIVATED household — caught during hardening review: without this check, a household that left the PTA kept full self-service access (claim slots, RSVP) indefinitely", async () => {
+    requireOrganization.mockResolvedValueOnce({ organizationId: "org-a", session: { userId: "u1", userEmail: "a@example.com" } });
+    requireOrganizationLabFeature.mockResolvedValueOnce(undefined);
+    findFirstAdult.mockResolvedValueOnce({ id: "adult-1", householdId: "household-1", household: { id: "household-1", status: "INACTIVE" } });
+
+    const { requirePtaHouseholdSelfAccess } = await import("../guard");
+    await expect(requirePtaHouseholdSelfAccess()).rejects.toMatchObject({ code: "PTA_HOUSEHOLD_INACTIVE" });
+  });
+
+  it("denies self-service for a PENDING household the same way as INACTIVE — only ACTIVE grants self-service", async () => {
+    requireOrganization.mockResolvedValueOnce({ organizationId: "org-a", session: { userId: "u1", userEmail: "a@example.com" } });
+    requireOrganizationLabFeature.mockResolvedValueOnce(undefined);
+    findFirstAdult.mockResolvedValueOnce({ id: "adult-1", householdId: "household-1", household: { id: "household-1", status: "PENDING" } });
+
+    const { requirePtaHouseholdSelfAccess } = await import("../guard");
+    await expect(requirePtaHouseholdSelfAccess()).rejects.toMatchObject({ code: "PTA_HOUSEHOLD_INACTIVE" });
   });
 });
