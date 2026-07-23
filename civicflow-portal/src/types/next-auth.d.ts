@@ -55,6 +55,25 @@ declare module "next-auth" {
     // the client.
     hasPlatformAccess?: boolean;
     platformRoles?: PlatformRole[];
+    // Set only while a SUPER_ADMIN is actively impersonating another user
+    // (see src/lib/impersonation.ts). Re-validated fresh on every session
+    // read — never trust this as a standing grant. actorUserId/actorEmail
+    // identify the REAL platform admin driving the session; every other
+    // top-level session field (userId, role, permissions, ...) reflects the
+    // TARGET user, exactly as if they had signed in themselves.
+    impersonation?: {
+      active: true;
+      actorUserId: string;
+      actorEmail: string;
+      actorDisplayName: string | null;
+      targetUserId: string;
+      targetDisplayName: string | null;
+      targetEmail: string;
+      organizationId: string;
+      organizationName: string;
+      startedAt: string;
+      reason: string | null;
+    };
     // MFA pending state
     mfaPending?: boolean;
     mfaUserId?: string;
