@@ -138,6 +138,26 @@ export const LAB_FEATURES = {
     metered: true,
     riskClassification: "medium",
   },
+  ptaVertical: {
+    key: "ptaVertical",
+    name: "Unestra for PTA",
+    description:
+      "A parent-teacher-association vertical validating whether Unestra can support household/family membership, school-year-scoped students and classrooms, volunteer signups, and PTA-specific dues/events/communications — built by reusing existing dues, payments, events, campaigns, and communications infrastructure. Not a student information system: no academic, discipline, health, or custody records are stored. See docs/pta-labs-mvp.md.",
+    lifecycle: "ALPHA",
+    requiresEntitlement: true,
+    requiresEnrollment: true,
+    // Unlike the internal-ops Labs features above, this is a genuine
+    // product-validation vertical intended (if it proves out) for a real
+    // paying customer someday — not an APH-only tool. internalOnly: false
+    // means the registry itself doesn't forbid enrolling a non-billing-exempt
+    // organization; nothing in this PR enrolls any production organization
+    // regardless (see docs/pta-labs-mvp.md's pilot procedure — enrollment is
+    // local/fictional-org only).
+    internalOnly: false,
+    metered: false,
+    helpText: "Household/family membership, school-year-scoped students and classrooms, volunteer signups, and PTA-specific dues/events/communications.",
+    riskClassification: "medium",
+  },
 } as const satisfies Record<string, LabFeatureDefinition>;
 
 /**

@@ -466,6 +466,21 @@ model Organization {
   meetingMinutesDrafts        MeetingMinutesDraft[]
   meetingIntelligenceFeedback MeetingIntelligenceFeedback[]
 
+  ptaProfile                PtaProfile?
+  ptaHouseholds             PtaHousehold[]
+  ptaStudents               PtaStudent[]
+  ptaGrades                 PtaGrade[]
+  ptaClassrooms             PtaClassroom[]
+  ptaTeachers               PtaTeacher[]
+  ptaStudentEnrollments     PtaStudentEnrollment[]
+  ptaVolunteerOpportunities PtaVolunteerOpportunity[]
+  ptaVolunteerSlots         PtaVolunteerSlot[]
+  ptaVolunteerSignups       PtaVolunteerSignup[]
+  ptaCommittees             PtaCommittee[]
+  ptaCommitteeMembers       PtaCommitteeMember[]
+  ptaEventRsvps             PtaEventRsvp[]
+  ptaHouseholdAdults        PtaHouseholdAdult[]
+
   @@index([slug])
   @@index([status])
 }
@@ -533,6 +548,8 @@ model User {
   meetingMinutesDraftsApproved            MeetingMinutesDraft[]         @relation("MeetingMinutesDraftApprovedBy")
   meetingMinutesDraftsRejected            MeetingMinutesDraft[]         @relation("MeetingMinutesDraftRejectedBy")
   meetingIntelligenceFeedbackSubmitted    MeetingIntelligenceFeedback[] @relation("MeetingIntelligenceFeedbackSubmittedBy")
+
+  ptaHouseholdAdultProfiles PtaHouseholdAdult[]
 
   @@index([email])
 }
@@ -826,6 +843,7 @@ model OrgMember {
   invites                 MemberInvite[]
   paymentReports          PaymentReport[]
   smsMessages             SmsMessage[]
+  ptaHouseholdBilling     PtaHousehold?
 
   @@unique([organizationId, userId])
   @@unique([organizationId, memberNumber])
@@ -881,13 +899,15 @@ model Event {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  contributions      Contribution[]
-  communicationLogs  CommunicationLog[]
-  attendanceRecords  AttendanceRecord[]
-  expenditures       Expenditure[]
-  paymentImportItems PaymentImportItem[]
-  paymentLinks       PaymentLink[]
+  organization              Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contributions             Contribution[]
+  communicationLogs         CommunicationLog[]
+  attendanceRecords         AttendanceRecord[]
+  expenditures              Expenditure[]
+  paymentImportItems        PaymentImportItem[]
+  paymentLinks              PaymentLink[]
+  ptaVolunteerOpportunities PtaVolunteerOpportunity[]
+  ptaEventRsvps             PtaEventRsvp[]
 
   @@index([organizationId])
   @@index([organizationId, startAt])
@@ -2159,4 +2179,402 @@ model PaymentReport {
   @@index([memberId])
   @@index([createdAt])
   @@index([category])
+}
+
+// ─── Unestra for PTA (Labs feature "ptaVertical") ────────────────────────────
+//
+// A product-validation vertical, not a student information system. Deliberately
+// reuses existing platform capabilities rather than duplicating them:
+//   - Dues: a household's "billing identity" is a normal OrgMember row
+//     (PtaHousehold.orgMemberId) — dues run entirely through the existing
+//     DuesAccount/DuesCharge/DuesPayment/PaymentLink/PaymentReport pipeline,
+//     unmodified. No new payment/Stripe infrastructure.
+//   - Fundraising: uses the existing Campaign/Contribution/PaymentLink models
+//     unmodified — no new model.
+//   - Communications: uses the existing CommunicationCampaign +
+//     resolveCommunicationRecipients()'s "manual"/memberIds selector —
+//     PTA-specific targeting (grade/classroom/committee/volunteers-for-event)
+//     is computed by PTA code into a memberIds list, not a new targeting engine.
+//   - Documents/minutes: uses the existing Attachment model (entityType
+//     MEETING/EVENT/ORGANIZATION/OTHER) and the existing Meeting/minutes
+//     approval workflow — no new document model.
+//   - Meetings/governance: PTA meetings ARE Meeting rows. Meeting Intelligence
+//     remains a fully separate, independently-enrolled Labs feature — nothing
+//     here reads or writes OrganizationLabFeature for "meetingIntelligence".
+//
+// Explicitly NOT stored anywhere below: date of birth, medical/disability
+// information, academic records, discipline records, student ID numbers,
+// custody information, emergency contacts, transportation data, or
+// background-check documents/results (only a coarse external-verification
+// status enum is stored — see PtaBackgroundCheckStatus).
+
+enum PtaDesignation {
+  PTA
+  PTO
+}
+
+enum PtaMembershipModel {
+  INDIVIDUAL
+  HOUSEHOLD
+  FAMILY
+}
+
+/// One row per organization enrolled in the ptaVertical Labs feature —
+/// organization-level PTA configuration. Never created automatically by
+/// enrollment; an officer configures it explicitly after enrollment.
+model PtaProfile {
+  id                     String             @id @default(cuid())
+  organizationId         String             @unique
+  schoolOrPtaName        String
+  designation            PtaDesignation     @default(PTA)
+  currentSchoolYear      String // e.g. "2026-2027" — free-text label, not a DB enum, so a new year never needs a migration
+  schoolAddress          String?
+  schoolWebsite          String?
+  principalName          String?
+  contactEmail           String?
+  membershipModel        PtaMembershipModel @default(HOUSEHOLD)
+  defaultDuesAmountCents Int?
+  gradesServed           String[]           @default([])
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+enum PtaHouseholdStatus {
+  ACTIVE
+  INACTIVE
+  PENDING
+}
+
+/// A family unit — the primary membership entity for a PTA, distinct from
+/// OrgMember (one individual). `orgMemberId` is the household's optional
+/// "billing identity": a normal OrgMember row created so dues can run through
+/// the existing, unmodified DuesAccount/DuesCharge/DuesPayment pipeline.
+/// Deleting a household never cascades to that OrgMember or its dues history
+/// (see the FK below) — the application layer prefers deactivating
+/// (status: INACTIVE) over hard delete once any dues history exists.
+model PtaHousehold {
+  id                      String             @id @default(cuid())
+  organizationId          String
+  displayName             String
+  status                  PtaHouseholdStatus @default(ACTIVE)
+  schoolYear              String // the school year this membership record applies to
+  orgMemberId             String?            @unique
+  primaryContactAdultId   String?
+  secondaryContactAdultId String?
+  volunteerInterests      String[]           @default([])
+  notes                   String?
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
+
+  organization     Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  orgMember        OrgMember?          @relation(fields: [orgMemberId], references: [id], onDelete: SetNull)
+  primaryContact   PtaHouseholdAdult?  @relation("PtaHouseholdPrimaryContact", fields: [primaryContactAdultId], references: [id], onDelete: SetNull)
+  secondaryContact PtaHouseholdAdult?  @relation("PtaHouseholdSecondaryContact", fields: [secondaryContactAdultId], references: [id], onDelete: SetNull)
+  adults           PtaHouseholdAdult[] @relation("PtaHouseholdAdults")
+  students         PtaStudent[]
+  eventRsvps       PtaEventRsvp[]
+
+  @@unique([organizationId, displayName, schoolYear])
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([organizationId, schoolYear])
+}
+
+enum PtaBackgroundCheckStatus {
+  NOT_REQUIRED
+  EXTERNAL_VERIFICATION_PENDING
+  EXTERNALLY_VERIFIED
+  EXPIRED
+}
+
+/// An adult linked to a household. `userId` is optional — an adult does not
+/// need a Unestra login to be recorded (e.g. a secondary contact who never
+/// signs in), matching "do not require every student to have a login" applied
+/// symmetrically to adults who never use the portal themselves.
+/// `backgroundCheckStatus` records only a coarse external-verification state —
+/// Unestra never performs or stores the underlying background-check result.
+model PtaHouseholdAdult {
+  id                    String                   @id @default(cuid())
+  organizationId        String
+  householdId           String
+  /// Deliberately NOT globally @unique — a parent belongs to at most one
+  /// household PER ORGANIZATION, but the same user must be able to be a
+  /// household adult in multiple PTA organizations at once (see
+  /// docs/pta-labs-mvp.md's multi-org scenario). The composite
+  /// @@unique([organizationId, userId]) below is the correct scope; a bare
+  /// per-field unique here would make it impossible for the same parent to
+  /// ever join a second PTA — this was caught and fixed during the
+  /// post-implementation hardening review.
+  userId                String?
+  name                  String
+  email                 String?
+  phone                 String?
+  relationshipLabel     String?
+  backgroundCheckStatus PtaBackgroundCheckStatus @default(NOT_REQUIRED)
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+
+  organization         Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  household            PtaHousehold         @relation("PtaHouseholdAdults", fields: [householdId], references: [id], onDelete: Cascade)
+  user                 User?                @relation(fields: [userId], references: [id], onDelete: SetNull)
+  primaryContactFor    PtaHousehold[]       @relation("PtaHouseholdPrimaryContact")
+  secondaryContactFor  PtaHousehold[]       @relation("PtaHouseholdSecondaryContact")
+  volunteerSignups     PtaVolunteerSignup[]
+  chairOfCommittees    PtaCommittee[]       @relation("PtaCommitteeChair")
+  committeeMemberships PtaCommitteeMember[]
+
+  @@unique([organizationId, userId])
+  @@index([organizationId])
+  @@index([householdId])
+}
+
+enum PtaStudentStatus {
+  ACTIVE
+  INACTIVE
+}
+
+/// Deliberately minimal — see the model-level doc above for the explicit list
+/// of fields NEVER stored here (DOB, medical/discipline/academic records,
+/// student ID, custody, emergency contacts, transportation).
+/// Grade/classroom association is year-scoped via PtaStudentEnrollment
+/// (a separate row per school year), not stored directly on this model, so a
+/// school-year rollover never overwrites — only adds — enrollment history.
+model PtaStudent {
+  id             String           @id @default(cuid())
+  organizationId String
+  householdId    String
+  displayName    String
+  status         PtaStudentStatus @default(ACTIVE)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  organization Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  household    PtaHousehold           @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  enrollments  PtaStudentEnrollment[]
+
+  @@index([organizationId])
+  @@index([householdId])
+}
+
+model PtaGrade {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  classrooms   PtaClassroom[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+/// A teacher record for classroom association only — never an authenticated
+/// account. Teachers do not automatically receive access to household or
+/// payment information (there is no `userId` on this model at all).
+model PtaTeacher {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  email          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  classrooms   PtaClassroom[]
+
+  @@index([organizationId])
+}
+
+model PtaClassroom {
+  id             String   @id @default(cuid())
+  organizationId String
+  gradeId        String
+  teacherId      String?
+  name           String
+  schoolYear     String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  grade        PtaGrade               @relation(fields: [gradeId], references: [id], onDelete: Restrict)
+  teacher      PtaTeacher?            @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+  enrollments  PtaStudentEnrollment[]
+
+  @@unique([organizationId, gradeId, name, schoolYear])
+  @@index([organizationId])
+  @@index([organizationId, schoolYear])
+}
+
+enum PtaEnrollmentStatus {
+  ACTIVE
+  INACTIVE
+}
+
+/// One row per student per school year — never overwritten on rollover, only
+/// superseded by a new row for the new year, so prior-year classroom history
+/// is always preserved.
+model PtaStudentEnrollment {
+  id             String              @id @default(cuid())
+  organizationId String
+  studentId      String
+  classroomId    String
+  schoolYear     String
+  status         PtaEnrollmentStatus @default(ACTIVE)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  student      PtaStudent   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  classroom    PtaClassroom @relation(fields: [classroomId], references: [id], onDelete: Restrict)
+
+  @@unique([studentId, schoolYear])
+  @@index([organizationId])
+  @@index([classroomId])
+}
+
+enum PtaVolunteerOpportunityStatus {
+  OPEN
+  CLOSED
+  CANCELLED
+  COMPLETED
+}
+
+model PtaVolunteerOpportunity {
+  id             String                        @id @default(cuid())
+  organizationId String
+  eventId        String?
+  title          String
+  description    String?
+  startAt        DateTime?
+  endAt          DateTime?
+  signupDeadline DateTime?
+  supplyRequest  String?
+  status         PtaVolunteerOpportunityStatus @default(OPEN)
+  createdAt      DateTime                      @default(now())
+  updatedAt      DateTime                      @updatedAt
+
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  event        Event?             @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  slots        PtaVolunteerSlot[]
+
+  @@index([organizationId])
+  @@index([organizationId, status])
+}
+
+/// `claimedCount` is the atomic-claim counter (see claimPtaVolunteerSlot()) —
+/// never write it directly outside that function; a conditional
+/// `UPDATE ... WHERE claimedCount < capacity` is what actually prevents
+/// overbooking under concurrent signups, not an application-level read-then-write check.
+model PtaVolunteerSlot {
+  id             String    @id @default(cuid())
+  organizationId String
+  opportunityId  String
+  label          String?
+  startAt        DateTime?
+  endAt          DateTime?
+  capacity       Int       @default(1)
+  claimedCount   Int       @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  opportunity  PtaVolunteerOpportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  signups      PtaVolunteerSignup[]
+
+  @@index([organizationId])
+  @@index([opportunityId])
+}
+
+enum PtaVolunteerSignupStatus {
+  SIGNED_UP
+  CANCELLED
+  COMPLETED
+}
+
+model PtaVolunteerSignup {
+  id               String                   @id @default(cuid())
+  organizationId   String
+  slotId           String
+  householdAdultId String
+  status           PtaVolunteerSignupStatus @default(SIGNED_UP)
+  hoursLogged      Float?
+  signedUpAt       DateTime                 @default(now())
+  cancelledAt      DateTime?
+  completedAt      DateTime?
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  slot           PtaVolunteerSlot  @relation(fields: [slotId], references: [id], onDelete: Cascade)
+  householdAdult PtaHouseholdAdult @relation(fields: [householdAdultId], references: [id], onDelete: Cascade)
+
+  @@unique([slotId, householdAdultId])
+  @@index([organizationId])
+  @@index([slotId])
+  @@index([householdAdultId])
+}
+
+model PtaCommittee {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  description    String?
+  chairAdultId   String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  chair        PtaHouseholdAdult?   @relation("PtaCommitteeChair", fields: [chairAdultId], references: [id], onDelete: SetNull)
+  members      PtaCommitteeMember[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model PtaCommitteeMember {
+  id               String   @id @default(cuid())
+  organizationId   String
+  committeeId      String
+  householdAdultId String
+  createdAt        DateTime @default(now())
+
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  committee      PtaCommittee      @relation(fields: [committeeId], references: [id], onDelete: Cascade)
+  householdAdult PtaHouseholdAdult @relation(fields: [householdAdultId], references: [id], onDelete: Cascade)
+
+  @@unique([committeeId, householdAdultId])
+  @@index([organizationId])
+}
+
+enum PtaRsvpStatus {
+  GOING
+  NOT_GOING
+  MAYBE
+}
+
+/// Household-level RSVP for the existing (unmodified) Event model — Event
+/// itself has no RSVP/capacity concept, so this is the one genuinely new
+/// piece needed to reuse events for PTA purposes.
+model PtaEventRsvp {
+  id             String        @id @default(cuid())
+  organizationId String
+  eventId        String
+  householdId    String
+  attendeeCount  Int           @default(1)
+  status         PtaRsvpStatus @default(GOING)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  event        Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  household    PtaHousehold @relation(fields: [householdId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, householdId])
+  @@index([organizationId])
+  @@index([eventId])
 }
