@@ -12,7 +12,7 @@ function centsToDollars(cents: number): string {
 }
 
 export default async function PtaDashboardPage() {
-  const { organizationId, access } = await getPtaPageGate("pta:analytics:read");
+  const { organizationId, access, can } = await getPtaPageGate("pta:analytics:read");
 
   if (!access.available) {
     return (
@@ -36,25 +36,57 @@ export default async function PtaDashboardPage() {
 
   const metrics = await getPtaDashboardMetrics(organizationId, profile.currentSchoolYear);
 
+  const quickActions: { href: string; label: string; visible: boolean }[] = [
+    { href: "/labs/pta/households/new", label: "Add a household", visible: can("pta:households:manage") },
+    { href: "/labs/pta/dues", label: "Review dues & payments", visible: can("pta:dues:manage") },
+    { href: "/labs/pta/volunteers/manage", label: "Post a volunteer opportunity", visible: can("pta:volunteers:manage") },
+    { href: "/labs/pta/committees", label: "Manage committees", visible: can("pta:committees:manage") },
+    { href: "/labs/pta/onboarding", label: "Setup checklist", visible: can("pta:households:manage") },
+  ].filter((a) => a.visible);
+
   return (
     <main className="space-y-6">
       <PtaLabsBadge />
       <PageHeader title={`${profile.schoolOrPtaName} Dashboard`} description={`School year ${profile.currentSchoolYear}. All metrics below are aggregate counts — never a student name.`} />
 
+      {quickActions.length > 0 ? (
+        <SectionCard title="Quick actions">
+          <div className="flex flex-wrap gap-2">
+            {quickActions.map((a) => (
+              <Link key={a.href} href={a.href} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50">
+                {a.label}
+              </Link>
+            ))}
+          </div>
+        </SectionCard>
+      ) : null}
+
       <SectionCard title="Membership">
         <div className="grid gap-4 md:grid-cols-4">
           <StatCard label="Active households" value={metrics.activeHouseholds} />
           <StatCard label="Paid" value={metrics.paidHouseholds} />
-          <StatCard label="Unpaid" value={metrics.unpaidHouseholds} />
+          <StatCard label="Unpaid" value={metrics.unpaidHouseholds} helper={metrics.outstandingDuesCents > 0 ? `${centsToDollars(metrics.outstandingDuesCents)} outstanding` : undefined} />
           <StatCard label="Upcoming events" value={metrics.upcomingEventsCount} />
         </div>
       </SectionCard>
 
-      <SectionCard title="Volunteers">
-        <div className="grid gap-4 md:grid-cols-3">
+      <SectionCard title="Volunteers &amp; Committees">
+        <div className="grid gap-4 md:grid-cols-4">
           <StatCard label="Slots open" value={metrics.volunteerSlotsOpen} />
           <StatCard label="Slots filled" value={metrics.volunteerSlotsFilled} />
           <StatCard label="Hours logged" value={metrics.volunteerHoursLogged.toFixed(1)} />
+          <StatCard label="Committees" value={metrics.committeesCount} />
+        </div>
+      </SectionCard>
+
+      <SectionCard title="Payments">
+        <div className="grid gap-4 md:grid-cols-2">
+          <StatCard
+            label="Pending payment reports"
+            value={metrics.pendingPaymentReportsCount}
+            helper={metrics.pendingPaymentReportsCount > 0 ? "Awaiting officer review in Payment Reports" : undefined}
+          />
+          <StatCard label="Outstanding dues" value={centsToDollars(metrics.outstandingDuesCents)} />
         </div>
       </SectionCard>
 
@@ -66,20 +98,13 @@ export default async function PtaDashboardPage() {
       </SectionCard>
 
       <SectionCard title="Governance">
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-4">
           <StatCard label="Announcements (30d)" value={metrics.recentAnnouncementsCount} />
           <StatCard label="Upcoming meeting" value={metrics.upcomingMeetingTitle ?? "None scheduled"} helper={metrics.upcomingMeetingDate ? formatDateTime(metrics.upcomingMeetingDate) : undefined} />
           <StatCard label="Recently approved minutes" value={metrics.recentlyApprovedMinutesCount} />
+          <StatCard label="Teachers on file" value={metrics.teachersCount} />
         </div>
       </SectionCard>
-
-      <p className="text-sm text-slate-600">
-        <Link href="/labs/pta/households" className="text-emerald-700 hover:underline">Household directory</Link>
-        {" · "}
-        <Link href="/labs/pta/volunteers" className="text-emerald-700 hover:underline">Volunteer opportunities</Link>
-        {" · "}
-        <Link href="/labs/pta/settings" className="text-emerald-700 hover:underline">Settings</Link>
-      </p>
     </main>
   );
 }

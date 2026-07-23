@@ -18,6 +18,7 @@ export async function GET(request: Request) {
     const households = await listPtaHouseholds(organizationId, {
       schoolYear: url.searchParams.get("schoolYear") ?? undefined,
       status: url.searchParams.get("status") ?? undefined,
+      search: url.searchParams.get("search") ?? undefined,
     });
     return Response.json({ ok: true, data: households });
   });

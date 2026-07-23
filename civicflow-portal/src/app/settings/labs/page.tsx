@@ -12,6 +12,18 @@ const STATUS_LABEL: Record<string, string> = {
   LAB_FEATURE_NOT_ENABLED: "Not yet available",
 };
 
+/**
+ * Where "Open" should take an enabled feature. The product readiness review
+ * found that this page named a feature's existence but gave no way to
+ * actually reach it — this map is the fix, kept here (rather than on the
+ * registry) since not every Labs feature has a customer-facing entry point
+ * yet (e.g. meetingIntelligence is operated from the internal Operations
+ * Center, not a tenant-facing page).
+ */
+const FEATURE_ENTRY_HREF: Record<string, string> = {
+  ptaVertical: "/labs/pta/dashboard",
+};
+
 export default async function OrganizationLabsPage() {
   const { organizationId } = await requirePermission("labs:read");
   const access = await listOrganizationLabAccess(organizationId);
@@ -44,6 +56,7 @@ export default async function OrganizationLabsPage() {
             {access.map((item) => {
               const feature = findLabFeature(item.featureKey);
               if (!feature) return null;
+              const entryHref = FEATURE_ENTRY_HREF[item.featureKey];
               return (
                 <li key={item.featureKey} className="rounded-lg border border-slate-200 px-4 py-3">
                   <div className="flex items-center justify-between gap-3">
@@ -51,13 +64,23 @@ export default async function OrganizationLabsPage() {
                       <p className="text-sm font-semibold text-slate-900">{feature.name}</p>
                       <p className="text-xs text-slate-600">{feature.description}</p>
                     </div>
-                    <span
-                      className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${
-                        item.available ? "bg-emerald-100 text-emerald-800" : "bg-slate-200 text-slate-700"
-                      }`}
-                    >
-                      {item.available ? "Enabled" : STATUS_LABEL[item.denialReason ?? ""] ?? "Not available"}
-                    </span>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                          item.available ? "bg-emerald-100 text-emerald-800" : "bg-slate-200 text-slate-700"
+                        }`}
+                      >
+                        {item.available ? "Enabled" : STATUS_LABEL[item.denialReason ?? ""] ?? "Not available"}
+                      </span>
+                      {item.available && entryHref ? (
+                        <Link
+                          href={entryHref}
+                          className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800"
+                        >
+                          Open →
+                        </Link>
+                      ) : null}
+                    </div>
                   </div>
                 </li>
               );

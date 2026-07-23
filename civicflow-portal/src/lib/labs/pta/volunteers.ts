@@ -87,7 +87,13 @@ export async function addPtaVolunteerSlot(
 export async function listPtaVolunteerOpportunities(organizationId: string, filters: { status?: string } = {}) {
   return prisma.ptaVolunteerOpportunity.findMany({
     where: { organizationId, ...(filters.status ? { status: filters.status as never } : {}) },
-    include: { slots: { include: { signups: { where: { status: "SIGNED_UP" } } } } },
+    include: {
+      slots: {
+        include: {
+          signups: { where: { status: "SIGNED_UP" }, include: { householdAdult: { select: { id: true, name: true } } } },
+        },
+      },
+    },
     orderBy: { createdAt: "desc" },
   });
 }
