@@ -16,7 +16,7 @@ const STATUS_LABELS: Record<string, string> = {
   PAID: "Paid",
   WAIVED: "Waived",
   VOIDED: "Voided",
-  PENDING_REVIEW: "Payment submitted — pending review",
+  PENDING_REVIEW: "Pending officer review",
 };
 
 const STATUS_TONE: Record<string, string> = {
@@ -134,17 +134,20 @@ export default async function PtaMembershipPage() {
       )}
 
       {summary.hasBillingIdentity && summary.currentCharge ? (
-        <SectionCard title="Pay your dues" description="Pay online, or let us know if you already paid another way.">
+        <SectionCard title="Payment options" description="Open a payment option below, or report a payment you already made another way.">
           {summary.onlinePaymentLinkSlug ? (
             <a
               href={`/pay/${summary.onlinePaymentLinkSlug}`}
               className="inline-block rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800"
             >
-              Pay online
+              Open payment option
             </a>
           ) : (
             <p className="mb-4 text-sm text-slate-600">Online payment isn&apos;t configured for this PTA yet. Please use one of the payment methods your PTA has shared with you, then let us know below.</p>
           )}
+          <p className="mt-3 text-xs text-slate-500">
+            Payments made through an external payment method may remain pending until reviewed and approved by a PTA officer.
+          </p>
           <div className="mt-4">
             <PtaReportPaymentForm duesChargeId={summary.currentCharge.id} />
           </div>
