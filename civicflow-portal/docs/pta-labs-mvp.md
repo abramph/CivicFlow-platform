@@ -261,7 +261,7 @@ See "Data minimization and privacy limitations" above. No dedicated bulk data-ex
 
 ## Recommended next steps
 
-1. **Parent Membership and Dues Self-Service** (recommended next PR) — a parent-facing page/routes for viewing dues balance and paying, since `dues.ts` is now fully wired for officers but a parent still has no self-service view of their own household's financial status. This is the single highest-value gap remaining.
+1. ~~**Parent Membership and Dues Self-Service**~~ — **done, in a separate PR** (`agent/pta-parent-dues-self-service`, depends on this PR) — see `docs/pta-parent-dues-self-service.md` for the parent-facing `/labs/pta/membership` page and its documented design decisions.
 2. Decide whether event-level QR check-in is worth the `MeetingAttendanceSession` schema change, based on real pilot feedback about whether officers actually want it.
 3. Consider whether an event-level capacity field is worth adding, based on real pilot feedback (confirmed absent during hardening review — see "Known limitations").
 4. Consider a bulk dues-charge/rollover helper once a real pilot has run one full school year.
