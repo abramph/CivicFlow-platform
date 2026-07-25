@@ -114,6 +114,7 @@ describe("POST /api/admin/impersonate/stop", () => {
       IMPERSONATION_COOKIE,
       JSON.stringify({
         actorUserId: "admin-1",
+        actorEmail: "admin@unestra.example",
         targetUserId: "target-1",
         organizationId: "org-a",
         sessionId: "session-1",
@@ -135,6 +136,13 @@ describe("POST /api/admin/impersonate/stop", () => {
       expect.objectContaining({
         organizationId: "org-a",
         actorUserId: "admin-1",
+        // Regression guard: the ended event must attribute the real admin's
+        // email from the cookie, not "unknown admin" — found live during
+        // the manual OrgPulse-report reproduction, where the impersonation
+        // history page rendered "unknown admin" for every ended session
+        // because actorEmail was never carried through from start() to
+        // stop()'s audit event.
+        actorEmail: "admin@unestra.example",
         action: "platform.impersonation.ended",
         entityType: "impersonation_session",
         entityId: "session-1",

@@ -34,6 +34,8 @@ const MAX_DURATION_MS = 4 * 60 * 60 * 1000; // 4 hours — a forgotten session s
 
 export interface ImpersonationCookiePayload {
   actorUserId: string;
+  /** Carried through so the "ended" audit event can attribute the real admin by email even though, by the time stop() runs, the ambient session resolves to the TARGET's identity, not the admin's. */
+  actorEmail: string;
   targetUserId: string;
   organizationId: string;
   /** Random, generated at start — correlates the start/end audit events for this one session. */

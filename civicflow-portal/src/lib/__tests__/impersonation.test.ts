@@ -25,6 +25,7 @@ import { resolveImpersonationOverlay, type ImpersonationCookiePayload } from "@/
 function cookiePayload(overrides: Partial<ImpersonationCookiePayload> = {}): ImpersonationCookiePayload {
   return {
     actorUserId: "admin-1",
+    actorEmail: "admin@unestra.example",
     targetUserId: "target-1",
     organizationId: "org-a",
     sessionId: "session-1",

@@ -31,6 +31,7 @@ export async function POST(request: Request) {
     await createAuditEvent({
       organizationId: payload.organizationId,
       actorUserId: payload.actorUserId,
+      actorEmail: payload.actorEmail,
       action: "platform.impersonation.ended",
       entityType: "impersonation_session",
       entityId: payload.sessionId,

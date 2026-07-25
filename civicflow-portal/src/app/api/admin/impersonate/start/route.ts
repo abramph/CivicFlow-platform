@@ -43,6 +43,7 @@ export async function POST(request: Request) {
 
     await beginImpersonationCookies({
       actorUserId: session.userId,
+      actorEmail: session.userEmail,
       targetUserId,
       organizationId,
       sessionId,
