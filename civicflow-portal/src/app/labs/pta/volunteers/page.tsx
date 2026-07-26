@@ -8,7 +8,7 @@ import { PtaLabsBadge } from "@/components/labs/pta/PtaLabsBadge";
 import { VolunteerSlotClaimButton } from "@/components/labs/pta/VolunteerSlotClaimButton";
 
 export default async function PtaVolunteersPage() {
-  const { organizationId, session } = await requireOrganization();
+  const { organizationId, session, can } = await requireOrganization();
   const access = await getOrganizationLabAccess(organizationId, "ptaVertical");
 
   if (!access.available) {
@@ -27,7 +27,11 @@ export default async function PtaVolunteersPage() {
   return (
     <main className="space-y-6">
       <PtaLabsBadge />
-      <PageHeader title="Volunteer Opportunities" description="Browse open opportunities and claim an available time slot." />
+      <PageHeader
+        title="Volunteer Opportunities"
+        description="Browse open opportunities and claim an available time slot."
+        actions={can("pta:volunteers:manage") ? [{ href: "/labs/pta/volunteers/manage", label: "Manage opportunities" }] : []}
+      />
 
       {opportunities.length === 0 ? (
         <EmptyState title="No open volunteer opportunities right now" />

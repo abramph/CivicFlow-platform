@@ -20,6 +20,10 @@ export interface PtaDashboardMetrics {
   upcomingMeetingTitle: string | null;
   upcomingMeetingDate: string | null;
   recentlyApprovedMinutesCount: number;
+  committeesCount: number;
+  teachersCount: number;
+  pendingPaymentReportsCount: number;
+  outstandingDuesCents: number;
 }
 
 export async function getPtaDashboardMetrics(organizationId: string, schoolYear: string): Promise<PtaDashboardMetrics> {
@@ -35,6 +39,10 @@ export async function getPtaDashboardMetrics(organizationId: string, schoolYear:
     recentAnnouncementsCount,
     upcomingMeeting,
     recentlyApprovedMinutesCount,
+    committeesCount,
+    teachersCount,
+    pendingPaymentReportsCount,
+    outstandingCharges,
   ] = await Promise.all([
     prisma.ptaHousehold.count({ where: { organizationId, schoolYear, status: "ACTIVE" } }),
     prisma.ptaHousehold.count({ where: { organizationId, schoolYear, status: "ACTIVE", orgMember: { duesCharges: { some: { organizationId, status: "PAID" } } } } }),
@@ -47,10 +55,21 @@ export async function getPtaDashboardMetrics(organizationId: string, schoolYear:
     prisma.communicationCampaign.count({ where: { organizationId, status: "SENT", createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } } }),
     prisma.meeting.findFirst({ where: { organizationId, meetingDate: { gte: new Date() } }, orderBy: { meetingDate: "asc" }, select: { title: true, meetingDate: true } }),
     prisma.meetingMinutesDraft.count({ where: { organizationId, status: "APPROVED", approvedAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } } }),
+    prisma.ptaCommittee.count({ where: { organizationId } }),
+    prisma.ptaTeacher.count({ where: { organizationId } }),
+    prisma.paymentReport.count({ where: { organizationId, status: "pending", member: { ptaHouseholdBilling: { isNot: null } } } }),
+    prisma.duesCharge.findMany({
+      where: { organizationId, status: { in: ["PENDING", "PARTIAL"] }, member: { ptaHouseholdBilling: { isNot: null } } },
+      select: { amountDue: true, amountPaid: true },
+    }),
   ]);
 
   const volunteerSlotsOpen = slots.reduce((sum, s) => sum + Math.max(0, s.capacity - s.claimedCount), 0);
   const volunteerSlotsFilled = slots.reduce((sum, s) => sum + s.claimedCount, 0);
+  const outstandingDuesCents = outstandingCharges.reduce(
+    (sum, c) => sum + Math.round((Number(c.amountDue) - Number(c.amountPaid)) * 100),
+    0
+  );
 
   return {
     activeHouseholds,
@@ -68,5 +87,9 @@ export async function getPtaDashboardMetrics(organizationId: string, schoolYear:
     upcomingMeetingTitle: upcomingMeeting?.title ?? null,
     upcomingMeetingDate: upcomingMeeting?.meetingDate?.toISOString() ?? null,
     recentlyApprovedMinutesCount,
+    committeesCount,
+    teachersCount,
+    pendingPaymentReportsCount,
+    outstandingDuesCents,
   };
 }

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { LogoutButton } from "@/components/LogoutButton";
 
 function isHiddenPath(pathname: string) {
@@ -42,6 +42,30 @@ export function PortalShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const { data: session, status, update } = useSession();
   const [switching, setSwitching] = useState(false);
+  const [ptaAvailable, setPtaAvailable] = useState(false);
+
+  // Whether "Unestra for PTA" is enrolled+enabled for the ACTIVE organization
+  // — refetched whenever the active org changes (including via the switcher
+  // below), since enrollment is per-organization, not per-user.
+  useEffect(() => {
+    const organizationId = session?.organizationId;
+    if (!organizationId) {
+      setPtaAvailable(false);
+      return;
+    }
+    let cancelled = false;
+    fetch("/api/labs/pta/access")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body) => {
+        if (!cancelled) setPtaAvailable(Boolean(body?.data?.available));
+      })
+      .catch(() => {
+        if (!cancelled) setPtaAvailable(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.organizationId]);
 
   async function switchOrganization(organizationId: string) {
     if (!session?.organizations || organizationId === session.organizationId) return;
@@ -234,6 +258,23 @@ export function PortalShell({ children }: { children: ReactNode }) {
                 {item.label}
               </Link>
             ))}
+            {ptaAvailable && can("pta:directory:read") ? (
+              <div className="mt-3 border-t border-slate-200 pt-3">
+                <p className="px-4 pb-1.5 text-xs font-semibold uppercase tracking-[0.15em] text-emerald-700">
+                  PTA
+                </p>
+                <Link
+                  href="/labs/pta/dashboard"
+                  className={`block rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
+                    isActive(pathname, "/labs/pta")
+                      ? "bg-emerald-700 text-white shadow-sm"
+                      : "text-slate-800 hover:bg-slate-100"
+                  }`}
+                >
+                  Unestra for PTA
+                </Link>
+              </div>
+            ) : null}
             {canSeePlatformAdmin ? (
               <Link
                 href="/admin/platform"

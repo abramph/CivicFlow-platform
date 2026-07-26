@@ -77,12 +77,21 @@ export async function getPtaHousehold(organizationId: string, householdId: strin
   return household;
 }
 
-export async function listPtaHouseholds(organizationId: string, filters: { schoolYear?: string; status?: string } = {}) {
+export async function listPtaHouseholds(organizationId: string, filters: { schoolYear?: string; status?: string; search?: string } = {}) {
   return prisma.ptaHousehold.findMany({
     where: {
       organizationId,
       ...(filters.schoolYear ? { schoolYear: filters.schoolYear } : {}),
       ...(filters.status ? { status: filters.status as never } : {}),
+      ...(filters.search
+        ? {
+            OR: [
+              { displayName: { contains: filters.search, mode: "insensitive" } },
+              { adults: { some: { name: { contains: filters.search, mode: "insensitive" } } } },
+              { students: { some: { displayName: { contains: filters.search, mode: "insensitive" } } } },
+            ],
+          }
+        : {}),
     },
     include: { adults: true, students: { select: { id: true, displayName: true, status: true } } },
     orderBy: { displayName: "asc" },
