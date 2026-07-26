@@ -1,9 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const requireMobileMembership = vi.fn();
-vi.mock("@/lib/mobile-auth", () => ({
-  requireMobileMembership: (...args: unknown[]) => requireMobileMembership(...args),
-}));
+const requireMobileOrgAccess = vi.fn();
+vi.mock("@/lib/mobile-auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/mobile-auth")>();
+  return {
+    ...actual,
+    requireMobileMembership: (...args: unknown[]) => requireMobileMembership(...args),
+    requireMobileOrgAccess: (...args: unknown[]) => requireMobileOrgAccess(...args),
+  };
+});
 
 const findManyCampaign = vi.fn().mockResolvedValue([]);
 const findManyPaymentMethodConfig = vi.fn().mockResolvedValue([]);
@@ -50,12 +56,12 @@ describe("GET /api/mobile/campaigns", () => {
 
 describe("GET /api/mobile/payment-methods", () => {
   beforeEach(() => {
-    requireMobileMembership.mockReset();
+    requireMobileOrgAccess.mockReset();
     findManyPaymentMethodConfig.mockReset();
   });
 
   it("filters out methods with no identifier or instructions", async () => {
-    requireMobileMembership.mockResolvedValueOnce({ organizationId: "org-a" });
+    requireMobileOrgAccess.mockResolvedValueOnce({ organizationId: "org-a" });
     findManyPaymentMethodConfig.mockResolvedValueOnce([
       { id: "1", label: "Cash", accountIdentifier: null, instructions: null },
       { id: "2", label: "Zelle", accountIdentifier: "treasurer@org.com", instructions: null },

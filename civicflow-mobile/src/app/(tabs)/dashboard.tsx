@@ -1,21 +1,26 @@
 import { router } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
 import { useCallback, useEffect, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
+import { API_BASE_URL } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import {
-  getAnnouncements,
+  getAnnouncementsForIdentity,
   getDues,
-  getEvents,
+  getEventsForIdentity,
   getPaymentHistory,
+  getPtaDues,
   getPtaVolunteerCommitments,
   getPtaVolunteerHours,
   type Announcement,
   type DuesSummary,
   type MobileEvent,
+  type PtaDuesSummary,
+  type PtaEvent,
   type PtaVolunteerCommitment,
   type PtaVolunteerHours,
 } from '@/lib/mobile-api';
@@ -23,6 +28,10 @@ import { useUnreadConversationCount } from '@/lib/unread-count';
 
 function formatCurrency(value: number) {
   return value.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+}
+
+function formatCentsCurrency(cents: number) {
+  return formatCurrency(cents / 100);
 }
 
 function formatHours(minutes: number): string {
@@ -33,38 +42,42 @@ function formatHours(minutes: number): string {
 export default function DashboardScreen() {
   const { selectedOrganization, selectedOrganizationId } = useAuth();
   const [dues, setDues] = useState<DuesSummary | null>(null);
+  const [ptaDues, setPtaDues] = useState<PtaDuesSummary | null>(null);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
-  const [events, setEvents] = useState<MobileEvent[]>([]);
+  const [events, setEvents] = useState<(MobileEvent | PtaEvent)[]>([]);
   const [pendingReportCount, setPendingReportCount] = useState(0);
   const [ptaHours, setPtaHours] = useState<PtaVolunteerHours | null>(null);
   const [ptaUpcoming, setPtaUpcoming] = useState<PtaVolunteerCommitment | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const unreadCount = useUnreadConversationCount(selectedOrganizationId);
-  // A PTA household adult has no personal OrgMember record — the
-  // dues/announcements/events/messages tabs all require one
-  // (requireMobileMembership on the portal side), so those calls are
-  // skipped entirely for a pure PTA parent rather than left to throw and
-  // blank the whole dashboard. Bridging those tabs to a PtaHouseholdAdult
-  // identity is real, separate future work (see docs/mobile-architecture.md
-  // "Known limitations") — out of scope for this pass, which focuses on the
-  // volunteer workflow specifically.
   const hasMemberIdentity = Boolean(selectedOrganization?.memberId);
   const pta = selectedOrganization?.pta ?? null;
+  const hasPtaIdentity = Boolean(pta?.householdAdultId);
+  // A pure PTA parent (household link, no OrgMember) reads announcements,
+  // events, and messages through the org-access / household-authorized
+  // bridge routes instead of the conventional member routes — see
+  // requireMobileOrgAccess / requireMobilePtaHouseholdAccess in
+  // civicflow-portal's mobile-auth.ts, and docs/mobile-pta-parent-parity.md.
+  const hasAnyIdentity = hasMemberIdentity || hasPtaIdentity;
 
   const load = useCallback(async () => {
-    if (!selectedOrganizationId) return;
+    if (!selectedOrganizationId || !hasAnyIdentity) return;
+
+    const [announcementsData, eventsData] = await Promise.all([
+      getAnnouncementsForIdentity(selectedOrganizationId, hasMemberIdentity),
+      getEventsForIdentity(selectedOrganizationId, hasMemberIdentity),
+    ]);
+    setAnnouncements(announcementsData.slice(0, 3));
+    setEvents(eventsData.slice(0, 3));
 
     if (hasMemberIdentity) {
-      const [duesData, announcementsData, eventsData, historyData] = await Promise.all([
-        getDues(selectedOrganizationId),
-        getAnnouncements(selectedOrganizationId),
-        getEvents(selectedOrganizationId),
-        getPaymentHistory(selectedOrganizationId),
-      ]);
+      const [duesData, historyData] = await Promise.all([getDues(selectedOrganizationId), getPaymentHistory(selectedOrganizationId)]);
       setDues(duesData);
-      setAnnouncements(announcementsData.slice(0, 3));
-      setEvents(eventsData.slice(0, 3));
       setPendingReportCount(historyData.reports.filter((r) => r.status === 'pending').length);
+    } else if (hasPtaIdentity) {
+      const duesData = await getPtaDues(selectedOrganizationId);
+      setPtaDues(duesData);
+      setPendingReportCount(duesData.currentCharge?.pendingReportCount ?? 0);
     }
 
     if (pta?.householdAdultId) {
@@ -75,7 +88,7 @@ export default function DashboardScreen() {
       setPtaHours(hoursData);
       setPtaUpcoming(commitments.find((c) => c.status === 'SIGNED_UP') ?? null);
     }
-  }, [selectedOrganizationId, hasMemberIdentity, pta?.householdAdultId]);
+  }, [selectedOrganizationId, hasAnyIdentity, hasMemberIdentity, hasPtaIdentity, pta?.householdAdultId]);
 
   useEffect(() => {
     (async () => {
@@ -122,6 +135,31 @@ export default function DashboardScreen() {
         </ThemedView>
       ) : null}
 
+      {hasPtaIdentity && !hasMemberIdentity ? (
+        <ThemedView style={styles.summaryRow}>
+          <Pressable style={styles.summaryTile} onPress={() => router.push('/dues')}>
+            <ThemedView type="backgroundElement" style={styles.card}>
+              <ThemedText type="small" themeColor="textSecondary">Dues Balance</ThemedText>
+              <ThemedText type="subtitle">
+                {ptaDues?.currentCharge ? formatCentsCurrency(ptaDues.currentCharge.remainingBalanceCents) : '—'}
+              </ThemedText>
+              {ptaDues?.currentCharge?.status === 'PENDING_REVIEW' ? (
+                <ThemedText type="small" style={styles.pending}>Payment pending review</ThemedText>
+              ) : null}
+              {ptaDues?.hasBillingIdentity === false ? (
+                <ThemedText type="small" themeColor="textSecondary">No billing record</ThemedText>
+              ) : null}
+            </ThemedView>
+          </Pressable>
+          <Pressable style={styles.summaryTile} onPress={() => router.push('/inbox')}>
+            <ThemedView type="backgroundElement" style={styles.card}>
+              <ThemedText type="small" themeColor="textSecondary">Unread Messages</ThemedText>
+              <ThemedText type="subtitle">{unreadCount}</ThemedText>
+            </ThemedView>
+          </Pressable>
+        </ThemedView>
+      ) : null}
+
       {pta?.householdAdultId ? (
         <Pressable onPress={() => router.push('/volunteers')}>
           <ThemedView type="backgroundElement" style={styles.card}>
@@ -142,7 +180,7 @@ export default function DashboardScreen() {
       ) : null}
 
       {pendingReportCount > 0 ? (
-        <Pressable onPress={() => router.push('/payment-history')}>
+        <Pressable onPress={() => router.push(hasMemberIdentity ? '/payment-history' : '/dues')}>
           <ThemedView type="backgroundElement" style={styles.card}>
             <ThemedText type="smallBold">
               {pendingReportCount} payment report{pendingReportCount === 1 ? '' : 's'} awaiting review
@@ -159,19 +197,37 @@ export default function DashboardScreen() {
             {nextEvent.startAt ? (
               <ThemedText type="small" themeColor="textSecondary">{new Date(nextEvent.startAt).toLocaleString()}</ThemedText>
             ) : null}
+            {'myRsvp' in nextEvent && nextEvent.myRsvp ? (
+              <ThemedText type="small" style={styles.rsvpBadge}>You&apos;re {nextEvent.myRsvp.status.replace('_', ' ').toLowerCase()}</ThemedText>
+            ) : null}
           </ThemedView>
         </Pressable>
       ) : null}
 
       <ThemedText type="smallBold" style={styles.sectionLabel}>Quick Actions</ThemedText>
       <ThemedView style={styles.quickActionsRow}>
-        <Pressable style={styles.actionButton} onPress={() => router.push('/make-payment')}>
-          <ThemedText style={styles.actionButtonText}>Make a Payment</ThemedText>
-        </Pressable>
-        <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/attendance-scan')}>
-          <ThemedText style={styles.actionButtonSecondaryText}>Scan Attendance Code</ThemedText>
-        </Pressable>
-        <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/report-payment')}>
+        {hasMemberIdentity ? (
+          <Pressable style={styles.actionButton} onPress={() => router.push('/make-payment')}>
+            <ThemedText style={styles.actionButtonText}>Make a Payment</ThemedText>
+          </Pressable>
+        ) : null}
+        {hasPtaIdentity && !hasMemberIdentity && ptaDues?.onlinePaymentLinkSlug ? (
+          <Pressable
+            style={styles.actionButton}
+            onPress={() => WebBrowser.openBrowserAsync(`${API_BASE_URL}/pay/${ptaDues.onlinePaymentLinkSlug}`)}
+          >
+            <ThemedText style={styles.actionButtonText}>Make a Payment</ThemedText>
+          </Pressable>
+        ) : null}
+        {hasMemberIdentity ? (
+          <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/attendance-scan')}>
+            <ThemedText style={styles.actionButtonSecondaryText}>Scan Attendance Code</ThemedText>
+          </Pressable>
+        ) : null}
+        <Pressable
+          style={styles.actionButtonSecondary}
+          onPress={() => router.push(hasMemberIdentity ? '/report-payment' : '/pta-report-payment')}
+        >
           <ThemedText style={styles.actionButtonSecondaryText}>Report a Payment</ThemedText>
         </Pressable>
         <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/inbox')}>
@@ -183,6 +239,16 @@ export default function DashboardScreen() {
         <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/events')}>
           <ThemedText style={styles.actionButtonSecondaryText}>Events</ThemedText>
         </Pressable>
+        {hasPtaIdentity ? (
+          <>
+            <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/minutes')}>
+              <ThemedText style={styles.actionButtonSecondaryText}>Meeting Minutes</ThemedText>
+            </Pressable>
+            <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/pta-documents')}>
+              <ThemedText style={styles.actionButtonSecondaryText}>Documents</ThemedText>
+            </Pressable>
+          </>
+        ) : null}
       </ThemedView>
 
       <ThemedView style={styles.sectionHeaderRow}>
@@ -242,6 +308,12 @@ const styles = StyleSheet.create({
   },
   delinquent: {
     color: '#B42318',
+  },
+  pending: {
+    color: '#B54708',
+  },
+  rsvpBadge: {
+    color: '#047857',
   },
   sectionHeaderRow: {
     flexDirection: 'row',

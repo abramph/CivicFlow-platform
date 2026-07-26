@@ -12,13 +12,13 @@ Legend: **Complete** = built, tested, used by a real screen. **Partial** = route
 | Logout | `/api/mobile/auth/logout` | POST | access token | Complete |
 | Accept invite | `/api/mobile/auth/accept-invite` | POST | invite token | Complete |
 | Current user / orgs | `/api/mobile/organizations` | GET | access token | **Complete** — extended this branch to include PTA household-adult and PTA-officer identities (previously MEMBER-role orgs only) |
-| Dashboard | *(client composes from Dues/Announcements/Events + new PTA hours/commitments)* | — | — | Complete for member identity; partial for PTA-only identity (volunteer card only) |
-| Announcements | `/api/mobile/announcements`, `/[id]/read` | GET/POST | `requireMobileMembership` | Complete for MEMBER-role orgs; **not usable by a pure PTA parent** (needs an `OrgMember`) — known gap |
-| Events | `/api/mobile/events` | GET | `requireMobileMembership` | Same as Announcements |
-| RSVP | — | — | — | **Missing** — no mobile RSVP endpoint exists at all (web-only today) |
-| Membership/Dues | `/api/mobile/dues` | GET | `requireMobileMembership` | Complete for MEMBER-role orgs; not usable by a pure PTA parent |
-| Payment reports | `/api/mobile/report-payment`, `/payment-history` | POST/GET | `requireMobileMembership` | Complete for MEMBER-role orgs |
-| Payment links/methods | `/api/mobile/payment-link`, `/payment-methods` | GET | `requireMobileMembership` | Complete for MEMBER-role orgs |
+| Dashboard | *(client composes from Dues/Announcements/Events + PTA hours/commitments)* | — | — | **Complete for both identities** — bridged this pass, see `mobile-pta-parent-parity.md` |
+| Announcements | `/api/mobile/announcements`, `/[id]/read` (member) + `/api/mobile/pta/announcements`, `/[id]/read` (PTA parent, new this pass) | GET/POST | `requireMobileMembership` / `requireMobilePtaHouseholdAccess` | **Complete for both identities** — client picks the route via `getAnnouncementsForIdentity()` |
+| Events | `/api/mobile/events` (member) + `/api/mobile/pta/events` (PTA parent, new this pass) | GET | `requireMobileMembership` / `requireMobilePtaHouseholdAccess` | **Complete for both identities** |
+| RSVP | `/api/mobile/pta/events/[eventId]/rsvp` (new this pass) | POST | `requireMobilePtaHouseholdAccess` | **Complete for PTA households** — household-scoped (`PtaEventRsvp`); no RSVP concept exists for conventional (non-PTA) events, so **N/A** for member-only orgs |
+| Membership/Dues | `/api/mobile/dues` (member) + `/api/mobile/pta/dues`, `/dues/report-payment` (PTA parent, new this pass) | GET/POST | `requireMobileMembership` / `requireMobilePtaHouseholdAccess` | **Complete for both identities** |
+| Payment reports | `/api/mobile/report-payment`, `/payment-history` (member) + `/api/mobile/pta/dues/report-payment` (PTA parent) | POST/GET | `requireMobileMembership` / `requireMobilePtaHouseholdAccess` | Complete for MEMBER-role orgs; dues-only reporting complete for PTA households (no generic payment-history list for PTA parents — dues screen shows prior charges instead) |
+| Payment links/methods | `/api/mobile/payment-link` (member only), `/payment-methods` (both) | GET | `requireMobileMembership` (payment-link) / `requireMobileOrgAccess` (payment-methods, loosened this pass — org-scoped data, no member filtering) | Complete for MEMBER-role orgs; PTA parents get "ways to pay" + the dues screen's own `onlinePaymentLinkSlug` (no generic payment-link lookup needed) |
 | **Volunteer opportunities (parent)** | `/api/mobile/pta/volunteers/opportunities`, `/opportunities/[id]` | GET | `requireMobilePtaHouseholdAccess` | **Complete — new this branch** |
 | **Volunteer signup/cancellation** | `/api/mobile/pta/volunteers/slots/[id]/claim`, `/cancel` | POST | `requireMobilePtaHouseholdAccess` | **Complete — new this branch.** Idempotent/concurrency-safe (delegates to `claimPtaVolunteerSlot`/`cancelPtaVolunteerSignup`, the same functions proven safe under real concurrent load on the portal side) |
 | **Volunteer history** | `/api/mobile/pta/volunteers/my-commitments` | GET | `requireMobilePtaHouseholdAccess` | **Complete — new this branch** |
@@ -26,13 +26,13 @@ Legend: **Complete** = built, tested, used by a real screen. **Partial** = route
 | **Volunteer attendance (officer)** | `/api/mobile/pta/volunteers/signups/[id]/checkin`, `/checkout`, `/attendance` | POST | `requireMobileStaffPermission(pta:volunteers:checkin)` | **Complete — new this branch.** Idempotent, server-timestamped |
 | **Volunteer roster/staffing (officer)** | `/api/mobile/pta/volunteers/today`, `/opportunities/[id]/roster` | GET | `requireMobileStaffPermission(pta:volunteers:checkin)` | **Complete — new this branch** |
 | **Volunteer hour approval (officer)** | `/api/mobile/pta/volunteers/hour-entries/pending`, `/[id]/approve` | GET/POST | `requireMobileStaffPermission(pta:volunteer-hours:approve)` | **Complete — new this branch.** Self-approval rejected server-side (`PTA_SELF_APPROVAL_FORBIDDEN`) |
-| Meetings | — | — | — | **Missing** — no mobile meetings/agenda endpoint exists |
-| Meeting attendance | `/api/mobile/attendance/check-in`, `/history`, `/meetings/[id]/attendance` | POST/GET | `requireMobileMembership` | Complete (QR-based check-in) |
-| Meeting minutes | — | — | — | **Missing** — no mobile approved-minutes endpoint exists (the web has `GET /api/labs/pta/minutes`, not bridged to mobile auth yet) |
-| Documents | — | — | — | **Missing** — no mobile document-list endpoint exists |
-| Inbox/messages | `/api/mobile/messages/conversations`, `/[id]`, `/[id]/messages` | GET/POST | `requireMobileMembership` | Complete for MEMBER-role orgs; not usable by a pure PTA parent |
+| Meetings | — | — | — | **Missing, deliberately** — no mobile meetings/agenda endpoint exists; the web's own meeting list is staff-only (`meetings:read`), so there's no parent-facing precedent to bridge. See `mobile-pta-parent-parity.md` for why this stayed out of scope this pass. |
+| Meeting attendance | `/api/mobile/attendance/check-in`, `/history`, `/meetings/[id]/attendance` | POST/GET | `requireMobileMembership` | Complete (QR-based check-in); N/A for PTA parents (no attendance concept exposed to them) |
+| Meeting minutes | `/api/mobile/pta/minutes` (new this pass) | GET | `requireMobilePtaHouseholdAccess` | **Complete for PTA households** — approved minutes only, mirrors the web's `listApprovedPtaMinutes()` exactly |
+| Documents | `/api/mobile/pta/documents` (new this pass) | GET | `requireMobilePtaHouseholdAccess` | **Complete for PTA households** — metadata only, `downloadable: false` always (no real file behind the seeded fictional `objectKey`s); genuinely new surface area, no prior parent-facing document read path existed anywhere |
+| Inbox/messages | `/api/mobile/messages/conversations`, `/[id]`, `/[id]/messages` | GET/POST | `requireMobileOrgAccess` (loosened this pass — was `requireMobileMembership`) | **Complete for both identities** — `ConversationParticipant` is `userId`-scoped, never needed `memberId` at all |
 | Notifications (device) | `/api/mobile/register-device`, `/unregister-device` | POST | access token | Complete (registration plumbing); no PTA-specific notification categories wired yet |
-| Profile | `/api/mobile/profile` | GET/PATCH | `requireMobileMembership` | Complete for MEMBER-role orgs |
+| Profile | `/api/mobile/profile` | GET/PATCH | `requireMobileMembership` | Name/email/organization display and organization switching work for both identities (sourced from `/api/mobile/organizations`, not this route). Comms-preference toggles (push/email/SMS) and Attendance History are **deliberately hidden for PTA parents this pass** — those fields live on the shared household `OrgMember`, not a per-adult record, and editing them would mean either touching a record shared across every adult in the household or fabricating new per-adult schema; neither existed as a bridgeable capability. See `mobile-pta-parent-parity.md`. |
 
 ## Volunteer permissions (server-enforced, never client-side)
 

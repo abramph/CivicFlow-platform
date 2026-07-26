@@ -1,5 +1,5 @@
 import { withApiErrorHandling } from "@/lib/api-route";
-import { requireMobileMembership } from "@/lib/mobile-auth";
+import { requireMobileOrgAccess } from "@/lib/mobile-auth";
 import { notifyNewMessageParticipants } from "@/lib/messaging";
 import { prisma } from "@/lib/prisma";
 import { requireRateLimit } from "@/lib/rate-limit";
@@ -10,6 +10,7 @@ const sendMessageSchema = z.object({
   body: z.string().trim().min(1).max(10000),
 });
 
+/** See conversations/route.ts's doc comment for why this uses requireMobileOrgAccess() instead of requireMobileMembership(). */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   return withApiErrorHandling(async () => {
     const rateLimited = await requireRateLimit({
@@ -21,7 +22,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (rateLimited) return rateLimited;
 
     const input = await parseJsonBody(request, sendMessageSchema);
-    const { organizationId: verifiedOrgId, session } = await requireMobileMembership(request, input.organizationId);
+    const { organizationId: verifiedOrgId, session } = await requireMobileOrgAccess(request, input.organizationId);
     const { id } = await params;
 
     const conversation = await prisma.conversation.findFirst({

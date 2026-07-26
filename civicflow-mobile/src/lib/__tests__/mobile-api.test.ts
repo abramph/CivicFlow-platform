@@ -5,13 +5,20 @@ import {
   checkOutPtaVolunteer,
   claimPtaVolunteerSlot,
   getAnnouncements,
+  getAnnouncementsForIdentity,
   getCampaigns,
   getConversation,
   getConversations,
+  getEventsForIdentity,
   getPaymentLinkSlug,
   getPaymentMethods,
   getPendingPtaHourEntries,
   getProfile,
+  getPtaAnnouncements,
+  getPtaDocuments,
+  getPtaDues,
+  getPtaEvents,
+  getPtaMinutes,
   getPtaVolunteerCommitments,
   getPtaVolunteerHours,
   getPtaVolunteerOpportunities,
@@ -19,7 +26,11 @@ import {
   getPtaVolunteerRoster,
   getPtaVolunteerToday,
   markAnnouncementRead,
+  markAnnouncementReadForIdentity,
+  markPtaAnnouncementRead,
+  reportPtaDuesPayment,
   sendConversationMessage,
+  setPtaEventRsvp,
   setPtaVolunteerAttendance,
   submitPaymentReport,
   updateProfile,
@@ -244,6 +255,118 @@ describe('mobile-api', () => {
         method: 'POST',
         body: JSON.stringify({ organizationId: 'org-1', adjustedMinutes: null }),
       });
+    });
+  });
+
+  describe('PTA parent parity — announcements, events, dues, minutes, documents', () => {
+    it('getPtaAnnouncements and markPtaAnnouncementRead hit the household-authorized bridge routes', async () => {
+      mockApiFetch.mockResolvedValueOnce([]);
+      await getPtaAnnouncements('org-1');
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/announcements?organizationId=org-1');
+
+      mockApiFetch.mockResolvedValueOnce(undefined);
+      await markPtaAnnouncementRead('org-1', 'campaign-1');
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/announcements/campaign-1/read', {
+        method: 'POST',
+        body: JSON.stringify({ organizationId: 'org-1' }),
+      });
+    });
+
+    it('getPtaEvents requests the household-scoped event list with RSVP state', async () => {
+      mockApiFetch.mockResolvedValueOnce([]);
+      await getPtaEvents('org-1');
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/events?organizationId=org-1');
+    });
+
+    it('setPtaEventRsvp defaults attendeeCount to 1 and posts the chosen status', async () => {
+      mockApiFetch.mockResolvedValueOnce({ status: 'GOING', attendeeCount: 1 });
+      await setPtaEventRsvp('org-1', 'event-1', 'GOING');
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/events/event-1/rsvp', {
+        method: 'POST',
+        body: JSON.stringify({ organizationId: 'org-1', status: 'GOING', attendeeCount: 1 }),
+      });
+    });
+
+    it('setPtaEventRsvp forwards an explicit attendeeCount', async () => {
+      mockApiFetch.mockResolvedValueOnce({ status: 'GOING', attendeeCount: 3 });
+      await setPtaEventRsvp('org-1', 'event-1', 'GOING', 3);
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/events/event-1/rsvp', {
+        method: 'POST',
+        body: JSON.stringify({ organizationId: 'org-1', status: 'GOING', attendeeCount: 3 }),
+      });
+    });
+
+    it('getPtaDues requests the household billing-identity summary', async () => {
+      mockApiFetch.mockResolvedValueOnce({});
+      await getPtaDues('org-1');
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/dues?organizationId=org-1');
+    });
+
+    it('reportPtaDuesPayment posts the full report body, including a null duesChargeId when unlinked', async () => {
+      mockApiFetch.mockResolvedValueOnce({});
+      await reportPtaDuesPayment({
+        organizationId: 'org-1',
+        duesChargeId: null,
+        amountCents: 2500,
+        paymentMethod: 'CASH',
+        paymentDate: '2026-01-01T00:00:00.000Z',
+      });
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/dues/report-payment', {
+        method: 'POST',
+        body: JSON.stringify({
+          organizationId: 'org-1',
+          duesChargeId: null,
+          amountCents: 2500,
+          paymentMethod: 'CASH',
+          paymentDate: '2026-01-01T00:00:00.000Z',
+        }),
+      });
+    });
+
+    it('getPtaMinutes and getPtaDocuments request the household-authorized read-only lists', async () => {
+      mockApiFetch.mockResolvedValueOnce([]);
+      await getPtaMinutes('org-1');
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/minutes?organizationId=org-1');
+
+      mockApiFetch.mockResolvedValueOnce([]);
+      await getPtaDocuments('org-1');
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/documents?organizationId=org-1');
+    });
+  });
+
+  describe('identity routing — conventional OrgMember vs. PTA household parent', () => {
+    it('getAnnouncementsForIdentity calls the conventional route when hasMemberIdentity is true', async () => {
+      mockApiFetch.mockResolvedValueOnce([]);
+      await getAnnouncementsForIdentity('org-1', true);
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/announcements?organizationId=org-1');
+    });
+
+    it('getAnnouncementsForIdentity calls the PTA bridge route when hasMemberIdentity is false', async () => {
+      mockApiFetch.mockResolvedValueOnce([]);
+      await getAnnouncementsForIdentity('org-1', false);
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/announcements?organizationId=org-1');
+    });
+
+    it('markAnnouncementReadForIdentity routes to the matching read endpoint for each identity', async () => {
+      mockApiFetch.mockResolvedValueOnce(undefined);
+      await markAnnouncementReadForIdentity('org-1', 'campaign-1', true);
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/announcements/campaign-1/read', expect.anything());
+
+      mockApiFetch.mockResolvedValueOnce(undefined);
+      await markAnnouncementReadForIdentity('org-1', 'campaign-1', false);
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/announcements/campaign-1/read', expect.anything());
+    });
+
+    it('getEventsForIdentity calls the conventional route when hasMemberIdentity is true', async () => {
+      mockApiFetch.mockResolvedValueOnce([]);
+      await getEventsForIdentity('org-1', true);
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/events?organizationId=org-1');
+    });
+
+    it('getEventsForIdentity calls the PTA bridge route when hasMemberIdentity is false', async () => {
+      mockApiFetch.mockResolvedValueOnce([]);
+      await getEventsForIdentity('org-1', false);
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/events?organizationId=org-1');
     });
   });
 });

@@ -227,7 +227,7 @@ export async function requireMobileMembership(
 export interface MobilePtaHouseholdAccess {
   session: MobileSession;
   organizationId: string;
-  adult: { id: string; householdId: string };
+  adult: { id: string; householdId: string; billingMemberId: string | null };
 }
 
 /**
@@ -239,6 +239,14 @@ export interface MobilePtaHouseholdAccess {
  * identity, not a per-adult one. This intentionally does NOT reuse
  * `requireMobileMembership()`, which requires exactly the membership row PTA
  * parents don't have.
+ *
+ * `billingMemberId` (the household's `orgMemberId`, nullable) is exposed
+ * because it is exactly what dues and announcements are actually scoped by
+ * server-side — `PtaHousehold.orgMemberId` is the household's one shared
+ * billing/communications identity (see `parent-dues.ts` and
+ * `communications.ts`'s `resolvePtaTargetMemberIds()`), never a per-adult
+ * one. Every caller of this function must re-derive any query from this
+ * value, never accept a client-supplied memberId.
  */
 export async function requireMobilePtaHouseholdAccess(
   request: Request,
@@ -252,12 +260,58 @@ export async function requireMobilePtaHouseholdAccess(
 
   const adult = await prisma.ptaHouseholdAdult.findFirst({
     where: { organizationId, userId: session.userId },
-    include: { household: { select: { id: true, status: true } } },
+    include: { household: { select: { id: true, status: true, orgMemberId: true } } },
   });
   if (!adult) throw new MobileForbiddenError("Your account is not linked to a PTA household in this organization");
   if (adult.household.status !== "ACTIVE") throw new MobileForbiddenError("Your household's PTA membership is not currently active");
 
-  return { session, organizationId, adult: { id: adult.id, householdId: adult.household.id } };
+  return { session, organizationId, adult: { id: adult.id, householdId: adult.household.id, billingMemberId: adult.household.orgMemberId } };
+}
+
+export interface MobileOrgAccess {
+  session: MobileSession;
+  organizationId: string;
+  /** Present only if the caller also has a regular per-user OrgMember (unrelated to PTA-household billing identity). */
+  memberId: string | null;
+}
+
+/**
+ * The loosest of the mobile guards — verifies only that the caller has SOME
+ * legitimate, currently-active tie to this organization (a regular
+ * membership, a PTA household link, or a staff role), without requiring a
+ * personal `OrgMember`. For features whose underlying data model is already
+ * scoped by `userId` directly rather than by `OrgMember` — messaging
+ * (`ConversationParticipant.userId`) is the motivating case — gating behind
+ * `requireMobileMembership()`'s `OrgMember` requirement was an unnecessarily
+ * strict assumption inherited from the "conventional member" case, not
+ * something the underlying query actually needed. Never grants any
+ * additional data access by itself — each route still scopes its own
+ * queries by `session.userId`/`organizationId` exactly as before.
+ */
+export async function requireMobileOrgAccess(request: Request, organizationId: string): Promise<MobileOrgAccess> {
+  const session = await requireMobileAuth(request);
+
+  const [membership, householdAdult, staffMembership] = await Promise.all([
+    prisma.organizationMembership.findFirst({
+      where: { userId: session.userId, organizationId, role: "MEMBER", status: "active", organization: { status: "active" } },
+    }),
+    prisma.ptaHouseholdAdult.findFirst({
+      where: { organizationId, userId: session.userId, organization: { status: "active" }, household: { status: "ACTIVE" } },
+    }),
+    prisma.organizationMembership.findFirst({
+      where: { userId: session.userId, organizationId, role: { not: "MEMBER" }, status: "active", organization: { status: "active" } },
+    }),
+  ]);
+
+  if (!membership && !householdAdult && !staffMembership) {
+    throw new MobileForbiddenError("No active access to this organization");
+  }
+
+  const member = membership
+    ? await prisma.orgMember.findFirst({ where: { userId: session.userId, organizationId }, select: { id: true } })
+    : null;
+
+  return { session, organizationId, memberId: member?.id ?? null };
 }
 
 export interface MobileStaffAccess {

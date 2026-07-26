@@ -1,5 +1,5 @@
 import { withApiErrorHandling } from "@/lib/api-route";
-import { requireMobileMembership } from "@/lib/mobile-auth";
+import { requireMobileOrgAccess } from "@/lib/mobile-auth";
 import { prisma } from "@/lib/prisma";
 import { ValidationError } from "@/lib/validation";
 
@@ -7,6 +7,9 @@ import { ValidationError } from "@/lib/validation";
  * GET /api/mobile/payment-methods?organizationId=...
  * The org's configured "ways to pay" (Zelle/CashApp/etc.) for the mobile
  * app's Dues and Make a Payment screens — mirrors the member web portal.
+ * Query is org-scoped only (no memberId filtering), so this uses the loosest
+ * access guard rather than requiring a conventional OrgMember — a PTA
+ * household parent needs to see the same "ways to pay" list.
  */
 export async function GET(request: Request) {
   return withApiErrorHandling(async () => {
@@ -14,7 +17,7 @@ export async function GET(request: Request) {
     const organizationId = searchParams.get("organizationId");
     if (!organizationId) throw new ValidationError("organizationId is required");
 
-    const { organizationId: verifiedOrgId } = await requireMobileMembership(request, organizationId);
+    const { organizationId: verifiedOrgId } = await requireMobileOrgAccess(request, organizationId);
 
     const methods = await prisma.paymentMethodConfig.findMany({
       where: { organizationId: verifiedOrgId, isActive: true },

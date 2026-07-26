@@ -10,13 +10,21 @@ import { getProfile, updateProfile, type MobileProfile } from '@/lib/mobile-api'
 
 export default function ProfileScreen() {
   const { user, organizations, selectedOrganization, selectedOrganizationId, logout } = useAuth();
+  const hasMemberIdentity = Boolean(selectedOrganization?.memberId);
   const [profile, setProfile] = useState<MobileProfile | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
 
+  // Comms preferences (commsPushEnabled/commsEmailEnabled/commsSmsEnabled) live
+  // on the conventional OrgMember record. A PTA household's OrgMember is a
+  // shared billing identity (see mobile-auth.ts), never a per-adult one, so
+  // there's no existing per-adult comms-preference model to bridge onto —
+  // this section is hidden rather than editing a shared household record or
+  // fabricating new schema. Name/email/organization above still render
+  // correctly for a PTA parent from the org-discovery response alone.
   const load = useCallback(async () => {
-    if (!selectedOrganizationId) return;
+    if (!selectedOrganizationId || !hasMemberIdentity) return;
     setProfile(await getProfile(selectedOrganizationId));
-  }, [selectedOrganizationId]);
+  }, [selectedOrganizationId, hasMemberIdentity]);
 
   useEffect(() => {
     (async () => {
@@ -67,42 +75,48 @@ export default function ProfileScreen() {
         </Pressable>
       ) : null}
 
-      <Pressable style={styles.secondaryButton} onPress={() => router.push('/attendance-history')}>
-        <ThemedText type="link">Attendance History</ThemedText>
-      </Pressable>
+      {hasMemberIdentity ? (
+        <Pressable style={styles.secondaryButton} onPress={() => router.push('/attendance-history')}>
+          <ThemedText type="link">Attendance History</ThemedText>
+        </Pressable>
+      ) : null}
 
-      <ThemedText type="smallBold" style={styles.sectionLabel}>Notifications</ThemedText>
-      <ThemedView type="backgroundElement" style={styles.card}>
-        <ThemedView style={styles.toggleRow}>
-          <ThemedText type="default">Push Notifications</ThemedText>
-          <Switch
-            value={profile?.commsPushEnabled ?? false}
-            disabled={!profile || saving === 'commsPushEnabled'}
-            onValueChange={(value) => handleToggle('commsPushEnabled', value)}
-          />
-        </ThemedView>
-        <ThemedView style={styles.toggleRow}>
-          <ThemedText type="default">Email Updates</ThemedText>
-          <Switch
-            value={profile?.commsEmailEnabled ?? false}
-            disabled={!profile || saving === 'commsEmailEnabled'}
-            onValueChange={(value) => handleToggle('commsEmailEnabled', value)}
-          />
-        </ThemedView>
-        <ThemedView style={styles.toggleRow}>
-          <ThemedText type="default">Text Messages</ThemedText>
-          <Switch
-            value={profile?.commsSmsEnabled ?? false}
-            disabled={!profile || saving === 'commsSmsEnabled' || Boolean(profile?.smsOptedOutAt)}
-            onValueChange={(value) => handleToggle('commsSmsEnabled', value)}
-          />
-        </ThemedView>
-        {profile?.smsOptedOutAt ? (
-          <ThemedText type="small" themeColor="textSecondary" style={styles.optOutNote}>
-            You&apos;ve texted STOP, so text messages are blocked until you text START to re-enable them.
-          </ThemedText>
-        ) : null}
-      </ThemedView>
+      {hasMemberIdentity ? (
+        <>
+          <ThemedText type="smallBold" style={styles.sectionLabel}>Notifications</ThemedText>
+          <ThemedView type="backgroundElement" style={styles.card}>
+            <ThemedView style={styles.toggleRow}>
+              <ThemedText type="default">Push Notifications</ThemedText>
+              <Switch
+                value={profile?.commsPushEnabled ?? false}
+                disabled={!profile || saving === 'commsPushEnabled'}
+                onValueChange={(value) => handleToggle('commsPushEnabled', value)}
+              />
+            </ThemedView>
+            <ThemedView style={styles.toggleRow}>
+              <ThemedText type="default">Email Updates</ThemedText>
+              <Switch
+                value={profile?.commsEmailEnabled ?? false}
+                disabled={!profile || saving === 'commsEmailEnabled'}
+                onValueChange={(value) => handleToggle('commsEmailEnabled', value)}
+              />
+            </ThemedView>
+            <ThemedView style={styles.toggleRow}>
+              <ThemedText type="default">Text Messages</ThemedText>
+              <Switch
+                value={profile?.commsSmsEnabled ?? false}
+                disabled={!profile || saving === 'commsSmsEnabled' || Boolean(profile?.smsOptedOutAt)}
+                onValueChange={(value) => handleToggle('commsSmsEnabled', value)}
+              />
+            </ThemedView>
+            {profile?.smsOptedOutAt ? (
+              <ThemedText type="small" themeColor="textSecondary" style={styles.optOutNote}>
+                You&apos;ve texted STOP, so text messages are blocked until you text START to re-enable them.
+              </ThemedText>
+            ) : null}
+          </ThemedView>
+        </>
+      ) : null}
 
       <Pressable style={styles.logoutButton} onPress={handleLogout}>
         <ThemedText style={styles.logoutText}>Log Out</ThemedText>

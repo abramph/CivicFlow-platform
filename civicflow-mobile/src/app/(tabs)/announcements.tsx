@@ -6,17 +6,19 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/lib/auth-context';
-import { getAnnouncements, type Announcement } from '@/lib/mobile-api';
+import { getAnnouncementsForIdentity, type Announcement } from '@/lib/mobile-api';
 
 export default function AnnouncementsScreen() {
-  const { selectedOrganizationId } = useAuth();
+  const { selectedOrganization, selectedOrganizationId } = useAuth();
+  const hasMemberIdentity = Boolean(selectedOrganization?.memberId);
+  const hasPtaIdentity = Boolean(selectedOrganization?.pta?.householdAdultId);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
-    if (!selectedOrganizationId) return;
-    setAnnouncements(await getAnnouncements(selectedOrganizationId));
-  }, [selectedOrganizationId]);
+    if (!selectedOrganizationId || (!hasMemberIdentity && !hasPtaIdentity)) return;
+    setAnnouncements(await getAnnouncementsForIdentity(selectedOrganizationId, hasMemberIdentity));
+  }, [selectedOrganizationId, hasMemberIdentity, hasPtaIdentity]);
 
   useEffect(() => {
     (async () => {

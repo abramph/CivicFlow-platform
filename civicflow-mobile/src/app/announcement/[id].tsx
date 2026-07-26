@@ -6,23 +6,24 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/lib/auth-context';
-import { getAnnouncements, markAnnouncementRead, type Announcement } from '@/lib/mobile-api';
+import { getAnnouncementsForIdentity, markAnnouncementReadForIdentity, type Announcement } from '@/lib/mobile-api';
 
 export default function AnnouncementDetailScreen() {
-  const { selectedOrganizationId } = useAuth();
+  const { selectedOrganization, selectedOrganizationId } = useAuth();
+  const hasMemberIdentity = Boolean(selectedOrganization?.memberId);
   const { id } = useLocalSearchParams<{ id: string }>();
   const [announcement, setAnnouncement] = useState<Announcement | null>(null);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     if (!selectedOrganizationId || !id) return;
-    const all = await getAnnouncements(selectedOrganizationId);
+    const all = await getAnnouncementsForIdentity(selectedOrganizationId, hasMemberIdentity);
     const match = all.find((item) => item.id === id) ?? null;
     setAnnouncement(match);
     if (match && !match.isRead) {
-      await markAnnouncementRead(selectedOrganizationId, id).catch(() => null);
+      await markAnnouncementReadForIdentity(selectedOrganizationId, id, hasMemberIdentity).catch(() => null);
     }
-  }, [selectedOrganizationId, id]);
+  }, [selectedOrganizationId, id, hasMemberIdentity]);
 
   useEffect(() => {
     (async () => {

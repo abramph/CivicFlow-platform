@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const findFirstMembership = vi.fn();
 const findFirstHouseholdAdult = vi.fn();
+const findFirstOrgMember = vi.fn();
 const findUniqueUser = vi.fn();
 const countMembership = vi.fn();
 const countPtaHouseholdAdult = vi.fn();
@@ -18,6 +19,7 @@ vi.mock("@/lib/prisma", () => ({
       findFirst: (...args: unknown[]) => findFirstHouseholdAdult(...args),
       count: (...args: unknown[]) => countPtaHouseholdAdult(...args),
     },
+    orgMember: { findFirst: (...args: unknown[]) => findFirstOrgMember(...args) },
     user: { findUnique: (...args: unknown[]) => findUniqueUser(...args) },
   },
 }));
@@ -30,7 +32,7 @@ vi.mock("@/lib/role-permissions", () => ({
   getEffectivePermissions: (...args: unknown[]) => getEffectivePermissionsMock(...args),
 }));
 
-import { completeMobileLogin, requireMobilePtaHouseholdAccess, requireMobileStaffPermission, signAccessToken } from "@/lib/mobile-auth";
+import { completeMobileLogin, requireMobileOrgAccess, requireMobilePtaHouseholdAccess, requireMobileStaffPermission, signAccessToken } from "@/lib/mobile-auth";
 
 function requestWithToken(token: string) {
   return new Request("https://portal.test/api/mobile/pta/volunteers/opportunities", {
@@ -41,6 +43,7 @@ function requestWithToken(token: string) {
 beforeEach(() => {
   findFirstMembership.mockReset();
   findFirstHouseholdAdult.mockReset();
+  findFirstOrgMember.mockReset();
   findUniqueUser.mockReset();
   countMembership.mockReset();
   countPtaHouseholdAdult.mockReset();
@@ -172,5 +175,53 @@ describe("requireMobileStaffPermission — officer-side mobile PTA guard", () =>
       requireMobileStaffPermission(requestWithToken(token), "org-a", "pta:volunteers:checkin" as never)
     ).rejects.toThrow(/not available/);
     expect(getEffectivePermissionsMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("requireMobileOrgAccess — the loosest guard, for userId-scoped features like messaging", () => {
+  it("grants access via a regular MEMBER-role membership and resolves memberId", async () => {
+    findUniqueUser.mockResolvedValueOnce({ id: "user-1", email: "member@example.com", mobileTokenVersion: 0 });
+    findFirstMembership
+      .mockResolvedValueOnce({ id: "membership-1", organizationId: "org-a", role: "MEMBER" }) // MEMBER-role lookup
+      .mockResolvedValueOnce(null); // staff-role lookup
+    findFirstHouseholdAdult.mockResolvedValueOnce(null);
+    findFirstOrgMember.mockResolvedValueOnce({ id: "member-1" });
+
+    const token = await signAccessToken("user-1", 0);
+    const result = await requireMobileOrgAccess(requestWithToken(token), "org-a");
+
+    expect(result.memberId).toBe("member-1");
+  });
+
+  it("grants access via a PTA household-adult link alone, with memberId: null — no personal OrgMember exists", async () => {
+    findUniqueUser.mockResolvedValueOnce({ id: "parent-1", email: "parent@example.com", mobileTokenVersion: 0 });
+    findFirstMembership.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+    findFirstHouseholdAdult.mockResolvedValueOnce({ id: "adult-1" });
+
+    const token = await signAccessToken("parent-1", 0);
+    const result = await requireMobileOrgAccess(requestWithToken(token), "org-a");
+
+    expect(result.memberId).toBeNull();
+    expect(findFirstOrgMember).not.toHaveBeenCalled();
+  });
+
+  it("grants access via a staff-role membership alone (an officer with no household link and no MEMBER row)", async () => {
+    findUniqueUser.mockResolvedValueOnce({ id: "officer-1", email: "officer@example.com", mobileTokenVersion: 0 });
+    findFirstMembership.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: "membership-1", role: "ORG_OWNER" });
+    findFirstHouseholdAdult.mockResolvedValueOnce(null);
+
+    const token = await signAccessToken("officer-1", 0);
+    const result = await requireMobileOrgAccess(requestWithToken(token), "org-a");
+
+    expect(result.memberId).toBeNull();
+  });
+
+  it("denies a caller with none of the three identities in this organization", async () => {
+    findUniqueUser.mockResolvedValueOnce({ id: "stranger-1", email: "stranger@example.com", mobileTokenVersion: 0 });
+    findFirstMembership.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+    findFirstHouseholdAdult.mockResolvedValueOnce(null);
+
+    const token = await signAccessToken("stranger-1", 0);
+    await expect(requireMobileOrgAccess(requestWithToken(token), "org-a")).rejects.toThrow(/No active access/);
   });
 });

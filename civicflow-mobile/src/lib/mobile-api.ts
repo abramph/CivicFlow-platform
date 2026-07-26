@@ -474,3 +474,167 @@ export function approvePtaHourEntry(organizationId: string, entryId: string, adj
     body: JSON.stringify({ organizationId, adjustedMinutes: adjustedMinutes ?? null }),
   });
 }
+
+// ── PTA parent parity (dues, events/RSVP, announcements, minutes, documents) ─
+// Backed by /api/mobile/pta/*, bridging a household-authorized parent (no
+// conventional OrgMember) onto the same web PTA parent library functions —
+// see mobile-auth.ts's requireMobilePtaHouseholdAccess(). A 403 here means
+// either PTA Labs isn't enrolled for this org, or the caller's account has no
+// linked household in it — both normal, not errors to surface as failures.
+
+export function getPtaAnnouncements(organizationId: string) {
+  return apiFetch<Announcement[]>(`/api/mobile/pta/announcements?organizationId=${encodeURIComponent(organizationId)}`);
+}
+
+export function markPtaAnnouncementRead(organizationId: string, campaignId: string) {
+  return apiFetch<void>(`/api/mobile/pta/announcements/${encodeURIComponent(campaignId)}/read`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId }),
+  });
+}
+
+export interface PtaEventRsvp {
+  status: 'GOING' | 'NOT_GOING' | 'MAYBE';
+  attendeeCount: number;
+}
+
+export interface PtaEventVolunteerOpportunity {
+  id: string;
+  title: string;
+}
+
+export interface PtaEvent {
+  id: string;
+  title: string;
+  description: string | null;
+  location: string | null;
+  startAt: string | null;
+  endAt: string | null;
+  status: string;
+  myRsvp: PtaEventRsvp | null;
+  volunteerOpportunities: PtaEventVolunteerOpportunity[];
+}
+
+export function getPtaEvents(organizationId: string) {
+  return apiFetch<PtaEvent[]>(`/api/mobile/pta/events?organizationId=${encodeURIComponent(organizationId)}`);
+}
+
+export function setPtaEventRsvp(
+  organizationId: string,
+  eventId: string,
+  status: 'GOING' | 'NOT_GOING' | 'MAYBE',
+  attendeeCount?: number
+) {
+  return apiFetch<PtaEventRsvp>(`/api/mobile/pta/events/${encodeURIComponent(eventId)}/rsvp`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId, status, attendeeCount: attendeeCount ?? 1 }),
+  });
+}
+
+export interface PtaDuesPayment {
+  id: string;
+  amountCents: number;
+  paymentDate: string;
+  method: string;
+  reference: string | null;
+}
+
+export interface PtaDuesAdjustment {
+  id: string;
+  type: string;
+  amountCents: number;
+  reason: string;
+  createdAt: string;
+}
+
+export type PtaDuesStatus = 'NO_CHARGE' | 'UNPAID' | 'PARTIALLY_PAID' | 'PAID' | 'WAIVED' | 'VOIDED' | 'PENDING_REVIEW';
+
+export interface PtaDuesCharge {
+  id: string;
+  amountDueCents: number;
+  amountPaidCents: number;
+  remainingBalanceCents: number;
+  dueDate: string;
+  periodStart: string | null;
+  periodEnd: string | null;
+  status: PtaDuesStatus;
+  rawStatus: string;
+  createdAt: string;
+  payments: PtaDuesPayment[];
+  adjustments: PtaDuesAdjustment[];
+  pendingReportCount: number;
+}
+
+export interface PtaDuesSummary {
+  schoolOrPtaName: string | null;
+  currentSchoolYear: string | null;
+  membershipModel: string | null;
+  defaultDuesAmountCents: number | null;
+  hasBillingIdentity: boolean;
+  currentCharge: PtaDuesCharge | null;
+  priorCharges: PtaDuesCharge[];
+  onlinePaymentLinkSlug: string | null;
+}
+
+export function getPtaDues(organizationId: string) {
+  return apiFetch<PtaDuesSummary>(`/api/mobile/pta/dues?organizationId=${encodeURIComponent(organizationId)}`);
+}
+
+export interface ReportPtaDuesPaymentInput {
+  organizationId: string;
+  duesChargeId?: string | null;
+  amountCents: number;
+  paymentMethod: string;
+  paymentDate: string;
+  referenceNumber?: string | null;
+  note?: string | null;
+}
+
+export function reportPtaDuesPayment(input: ReportPtaDuesPaymentInput) {
+  return apiFetch(`/api/mobile/pta/dues/report-payment`, { method: 'POST', body: JSON.stringify(input) });
+}
+
+export interface PtaApprovedMinutes {
+  id: string;
+  title: string;
+  fileName: string;
+  uploadedAt: string;
+}
+
+export function getPtaMinutes(organizationId: string) {
+  return apiFetch<PtaApprovedMinutes[]>(`/api/mobile/pta/minutes?organizationId=${encodeURIComponent(organizationId)}`);
+}
+
+export interface PtaDocument {
+  id: string;
+  title: string;
+  fileName: string;
+  contentType: string;
+  uploadedAt: string;
+  downloadable: false;
+}
+
+export function getPtaDocuments(organizationId: string) {
+  return apiFetch<PtaDocument[]>(`/api/mobile/pta/documents?organizationId=${encodeURIComponent(organizationId)}`);
+}
+
+// ── Identity routing ─────────────────────────────────────────────────────────
+// A caller can have a conventional OrgMember, a PTA household link, both (an
+// officer who is also a parent), or neither. `hasMemberIdentity` always wins
+// when both are present, matching how dashboard.tsx already treats it as the
+// organization's "primary" identity for the officer/dual-identity case.
+// Screens branch through these instead of re-deriving the choice themselves.
+
+export function getAnnouncementsForIdentity(organizationId: string, hasMemberIdentity: boolean) {
+  return hasMemberIdentity ? getAnnouncements(organizationId) : getPtaAnnouncements(organizationId);
+}
+
+export function markAnnouncementReadForIdentity(organizationId: string, campaignId: string, hasMemberIdentity: boolean) {
+  return hasMemberIdentity
+    ? markAnnouncementRead(organizationId, campaignId)
+    : markPtaAnnouncementRead(organizationId, campaignId);
+}
+
+export function getEventsForIdentity(organizationId: string, hasMemberIdentity: boolean): Promise<PtaEvent[] | MobileEvent[]> {
+  return hasMemberIdentity ? getEvents(organizationId) : getPtaEvents(organizationId);
+}

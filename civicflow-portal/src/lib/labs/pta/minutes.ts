@@ -21,3 +21,25 @@ export async function listApprovedPtaMinutes(organizationId: string) {
     orderBy: { uploadedAt: "desc" },
   });
 }
+
+/**
+ * Parent-safe document list — deliberately scoped to ONLY attachments
+ * explicitly marked `purpose: "pta_document"` on the organization itself
+ * (bylaws, budget, etc. — the "PTA documents" the demo seed creates), never
+ * every attachment in the org. There is no existing parent-facing document
+ * read path today (the generic `/documents` admin UI is gated by a staff
+ * permission, same as meetings) — this is genuinely new, narrowly-scoped
+ * surface area, not a bridge onto something parents already had access to.
+ *
+ * The seeded documents' `objectKey` values are fictional placeholders
+ * (`seed-fixtures/pta/...`) with no real file behind them — callers of this
+ * function must not attempt to actually fetch/download the object; render
+ * an honest "not available in this demo" state instead (see
+ * docs/mobile-architecture.md's Documents section).
+ */
+export async function listPtaOrganizationDocuments(organizationId: string) {
+  return prisma.attachment.findMany({
+    where: { organizationId, entityType: "ORGANIZATION", entityId: organizationId, purpose: "pta_document", deletedAt: null },
+    orderBy: { uploadedAt: "desc" },
+  });
+}

@@ -21,6 +21,7 @@
 import { loadEnvConfig } from "@next/env";
 import type { PrismaClient as PrismaClientType } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { resolvePtaTargetMemberIds } from "../src/lib/labs/pta/communications";
 
 loadEnvConfig(process.cwd());
 
@@ -633,7 +634,7 @@ async function main() {
   console.log("Fictional fundraising campaign created (Fall Fun Run).");
 
   // ── Announcement ────────────────────────────────────────────────────────────
-  await prisma.communicationCampaign.upsert({
+  const welcomeAnnouncement = await prisma.communicationCampaign.upsert({
     where: { id: "seed-pta-welcome-announcement" },
     update: {},
     create: {
@@ -649,6 +650,24 @@ async function main() {
       sentAt: new Date(),
     },
   });
+  // A campaign with status "SENT" but zero CommunicationRecipient rows is
+  // invisible to every household and officer alike — every announcement
+  // screen (web and mobile) reads from CommunicationRecipient, never the
+  // campaign directly. This was caught live: a real mobile API call for a
+  // seeded household returned an empty announcement list despite this
+  // "sent" campaign existing, because recipient fan-out had never been
+  // implemented in this seed script at all. Uses the exact same
+  // resolvePtaTargetMemberIds({type:"all"}) the real send pipeline uses —
+  // no separate ad-hoc targeting logic.
+  const allHouseholdMemberIds = await resolvePtaTargetMemberIds(org.id, { type: "all" });
+  for (const memberId of allHouseholdMemberIds) {
+    const existingRecipient = await prisma.communicationRecipient.findFirst({ where: { campaignId: welcomeAnnouncement.id, memberId } });
+    if (!existingRecipient) {
+      await prisma.communicationRecipient.create({
+        data: { organizationId: org.id, campaignId: welcomeAnnouncement.id, memberId, deliveryStatus: "SENT", sentAt: welcomeAnnouncement.sentAt },
+      });
+    }
+  }
   // Scheduled (not yet sent) and canceled announcements, alongside the sent
   // one above — CommunicationCampaignStatus has no literal "SCHEDULED" or
   // "ARCHIVED" value, so these use READY+scheduledFor and CANCELED
