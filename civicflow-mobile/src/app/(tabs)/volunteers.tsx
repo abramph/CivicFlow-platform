@@ -1,0 +1,202 @@
+import { router } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
+import { Pressable, RefreshControl, ScrollView, StyleSheet } from 'react-native';
+
+import { ThemedText } from '@/components/themed-text';
+import { ThemedView } from '@/components/themed-view';
+import { Spacing } from '@/constants/theme';
+import { useAuth } from '@/lib/auth-context';
+import {
+  getPtaVolunteerCommitments,
+  getPtaVolunteerHours,
+  getPtaVolunteerOpportunities,
+  getPtaVolunteerToday,
+  type PtaVolunteerCommitment,
+  type PtaVolunteerHours,
+  type PtaVolunteerOpportunitySummary,
+  type PtaVolunteerTodaySummary,
+} from '@/lib/mobile-api';
+
+function formatMinutes(minutes: number): string {
+  const hours = minutes / 60;
+  return hours === Math.trunc(hours) ? String(hours) : hours.toFixed(1);
+}
+
+/**
+ * One screen serving two very different audiences, switched on
+ * `selectedOrganization.pta`: a parent sees the volunteer hub (browse,
+ * claim, hours, goal); a Volunteer Coordinator additionally sees the
+ * event-day staffing summary up top, with a link into the check-in screen.
+ * Officer administration otherwise stays web-first — this is deliberately
+ * NOT a full opportunity-management screen.
+ */
+export default function VolunteersScreen() {
+  const { selectedOrganization, selectedOrganizationId } = useAuth();
+  const pta = selectedOrganization?.pta ?? null;
+  const isParent = Boolean(pta?.householdAdultId);
+  const isOfficer = Boolean(pta?.isOfficer);
+
+  const [opportunities, setOpportunities] = useState<PtaVolunteerOpportunitySummary[]>([]);
+  const [commitments, setCommitments] = useState<PtaVolunteerCommitment[]>([]);
+  const [hours, setHours] = useState<PtaVolunteerHours | null>(null);
+  const [today, setToday] = useState<PtaVolunteerTodaySummary | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = useCallback(async () => {
+    if (!selectedOrganizationId || !pta) return;
+    const tasks: Promise<void>[] = [];
+    if (isParent) {
+      tasks.push(
+        getPtaVolunteerOpportunities(selectedOrganizationId).then(setOpportunities),
+        getPtaVolunteerCommitments(selectedOrganizationId).then(setCommitments),
+        getPtaVolunteerHours(selectedOrganizationId).then(setHours)
+      );
+    }
+    if (isOfficer) {
+      tasks.push(getPtaVolunteerToday(selectedOrganizationId).then(setToday));
+    }
+    await Promise.all(tasks);
+  }, [selectedOrganizationId, pta, isParent, isOfficer]);
+
+  useEffect(() => {
+    (async () => {
+      await load();
+    })();
+  }, [load]);
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }
+
+  if (!pta) {
+    // Not enrolled in PTA Labs, or no PTA identity for this org — the tab
+    // itself is hidden in this case (see (tabs)/_layout.tsx), but this
+    // guards direct navigation too.
+    return (
+      <ThemedView style={styles.container}>
+        <ThemedText type="subtitle" themeColor="textSecondary">
+          Volunteer features aren&apos;t available for this organization.
+        </ThemedText>
+      </ThemedView>
+    );
+  }
+
+  const upcoming = commitments.filter((c) => c.status === 'SIGNED_UP');
+  const completed = commitments.filter((c) => c.status !== 'SIGNED_UP' && c.status !== 'CANCELLED');
+
+  return (
+    <ScrollView
+      contentContainerStyle={styles.container}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+    >
+      <ThemedText type="title">Volunteers</ThemedText>
+
+      {isOfficer && today ? (
+        <Pressable onPress={() => router.push('/volunteer-checkin')}>
+          <ThemedView type="backgroundElement" style={styles.card}>
+            <ThemedText type="smallBold">Today&apos;s staffing</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              {today.understaffedShiftCount} understaffed shift{today.understaffedShiftCount === 1 ? '' : 's'} ·{' '}
+              {today.pendingHourApprovalCount} pending hour approval{today.pendingHourApprovalCount === 1 ? '' : 's'}
+            </ThemedText>
+            <ThemedText type="link" style={styles.link}>
+              Open check-in →
+            </ThemedText>
+          </ThemedView>
+        </Pressable>
+      ) : null}
+
+      {isParent ? (
+        <>
+          <ThemedView type="backgroundElement" style={styles.card}>
+            <ThemedText type="smallBold">Family volunteer goal</ThemedText>
+            {hours ? (
+              <>
+                <ThemedText type="default">{formatMinutes(hours.approvedMinutes)} hours approved</ThemedText>
+                {hours.pendingMinutes > 0 ? (
+                  <ThemedText type="small" themeColor="textSecondary">{formatMinutes(hours.pendingMinutes)} hours awaiting approval</ThemedText>
+                ) : null}
+                {hours.requiredMinutes != null ? (
+                  <ThemedText type="small" themeColor="textSecondary">
+                    {formatMinutes(hours.remainingMinutes ?? 0)} hours remaining toward the {formatMinutes(hours.requiredMinutes)}-hour goal
+                  </ThemedText>
+                ) : (
+                  <ThemedText type="small" themeColor="textSecondary">This PTA doesn&apos;t require a set number of hours.</ThemedText>
+                )}
+              </>
+            ) : null}
+          </ThemedView>
+
+          {upcoming.length > 0 ? (
+            <>
+              <ThemedText type="smallBold" style={styles.sectionLabel}>My upcoming shifts</ThemedText>
+              {upcoming.map((c) => (
+                <ThemedView key={c.id} type="backgroundElement" style={styles.listCard}>
+                  <ThemedText type="smallBold">{c.opportunityTitle}</ThemedText>
+                  <ThemedText type="small" themeColor="textSecondary">{c.slotLabel ?? 'Shift'}</ThemedText>
+                </ThemedView>
+              ))}
+            </>
+          ) : null}
+
+          <ThemedText type="smallBold" style={styles.sectionLabel}>Open opportunities</ThemedText>
+          {opportunities.length === 0 ? (
+            <ThemedText type="small" themeColor="textSecondary">No open volunteer opportunities right now.</ThemedText>
+          ) : (
+            opportunities.map((opp) => (
+              <Pressable key={opp.id} onPress={() => router.push(`/volunteer-opportunity/${opp.id}`)}>
+                <ThemedView type="backgroundElement" style={styles.listCard}>
+                  <ThemedText type="smallBold">{opp.title}</ThemedText>
+                  {opp.description ? (
+                    <ThemedText type="small" themeColor="textSecondary" numberOfLines={2}>{opp.description}</ThemedText>
+                  ) : null}
+                  <ThemedText type="small" themeColor="textSecondary">
+                    {opp.slots.reduce((sum, s) => sum + s.claimedCount, 0)}/{opp.slots.reduce((sum, s) => sum + s.capacity, 0)} filled
+                  </ThemedText>
+                </ThemedView>
+              </Pressable>
+            ))
+          )}
+
+          {completed.length > 0 ? (
+            <>
+              <ThemedText type="smallBold" style={styles.sectionLabel}>Completed service</ThemedText>
+              {completed.map((c) => (
+                <ThemedView key={c.id} type="backgroundElement" style={styles.listCard}>
+                  <ThemedText type="smallBold">{c.opportunityTitle}</ThemedText>
+                  <ThemedText type="small" themeColor="textSecondary">{c.status.replace('_', ' ')}</ThemedText>
+                </ThemedView>
+              ))}
+            </>
+          ) : null}
+        </>
+      ) : null}
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    padding: Spacing.four,
+    gap: Spacing.three,
+  },
+  card: {
+    borderRadius: 12,
+    padding: Spacing.three,
+    gap: 4,
+  },
+  listCard: {
+    borderRadius: 10,
+    padding: Spacing.three,
+    gap: 2,
+  },
+  sectionLabel: {
+    marginTop: Spacing.two,
+  },
+  link: {
+    marginTop: 4,
+  },
+});

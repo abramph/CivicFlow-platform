@@ -11,14 +11,23 @@ import {
   getDues,
   getEvents,
   getPaymentHistory,
+  getPtaVolunteerCommitments,
+  getPtaVolunteerHours,
   type Announcement,
   type DuesSummary,
   type MobileEvent,
+  type PtaVolunteerCommitment,
+  type PtaVolunteerHours,
 } from '@/lib/mobile-api';
 import { useUnreadConversationCount } from '@/lib/unread-count';
 
 function formatCurrency(value: number) {
   return value.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+}
+
+function formatHours(minutes: number): string {
+  const hours = minutes / 60;
+  return hours === Math.trunc(hours) ? String(hours) : hours.toFixed(1);
 }
 
 export default function DashboardScreen() {
@@ -27,22 +36,46 @@ export default function DashboardScreen() {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [events, setEvents] = useState<MobileEvent[]>([]);
   const [pendingReportCount, setPendingReportCount] = useState(0);
+  const [ptaHours, setPtaHours] = useState<PtaVolunteerHours | null>(null);
+  const [ptaUpcoming, setPtaUpcoming] = useState<PtaVolunteerCommitment | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const unreadCount = useUnreadConversationCount(selectedOrganizationId);
+  // A PTA household adult has no personal OrgMember record — the
+  // dues/announcements/events/messages tabs all require one
+  // (requireMobileMembership on the portal side), so those calls are
+  // skipped entirely for a pure PTA parent rather than left to throw and
+  // blank the whole dashboard. Bridging those tabs to a PtaHouseholdAdult
+  // identity is real, separate future work (see docs/mobile-architecture.md
+  // "Known limitations") — out of scope for this pass, which focuses on the
+  // volunteer workflow specifically.
+  const hasMemberIdentity = Boolean(selectedOrganization?.memberId);
+  const pta = selectedOrganization?.pta ?? null;
 
   const load = useCallback(async () => {
     if (!selectedOrganizationId) return;
-    const [duesData, announcementsData, eventsData, historyData] = await Promise.all([
-      getDues(selectedOrganizationId),
-      getAnnouncements(selectedOrganizationId),
-      getEvents(selectedOrganizationId),
-      getPaymentHistory(selectedOrganizationId),
-    ]);
-    setDues(duesData);
-    setAnnouncements(announcementsData.slice(0, 3));
-    setEvents(eventsData.slice(0, 3));
-    setPendingReportCount(historyData.reports.filter((r) => r.status === 'pending').length);
-  }, [selectedOrganizationId]);
+
+    if (hasMemberIdentity) {
+      const [duesData, announcementsData, eventsData, historyData] = await Promise.all([
+        getDues(selectedOrganizationId),
+        getAnnouncements(selectedOrganizationId),
+        getEvents(selectedOrganizationId),
+        getPaymentHistory(selectedOrganizationId),
+      ]);
+      setDues(duesData);
+      setAnnouncements(announcementsData.slice(0, 3));
+      setEvents(eventsData.slice(0, 3));
+      setPendingReportCount(historyData.reports.filter((r) => r.status === 'pending').length);
+    }
+
+    if (pta?.householdAdultId) {
+      const [hoursData, commitments] = await Promise.all([
+        getPtaVolunteerHours(selectedOrganizationId),
+        getPtaVolunteerCommitments(selectedOrganizationId),
+      ]);
+      setPtaHours(hoursData);
+      setPtaUpcoming(commitments.find((c) => c.status === 'SIGNED_UP') ?? null);
+    }
+  }, [selectedOrganizationId, hasMemberIdentity, pta?.householdAdultId]);
 
   useEffect(() => {
     (async () => {
@@ -71,21 +104,42 @@ export default function DashboardScreen() {
         Welcome back, {selectedOrganization?.firstName ?? 'member'}
       </ThemedText>
 
-      <ThemedView style={styles.summaryRow}>
-        <Pressable style={styles.summaryTile} onPress={() => router.push('/dues')}>
+      {hasMemberIdentity ? (
+        <ThemedView style={styles.summaryRow}>
+          <Pressable style={styles.summaryTile} onPress={() => router.push('/dues')}>
+            <ThemedView type="backgroundElement" style={styles.card}>
+              <ThemedText type="small" themeColor="textSecondary">Balance</ThemedText>
+              <ThemedText type="subtitle">{dues ? formatCurrency(dues.outstandingBalance) : '—'}</ThemedText>
+              {dues?.isDelinquent ? <ThemedText type="small" style={styles.delinquent}>Past due</ThemedText> : null}
+            </ThemedView>
+          </Pressable>
+          <Pressable style={styles.summaryTile} onPress={() => router.push('/inbox')}>
+            <ThemedView type="backgroundElement" style={styles.card}>
+              <ThemedText type="small" themeColor="textSecondary">Unread Messages</ThemedText>
+              <ThemedText type="subtitle">{unreadCount}</ThemedText>
+            </ThemedView>
+          </Pressable>
+        </ThemedView>
+      ) : null}
+
+      {pta?.householdAdultId ? (
+        <Pressable onPress={() => router.push('/volunteers')}>
           <ThemedView type="backgroundElement" style={styles.card}>
-            <ThemedText type="small" themeColor="textSecondary">Balance</ThemedText>
-            <ThemedText type="subtitle">{dues ? formatCurrency(dues.outstandingBalance) : '—'}</ThemedText>
-            {dues?.isDelinquent ? <ThemedText type="small" style={styles.delinquent}>Past due</ThemedText> : null}
+            <ThemedText type="small" themeColor="textSecondary">Volunteer hours approved</ThemedText>
+            <ThemedText type="subtitle">{ptaHours ? formatHours(ptaHours.approvedMinutes) : '—'}</ThemedText>
+            {ptaHours?.requiredMinutes != null ? (
+              <ThemedText type="small" themeColor="textSecondary">
+                {formatHours(ptaHours.remainingMinutes ?? 0)} remaining toward the {formatHours(ptaHours.requiredMinutes)}-hour goal
+              </ThemedText>
+            ) : null}
+            {ptaUpcoming ? (
+              <ThemedText type="small" themeColor="textSecondary">
+                Next: {ptaUpcoming.opportunityTitle} — {ptaUpcoming.slotLabel ?? 'shift'}
+              </ThemedText>
+            ) : null}
           </ThemedView>
         </Pressable>
-        <Pressable style={styles.summaryTile} onPress={() => router.push('/inbox')}>
-          <ThemedView type="backgroundElement" style={styles.card}>
-            <ThemedText type="small" themeColor="textSecondary">Unread Messages</ThemedText>
-            <ThemedText type="subtitle">{unreadCount}</ThemedText>
-          </ThemedView>
-        </Pressable>
-      </ThemedView>
+      ) : null}
 
       {pendingReportCount > 0 ? (
         <Pressable onPress={() => router.push('/payment-history')}>

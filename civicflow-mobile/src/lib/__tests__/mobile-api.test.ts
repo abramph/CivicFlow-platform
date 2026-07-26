@@ -1,13 +1,26 @@
 import {
+  approvePtaHourEntry,
+  cancelPtaVolunteerSlot,
+  checkInPtaVolunteer,
+  checkOutPtaVolunteer,
+  claimPtaVolunteerSlot,
   getAnnouncements,
   getCampaigns,
   getConversation,
   getConversations,
   getPaymentLinkSlug,
   getPaymentMethods,
+  getPendingPtaHourEntries,
   getProfile,
+  getPtaVolunteerCommitments,
+  getPtaVolunteerHours,
+  getPtaVolunteerOpportunities,
+  getPtaVolunteerOpportunity,
+  getPtaVolunteerRoster,
+  getPtaVolunteerToday,
   markAnnouncementRead,
   sendConversationMessage,
+  setPtaVolunteerAttendance,
   submitPaymentReport,
   updateProfile,
 } from '@/lib/mobile-api';
@@ -137,5 +150,100 @@ describe('mobile-api', () => {
     mockApiFetch.mockResolvedValueOnce({ slug: null });
     await getPaymentLinkSlug('org-1', { dues: true });
     expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/payment-link?organizationId=org-1&dues=true');
+  });
+
+  describe('PTA volunteers — parent workflow', () => {
+    it('getPtaVolunteerOpportunities requests the org-scoped open-opportunity list', async () => {
+      mockApiFetch.mockResolvedValueOnce([]);
+      await getPtaVolunteerOpportunities('org-1');
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/volunteers/opportunities?organizationId=org-1');
+    });
+
+    it('getPtaVolunteerOpportunity requests a single opportunity scoped to the org', async () => {
+      mockApiFetch.mockResolvedValueOnce({});
+      await getPtaVolunteerOpportunity('org-1', 'opp-1');
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/volunteers/opportunities/opp-1?organizationId=org-1');
+    });
+
+    it('claimPtaVolunteerSlot never sends a householdAdultId — only organizationId, resolved server-side', async () => {
+      mockApiFetch.mockResolvedValueOnce({});
+      await claimPtaVolunteerSlot('org-1', 'slot-1');
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/volunteers/slots/slot-1/claim', {
+        method: 'POST',
+        body: JSON.stringify({ organizationId: 'org-1' }),
+      });
+    });
+
+    it('cancelPtaVolunteerSlot sends an optional reason, defaulting to null', async () => {
+      mockApiFetch.mockResolvedValueOnce({});
+      await cancelPtaVolunteerSlot('org-1', 'slot-1');
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/volunteers/slots/slot-1/cancel', {
+        method: 'POST',
+        body: JSON.stringify({ organizationId: 'org-1', reason: null }),
+      });
+    });
+
+    it('getPtaVolunteerCommitments requests the caller\'s own commitment history', async () => {
+      mockApiFetch.mockResolvedValueOnce([]);
+      await getPtaVolunteerCommitments('org-1');
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/volunteers/my-commitments?organizationId=org-1');
+    });
+
+    it('getPtaVolunteerHours requests the caller\'s own household totals', async () => {
+      mockApiFetch.mockResolvedValueOnce({});
+      await getPtaVolunteerHours('org-1');
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/volunteers/hours?organizationId=org-1');
+    });
+  });
+
+  describe('PTA volunteers — limited officer workflow', () => {
+    it('getPtaVolunteerToday requests the event-day staffing summary', async () => {
+      mockApiFetch.mockResolvedValueOnce({ opportunities: [], understaffedShiftCount: 0, pendingHourApprovalCount: 0 });
+      await getPtaVolunteerToday('org-1');
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/volunteers/today?organizationId=org-1');
+    });
+
+    it('getPtaVolunteerRoster requests the full roster for one opportunity', async () => {
+      mockApiFetch.mockResolvedValueOnce({});
+      await getPtaVolunteerRoster('org-1', 'opp-1');
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/volunteers/opportunities/opp-1/roster?organizationId=org-1');
+    });
+
+    it('checkInPtaVolunteer and checkOutPtaVolunteer post to their own idempotent endpoints', async () => {
+      mockApiFetch.mockResolvedValue({});
+      await checkInPtaVolunteer('org-1', 'signup-1');
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/volunteers/signups/signup-1/checkin', {
+        method: 'POST',
+        body: JSON.stringify({ organizationId: 'org-1' }),
+      });
+
+      await checkOutPtaVolunteer('org-1', 'signup-1');
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/volunteers/signups/signup-1/checkout', {
+        method: 'POST',
+        body: JSON.stringify({ organizationId: 'org-1' }),
+      });
+    });
+
+    it('setPtaVolunteerAttendance sends the outcome status and optional manual minutes', async () => {
+      mockApiFetch.mockResolvedValueOnce({});
+      await setPtaVolunteerAttendance('org-1', 'signup-1', 'NO_SHOW');
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/volunteers/signups/signup-1/attendance', {
+        method: 'POST',
+        body: JSON.stringify({ organizationId: 'org-1', status: 'NO_SHOW', manualMinutes: null }),
+      });
+    });
+
+    it('getPendingPtaHourEntries and approvePtaHourEntry hit the hour-approval queue', async () => {
+      mockApiFetch.mockResolvedValueOnce([]);
+      await getPendingPtaHourEntries('org-1');
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/volunteers/hour-entries/pending?organizationId=org-1');
+
+      mockApiFetch.mockResolvedValueOnce({});
+      await approvePtaHourEntry('org-1', 'entry-1');
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/volunteers/hour-entries/entry-1/approve', {
+        method: 'POST',
+        body: JSON.stringify({ organizationId: 'org-1', adjustedMinutes: null }),
+      });
+    });
   });
 });

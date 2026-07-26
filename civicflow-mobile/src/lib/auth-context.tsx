@@ -10,15 +10,26 @@ export interface MobileUser {
   displayName: string | null;
 }
 
+export interface MobileOrganizationPtaAccess {
+  householdAdultId: string | null;
+  householdName: string | null;
+  isOfficer: boolean;
+  canCheckIn: boolean;
+  canApproveHours: boolean;
+}
+
 export interface MobileOrganization {
   organizationId: string;
   organizationName: string;
   organizationLogoUrl: string | null;
-  memberId: string;
-  firstName: string;
-  lastName: string;
-  membershipStatus: string;
+  /** Null for a pure PTA parent — the household's shared OrgMember is a billing identity, never a per-adult one. */
+  memberId: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  membershipStatus: string | null;
   isDelinquent: boolean;
+  /** Null when this org has no PTA relevance for the caller at all (a regular member-only org). */
+  pta: MobileOrganizationPtaAccess | null;
 }
 
 interface TokenPair {
