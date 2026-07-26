@@ -2,7 +2,20 @@
 
 ## Status
 
-Implemented on a stacked branch (`agent/pta-volunteer-management`) on top of the still-unmerged PTA Web UI Integration (PR #19) and Fictional Demo Environment & Platform Administrator Impersonation (PR #20) branches — see "Branch dependency" below. Not merged, not deployed, no production migration applied.
+PTA Web UI Integration (PR #19) and Fictional Demo Environment & Platform Administrator Impersonation (PR #20) have both been merged to `main`. This branch (PR #21) was rebased onto the resulting `main` — see "Branch dependency" below for merge commits. PR #21 itself remains open/draft, not merged, not deployed, no production migration applied.
+
+## Stale-UI defect re-investigation (2026-07-26)
+
+A prior report described post-action UI staleness (an officer's check-in/attendance/approval action succeeding server-side but not visibly updating without a manual reload). This was re-investigated carefully — every mutating client component was re-tested live with deliberate waits between the triggering click and the verifying screenshot, across check-in, check-out, attendance confirmation, hour approval/adjustment, requirement updates, and parent signup/cancellation. **The defect did not reproduce.** Every one of the 25 PTA client components that perform a mutating request already pairs it with `router.refresh()` and a `disabled={pending}` guard against double-submission (confirmed both by code audit and by `src/components/labs/pta/__tests__/refresh-consistency.test.ts`, a static-source regression test — see "Tests"). The original report is believed to have been a testing-methodology artifact: screenshotting immediately after a click, before the async fetch-then-refresh round trip completed. No code changes were made for this non-reproducing defect, per explicit instruction not to add speculative fixes; the regression test exists so a future change that actually drops a refresh call fails CI instead of only surfacing in manual testing.
+
+## Rollback strategy
+
+The migration (`20260725114304_add_pta_volunteer_hours_tracking`) is purely additive — `ALTER TYPE ... ADD VALUE` on existing enums, `ADD COLUMN` on existing tables, and `CREATE TABLE` for the four new models (`PtaVolunteerAttendance`, `PtaVolunteerHourEntry`, `PtaVolunteerHourAdjustment`, `PtaVolunteerRequirement`). It never drops, renames, or narrows anything that pre-existing code depends on. Rollback implications:
+
+- **Before this migration is applied**: simply don't deploy this PR. Nothing else in the codebase depends on the new tables/columns, so the pre-existing schema and all other features are completely unaffected either way.
+- **After this migration is applied but before this PR's application code ships**: the new tables/columns exist but are unused — harmless. No existing query touches them (Prisma only queries columns/tables the running code references).
+- **After both ship and need to be rolled back**: revert the application code deploy first (safe — the old code never references the new tables/columns). The schema changes themselves do not need to be reverted to make rollback safe, since Postgres enum values and extra columns/tables sitting unused cause no functional or performance impact. If a full schema rollback is still desired, it requires a hand-written down-migration (Prisma does not auto-generate one) that drops the four new tables and the columns added to existing tables — enum values added via `ALTER TYPE ... ADD VALUE` cannot be cleanly removed in Postgres without recreating the enum type, so a full enum-level rollback would require an accompanying data migration if any row had already used a new enum value.
+- No existing row's data is modified by this migration — every new column is nullable or has a safe default, and every backfill-free.
 
 ## Product goal
 
@@ -109,16 +122,22 @@ Performed live against the disposable `civicflow_volunteer_dev` Postgres databas
 - Live-exercised "adjust before approving" (480 → 510 minutes) and Approve on a real pending entry; confirmed via database query that `creditedMinutes`, `status`, `approvedByUserId`, and `approvedAt` all persisted correctly, and that the audit event log recorded the adjustment.
 - Confirmed Riverdale (the non-PTA org) shows "Manage Volunteers: Not available for this organization" for the same logged-in user — zero cross-vertical leakage.
 - Confirmed the parent-facing view (same president, viewing his own Morgan household) correctly showed 15 approved hours, "remaining toward goal" clamped to 0 rather than a negative number, an open self-signup, and completed-service history.
-- One UI polish item noted (not a data-correctness defect): after a check-in/attendance-confirmation action, the page did not immediately re-render the new state without a manual reload, even though the underlying write succeeded correctly every time (verified by direct database query). Worth a future pass at explicit `router.refresh()`/optimistic UI, not blocking.
+
+### Finalization pass (2026-07-26), after PR #19 and PR #20 merged and this branch was rebased onto the resulting `main`
+
+- **Stale-UI re-investigation**: re-tested check-in, check-out, and attendance confirmation with deliberate waits between each click and its verifying screenshot. The previously reported staleness did not reproduce — see "Stale-UI defect re-investigation" above.
+- **Parent signup/cancellation live-capacity check**: claimed "Picture Day Helpers" (0/3 → 1/3, "My signups" updated), then canceled it (1/3 → 0/3 restored) — both updated the visible UI with no manual reload.
+- **Requirement update**: changed the family volunteer-hour goal from 10 to 12 hours via the officer settings form; a "Saved." confirmation appeared and the new value (720 minutes) was confirmed persisted via direct database query.
+- **Responsive check**: the check-in/attendance page and the officer nav were tested at tablet width (768px) and mobile width (375px). Both remain fully usable — action buttons wrap onto their own rows, no horizontal overflow, no hidden or unreachable controls. The event-day check-in workflow works on a phone-sized browser.
+- **Impersonation re-verification** (PR #20, now merged): full walkthrough re-run against the rebased branch — persistent banner, org-switching to Riverdale (which correctly shows zero PTA nav and denies the direct route with a forbidden redirect), exit restoring Platform Admin context, and both the "started" and "ended" audit events correctly attributing the real superadmin actor.
 
 ## Known limitations
 
 - **Self-reported hours (a parent proposing their own minutes without an officer-initiated check-in) were deliberately deferred**, per an explicit decision during this task, rather than shipped as a half-safe placeholder. All current hour entries originate from an officer action (check-in/out, attendance confirmation, or manual entry) or the seed script — never from an unauthenticated or self-asserted parent claim.
 - **Notifications are not wired up** — no existing notification architecture was found to reuse for "your hours were approved/rejected" or "a shift you signed up for was canceled." Documented as deferred, matching the brief's explicit instruction to degrade gracefully rather than build a new notification pipeline for this pass.
 - **No QR/mobile check-in** — see "Mobile-readiness" above.
-- **The stale-render UX nit** described in "Manual verification" above.
-- Pre-existing, unrelated: 5 TypeScript errors in `src/lib/__tests__/migration-import.test.ts` (a desktop-migration-import test file, untouched by this branch) were present in the baseline before this work began and remain outside this task's scope.
+- Pre-existing, unrelated: 5 TypeScript errors in `src/lib/__tests__/migration-import.test.ts` (a desktop-migration-import test file, untouched by this branch) were present in the baseline before this work began (confirmed present even on PR #19 alone) and remain outside this task's scope.
 
 ## Branch dependency
 
-This branch (`agent/pta-volunteer-management`) is stacked on the combined tip of PR #19 (PTA Web UI Integration) and PR #20 (Fictional Demo Environment & Platform Administrator Impersonation), both still open/unmerged at the time this branch was created. The two were merged locally into this branch's base (verified zero file overlap between them beforehand) rather than duplicating their UI/impersonation work. Intended final merge order: `main` → PR #19 → PR #20 → this PR.
+PR #19 (PTA Web UI Integration) and PR #20 (Fictional Demo Environment & Platform Administrator Impersonation) have both been independently validated and merged to `main` (merge commits `7161f65` and `d3dd95e` respectively). This branch was then rebased onto the resulting `main` — git's patch-id matching automatically recognized and skipped the two commits already merged via PR #20, leaving exactly one commit (the volunteer-management work) on top of `main`. PR #21 itself remains open/draft pending final human review; it was not merged as part of this finalization pass, per explicit instruction.
