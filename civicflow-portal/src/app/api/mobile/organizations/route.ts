@@ -1,52 +1,138 @@
 import { withApiErrorHandling } from "@/lib/api-route";
 import { requireMobileAuth } from "@/lib/mobile-auth";
+import { getOrganizationLabAccess } from "@/lib/labs/access";
+import { getEffectivePermissions } from "@/lib/role-permissions";
 import { prisma } from "@/lib/prisma";
+import { PERMISSIONS, type Role } from "@/lib/rbac";
+
+interface OrgRow {
+  organizationId: string;
+  organizationName: string;
+  organizationLogoUrl: string | null;
+  memberId: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  membershipStatus: string | null;
+  isDelinquent: boolean;
+  pta: {
+    householdAdultId: string | null;
+    householdName: string | null;
+    isOfficer: boolean;
+    canCheckIn: boolean;
+    canApproveHours: boolean;
+  } | null;
+}
 
 /**
- * Lists every organization the caller has an active MEMBER-role membership
- * in, along with their linked OrgMember summary — backs the mobile org
- * switcher for members belonging to multiple organizations.
+ * Lists every organization the caller can meaningfully open in the mobile
+ * app — three independent identities, merged by organizationId (a caller
+ * can hold more than one, e.g. a PTA president who is also a household
+ * adult in their own PTA):
+ *
+ *  1. A regular MEMBER-role OrganizationMembership + linked OrgMember (the
+ *     original, pre-PTA behavior — untouched).
+ *  2. A PtaHouseholdAdult.userId link. PTA parents deliberately have NO
+ *     OrganizationMembership at all (the household's one shared OrgMember
+ *     is a billing identity, not a per-adult one — see mobile-auth.ts), so
+ *     without this branch every PTA parent would see a permanently empty
+ *     org-switcher after logging in, unable to reach any screen.
+ *  3. A staff-role OrganizationMembership that actually holds
+ *     pta:volunteers:checkin or pta:volunteer-hours:approve in a
+ *     PTA-enrolled org — the limited officer mobile workflow's entry point.
+ *     Deliberately NOT "any staff role in any org" — an officer with no PTA
+ *     permission at all has nothing to do in this app yet (officer admin
+ *     stays web-first), so surfacing them here would be a dead end.
  */
 export async function GET(request: Request) {
   return withApiErrorHandling(async () => {
     const { userId } = await requireMobileAuth(request);
 
+    const rows = new Map<string, OrgRow>();
+
+    // ── 1. Regular members (unchanged) ──────────────────────────────────
     const memberships = await prisma.organizationMembership.findMany({
       where: { userId, role: "MEMBER", organization: { status: "active" } },
       orderBy: { joinedAt: "asc" },
       include: { organization: { select: { id: true, name: true, logoUrl: true } } },
     });
-
     const members = await prisma.orgMember.findMany({
       where: { userId, organizationId: { in: memberships.map((m) => m.organizationId) } },
-      select: {
-        id: true,
-        organizationId: true,
-        firstName: true,
-        lastName: true,
-        membershipStatus: true,
-        isDelinquent: true,
-      },
+      select: { id: true, organizationId: true, firstName: true, lastName: true, membershipStatus: true, isDelinquent: true },
     });
     const memberByOrgId = new Map(members.map((m) => [m.organizationId, m]));
+    for (const membership of memberships) {
+      const member = memberByOrgId.get(membership.organizationId);
+      if (!member) continue;
+      rows.set(membership.organizationId, {
+        organizationId: membership.organizationId,
+        organizationName: membership.organization.name,
+        organizationLogoUrl: membership.organization.logoUrl,
+        memberId: member.id,
+        firstName: member.firstName,
+        lastName: member.lastName,
+        membershipStatus: member.membershipStatus,
+        isDelinquent: member.isDelinquent,
+        pta: null,
+      });
+    }
 
-    const data = memberships
-      .map((membership) => {
-        const member = memberByOrgId.get(membership.organizationId);
-        if (!member) return null;
-        return {
+    // ── 2. PTA household adults ──────────────────────────────────────────
+    const householdAdults = await prisma.ptaHouseholdAdult.findMany({
+      where: { userId, organization: { status: "active" }, household: { status: "ACTIVE" } },
+      include: { organization: { select: { id: true, name: true, logoUrl: true } } },
+    });
+    for (const adult of householdAdults) {
+      const existing = rows.get(adult.organizationId);
+      const [firstName, ...lastParts] = adult.name.split(" ");
+      if (existing) {
+        existing.pta = { householdAdultId: adult.id, householdName: null, isOfficer: existing.pta?.isOfficer ?? false, canCheckIn: existing.pta?.canCheckIn ?? false, canApproveHours: existing.pta?.canApproveHours ?? false };
+      } else {
+        rows.set(adult.organizationId, {
+          organizationId: adult.organizationId,
+          organizationName: adult.organization.name,
+          organizationLogoUrl: adult.organization.logoUrl,
+          memberId: null,
+          firstName: firstName ?? adult.name,
+          lastName: lastParts.join(" ") || null,
+          membershipStatus: null,
+          isDelinquent: false,
+          pta: { householdAdultId: adult.id, householdName: null, isOfficer: false, canCheckIn: false, canApproveHours: false },
+        });
+      }
+    }
+
+    // ── 3. PTA officers with a relevant permission ──────────────────────
+    const staffMemberships = await prisma.organizationMembership.findMany({
+      where: { userId, role: { not: "MEMBER" }, status: "active", organization: { status: "active" } },
+      include: { organization: { select: { id: true, name: true, logoUrl: true, status: true } } },
+    });
+    for (const membership of staffMemberships) {
+      const labAccess = await getOrganizationLabAccess(membership.organizationId, "ptaVertical");
+      if (!labAccess.available) continue;
+
+      const effective = await getEffectivePermissions(membership.organizationId, membership.role as Role);
+      const canCheckIn = effective.includes(PERMISSIONS.PTA_VOLUNTEERS_CHECKIN);
+      const canApproveHours = effective.includes(PERMISSIONS.PTA_VOLUNTEER_HOURS_APPROVE);
+      if (!canCheckIn && !canApproveHours) continue;
+
+      const existing = rows.get(membership.organizationId);
+      if (existing) {
+        existing.pta = { householdAdultId: existing.pta?.householdAdultId ?? null, householdName: null, isOfficer: true, canCheckIn, canApproveHours };
+      } else {
+        rows.set(membership.organizationId, {
           organizationId: membership.organizationId,
           organizationName: membership.organization.name,
           organizationLogoUrl: membership.organization.logoUrl,
-          memberId: member.id,
-          firstName: member.firstName,
-          lastName: member.lastName,
-          membershipStatus: member.membershipStatus,
-          isDelinquent: member.isDelinquent,
-        };
-      })
-      .filter((row): row is NonNullable<typeof row> => row !== null);
+          memberId: null,
+          firstName: null,
+          lastName: null,
+          membershipStatus: null,
+          isDelinquent: false,
+          pta: { householdAdultId: null, householdName: null, isOfficer: true, canCheckIn, canApproveHours },
+        });
+      }
+    }
 
-    return Response.json({ ok: true, data });
+    return Response.json({ ok: true, data: Array.from(rows.values()) });
   });
 }
