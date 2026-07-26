@@ -145,18 +145,20 @@ async function main() {
   );
 
   // ── Households, adults, students, dues ──────────────────────────────────────
+  // Each household deliberately demonstrates a different membership/dues
+  // scenario, so every screen in the product has something real to show
+  // rather than a single repeated "happy path."
   const householdSeeds = [
-    { name: "The Morgan Household", adults: [{ name: "Alex Morgan", email: president.email, phone: "555-0101", userId: president.id, primary: true }], students: [{ name: "Riley M.", grade: 0 }] },
-    { name: "The Kim Household", adults: [{ name: "Casey Kim", email: "casey@pinegrovepta.example", phone: "555-0102", primary: true }, { name: "Drew Kim", email: "drew@pinegrovepta.example", phone: "555-0103", primary: false }], students: [{ name: "Avery K.", grade: 1 }, { name: "Quinn K.", grade: 2 }] },
-    { name: "The Chen Household", adults: [{ name: "Riley Chen", email: "riley.chen@pinegrovepta.example", phone: "555-0104", primary: true }], students: [{ name: "Skylar C.", grade: 0 }] },
-    { name: "The Osei Household", adults: [{ name: "Nia Osei", email: "nia.osei@pinegrovepta.example", phone: "555-0105", primary: true }, { name: "Femi Osei", email: "femi.osei@pinegrovepta.example", phone: "555-0106", primary: false }], students: [{ name: "Amara O.", grade: 1 }] },
-    { name: "The Patel Household", adults: [{ name: "Sam Patel", email: "member@pinegrovepta.example", phone: "555-0107", primary: true }], students: [{ name: "Dev P.", grade: 2 }] },
+    { name: "The Morgan Household", adults: [{ name: "Alex Morgan", email: president.email, phone: "555-0101", userId: president.id, primary: true }], students: [{ name: "Riley M.", grade: 0 }], scenario: "paid" },
+    { name: "The Kim Household", adults: [{ name: "Casey Kim", email: "casey@pinegrovepta.example", phone: "555-0102", primary: true }, { name: "Drew Kim", email: "drew@pinegrovepta.example", phone: "555-0103", primary: false }], students: [{ name: "Avery K.", grade: 1 }, { name: "Quinn K.", grade: 2 }], scenario: "unpaid" },
+    { name: "The Chen Household", adults: [{ name: "Riley Chen", email: "riley.chen@pinegrovepta.example", phone: "555-0104", primary: true }], students: [{ name: "Skylar C.", grade: 0 }], scenario: "pending_review" },
+    { name: "The Osei Household", adults: [{ name: "Nia Osei", email: "nia.osei@pinegrovepta.example", phone: "555-0105", primary: true }, { name: "Femi Osei", email: "femi.osei@pinegrovepta.example", phone: "555-0106", primary: false }], students: [{ name: "Amara O.", grade: 1 }], scenario: "waived" },
+    { name: "The Patel Household", adults: [{ name: "Sam Patel", email: "member@pinegrovepta.example", phone: "555-0107", primary: true }], students: [{ name: "Dev P.", grade: 2 }], scenario: "prior_year" },
+    { name: "The Whitfield Household", adults: [{ name: "Jordan Whitfield", email: "jordan.whitfield@pinegrovepta.example", phone: "555-0108", primary: true }], students: [] as { name: string; grade: number }[], scenario: "no_students" },
   ] as const;
 
-  const households: Array<{ id: string; adultIds: string[]; studentIds: string[] }> = [];
-  let householdIndex = 0;
+  const households: Array<{ id: string; adultIds: string[]; studentIds: string[]; orgMemberId: string }> = [];
   for (const seed of householdSeeds) {
-    householdIndex += 1;
     const orgMember = await prisma.orgMember.upsert({
       where: { organizationId_memberNumber: { organizationId: org.id, memberNumber: seed.name } },
       update: {},
@@ -198,9 +200,8 @@ async function main() {
       }
     }
 
-    households.push({ id: household.id, adultIds, studentIds });
+    households.push({ id: household.id, adultIds, studentIds, orgMemberId: orgMember.id });
 
-    // Dues charge — alternate paid/unpaid across households for a realistic mixed dashboard.
     const duesAccount = await findOrCreateDuesAccount(org.id, orgMember.id);
     const periodStart = new Date(`${SCHOOL_YEAR.slice(0, 4)}-08-01`);
     const periodEnd = new Date(`${SCHOOL_YEAR.slice(5)}-06-30`);
@@ -210,16 +211,104 @@ async function main() {
       create: { organizationId: org.id, memberId: orgMember.id, duesAccountId: duesAccount.id, amountDue: 25, dueDate: new Date(`${SCHOOL_YEAR.slice(0, 4)}-09-01`), periodStart, periodEnd },
     });
 
-    const shouldBePaid = householdIndex % 2 === 1;
-    if (shouldBePaid && charge.status !== "PAID") {
+    if (seed.scenario === "paid" && charge.status !== "PAID") {
       const existingPayment = await prisma.duesPayment.findFirst({ where: { organizationId: org.id, duesChargeId: charge.id } });
       if (!existingPayment) {
         await prisma.duesPayment.create({ data: { organizationId: org.id, memberId: orgMember.id, duesChargeId: charge.id, amount: 25, paymentDate: new Date(), method: "CREDIT_CARD" } });
       }
       await prisma.duesCharge.update({ where: { id: charge.id }, data: { amountPaid: 25, status: "PAID" } });
     }
+
+    if (seed.scenario === "pending_review") {
+      // A parent reported paying by check; nobody has approved it yet — the
+      // charge itself stays PENDING until an officer acts on the report.
+      const existing = await prisma.paymentReport.findFirst({ where: { organizationId: org.id, memberId: orgMember.id, duesChargeId: charge.id, status: "pending" } });
+      if (!existing) {
+        await prisma.paymentReport.create({
+          data: {
+            organizationId: org.id,
+            memberId: orgMember.id,
+            duesChargeId: charge.id,
+            amount: 25,
+            paymentMethod: "CHECK",
+            paymentDate: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
+            referenceNumber: "Check #1042 (fictional)",
+            note: "Paid at the PTA meeting drop box (fictional demo data).",
+            category: "MEMBERSHIP_DUES",
+            status: "pending",
+          },
+        });
+      }
+    }
+
+    if (seed.scenario === "waived") {
+      if (charge.status !== "WAIVED") {
+        await prisma.duesCharge.update({ where: { id: charge.id }, data: { status: "WAIVED", notes: "Waived for financial hardship (fictional demo data)." } });
+        const existingAdjustment = await prisma.duesAdjustment.findFirst({ where: { organizationId: org.id, duesChargeId: charge.id, adjustmentType: "WAIVER" } });
+        if (!existingAdjustment) {
+          await prisma.duesAdjustment.create({
+            data: {
+              organizationId: org.id,
+              memberId: orgMember.id,
+              duesChargeId: charge.id,
+              adjustmentType: "WAIVER",
+              amount: 25,
+              reason: "Financial hardship waiver (fictional demo data).",
+              approvedByUserId: president.id,
+              createdByUserId: president.id,
+            },
+          });
+        }
+      }
+    }
+
+    if (seed.scenario === "prior_year") {
+      // Alongside the current-year charge above, also give this household a
+      // fully-paid PRIOR school year charge — demonstrates that a household's
+      // dues history survives across school years rather than only ever
+      // showing "this year."
+      const priorYear = "2025-2026";
+      const priorStart = new Date("2025-08-01");
+      const priorEnd = new Date("2026-06-30");
+      const priorCharge = await prisma.duesCharge.upsert({
+        where: { organizationId_memberId_duesAccountId_periodStart_periodEnd: { organizationId: org.id, memberId: orgMember.id, duesAccountId: duesAccount.id, periodStart: priorStart, periodEnd: priorEnd } },
+        update: {},
+        create: { organizationId: org.id, memberId: orgMember.id, duesAccountId: duesAccount.id, amountDue: 20, amountPaid: 20, status: "PAID", dueDate: new Date("2025-09-01"), periodStart: priorStart, periodEnd: priorEnd },
+      });
+      const existingPriorPayment = await prisma.duesPayment.findFirst({ where: { organizationId: org.id, duesChargeId: priorCharge.id } });
+      if (!existingPriorPayment) {
+        await prisma.duesPayment.create({ data: { organizationId: org.id, memberId: orgMember.id, duesChargeId: priorCharge.id, amount: 20, paymentDate: new Date("2025-09-05"), method: "CHECK", reference: `Prior-year dues, ${priorYear} (fictional)` } });
+      }
+    }
+    // "unpaid" and "no_students" households intentionally get no further
+    // action here — the current-year charge created above already stays
+    // PENDING/unpaid, which is the scenario itself.
   }
-  console.log(`${households.length} fictional households created (with adults, students, and a dues cycle).`);
+  console.log(`${households.length} fictional households created, covering paid / unpaid / pending-review / waived / prior-year / no-students scenarios.`);
+
+  // A second payment report, already approved, so the Payment Reports queue
+  // shows both an outstanding item and a resolved one rather than only ever
+  // pending items.
+  const paidHousehold = households[0];
+  if (paidHousehold) {
+    const approvedExisting = await prisma.paymentReport.findFirst({ where: { organizationId: org.id, memberId: paidHousehold.orgMemberId, status: "approved" } });
+    if (!approvedExisting) {
+      await prisma.paymentReport.create({
+        data: {
+          organizationId: org.id,
+          memberId: paidHousehold.orgMemberId,
+          amount: 25,
+          paymentMethod: "CREDIT_CARD",
+          paymentDate: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000),
+          note: "Approved at the September meeting (fictional demo data).",
+          category: "MEMBERSHIP_DUES",
+          status: "approved",
+          reviewedAt: new Date(Date.now() - 9 * 24 * 60 * 60 * 1000),
+        },
+      });
+    }
+  }
+  console.log("Payment reports created (one pending review, one already approved).");
 
   // ── Committees ───────────────────────────────────────────────────────────
   const committeeSeeds = [
@@ -239,7 +328,19 @@ async function main() {
       });
     }
   }
-  console.log("Committees created (Membership, Fundraising, Family Engagement).");
+  // PtaCommittee has no archived/status field in the current schema — this
+  // is simulated via naming/description rather than a real lifecycle state,
+  // and documented as a known limitation rather than silently implied.
+  await prisma.ptaCommittee.upsert({
+    where: { organizationId_name: { organizationId: org.id, name: "Winter Gala Committee (2025 — concluded)" } },
+    update: {},
+    create: {
+      organizationId: org.id,
+      name: "Winter Gala Committee (2025 — concluded)",
+      description: "Ran the 2025 Winter Gala fundraiser; the event has concluded and this committee is no longer active (fictional demo data). No \"archived\" status field exists yet — see docs/pta-demo-environment.md.",
+    },
+  });
+  console.log("Committees created (Membership, Fundraising, Family Engagement, plus one concluded committee).");
 
   // ── Events + RSVPs ─────────────────────────────────────────────────────────
   const bookFair = await prisma.event.upsert({
@@ -272,13 +373,16 @@ async function main() {
     update: {},
     create: { id: "seed-pta-slot-morning", organizationId: org.id, opportunityId: opportunity.id, label: "Morning shift (9am-12pm)", capacity: 3 },
   });
-  await prisma.ptaVolunteerSlot.upsert({
+  const afternoonSlot = await prisma.ptaVolunteerSlot.upsert({
     where: { id: "seed-pta-slot-afternoon" },
     update: {},
-    create: { id: "seed-pta-slot-afternoon", organizationId: org.id, opportunityId: opportunity.id, label: "Afternoon shift (12pm-3pm)", capacity: 2 },
+    // capacity 1 so a single signup below makes this slot fully claimed —
+    // the "full" scenario the demo brief asks for.
+    create: { id: "seed-pta-slot-afternoon", organizationId: org.id, opportunityId: opportunity.id, label: "Afternoon shift (12pm-3pm)", capacity: 1 },
   });
 
   const firstAdult = households[0]?.adultIds[0];
+  const secondAdult = households[1]?.adultIds[0];
   if (firstAdult) {
     const existingSignup = await prisma.ptaVolunteerSignup.findUnique({ where: { slotId_householdAdultId: { slotId: morningSlot.id, householdAdultId: firstAdult } } });
     if (!existingSignup) {
@@ -286,7 +390,26 @@ async function main() {
       await prisma.ptaVolunteerSlot.update({ where: { id: morningSlot.id }, data: { claimedCount: 1 } });
     }
   }
-  console.log("Volunteer opportunity created with slots (one claimed).");
+  if (secondAdult) {
+    const existingSignup = await prisma.ptaVolunteerSignup.findUnique({ where: { slotId_householdAdultId: { slotId: afternoonSlot.id, householdAdultId: secondAdult } } });
+    if (!existingSignup) {
+      await prisma.ptaVolunteerSignup.create({ data: { organizationId: org.id, slotId: afternoonSlot.id, householdAdultId: secondAdult, status: "SIGNED_UP" } });
+      await prisma.ptaVolunteerSlot.update({ where: { id: afternoonSlot.id }, data: { claimedCount: 1 } });
+    }
+  }
+
+  // A second, entirely empty opportunity — the "nobody has signed up yet" scenario.
+  const emptyOpportunity = await prisma.ptaVolunteerOpportunity.upsert({
+    where: { id: "seed-pta-family-night-volunteers" },
+    update: {},
+    create: { id: "seed-pta-family-night-volunteers", organizationId: org.id, eventId: familyNight.id, title: "Family Movie Night Setup", description: "Help set up chairs and the projector (fictional)." },
+  });
+  await prisma.ptaVolunteerSlot.upsert({
+    where: { id: "seed-pta-slot-movie-night" },
+    update: {},
+    create: { id: "seed-pta-slot-movie-night", organizationId: org.id, opportunityId: emptyOpportunity.id, label: "5pm-7pm", capacity: 4 },
+  });
+  console.log("Volunteer opportunities created: one with a partially-filled slot and one fully-claimed slot, plus one entirely empty opportunity.");
 
   // ── Fundraising campaign ────────────────────────────────────────────────────
   const campaign = await prisma.campaign.upsert({
@@ -320,7 +443,73 @@ async function main() {
       sentAt: new Date(),
     },
   });
-  console.log("Fictional announcement created.");
+  // Scheduled (not yet sent) and canceled announcements, alongside the sent
+  // one above — CommunicationCampaignStatus has no literal "SCHEDULED" or
+  // "ARCHIVED" value, so these use READY+scheduledFor and CANCELED
+  // respectively, the closest real states the schema supports.
+  await prisma.communicationCampaign.upsert({
+    where: { id: "seed-pta-book-fair-reminder" },
+    update: {},
+    create: {
+      id: "seed-pta-book-fair-reminder",
+      organizationId: org.id,
+      createdByUserId: president.id,
+      communicationType: "ANNOUNCEMENT",
+      channel: "INTERNAL_LOG_ONLY",
+      title: "Book Fair Reminder",
+      subject: "Book Fair Reminder",
+      body: "Don't forget — the Scholastic Book Fair is next week! (fictional demo announcement)",
+      status: "READY",
+      scheduledFor: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    },
+  });
+  await prisma.communicationCampaign.upsert({
+    where: { id: "seed-pta-canceled-bake-sale" },
+    update: {},
+    create: {
+      id: "seed-pta-canceled-bake-sale",
+      organizationId: org.id,
+      createdByUserId: president.id,
+      communicationType: "ANNOUNCEMENT",
+      channel: "INTERNAL_LOG_ONLY",
+      title: "Spring Bake Sale (canceled)",
+      subject: "Spring Bake Sale (canceled)",
+      body: "The spring bake sale has been canceled due to a scheduling conflict (fictional demo announcement).",
+      status: "CANCELED",
+    },
+  });
+  console.log("Fictional announcements created: sent, scheduled, and canceled.");
+
+  // ── Fictional documents ──────────────────────────────────────────────────
+  // No PTA-specific document model/API exists yet (see docs/pta-labs-mvp.md
+  // and the officer-UI-integration sprint's documents placeholder page) —
+  // these rows use the existing generic, org-scoped Attachment model so the
+  // demo organization has plausible document METADATA to look at, without
+  // implying a document-management UI exists to browse them.
+  const documentSeeds = [
+    { id: "seed-pta-doc-bylaws", fileName: "Pine_Grove_PTA_Bylaws_2026.pdf", title: "PTA Bylaws (2026 revision)" },
+    { id: "seed-pta-doc-budget", fileName: "Pine_Grove_PTA_Budget_2026-2027.xlsx", title: "Annual Budget, 2026-2027" },
+  ];
+  for (const doc of documentSeeds) {
+    await prisma.attachment.upsert({
+      where: { id: doc.id },
+      update: {},
+      create: {
+        id: doc.id,
+        organizationId: org.id,
+        entityType: "ORGANIZATION",
+        entityId: org.id,
+        purpose: "pta_document",
+        title: doc.title,
+        fileName: doc.fileName,
+        contentType: doc.fileName.endsWith(".pdf") ? "application/pdf" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        byteSize: 245_000,
+        objectKey: `seed-fixtures/pta/${doc.fileName}`,
+        uploadedByUserId: president.id,
+      },
+    });
+  }
+  console.log("Fictional PTA documents created (bylaws, budget) — metadata only, no real file bytes.");
 
   // ── Approved sample minutes (Meeting + Attachment, no Meeting Intelligence) ─
   const meeting = await prisma.meeting.upsert({
@@ -348,6 +537,95 @@ async function main() {
   console.log("One approved sample-minutes document created.");
 
   console.log("\nPine Grove School PTA demo seed complete.");
+
+  // ── Second fictional organization: a NON-PTA org, for cross-vertical
+  // isolation testing (impersonation, org switching, Labs enrollment) ────────
+  // Deliberately NOT enrolled in ptaVertical — an impersonated session
+  // dropped into this organization must never show any PTA data or nav.
+  const riverdale = await prisma.organization.upsert({
+    where: { slug: "riverdale-community-association" },
+    update: {},
+    create: {
+      slug: "riverdale-community-association",
+      name: "Riverdale Community Association",
+      organizationType: "Community Association",
+      plan: "elite",
+      email: "hello@riverdaleassociation.example",
+      website: "https://riverdaleassociation.example",
+    },
+  });
+  console.log(`\nOrganization: ${riverdale.name} (${riverdale.id}) — NOT enrolled in any Labs feature.`);
+
+  const riverdaleDirector = await prisma.user.upsert({
+    where: { email: "director@riverdaleassociation.example" },
+    update: {},
+    create: { email: "director@riverdaleassociation.example", displayName: "Morgan Ellis (Director)", passwordHash: await hash("PtaDemo!Change1"), emailVerified: true },
+  });
+  await prisma.organizationMembership.upsert({
+    where: { organizationId_userId: { organizationId: riverdale.id, userId: riverdaleDirector.id } },
+    update: { role: "ORG_OWNER" },
+    create: { organizationId: riverdale.id, userId: riverdaleDirector.id, role: "ORG_OWNER", status: "active", joinedAt: new Date() },
+  });
+
+  // Alex Morgan (Pine Grove's President) is ALSO a member here, with a
+  // different role — the "one fictional user belonging to both
+  // organizations" the demo brief asks for, reusing an already-established
+  // fictional identity rather than inventing a disconnected one.
+  await prisma.organizationMembership.upsert({
+    where: { organizationId_userId: { organizationId: riverdale.id, userId: president.id } },
+    update: { role: "STAFF" },
+    create: { organizationId: riverdale.id, userId: president.id, role: "STAFF", status: "active", joinedAt: new Date() },
+  });
+  console.log("Riverdale members created (a director, plus Pine Grove's President as a cross-organization STAFF member).");
+
+  const riverdaleMember = await prisma.orgMember.upsert({
+    where: { organizationId_memberNumber: { organizationId: riverdale.id, memberNumber: "RCA-0001" } },
+    update: {},
+    create: { organizationId: riverdale.id, firstName: "Taylor", lastName: "Brooks (fictional)", email: "taylor.brooks@riverdaleassociation.example", memberNumber: "RCA-0001" },
+  });
+  const riverdaleDuesAccount = await prisma.duesAccount.upsert({
+    where: { id: "seed-riverdale-dues-account" },
+    update: {},
+    create: { id: "seed-riverdale-dues-account", organizationId: riverdale.id, memberId: riverdaleMember.id, name: "Annual Membership Dues", frequency: "annual", amountDefault: 60 },
+  });
+  await prisma.duesCharge.upsert({
+    where: { id: "seed-riverdale-dues-charge" },
+    update: {},
+    create: {
+      id: "seed-riverdale-dues-charge",
+      organizationId: riverdale.id,
+      memberId: riverdaleMember.id,
+      duesAccountId: riverdaleDuesAccount.id,
+      amountDue: 60,
+      dueDate: new Date(`${SCHOOL_YEAR.slice(0, 4)}-10-01`),
+      periodStart: new Date(`${SCHOOL_YEAR.slice(0, 4)}-01-01`),
+      periodEnd: new Date(`${SCHOOL_YEAR.slice(0, 4)}-12-31`),
+    },
+  });
+
+  await prisma.event.upsert({
+    where: { id: "seed-riverdale-annual-meeting" },
+    update: {},
+    create: { id: "seed-riverdale-annual-meeting", organizationId: riverdale.id, title: "Riverdale Annual Meeting", description: "Annual community meeting (fictional).", startAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), status: "upcoming" },
+  });
+
+  await prisma.communicationCampaign.upsert({
+    where: { id: "seed-riverdale-newsletter" },
+    update: {},
+    create: {
+      id: "seed-riverdale-newsletter",
+      organizationId: riverdale.id,
+      createdByUserId: riverdaleDirector.id,
+      communicationType: "ANNOUNCEMENT",
+      channel: "INTERNAL_LOG_ONLY",
+      title: "Riverdale Quarterly Newsletter",
+      subject: "Riverdale Quarterly Newsletter",
+      body: "Welcome to this quarter's community newsletter (fictional demo announcement).",
+      status: "SENT",
+      sentAt: new Date(),
+    },
+  });
+  console.log("Riverdale demo data created (a member, dues charge, event, and announcement) — a plain, non-PTA org for cross-vertical isolation testing.");
 }
 
 main()

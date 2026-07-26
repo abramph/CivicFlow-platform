@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   { href: "/admin/platform/jobs", label: "Background Operations" },
   { href: "/admin/platform/labs", label: "Unestra Labs" },
   { href: "/admin/platform/audit", label: "Audit" },
+  { href: "/admin/platform/impersonation", label: "Impersonation" },
 ];
 
 function isActive(pathname: string, href: string, exact?: boolean) {

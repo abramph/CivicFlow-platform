@@ -4,9 +4,11 @@ import { requireSuperAdmin } from "@/lib/auth-guards";
 import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { formatDate, formatDateTime, formatEnumLabel } from "@/lib/formatting";
 import { getOrganizationDetail } from "@/lib/platform-operations/organizations";
+import { listOrganizationMembersForImpersonation } from "@/lib/platform-operations/impersonation";
 import { Breadcrumbs, StatusPill, EmptyState } from "@/components/admin/OperationsUI";
 import { CopyIdButton } from "@/components/admin/CopyIdButton";
 import { OpenInOrganizationPortalButton } from "@/components/admin/OpenInOrganizationPortalButton";
+import { ImpersonateUserPanel } from "@/components/admin/ImpersonateUserPanel";
 
 export default async function PlatformOrganizationDetailPage({
   params,
@@ -20,6 +22,7 @@ export default async function PlatformOrganizationDetailPage({
   if (!detail) notFound();
 
   const { identity, membership, billing, communications, operationalHealth } = detail;
+  const impersonationCandidates = await listOrganizationMembersForImpersonation(organizationId);
   const stripeDashboardUrl = billing.stripeCustomerId
     ? `https://dashboard.stripe.com/customers/${encodeURIComponent(billing.stripeCustomerId)}`
     : null;
@@ -86,6 +89,13 @@ export default async function PlatformOrganizationDetailPage({
         <div className="mt-4">
           <OpenInOrganizationPortalButton organizationId={identity.id} />
         </div>
+      </SectionCard>
+
+      <SectionCard
+        title="Impersonate a user"
+        description="Experience this organization exactly as one of its members would — for demos, QA, and support. Unlike “Open in organization portal” above (which only works for orgs you're a real member of), this works for any organization and any active member, and is fully audited."
+      >
+        <ImpersonateUserPanel organizationId={identity.id} candidates={impersonationCandidates} />
       </SectionCard>
 
       <SectionCard title="Membership summary">

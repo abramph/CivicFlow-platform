@@ -26,6 +26,15 @@ vi.mock("@/lib/platform-access", async () => {
   return { ...actual, getPlatformAccessForUser: (...args: unknown[]) => getPlatformAccessForUser(...args) };
 });
 
+// This file predates impersonation, which the session callback also
+// resolves on every call (and which itself reads next/headers' cookies() —
+// unavailable outside a real request scope, which is exactly this unit-test
+// environment). Impersonation-specific behavior has its own coverage in
+// impersonation.test.ts and authOptions-impersonation-session.test.ts.
+vi.mock("@/lib/impersonation", () => ({
+  resolveImpersonationOverlay: vi.fn().mockResolvedValue(null),
+}));
+
 import type { Session } from "next-auth";
 import { authOptions } from "@/lib/authOptions";
 

@@ -5,8 +5,28 @@ import { prisma } from "@/lib/prisma";
 import { getEffectivePermissions } from "@/lib/role-permissions";
 import { resolveActiveOrganization, getUserOrgMemberships } from "@/lib/org-context";
 import { getPlatformAccessForUser } from "@/lib/platform-access";
+import { resolveImpersonationOverlay } from "@/lib/impersonation";
 
 const defaultApiBase = process.env.NEXT_PUBLIC_API_BASE || "https://api.civicflowapp.com/api";
+
+/**
+ * Resolves every identity-dependent session field for a given userId.
+ * Extracted so the session() callback can call it once for the real user
+ * and, when a valid impersonation overlay is active, a second time for the
+ * target user instead — the exact same derivation either way, so an
+ * impersonated session is indistinguishable from that user's own real
+ * session to every downstream permission check.
+ */
+async function resolveSessionIdentity(userId: string) {
+  const [active, organizations, user, platformAccess] = await Promise.all([
+    resolveActiveOrganization(userId),
+    getUserOrgMemberships(userId),
+    prisma.user.findUnique({ where: { id: userId }, select: { email: true } }),
+    getPlatformAccessForUser(userId),
+  ]);
+  const permissions = active?.organizationId && active?.role ? await getEffectivePermissions(active.organizationId, active.role) : [];
+  return { active, organizations, user, platformAccess, permissions };
+}
 
 export const authOptions: NextAuthOptions = {
   session: {
@@ -209,28 +229,45 @@ export const authOptions: NextAuthOptions = {
       }
 
       if (token.userId) {
-        const [active, organizations, user, platformAccess] = await Promise.all([
-          resolveActiveOrganization(String(token.userId)),
-          getUserOrgMemberships(String(token.userId)),
-          prisma.user.findUnique({
-            where: { id: String(token.userId) },
-            select: { email: true },
-          }),
-          getPlatformAccessForUser(String(token.userId)),
-        ]);
+        const realUserId = String(token.userId);
+        // Real, JWT-signed identity — token.userId is NEVER overwritten by
+        // impersonation, only this derived session view is. See
+        // src/lib/impersonation.ts's module doc comment for why that's the
+        // property that keeps this safe.
+        const overlay = await resolveImpersonationOverlay(realUserId);
+        const effectiveUserId = overlay?.targetUserId ?? realUserId;
+        const identity = await resolveSessionIdentity(effectiveUserId);
 
-        session.userId = String(token.userId);
-        session.userEmail = user?.email ?? String(token.userEmail || "");
-        session.organizationId = active?.organizationId ?? null;
-        session.orgName = active?.organizationName ?? null;
-        session.role = active?.role ?? null;
-        session.memberId = active?.memberId ?? null;
-        session.organizations = organizations;
+        session.userId = effectiveUserId;
+        session.userEmail = identity.user?.email ?? (overlay ? overlay.targetEmail : String(token.userEmail || ""));
+        session.organizationId = identity.active?.organizationId ?? null;
+        session.orgName = identity.active?.organizationName ?? null;
+        session.role = identity.active?.role ?? null;
+        session.memberId = identity.active?.memberId ?? null;
+        session.organizations = identity.organizations;
         // Global, active-organization-independent — resolved fresh here on
         // every session read (never persisted in the JWT) so a revocation
-        // takes effect on the next request instead of lingering.
-        session.hasPlatformAccess = platformAccess.hasPlatformAccess;
-        session.platformRoles = platformAccess.platformRoles;
+        // takes effect on the next request instead of lingering. Resolved
+        // for effectiveUserId, so an impersonated session never inherits
+        // the real admin's platform access.
+        session.hasPlatformAccess = identity.platformAccess.hasPlatformAccess;
+        session.platformRoles = identity.platformAccess.platformRoles;
+        session.permissions = identity.permissions;
+        session.impersonation = overlay
+          ? {
+              active: true,
+              actorUserId: overlay.actorUserId,
+              actorEmail: overlay.actorEmail,
+              actorDisplayName: overlay.actorDisplayName,
+              targetUserId: overlay.targetUserId,
+              targetDisplayName: overlay.targetDisplayName,
+              targetEmail: overlay.targetEmail,
+              organizationId: overlay.organizationId,
+              organizationName: overlay.organizationName,
+              startedAt: overlay.startedAt,
+              reason: overlay.reason,
+            }
+          : undefined;
       } else {
         session.userId = token.userId;
         session.userEmail = token.userEmail;
@@ -238,16 +275,9 @@ export const authOptions: NextAuthOptions = {
         session.role = token.role ?? null;
         session.hasPlatformAccess = false;
         session.platformRoles = [];
+        session.permissions = [];
+        session.impersonation = undefined;
       }
-
-      // Effective (possibly org-customized) permission set, embedded so
-      // client components (e.g. the portal nav) can filter without a
-      // separate round-trip — computed the same way requirePermission()
-      // does server-side.
-      session.permissions =
-        session.organizationId && session.role
-          ? await getEffectivePermissions(session.organizationId, session.role)
-          : [];
 
       session.org_id   = String(token.org_id  || "");
       session.api_key  = String(token.api_key || "");
