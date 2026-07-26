@@ -366,7 +366,7 @@ async function main() {
   const opportunity = await prisma.ptaVolunteerOpportunity.upsert({
     where: { id: "seed-pta-book-fair-volunteers" },
     update: {},
-    create: { id: "seed-pta-book-fair-volunteers", organizationId: org.id, eventId: bookFair.id, title: "Book Fair Setup & Cashiering", description: "Help set up tables and staff the register (fictional)." },
+    create: { id: "seed-pta-book-fair-volunteers", organizationId: org.id, eventId: bookFair.id, title: "Book Fair Setup & Cashiering", description: "Help set up tables and staff the register (fictional).", schoolYear: SCHOOL_YEAR, status: "OPEN" },
   });
   const morningSlot = await prisma.ptaVolunteerSlot.upsert({
     where: { id: "seed-pta-slot-morning" },
@@ -402,7 +402,7 @@ async function main() {
   const emptyOpportunity = await prisma.ptaVolunteerOpportunity.upsert({
     where: { id: "seed-pta-family-night-volunteers" },
     update: {},
-    create: { id: "seed-pta-family-night-volunteers", organizationId: org.id, eventId: familyNight.id, title: "Family Movie Night Setup", description: "Help set up chairs and the projector (fictional)." },
+    create: { id: "seed-pta-family-night-volunteers", organizationId: org.id, eventId: familyNight.id, title: "Family Movie Night Setup", description: "Help set up chairs and the projector (fictional).", schoolYear: SCHOOL_YEAR, status: "OPEN" },
   });
   await prisma.ptaVolunteerSlot.upsert({
     where: { id: "seed-pta-slot-movie-night" },
@@ -410,6 +410,189 @@ async function main() {
     create: { id: "seed-pta-slot-movie-night", organizationId: org.id, opportunityId: emptyOpportunity.id, label: "5pm-7pm", capacity: 4 },
   });
   console.log("Volunteer opportunities created: one with a partially-filled slot and one fully-claimed slot, plus one entirely empty opportunity.");
+
+  // ── Volunteer-hours tracking: attendance, ledger, and requirement scenarios ─
+  // A family volunteer-hour goal — 10 hours/household. Every household below
+  // demonstrates a different position relative to it (exceeded, met, close,
+  // zero) rather than one repeated case.
+  await prisma.ptaVolunteerRequirement.upsert({
+    where: { organizationId_schoolYear: { organizationId: org.id, schoolYear: SCHOOL_YEAR } },
+    update: {},
+    create: { organizationId: org.id, schoolYear: SCHOOL_YEAR, requiredMinutes: 600, active: true },
+  });
+
+  // A completed opportunity with a full attendance/hours history — the
+  // "we already ran this and processed the hours" scenario, as opposed to
+  // Book Fair/Family Night above (still upcoming/open).
+  const teacherBreakfast = await prisma.ptaVolunteerOpportunity.upsert({
+    where: { id: "seed-pta-teacher-breakfast" },
+    update: {},
+    create: {
+      id: "seed-pta-teacher-breakfast",
+      organizationId: org.id,
+      title: "Teacher Appreciation Breakfast",
+      description: "Set up and serve a breakfast for the school's teaching staff (fictional).",
+      schoolYear: SCHOOL_YEAR,
+      status: "COMPLETED",
+      coordinatorUserId: president.id,
+    },
+  });
+  const breakfastSlot = await prisma.ptaVolunteerSlot.upsert({
+    where: { id: "seed-pta-slot-breakfast" },
+    update: {},
+    create: {
+      id: "seed-pta-slot-breakfast",
+      organizationId: org.id,
+      opportunityId: teacherBreakfast.id,
+      label: "7am-9am setup and serving",
+      capacity: 6,
+      startAt: new Date("2026-10-01T07:00:00-04:00"),
+      endAt: new Date("2026-10-01T09:00:00-04:00"),
+      defaultCreditedMinutes: 120,
+      status: "CLOSED",
+    },
+  });
+
+  // household index: 0 Morgan, 1 Kim, 2 Chen, 3 Osei, 4 Patel, 5 Whitfield
+  const morganAdult = households[0]?.adultIds[0];
+  const [caseyKim, drewKim] = households[1]?.adultIds ?? [];
+  const [niaOsei, femiOsei] = households[3]?.adultIds ?? [];
+  const samPatel = households[4]?.adultIds[0];
+  // Whitfield (households[5]) deliberately gets no signup, attendance, or
+  // hour entry at all — see the "household with zero hours" scenario below.
+
+  async function seedAttendedSignup(
+    householdAdultId: string | undefined,
+    outcome: "ATTENDED" | "NO_SHOW" | "EXCUSED",
+    checkIn: string | null,
+    checkOut: string | null
+  ) {
+    if (!householdAdultId) return null;
+    // Resolved explicitly rather than assumed — this exact omission (a
+    // signup created without its denormalized householdId) was caught live
+    // by querying the seeded ledger directly: every entry silently had a
+    // blank householdId, which would make every household-hours total and
+    // report see zero hours despite real approved/pending entries existing.
+    const adultRecord = await prisma.ptaHouseholdAdult.findFirstOrThrow({ where: { id: householdAdultId, organizationId: org.id } });
+    const signup = await prisma.ptaVolunteerSignup.upsert({
+      where: { slotId_householdAdultId: { slotId: breakfastSlot.id, householdAdultId } },
+      update: {},
+      create: { organizationId: org.id, slotId: breakfastSlot.id, householdAdultId, householdId: adultRecord.householdId, status: outcome, source: "SELF" },
+    });
+    if (checkIn) {
+      await prisma.ptaVolunteerAttendance.upsert({
+        where: { signupId: signup.id },
+        update: {},
+        create: {
+          organizationId: org.id,
+          signupId: signup.id,
+          scheduledStart: breakfastSlot.startAt,
+          scheduledEnd: breakfastSlot.endAt,
+          checkInAt: checkIn ? new Date(checkIn) : null,
+          checkOutAt: checkOut ? new Date(checkOut) : null,
+          status: outcome === "ATTENDED" ? "ATTENDED" : outcome,
+          recordedByUserId: president.id,
+        },
+      });
+    }
+    return signup;
+  }
+
+  const morganSignup = await seedAttendedSignup(morganAdult, "ATTENDED", "2026-10-01T07:00:00-04:00", "2026-10-01T09:00:00-04:00");
+  const kimSignup = await seedAttendedSignup(caseyKim, "ATTENDED", "2026-10-01T07:00:00-04:00", "2026-10-01T08:00:00-04:00");
+  const oseiSignup = await seedAttendedSignup(niaOsei, "ATTENDED", "2026-10-01T07:00:00-04:00", "2026-10-01T09:00:00-04:00");
+  const patelSignup = await seedAttendedSignup(samPatel, "ATTENDED", "2026-10-01T07:00:00-04:00", "2026-10-01T08:30:00-04:00");
+  await seedAttendedSignup(drewKim, "NO_SHOW", null, null);
+  await seedAttendedSignup(femiOsei, "EXCUSED", null, null);
+  await prisma.ptaVolunteerSlot.updateMany({ where: { id: breakfastSlot.id }, data: { claimedCount: 6 } });
+
+  async function seedHourEntry(
+    signup: { id: string; householdAdultId: string; householdId: string | null } | null,
+    creditedMinutes: number,
+    outcome: "PENDING" | "APPROVED" | "REJECTED"
+  ) {
+    if (!signup) return null;
+    const existing = await prisma.ptaVolunteerHourEntry.findFirst({ where: { organizationId: org.id, signupId: signup.id } });
+    if (existing) return existing;
+    return prisma.ptaVolunteerHourEntry.create({
+      data: {
+        organizationId: org.id,
+        schoolYear: SCHOOL_YEAR,
+        signupId: signup.id,
+        householdAdultId: signup.householdAdultId,
+        householdId: signup.householdId,
+        opportunityId: teacherBreakfast.id,
+        slotId: breakfastSlot.id,
+        creditedMinutes,
+        status: outcome,
+        source: "OFFICER_MANUAL",
+        ...(outcome === "APPROVED" ? { approvedByUserId: president.id, approvedAt: new Date() } : {}),
+        ...(outcome === "REJECTED" ? { rejectedByUserId: president.id, rejectedAt: new Date(), notes: "No sign-in sheet entry found for this shift (fictional demo data)." } : {}),
+      },
+    });
+  }
+
+  // Morgan: "household with many hours" — a base 780 minutes approved, then a
+  // +120 minute adjustment on top (with a documented reason) so this single
+  // scenario demonstrates both "clearly exceeds the requirement" and the
+  // adjustment/audit-trail feature at once, without needing a second signup.
+  const morganEntry = await seedHourEntry(morganSignup, 780, "APPROVED");
+  if (morganEntry) {
+    const existingAdjustment = await prisma.ptaVolunteerHourAdjustment.findFirst({ where: { hourEntryId: morganEntry.id } });
+    if (!existingAdjustment) {
+      await prisma.ptaVolunteerHourAdjustment.create({
+        data: { organizationId: org.id, hourEntryId: morganEntry.id, minuteAdjustment: 120, reason: "Also covered two additional setup shifts logged separately on paper (fictional demo data).", actorUserId: president.id },
+      });
+      await prisma.ptaVolunteerHourEntry.update({ where: { id: morganEntry.id }, data: { creditedMinutes: 900 } });
+    }
+  }
+
+  // Osei: "household that met its requirement" — exactly at the 600-minute goal.
+  await seedHourEntry(oseiSignup, 600, "APPROVED");
+
+  // Kim: "household near its requirement" — 480 of 600 minutes, still PENDING (not yet counted toward the goal until approved).
+  await seedHourEntry(kimSignup, 480, "PENDING");
+
+  // Patel: a reported shift that got rejected (e.g. no attendance evidence) — the household's hours stay at zero from this shift.
+  await seedHourEntry(patelSignup, 90, "REJECTED");
+
+  // Whitfield: "household with zero hours" — no signups, no attendance, no entries at all (nothing to seed).
+
+  console.log("Volunteer attendance and hour-ledger scenarios created: attended/no-show/excused, pending/approved/rejected/adjusted hours, and a household-hour-requirement mix.");
+
+  // A canceled opportunity — the "this activity isn't happening" scenario.
+  await prisma.ptaVolunteerOpportunity.upsert({
+    where: { id: "seed-pta-fall-festival" },
+    update: {},
+    create: {
+      id: "seed-pta-fall-festival",
+      organizationId: org.id,
+      title: "Fall Festival Setup",
+      description: "Canceled due to a venue scheduling conflict (fictional demo data).",
+      schoolYear: SCHOOL_YEAR,
+      status: "CANCELLED",
+    },
+  });
+
+  // A fifth, ordinary open opportunity for general realism.
+  const pictureDay = await prisma.ptaVolunteerOpportunity.upsert({
+    where: { id: "seed-pta-picture-day" },
+    update: {},
+    create: {
+      id: "seed-pta-picture-day",
+      organizationId: org.id,
+      title: "Picture Day Helpers",
+      description: "Help line students up by classroom for individual photos (fictional).",
+      schoolYear: SCHOOL_YEAR,
+      status: "OPEN",
+    },
+  });
+  await prisma.ptaVolunteerSlot.upsert({
+    where: { id: "seed-pta-slot-picture-day" },
+    update: {},
+    create: { id: "seed-pta-slot-picture-day", organizationId: org.id, opportunityId: pictureDay.id, label: "Full day", capacity: 3, minNeeded: 2 },
+  });
+  console.log("Fifth opportunity created (Picture Day Helpers), plus one canceled opportunity (Fall Festival Setup).");
 
   // ── Fundraising campaign ────────────────────────────────────────────────────
   const campaign = await prisma.campaign.upsert({

@@ -134,6 +134,15 @@ export const PERMISSIONS = {
   PTA_DUES_MANAGE:        "pta:dues:manage",
   PTA_EVENTS_MANAGE:      "pta:events:manage",
   PTA_VOLUNTEERS_MANAGE:  "pta:volunteers:manage",
+  // Volunteer-hours tracking: deliberately separate from PTA_VOLUNTEERS_MANAGE
+  // (creating opportunities/shifts) so an org can, in principle, let a
+  // coordinator manage shifts without also being the one who checks people in
+  // or approves hours — though today every role bundle below grants them
+  // together. Treasurer (FINANCE) deliberately does NOT receive these, per
+  // the volunteer-management feature's explicit role guidance — hours are
+  // not dues/payments and are not a Treasurer's job by default.
+  PTA_VOLUNTEERS_CHECKIN:      "pta:volunteers:checkin",
+  PTA_VOLUNTEER_HOURS_APPROVE: "pta:volunteer-hours:approve",
   PTA_COMMITTEES_MANAGE:  "pta:committees:manage",
   PTA_FUNDRAISING_MANAGE: "pta:fundraising:manage",
   PTA_ANNOUNCEMENTS_PUBLISH: "pta:announcements:publish",
@@ -210,6 +219,8 @@ const ORG_OWNER_PERMISSIONS: Permission[] = [
   PERMISSIONS.PTA_DUES_MANAGE,
   PERMISSIONS.PTA_EVENTS_MANAGE,
   PERMISSIONS.PTA_VOLUNTEERS_MANAGE,
+  PERMISSIONS.PTA_VOLUNTEERS_CHECKIN,
+  PERMISSIONS.PTA_VOLUNTEER_HOURS_APPROVE,
   PERMISSIONS.PTA_COMMITTEES_MANAGE,
   PERMISSIONS.PTA_FUNDRAISING_MANAGE,
   PERMISSIONS.PTA_ANNOUNCEMENTS_PUBLISH,
@@ -270,6 +281,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.PTA_DUES_MANAGE,
     PERMISSIONS.PTA_EVENTS_MANAGE,
     PERMISSIONS.PTA_VOLUNTEERS_MANAGE,
+  PERMISSIONS.PTA_VOLUNTEERS_CHECKIN,
+  PERMISSIONS.PTA_VOLUNTEER_HOURS_APPROVE,
     PERMISSIONS.PTA_COMMITTEES_MANAGE,
     PERMISSIONS.PTA_FUNDRAISING_MANAGE,
     PERMISSIONS.PTA_ANNOUNCEMENTS_PUBLISH,
@@ -336,6 +349,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.PTA_STUDENTS_MANAGE,
     PERMISSIONS.PTA_EVENTS_MANAGE,
     PERMISSIONS.PTA_VOLUNTEERS_MANAGE,
+  PERMISSIONS.PTA_VOLUNTEERS_CHECKIN,
+  PERMISSIONS.PTA_VOLUNTEER_HOURS_APPROVE,
     PERMISSIONS.PTA_COMMITTEES_MANAGE,
     PERMISSIONS.PTA_ANNOUNCEMENTS_PUBLISH,
     PERMISSIONS.PTA_DOCUMENTS_MANAGE,

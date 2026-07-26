@@ -40,6 +40,7 @@ export default async function PtaDashboardPage() {
     { href: "/labs/pta/households/new", label: "Add a household", visible: can("pta:households:manage") },
     { href: "/labs/pta/dues", label: "Review dues & payments", visible: can("pta:dues:manage") },
     { href: "/labs/pta/volunteers/manage", label: "Post a volunteer opportunity", visible: can("pta:volunteers:manage") },
+    { href: "/labs/pta/volunteers/approvals", label: "Review volunteer hours", visible: can("pta:volunteer-hours:approve") },
     { href: "/labs/pta/committees", label: "Manage committees", visible: can("pta:committees:manage") },
     { href: "/labs/pta/onboarding", label: "Setup checklist", visible: can("pta:households:manage") },
   ].filter((a) => a.visible);
@@ -74,9 +75,19 @@ export default async function PtaDashboardPage() {
         <div className="grid gap-4 md:grid-cols-4">
           <StatCard label="Slots open" value={metrics.volunteerSlotsOpen} />
           <StatCard label="Slots filled" value={metrics.volunteerSlotsFilled} />
-          <StatCard label="Hours logged" value={metrics.volunteerHoursLogged.toFixed(1)} />
+          <StatCard label="Approved hours this year" value={(metrics.approvedVolunteerMinutes / 60).toFixed(1)} />
           <StatCard label="Committees" value={metrics.committeesCount} />
         </div>
+        {metrics.pendingVolunteerHourApprovals > 0 || metrics.understaffedShiftsCount > 0 ? (
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <StatCard
+              label="Pending hour approvals"
+              value={metrics.pendingVolunteerHourApprovals}
+              helper={metrics.pendingVolunteerHourApprovals > 0 ? <Link href="/labs/pta/volunteers/approvals" className="text-emerald-700 hover:underline">Review now →</Link> : undefined}
+            />
+            <StatCard label="Understaffed shifts" value={metrics.understaffedShiftsCount} />
+          </div>
+        ) : null}
       </SectionCard>
 
       <SectionCard title="Payments">

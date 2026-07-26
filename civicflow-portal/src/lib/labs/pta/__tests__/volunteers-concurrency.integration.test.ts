@@ -88,4 +88,39 @@ describe.skipIf(!RUN_INTEGRATION)("claimPtaVolunteerSlot — real concurrent cla
     const signupCount = await prisma.ptaVolunteerSignup.count({ where: { slotId, status: "SIGNED_UP" } });
     expect(signupCount).toBe(3);
   });
+
+  it("manuallyAssignPtaVolunteer races are also capped at exactly `capacity`, sharing the same atomic claim path as a parent's own claim", async () => {
+    const { manuallyAssignPtaVolunteer } = await import("../volunteers");
+
+    const raceSlot = await prisma.ptaVolunteerSlot.create({ data: { organizationId, opportunityId, capacity: 2 } });
+    const raceAdults: string[] = [];
+    const household = await prisma.ptaHousehold.create({ data: { organizationId, displayName: "Manual Assign Race Household", schoolYear: "2026-2027" } });
+    for (let i = 0; i < 6; i++) {
+      const adult = await prisma.ptaHouseholdAdult.create({ data: { organizationId, householdId: household.id, name: `Manual Race Adult ${i}` } });
+      raceAdults.push(adult.id);
+    }
+
+    const results = await Promise.allSettled(raceAdults.map((adultId) => manuallyAssignPtaVolunteer(organizationId, raceSlot.id, adultId, actorUserId)));
+    const succeeded = results.filter((r) => r.status === "fulfilled");
+    expect(succeeded).toHaveLength(2);
+
+    const finalSlot = await prisma.ptaVolunteerSlot.findUniqueOrThrow({ where: { id: raceSlot.id } });
+    expect(finalSlot.claimedCount).toBe(2);
+  });
+
+  it("repeated concurrent check-in requests for the same signup never produce more than one checkInAt timestamp", async () => {
+    const { claimPtaVolunteerSlot, checkInPtaVolunteer } = await import("../volunteers");
+
+    const checkinSlot = await prisma.ptaVolunteerSlot.create({ data: { organizationId, opportunityId, capacity: 1 } });
+    const household = await prisma.ptaHousehold.create({ data: { organizationId, displayName: "Check-in Race Household", schoolYear: "2026-2027" } });
+    const adult = await prisma.ptaHouseholdAdult.create({ data: { organizationId, householdId: household.id, name: "Check-in Race Adult" } });
+    const signup = await claimPtaVolunteerSlot(organizationId, checkinSlot.id, adult.id, actorUserId);
+
+    const results = await Promise.all(Array.from({ length: 5 }, () => checkInPtaVolunteer(organizationId, signup.id, actorUserId)));
+    const timestamps = new Set(results.map((r) => r.checkInAt?.getTime()));
+    expect(timestamps.size).toBe(1); // every concurrent call agrees on the same, first-write-wins timestamp
+
+    const attendanceRows = await prisma.ptaVolunteerAttendance.count({ where: { signupId: signup.id } });
+    expect(attendanceRows).toBe(1); // no duplicate attendance row from the race
+  });
 });

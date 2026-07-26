@@ -8,6 +8,10 @@ const bodySchema = z.object({
   startAt: z.coerce.date().nullable().optional(),
   endAt: z.coerce.date().nullable().optional(),
   capacity: z.number().int().min(1),
+  minNeeded: z.number().int().min(0).nullable().optional(),
+  defaultCreditedMinutes: z.number().int().min(0).nullable().optional(),
+  locationOverride: z.string().nullable().optional(),
+  sortOrder: z.number().int().optional(),
 });
 
 export async function POST(request: Request, { params }: { params: Promise<{ opportunityId: string }> }) {
