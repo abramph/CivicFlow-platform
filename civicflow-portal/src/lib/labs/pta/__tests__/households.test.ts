@@ -104,6 +104,35 @@ describe("deletePtaHousehold — payment-history preservation", () => {
   });
 });
 
+describe("resolvePtaHouseholdAdultUserIds — push-notification fallback for the billing OrgMember", () => {
+  it("returns every linked adult's userId, filtering out adults with no linked login", async () => {
+    findFirstHousehold.mockResolvedValueOnce({
+      adults: [{ userId: "adult-user-1" }, { userId: null }, { userId: "adult-user-2" }],
+    });
+    const { resolvePtaHouseholdAdultUserIds } = await import("../households");
+    const result = await resolvePtaHouseholdAdultUserIds("org-a", "member-1");
+
+    expect(findFirstHousehold).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { organizationId: "org-a", orgMemberId: "member-1", status: "ACTIVE" } })
+    );
+    expect(result).toEqual(["adult-user-1", "adult-user-2"]);
+  });
+
+  it("returns an empty list when the OrgMember isn't a household billing identity at all", async () => {
+    findFirstHousehold.mockResolvedValueOnce(null);
+    const { resolvePtaHouseholdAdultUserIds } = await import("../households");
+    const result = await resolvePtaHouseholdAdultUserIds("org-a", "not-a-household-member");
+    expect(result).toEqual([]);
+  });
+
+  it("returns an empty list for a deactivated household, even if it has linked adults", async () => {
+    findFirstHousehold.mockResolvedValueOnce(null); // the ACTIVE-only where-clause excludes it
+    const { resolvePtaHouseholdAdultUserIds } = await import("../households");
+    const result = await resolvePtaHouseholdAdultUserIds("org-a", "member-1");
+    expect(result).toEqual([]);
+  });
+});
+
 describe("addPtaStudent — data minimization", () => {
   it("audit metadata never includes the student's display name or any other field beyond stable identifiers", async () => {
     findFirstHousehold.mockResolvedValueOnce({ id: "household-1", organizationId: "org-a" });

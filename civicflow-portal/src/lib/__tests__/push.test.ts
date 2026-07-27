@@ -21,6 +21,11 @@ vi.mock("@/lib/prisma", () => ({
 
 vi.mock("@/lib/deep-links", () => ({ validateDeepLink: vi.fn(() => null) }));
 
+const resolvePtaHouseholdAdultUserIds = vi.fn().mockResolvedValue([]);
+vi.mock("@/lib/labs/pta/households", () => ({
+  resolvePtaHouseholdAdultUserIds: (...args: unknown[]) => resolvePtaHouseholdAdultUserIds(...args),
+}));
+
 vi.mock("expo-server-sdk", () => ({
   Expo: class {
     static isExpoPushToken() {
@@ -42,6 +47,7 @@ describe("sendPushToMember opt-out gating", () => {
     findFirstOrgMember.mockReset();
     findManyMobileDeviceToken.mockClear();
     createCommunicationLog.mockClear();
+    resolvePtaHouseholdAdultUserIds.mockReset().mockResolvedValue([]);
   });
 
   it("skips sending when the member has opted out of push entirely", async () => {
@@ -120,8 +126,9 @@ describe("sendPushToMember opt-out gating", () => {
     expect(result.skipped).toBe(false);
   });
 
-  it("skips cleanly when the member has no linked mobile login", async () => {
+  it("skips cleanly when the member has no linked mobile login and isn't a PTA household either", async () => {
     findFirstOrgMember.mockResolvedValueOnce({ userId: null, commsPushEnabled: true, requiredNoticesOnly: false });
+    resolvePtaHouseholdAdultUserIds.mockResolvedValueOnce([]);
 
     const result = await sendPushToMember({
       organizationId: "org-a",
@@ -132,5 +139,56 @@ describe("sendPushToMember opt-out gating", () => {
 
     expect(result.skipped).toBe(true);
     expect(result.reason).toMatch(/No linked mobile login/);
+  });
+
+  describe("PTA household billing-identity fallback", () => {
+    it("falls back to every linked household adult's userId when the member has no userId of its own", async () => {
+      findFirstOrgMember.mockResolvedValueOnce({ userId: null, commsPushEnabled: true, requiredNoticesOnly: false });
+      resolvePtaHouseholdAdultUserIds.mockResolvedValueOnce(["adult-1", "adult-2"]);
+      findManyMobileDeviceToken.mockResolvedValueOnce([{ token: "ExponentPushToken[a]" }, { token: "ExponentPushToken[b]" }]);
+
+      const result = await sendPushToMember({
+        organizationId: "org-a",
+        memberId: "household-member-1",
+        title: "Welcome to Pine Grove PTA!",
+        body: "Hello",
+      });
+
+      expect(resolvePtaHouseholdAdultUserIds).toHaveBeenCalledWith("org-a", "household-member-1");
+      expect(findManyMobileDeviceToken).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { userId: { in: ["adult-1", "adult-2"] } } })
+      );
+      expect(result.skipped).toBe(false);
+    });
+
+    it("still respects the household's shared push opt-out for the fallback path", async () => {
+      findFirstOrgMember.mockResolvedValueOnce({ userId: null, commsPushEnabled: false, requiredNoticesOnly: false });
+      resolvePtaHouseholdAdultUserIds.mockResolvedValueOnce(["adult-1"]);
+
+      const result = await sendPushToMember({
+        organizationId: "org-a",
+        memberId: "household-member-1",
+        title: "Welcome to Pine Grove PTA!",
+        body: "Hello",
+      });
+
+      expect(result.skipped).toBe(true);
+      expect(result.reason).toMatch(/opted out/);
+      expect(findManyMobileDeviceToken).not.toHaveBeenCalled();
+    });
+
+    it("does not call the household resolver at all when the member already has its own userId", async () => {
+      findFirstOrgMember.mockResolvedValueOnce({ userId: "user-1", commsPushEnabled: true, requiredNoticesOnly: false });
+      findManyMobileDeviceToken.mockResolvedValueOnce([{ token: "ExponentPushToken[abc]" }]);
+
+      await sendPushToMember({
+        organizationId: "org-a",
+        memberId: "member-1",
+        title: "Announcement",
+        body: "Hello",
+      });
+
+      expect(resolvePtaHouseholdAdultUserIds).not.toHaveBeenCalled();
+    });
   });
 });

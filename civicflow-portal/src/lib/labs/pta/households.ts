@@ -77,6 +77,27 @@ export async function getPtaHousehold(organizationId: string, householdId: strin
   return household;
 }
 
+/**
+ * Resolves which User accounts should receive a push notification addressed
+ * to a PTA household's billing-identity OrgMember. That OrgMember never
+ * carries a personal login of its own (see the module doc above), so
+ * sendPushToMember()'s normal "look up this member's own userId" resolution
+ * always comes back empty for a household — this is the fallback it calls
+ * instead, resolving through every adult actually linked to the household.
+ * Only an ACTIVE household's adults are returned: a deactivated household
+ * loses push access at the same moment it loses in-app access (see
+ * requireMobilePtaHouseholdAccess), not just when its lead contact happens
+ * to be removed.
+ */
+export async function resolvePtaHouseholdAdultUserIds(organizationId: string, orgMemberId: string): Promise<string[]> {
+  const household = await prisma.ptaHousehold.findFirst({
+    where: { organizationId, orgMemberId, status: "ACTIVE" },
+    select: { adults: { where: { userId: { not: null } }, select: { userId: true } } },
+  });
+  if (!household) return [];
+  return household.adults.map((adult) => adult.userId).filter((userId): userId is string => userId != null);
+}
+
 export async function listPtaHouseholds(organizationId: string, filters: { schoolYear?: string; status?: string; search?: string } = {}) {
   return prisma.ptaHousehold.findMany({
     where: {
