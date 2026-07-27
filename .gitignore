@@ -61,3 +61,12 @@ cloud-api/db/cloud.db
 tools/private.pem
 scripts/private/
 .do/app-secrets.yaml
+
+# Apple signing/notarization material — must never be committed, even
+# temporarily. CI decodes these from GitHub Secrets into $RUNNER_TEMP only.
+*.p12
+*.p8
+*.cer
+*.mobileprovision
+*.keychain
+*.keychain-db
