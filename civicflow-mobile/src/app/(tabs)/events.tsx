@@ -6,17 +6,19 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/lib/auth-context';
-import { getEvents, type MobileEvent } from '@/lib/mobile-api';
+import { getEventsForIdentity, type MobileEvent, type PtaEvent } from '@/lib/mobile-api';
 
 export default function EventsScreen() {
-  const { selectedOrganizationId } = useAuth();
-  const [events, setEvents] = useState<MobileEvent[]>([]);
+  const { selectedOrganization, selectedOrganizationId } = useAuth();
+  const hasMemberIdentity = Boolean(selectedOrganization?.memberId);
+  const hasPtaIdentity = Boolean(selectedOrganization?.pta?.householdAdultId);
+  const [events, setEvents] = useState<(MobileEvent | PtaEvent)[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
-    if (!selectedOrganizationId) return;
-    setEvents(await getEvents(selectedOrganizationId));
-  }, [selectedOrganizationId]);
+    if (!selectedOrganizationId || (!hasMemberIdentity && !hasPtaIdentity)) return;
+    setEvents(await getEventsForIdentity(selectedOrganizationId, hasMemberIdentity));
+  }, [selectedOrganizationId, hasMemberIdentity, hasPtaIdentity]);
 
   useEffect(() => {
     (async () => {
@@ -33,9 +35,11 @@ export default function EventsScreen() {
   return (
     <ThemedView style={styles.container}>
       <ThemedText type="title">Events</ThemedText>
-      <Pressable style={styles.scanButton} onPress={() => router.push('/attendance-scan')}>
-        <ThemedText style={styles.scanButtonText}>Scan Attendance Code</ThemedText>
-      </Pressable>
+      {hasMemberIdentity ? (
+        <Pressable style={styles.scanButton} onPress={() => router.push('/attendance-scan')}>
+          <ThemedText style={styles.scanButtonText}>Scan Attendance Code</ThemedText>
+        </Pressable>
+      ) : null}
       <FlatList
         data={events}
         keyExtractor={(item) => item.id}
@@ -51,6 +55,9 @@ export default function EventsScreen() {
               </ThemedText>
               {item.description ? (
                 <ThemedText type="default" numberOfLines={2} style={styles.body}>{item.description}</ThemedText>
+              ) : null}
+              {'myRsvp' in item && item.myRsvp ? (
+                <ThemedText type="small" style={styles.rsvpBadge}>You&apos;re {item.myRsvp.status.replace('_', ' ').toLowerCase()}</ThemedText>
               ) : null}
             </ThemedView>
           </Pressable>
@@ -91,6 +98,10 @@ const styles = StyleSheet.create({
   },
   body: {
     marginTop: 4,
+  },
+  rsvpBadge: {
+    color: '#047857',
+    marginTop: 2,
   },
   empty: {
     textAlign: 'center',

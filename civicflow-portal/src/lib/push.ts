@@ -1,6 +1,7 @@
 import { Expo, type ExpoPushMessage } from "expo-server-sdk";
 import { prisma } from "@/lib/prisma";
 import { validateDeepLink } from "@/lib/deep-links";
+import { resolvePtaHouseholdAdultUserIds } from "@/lib/labs/pta/households";
 
 const expo = new Expo();
 
@@ -63,6 +64,18 @@ export async function sendPushToTokens(tokens: string[], notification: PushNotif
  * logs it to CommunicationLog alongside email/SMS history. Respects the
  * member's push opt-out unless `required` is set (administrative notices
  * that must always be delivered).
+ *
+ * A PTA household's billing-identity OrgMember (see households.ts) never
+ * carries a personal `userId` of its own — its dues/announcement push would
+ * otherwise silently reach no device at all, even though every adult in the
+ * household has their own registered device. When `member.userId` is null,
+ * this falls back to resolving every linked household adult's userId
+ * instead, and sends to all of their devices; the shared
+ * commsPushEnabled/requiredNoticesOnly preference (there is no per-adult
+ * preference model — see mobile-pta-parent-parity.md) still applies to all
+ * of them equally. For a plain conventional member this fallback is a no-op:
+ * resolvePtaHouseholdAdultUserIds() only ever returns rows for an OrgMember
+ * that is genuinely a PTA household's billing identity.
  */
 export async function sendPushToMember(params: {
   organizationId: string;
@@ -76,7 +89,13 @@ export async function sendPushToMember(params: {
     where: { id: params.memberId, organizationId: params.organizationId },
     select: { userId: true, commsPushEnabled: true, requiredNoticesOnly: true },
   });
-  if (!member?.userId) return { sent: 0, failed: 0, skipped: true, reason: "No linked mobile login" };
+  if (!member) return { sent: 0, failed: 0, skipped: true, reason: "Member not found" };
+
+  const userIds = member.userId
+    ? [member.userId]
+    : await resolvePtaHouseholdAdultUserIds(params.organizationId, params.memberId);
+  if (userIds.length === 0) return { sent: 0, failed: 0, skipped: true, reason: "No linked mobile login" };
+
   if (!params.required && !member.commsPushEnabled) {
     return { sent: 0, failed: 0, skipped: true, reason: "Member has opted out of push notifications" };
   }
@@ -85,7 +104,7 @@ export async function sendPushToMember(params: {
   }
 
   const tokens = await prisma.mobileDeviceToken.findMany({
-    where: { userId: member.userId },
+    where: { userId: { in: userIds } },
     select: { token: true },
   });
 

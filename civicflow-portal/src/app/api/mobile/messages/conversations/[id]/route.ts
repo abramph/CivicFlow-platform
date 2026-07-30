@@ -1,15 +1,16 @@
 import { withApiErrorHandling } from "@/lib/api-route";
-import { requireMobileMembership } from "@/lib/mobile-auth";
+import { requireMobileOrgAccess } from "@/lib/mobile-auth";
 import { prisma } from "@/lib/prisma";
 import { ValidationError } from "@/lib/validation";
 
+/** See conversations/route.ts's doc comment for why this uses requireMobileOrgAccess() instead of requireMobileMembership(). */
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   return withApiErrorHandling(async () => {
     const { searchParams } = new URL(request.url);
     const organizationId = searchParams.get("organizationId");
     if (!organizationId) throw new ValidationError("organizationId is required");
 
-    const { organizationId: verifiedOrgId, session } = await requireMobileMembership(request, organizationId);
+    const { organizationId: verifiedOrgId, session } = await requireMobileOrgAccess(request, organizationId);
     const { id } = await params;
 
     const conversation = await prisma.conversation.findFirst({

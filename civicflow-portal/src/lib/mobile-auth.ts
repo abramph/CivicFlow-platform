@@ -18,6 +18,9 @@
 import { SignJWT, jwtVerify } from "jose";
 import { getServerEnv } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
+import { requireOrganizationLabFeature } from "@/lib/labs/access";
+import { getEffectivePermissions } from "@/lib/role-permissions";
+import type { Permission, Role } from "@/lib/rbac";
 
 const ACCESS_TOKEN_TTL_SECONDS = 15 * 60; // 15 minutes
 const REFRESH_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
@@ -84,9 +87,17 @@ export async function signMobileTokenPair(userId: string, tokenVersion: number) 
 /**
  * Shared final step of mobile login, used both by the direct (no-MFA) path
  * in mobile/auth/login and by mobile/auth/mfa/challenge once a code is
- * verified — checks the account actually has an active MEMBER membership
- * (this is the member-facing app; staff-only accounts aren't valid here),
- * then issues a fresh token pair.
+ * verified — checks the account is eligible for the member-facing app at
+ * all, then issues a fresh token pair.
+ *
+ * Eligibility is EITHER of two independent identities, since PTA parents are
+ * not "regular" members: a real OrganizationMembership{role: MEMBER} row
+ * (the general case), OR a PtaHouseholdAdult.userId link in at least one PTA
+ * household (household adults deliberately have no OrganizationMembership at
+ * all — the household's single shared OrgMember is a billing identity, not a
+ * per-adult one; see requireMobilePtaHouseholdAccess()). Without this second
+ * branch, no PTA parent could ever obtain a mobile token — the PTA volunteer
+ * app would be permanently unreachable for its actual target audience.
  */
 export async function completeMobileLogin(user: {
   id: string;
@@ -97,10 +108,15 @@ export async function completeMobileLogin(user: {
   | { ok: true; data: { accessToken: string; refreshToken: string; expiresIn: number; user: { id: string; email: string; displayName: string | null } } }
   | { ok: false; status: number; error: string }
 > {
-  const membershipCount = await prisma.organizationMembership.count({
-    where: { userId: user.id, role: "MEMBER", organization: { status: "active" } },
-  });
-  if (membershipCount === 0) {
+  const [membershipCount, ptaHouseholdAdultCount] = await Promise.all([
+    prisma.organizationMembership.count({
+      where: { userId: user.id, role: "MEMBER", organization: { status: "active" } },
+    }),
+    prisma.ptaHouseholdAdult.count({
+      where: { userId: user.id, organization: { status: "active" }, household: { status: "ACTIVE" } },
+    }),
+  ]);
+  if (membershipCount === 0 && ptaHouseholdAdultCount === 0) {
     return {
       ok: false,
       status: 403,
@@ -206,4 +222,133 @@ export async function requireMobileMembership(
   if (!member) throw new MobileForbiddenError("No linked member record for this organization");
 
   return { session, organizationId, memberId: member.id };
+}
+
+export interface MobilePtaHouseholdAccess {
+  session: MobileSession;
+  organizationId: string;
+  adult: { id: string; householdId: string; billingMemberId: string | null };
+}
+
+/**
+ * Mobile equivalent of `requirePtaHouseholdSelfAccess()` (src/lib/labs/pta/guard.ts).
+ * A PTA parent is resolved via `PtaHouseholdAdult.userId`, never via
+ * `OrganizationMembership`/`OrgMember` — most household adults (everyone
+ * except an officer who also happens to be a parent) have no membership row
+ * at all, since the household's single shared `OrgMember` is a billing
+ * identity, not a per-adult one. This intentionally does NOT reuse
+ * `requireMobileMembership()`, which requires exactly the membership row PTA
+ * parents don't have.
+ *
+ * `billingMemberId` (the household's `orgMemberId`, nullable) is exposed
+ * because it is exactly what dues and announcements are actually scoped by
+ * server-side — `PtaHousehold.orgMemberId` is the household's one shared
+ * billing/communications identity (see `parent-dues.ts` and
+ * `communications.ts`'s `resolvePtaTargetMemberIds()`), never a per-adult
+ * one. Every caller of this function must re-derive any query from this
+ * value, never accept a client-supplied memberId.
+ */
+export async function requireMobilePtaHouseholdAccess(
+  request: Request,
+  organizationId: string
+): Promise<MobilePtaHouseholdAccess> {
+  const session = await requireMobileAuth(request);
+
+  await requireOrganizationLabFeature(organizationId, "ptaVertical").catch(() => {
+    throw new MobileForbiddenError("PTA is not available for this organization");
+  });
+
+  const adult = await prisma.ptaHouseholdAdult.findFirst({
+    where: { organizationId, userId: session.userId },
+    include: { household: { select: { id: true, status: true, orgMemberId: true } } },
+  });
+  if (!adult) throw new MobileForbiddenError("Your account is not linked to a PTA household in this organization");
+  if (adult.household.status !== "ACTIVE") throw new MobileForbiddenError("Your household's PTA membership is not currently active");
+
+  return { session, organizationId, adult: { id: adult.id, householdId: adult.household.id, billingMemberId: adult.household.orgMemberId } };
+}
+
+export interface MobileOrgAccess {
+  session: MobileSession;
+  organizationId: string;
+  /** Present only if the caller also has a regular per-user OrgMember (unrelated to PTA-household billing identity). */
+  memberId: string | null;
+}
+
+/**
+ * The loosest of the mobile guards — verifies only that the caller has SOME
+ * legitimate, currently-active tie to this organization (a regular
+ * membership, a PTA household link, or a staff role), without requiring a
+ * personal `OrgMember`. For features whose underlying data model is already
+ * scoped by `userId` directly rather than by `OrgMember` — messaging
+ * (`ConversationParticipant.userId`) is the motivating case — gating behind
+ * `requireMobileMembership()`'s `OrgMember` requirement was an unnecessarily
+ * strict assumption inherited from the "conventional member" case, not
+ * something the underlying query actually needed. Never grants any
+ * additional data access by itself — each route still scopes its own
+ * queries by `session.userId`/`organizationId` exactly as before.
+ */
+export async function requireMobileOrgAccess(request: Request, organizationId: string): Promise<MobileOrgAccess> {
+  const session = await requireMobileAuth(request);
+
+  const [membership, householdAdult, staffMembership] = await Promise.all([
+    prisma.organizationMembership.findFirst({
+      where: { userId: session.userId, organizationId, role: "MEMBER", status: "active", organization: { status: "active" } },
+    }),
+    prisma.ptaHouseholdAdult.findFirst({
+      where: { organizationId, userId: session.userId, organization: { status: "active" }, household: { status: "ACTIVE" } },
+    }),
+    prisma.organizationMembership.findFirst({
+      where: { userId: session.userId, organizationId, role: { not: "MEMBER" }, status: "active", organization: { status: "active" } },
+    }),
+  ]);
+
+  if (!membership && !householdAdult && !staffMembership) {
+    throw new MobileForbiddenError("No active access to this organization");
+  }
+
+  const member = membership
+    ? await prisma.orgMember.findFirst({ where: { userId: session.userId, organizationId }, select: { id: true } })
+    : null;
+
+  return { session, organizationId, memberId: member?.id ?? null };
+}
+
+export interface MobileStaffAccess {
+  session: MobileSession;
+  organizationId: string;
+  role: string;
+}
+
+/**
+ * Mobile equivalent of `requirePtaAccess(permission)` (officer-side). Unlike
+ * the parent guard above, this resolves via a real `OrganizationMembership`
+ * — officers (President, Volunteer Coordinator, etc.) always have one,
+ * regardless of whether they're also a household adult. `MEMBER`-role
+ * accounts are excluded up front since `getEffectivePermissions()` already
+ * hard-codes zero permissions for that role (see role-permissions.ts) — this
+ * is just a clearer 403 than letting every subsequent permission check fail.
+ */
+export async function requireMobileStaffPermission(
+  request: Request,
+  organizationId: string,
+  permission: Permission
+): Promise<MobileStaffAccess> {
+  const session = await requireMobileAuth(request);
+
+  const membership = await prisma.organizationMembership.findFirst({
+    where: { userId: session.userId, organizationId, status: "active", organization: { status: "active" }, role: { not: "MEMBER" } },
+  });
+  if (!membership) throw new MobileForbiddenError("No active staff membership for this organization");
+
+  await requireOrganizationLabFeature(organizationId, "ptaVertical").catch(() => {
+    throw new MobileForbiddenError("PTA is not available for this organization");
+  });
+
+  const effective = await getEffectivePermissions(organizationId, membership.role as Role);
+  if (!effective.includes(permission)) {
+    throw new MobileForbiddenError(`Permission denied: ${permission}`);
+  }
+
+  return { session, organizationId, role: membership.role };
 }

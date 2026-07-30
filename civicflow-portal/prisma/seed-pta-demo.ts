@@ -21,6 +21,7 @@
 import { loadEnvConfig } from "@next/env";
 import type { PrismaClient as PrismaClientType } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { resolvePtaTargetMemberIds } from "../src/lib/labs/pta/communications";
 
 loadEnvConfig(process.cwd());
 
@@ -123,6 +124,22 @@ async function main() {
   await upsertOfficer("member@pinegrovepta.example", "Sam Patel (General Member)", "READ_ONLY");
   console.log("Officers created (President, VP, Treasurer, Secretary, General Member).");
 
+  // Alex Morgan (president) is deliberately both an officer AND a parent
+  // (Morgan household), which is realistic but doesn't exercise the far more
+  // common "pure parent, zero officer permission" case — every other
+  // household adult above coincidentally shares a display name with an
+  // officer but has no actual PtaHouseholdAdult.userId link at all, so none
+  // of them can log in as a parent either. This account exists specifically
+  // so the mobile app (and any other client) has one real, login-capable
+  // household adult who holds no OrganizationMembership/officer role
+  // whatsoever — the case that must see zero officer tools and get a real
+  // 403 from every officer-only mobile route.
+  const parentOnlyUser = await prisma.user.upsert({
+    where: { email: "parent@pinegrovepta.example" },
+    update: {},
+    create: { email: "parent@pinegrovepta.example", displayName: "Casey Kim (Parent)", passwordHash: await hash("PtaDemo!Change1"), emailVerified: true },
+  });
+
   // ── Grades, teachers, classrooms ────────────────────────────────────────────
   const grades = await Promise.all(
     GRADES.map((name, i) =>
@@ -150,7 +167,7 @@ async function main() {
   // rather than a single repeated "happy path."
   const householdSeeds = [
     { name: "The Morgan Household", adults: [{ name: "Alex Morgan", email: president.email, phone: "555-0101", userId: president.id, primary: true }], students: [{ name: "Riley M.", grade: 0 }], scenario: "paid" },
-    { name: "The Kim Household", adults: [{ name: "Casey Kim", email: "casey@pinegrovepta.example", phone: "555-0102", primary: true }, { name: "Drew Kim", email: "drew@pinegrovepta.example", phone: "555-0103", primary: false }], students: [{ name: "Avery K.", grade: 1 }, { name: "Quinn K.", grade: 2 }], scenario: "unpaid" },
+    { name: "The Kim Household", adults: [{ name: "Casey Kim", email: "casey@pinegrovepta.example", phone: "555-0102", userId: parentOnlyUser.id, primary: true }, { name: "Drew Kim", email: "drew@pinegrovepta.example", phone: "555-0103", primary: false }], students: [{ name: "Avery K.", grade: 1 }, { name: "Quinn K.", grade: 2 }], scenario: "unpaid" },
     { name: "The Chen Household", adults: [{ name: "Riley Chen", email: "riley.chen@pinegrovepta.example", phone: "555-0104", primary: true }], students: [{ name: "Skylar C.", grade: 0 }], scenario: "pending_review" },
     { name: "The Osei Household", adults: [{ name: "Nia Osei", email: "nia.osei@pinegrovepta.example", phone: "555-0105", primary: true }, { name: "Femi Osei", email: "femi.osei@pinegrovepta.example", phone: "555-0106", primary: false }], students: [{ name: "Amara O.", grade: 1 }], scenario: "waived" },
     { name: "The Patel Household", adults: [{ name: "Sam Patel", email: "member@pinegrovepta.example", phone: "555-0107", primary: true }], students: [{ name: "Dev P.", grade: 2 }], scenario: "prior_year" },
@@ -382,18 +399,25 @@ async function main() {
   });
 
   const firstAdult = households[0]?.adultIds[0];
+  const firstHouseholdId = households[0]?.id;
   const secondAdult = households[1]?.adultIds[0];
+  const secondHouseholdId = households[1]?.id;
   if (firstAdult) {
     const existingSignup = await prisma.ptaVolunteerSignup.findUnique({ where: { slotId_householdAdultId: { slotId: morningSlot.id, householdAdultId: firstAdult } } });
     if (!existingSignup) {
-      await prisma.ptaVolunteerSignup.create({ data: { organizationId: org.id, slotId: morningSlot.id, householdAdultId: firstAdult, status: "SIGNED_UP" } });
+      // householdId is denormalized onto the signup for fast per-household
+      // hours/report queries — omitting it here was the exact bug (found
+      // live via a mobile check-in/attendance test, not code review) that
+      // silently zeroed this household out of every hours report despite a
+      // real, correctly-credited PENDING/APPROVED entry existing.
+      await prisma.ptaVolunteerSignup.create({ data: { organizationId: org.id, slotId: morningSlot.id, householdAdultId: firstAdult, householdId: firstHouseholdId, status: "SIGNED_UP" } });
       await prisma.ptaVolunteerSlot.update({ where: { id: morningSlot.id }, data: { claimedCount: 1 } });
     }
   }
   if (secondAdult) {
     const existingSignup = await prisma.ptaVolunteerSignup.findUnique({ where: { slotId_householdAdultId: { slotId: afternoonSlot.id, householdAdultId: secondAdult } } });
     if (!existingSignup) {
-      await prisma.ptaVolunteerSignup.create({ data: { organizationId: org.id, slotId: afternoonSlot.id, householdAdultId: secondAdult, status: "SIGNED_UP" } });
+      await prisma.ptaVolunteerSignup.create({ data: { organizationId: org.id, slotId: afternoonSlot.id, householdAdultId: secondAdult, householdId: secondHouseholdId, status: "SIGNED_UP" } });
       await prisma.ptaVolunteerSlot.update({ where: { id: afternoonSlot.id }, data: { claimedCount: 1 } });
     }
   }
@@ -610,7 +634,7 @@ async function main() {
   console.log("Fictional fundraising campaign created (Fall Fun Run).");
 
   // ── Announcement ────────────────────────────────────────────────────────────
-  await prisma.communicationCampaign.upsert({
+  const welcomeAnnouncement = await prisma.communicationCampaign.upsert({
     where: { id: "seed-pta-welcome-announcement" },
     update: {},
     create: {
@@ -626,6 +650,24 @@ async function main() {
       sentAt: new Date(),
     },
   });
+  // A campaign with status "SENT" but zero CommunicationRecipient rows is
+  // invisible to every household and officer alike — every announcement
+  // screen (web and mobile) reads from CommunicationRecipient, never the
+  // campaign directly. This was caught live: a real mobile API call for a
+  // seeded household returned an empty announcement list despite this
+  // "sent" campaign existing, because recipient fan-out had never been
+  // implemented in this seed script at all. Uses the exact same
+  // resolvePtaTargetMemberIds({type:"all"}) the real send pipeline uses —
+  // no separate ad-hoc targeting logic.
+  const allHouseholdMemberIds = await resolvePtaTargetMemberIds(org.id, { type: "all" });
+  for (const memberId of allHouseholdMemberIds) {
+    const existingRecipient = await prisma.communicationRecipient.findFirst({ where: { campaignId: welcomeAnnouncement.id, memberId } });
+    if (!existingRecipient) {
+      await prisma.communicationRecipient.create({
+        data: { organizationId: org.id, campaignId: welcomeAnnouncement.id, memberId, deliveryStatus: "SENT", sentAt: welcomeAnnouncement.sentAt },
+      });
+    }
+  }
   // Scheduled (not yet sent) and canceled announcements, alongside the sent
   // one above — CommunicationCampaignStatus has no literal "SCHEDULED" or
   // "ARCHIVED" value, so these use READY+scheduledFor and CANCELED

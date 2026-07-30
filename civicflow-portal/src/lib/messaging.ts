@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/mail";
-import { sendPushToMember } from "@/lib/push";
+import { sendPushToMember, sendPushToTokens } from "@/lib/push";
 
 function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 3)}...` : text;
@@ -55,6 +55,27 @@ export async function notifyNewMessageParticipants(params: {
           await sendEmail({ to: participant.user.email, subject, text: emailText }).catch(() => null);
         }
         continue;
+      }
+
+      // A pure PTA household parent has no personal OrgMember at all (their
+      // household's shared billing OrgMember carries no userId of its own —
+      // see push.ts's doc comment on sendPushToMember), so the lookup above
+      // always misses for them. Unlike the household case, we already have
+      // their own userId directly here — no household indirection needed,
+      // just their own registered devices. There's no per-adult push/email
+      // preference model for this identity yet (see
+      // mobile-pta-parent-parity.md), so this always attempts push.
+      const isPtaHouseholdAdult = await prisma.ptaHouseholdAdult.findFirst({
+        where: { organizationId: params.organizationId, userId: participant.userId, household: { status: "ACTIVE" } },
+        select: { id: true },
+      });
+      if (isPtaHouseholdAdult) {
+        const tokens = await prisma.mobileDeviceToken.findMany({
+          where: { userId: participant.userId },
+          select: { token: true },
+        });
+        const result = await sendPushToTokens(tokens.map((t) => t.token), { title: subject, body: preview, deepLink });
+        if (result.sent > 0) continue;
       }
     }
 

@@ -9,6 +9,7 @@ const createChallengeToken = vi.fn().mockResolvedValue({ id: "challenge-1", toke
 const deleteChallengeToken = vi.fn().mockResolvedValue(undefined);
 const deleteManyChallengeToken = vi.fn().mockResolvedValue(undefined);
 const countMembership = vi.fn().mockResolvedValue(1);
+const countPtaHouseholdAdult = vi.fn().mockResolvedValue(0);
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -25,6 +26,9 @@ vi.mock("@/lib/prisma", () => ({
     },
     organizationMembership: {
       count: (...args: unknown[]) => countMembership(...args),
+    },
+    ptaHouseholdAdult: {
+      count: (...args: unknown[]) => countPtaHouseholdAdult(...args),
     },
   },
 }));

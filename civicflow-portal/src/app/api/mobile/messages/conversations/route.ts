@@ -1,5 +1,5 @@
 import { withApiErrorHandling } from "@/lib/api-route";
-import { requireMobileMembership } from "@/lib/mobile-auth";
+import { requireMobileOrgAccess } from "@/lib/mobile-auth";
 import { prisma } from "@/lib/prisma";
 import { ValidationError } from "@/lib/validation";
 
@@ -8,6 +8,12 @@ import { ValidationError } from "@/lib/validation";
  * Lists the caller's conversations with officers, newest first. No create
  * endpoint here — in this first cut, only staff (officers) can start a new
  * conversation; a member can reply within one they're already part of.
+ *
+ * Uses `requireMobileOrgAccess()` rather than `requireMobileMembership()` —
+ * `ConversationParticipant` is scoped by `userId` directly, never by
+ * `OrgMember`, so requiring one was an unnecessary restriction inherited
+ * from the "conventional member" case. This is what lets a PTA household
+ * parent (who has no personal `OrgMember`) use their inbox at all.
  */
 export async function GET(request: Request) {
   return withApiErrorHandling(async () => {
@@ -15,7 +21,7 @@ export async function GET(request: Request) {
     const organizationId = searchParams.get("organizationId");
     if (!organizationId) throw new ValidationError("organizationId is required");
 
-    const { organizationId: verifiedOrgId, session } = await requireMobileMembership(request, organizationId);
+    const { organizationId: verifiedOrgId, session } = await requireMobileOrgAccess(request, organizationId);
 
     const participations = await prisma.conversationParticipant.findMany({
       where: { userId: session.userId, organizationId: verifiedOrgId },

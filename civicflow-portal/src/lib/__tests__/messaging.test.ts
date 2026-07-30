@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const findManyParticipant = vi.fn();
 const findFirstOrgMember = vi.fn();
+const findFirstPtaHouseholdAdult = vi.fn();
+const findManyMobileDeviceToken = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -11,6 +13,12 @@ vi.mock("@/lib/prisma", () => ({
     orgMember: {
       findFirst: (...args: unknown[]) => findFirstOrgMember(...args),
     },
+    ptaHouseholdAdult: {
+      findFirst: (...args: unknown[]) => findFirstPtaHouseholdAdult(...args),
+    },
+    mobileDeviceToken: {
+      findMany: (...args: unknown[]) => findManyMobileDeviceToken(...args),
+    },
   },
 }));
 
@@ -18,7 +26,11 @@ const sendEmail = vi.fn().mockResolvedValue({ sent: true, skipped: false });
 vi.mock("@/lib/mail", () => ({ sendEmail: (...args: unknown[]) => sendEmail(...args) }));
 
 const sendPushToMember = vi.fn();
-vi.mock("@/lib/push", () => ({ sendPushToMember: (...args: unknown[]) => sendPushToMember(...args) }));
+const sendPushToTokens = vi.fn();
+vi.mock("@/lib/push", () => ({
+  sendPushToMember: (...args: unknown[]) => sendPushToMember(...args),
+  sendPushToTokens: (...args: unknown[]) => sendPushToTokens(...args),
+}));
 
 import { notifyNewMessageParticipants } from "@/lib/messaging";
 
@@ -26,8 +38,11 @@ describe("notifyNewMessageParticipants", () => {
   beforeEach(() => {
     findManyParticipant.mockReset();
     findFirstOrgMember.mockReset();
+    findFirstPtaHouseholdAdult.mockReset();
+    findManyMobileDeviceToken.mockReset();
     sendEmail.mockClear();
     sendPushToMember.mockReset();
+    sendPushToTokens.mockReset().mockResolvedValue({ sent: 0, failed: 0 });
   });
 
   it("sends push to a member recipient and skips the email fallback when push is delivered", async () => {
@@ -102,6 +117,72 @@ describe("notifyNewMessageParticipants", () => {
 
     expect(sendPushToMember).not.toHaveBeenCalled();
     expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: "officer2@example.com" }));
+  });
+
+  it("pushes directly to a pure PTA parent's own devices when they have no personal OrgMember", async () => {
+    findManyParticipant.mockResolvedValueOnce([
+      { userId: "parent-user-1", role: "MEMBER", user: { email: "parent@example.com" } },
+    ]);
+    findFirstOrgMember.mockResolvedValueOnce(null);
+    findFirstPtaHouseholdAdult.mockResolvedValueOnce({ id: "adult-1" });
+    findManyMobileDeviceToken.mockResolvedValueOnce([{ token: "ExponentPushToken[abc]" }]);
+    sendPushToTokens.mockResolvedValueOnce({ sent: 1, failed: 0 });
+
+    await notifyNewMessageParticipants({
+      conversationId: "conv-1",
+      organizationId: "org-a",
+      senderUserId: "officer-1",
+      senderDisplayName: "Officer Jane",
+      body: "Hello there",
+    });
+
+    expect(findFirstPtaHouseholdAdult).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ organizationId: "org-a", userId: "parent-user-1" }) })
+    );
+    expect(findManyMobileDeviceToken).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { userId: "parent-user-1" } })
+    );
+    expect(sendPushToTokens).toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("falls back to email for a PTA parent when push delivery fails (no registered devices)", async () => {
+    findManyParticipant.mockResolvedValueOnce([
+      { userId: "parent-user-1", role: "MEMBER", user: { email: "parent@example.com" } },
+    ]);
+    findFirstOrgMember.mockResolvedValueOnce(null);
+    findFirstPtaHouseholdAdult.mockResolvedValueOnce({ id: "adult-1" });
+    findManyMobileDeviceToken.mockResolvedValueOnce([]);
+    sendPushToTokens.mockResolvedValueOnce({ sent: 0, failed: 0 });
+
+    await notifyNewMessageParticipants({
+      conversationId: "conv-1",
+      organizationId: "org-a",
+      senderUserId: "officer-1",
+      senderDisplayName: "Officer Jane",
+      body: "Hello there",
+    });
+
+    expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: "parent@example.com" }));
+  });
+
+  it("emails a MEMBER-role participant who is neither a conventional member nor a PTA household adult", async () => {
+    findManyParticipant.mockResolvedValueOnce([
+      { userId: "orphan-user-1", role: "MEMBER", user: { email: "orphan@example.com" } },
+    ]);
+    findFirstOrgMember.mockResolvedValueOnce(null);
+    findFirstPtaHouseholdAdult.mockResolvedValueOnce(null);
+
+    await notifyNewMessageParticipants({
+      conversationId: "conv-1",
+      organizationId: "org-a",
+      senderUserId: "officer-1",
+      senderDisplayName: "Officer Jane",
+      body: "Hello there",
+    });
+
+    expect(sendPushToTokens).not.toHaveBeenCalled();
+    expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: "orphan@example.com" }));
   });
 
   it("never notifies the sender themselves", async () => {

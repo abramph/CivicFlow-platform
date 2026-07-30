@@ -1,24 +1,37 @@
 import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/lib/auth-context';
-import { getEvents, type MobileEvent } from '@/lib/mobile-api';
+import { getEventsForIdentity, setPtaEventRsvp, type MobileEvent, type PtaEvent } from '@/lib/mobile-api';
+
+const RSVP_OPTIONS: { value: 'GOING' | 'MAYBE' | 'NOT_GOING'; label: string }[] = [
+  { value: 'GOING', label: 'Going' },
+  { value: 'MAYBE', label: 'Maybe' },
+  { value: 'NOT_GOING', label: "Can't go" },
+];
+
+function isPtaEvent(event: MobileEvent | PtaEvent): event is PtaEvent {
+  return 'myRsvp' in event;
+}
 
 export default function EventDetailScreen() {
-  const { selectedOrganizationId } = useAuth();
+  const { selectedOrganization, selectedOrganizationId } = useAuth();
+  const hasMemberIdentity = Boolean(selectedOrganization?.memberId);
+  const hasPtaIdentity = Boolean(selectedOrganization?.pta?.householdAdultId);
   const { id } = useLocalSearchParams<{ id: string }>();
-  const [event, setEvent] = useState<MobileEvent | null>(null);
+  const [event, setEvent] = useState<MobileEvent | PtaEvent | null>(null);
   const [loading, setLoading] = useState(true);
+  const [rsvpSubmitting, setRsvpSubmitting] = useState(false);
 
   const load = useCallback(async () => {
-    if (!selectedOrganizationId || !id) return;
-    const all = await getEvents(selectedOrganizationId);
+    if (!selectedOrganizationId || !id || (!hasMemberIdentity && !hasPtaIdentity)) return;
+    const all = await getEventsForIdentity(selectedOrganizationId, hasMemberIdentity);
     setEvent(all.find((item) => item.id === id) ?? null);
-  }, [selectedOrganizationId, id]);
+  }, [selectedOrganizationId, id, hasMemberIdentity, hasPtaIdentity]);
 
   useEffect(() => {
     (async () => {
@@ -30,6 +43,17 @@ export default function EventDetailScreen() {
       }
     })();
   }, [load]);
+
+  async function handleRsvp(status: 'GOING' | 'MAYBE' | 'NOT_GOING') {
+    if (!selectedOrganizationId || !id || rsvpSubmitting) return;
+    setRsvpSubmitting(true);
+    try {
+      const rsvp = await setPtaEventRsvp(selectedOrganizationId, id, status);
+      setEvent((current) => (current && isPtaEvent(current) ? { ...current, myRsvp: rsvp } : current));
+    } finally {
+      setRsvpSubmitting(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -61,6 +85,39 @@ export default function EventDetailScreen() {
       {event.description ? (
         <ThemedText type="default" style={styles.body}>{event.description}</ThemedText>
       ) : null}
+
+      {isPtaEvent(event) ? (
+        <ThemedView type="backgroundElement" style={styles.rsvpCard}>
+          <ThemedText type="smallBold">Your RSVP</ThemedText>
+          <ThemedView style={styles.rsvpRow}>
+            {RSVP_OPTIONS.map((option) => (
+              <Pressable
+                key={option.value}
+                disabled={rsvpSubmitting}
+                style={[styles.rsvpChip, event.myRsvp?.status === option.value && styles.rsvpChipSelected]}
+                onPress={() => handleRsvp(option.value)}
+              >
+                <ThemedText
+                  type="small"
+                  style={event.myRsvp?.status === option.value ? styles.rsvpChipTextSelected : undefined}
+                >
+                  {option.label}
+                </ThemedText>
+              </Pressable>
+            ))}
+          </ThemedView>
+          {event.myRsvp ? (
+            <ThemedText type="small" themeColor="textSecondary">
+              {event.myRsvp.attendeeCount} attendee{event.myRsvp.attendeeCount === 1 ? '' : 's'} from your household
+            </ThemedText>
+          ) : null}
+          {event.volunteerOpportunities.length > 0 ? (
+            <ThemedText type="small" themeColor="textSecondary" style={styles.volunteerNote}>
+              Volunteer opportunities are available for this event — see the Volunteer tab.
+            </ThemedText>
+          ) : null}
+        </ThemedView>
+      ) : null}
     </ScrollView>
   );
 }
@@ -77,5 +134,33 @@ const styles = StyleSheet.create({
   },
   body: {
     marginTop: Spacing.two,
+  },
+  rsvpCard: {
+    borderRadius: 12,
+    padding: Spacing.three,
+    gap: Spacing.two,
+    marginTop: Spacing.three,
+  },
+  rsvpRow: {
+    flexDirection: 'row',
+    gap: Spacing.two,
+    backgroundColor: 'transparent',
+  },
+  rsvpChip: {
+    borderWidth: 1,
+    borderColor: '#D0D5DD',
+    borderRadius: 999,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.one,
+  },
+  rsvpChipSelected: {
+    backgroundColor: '#047857',
+    borderColor: '#047857',
+  },
+  rsvpChipTextSelected: {
+    color: '#fff',
+  },
+  volunteerNote: {
+    marginTop: Spacing.one,
   },
 });

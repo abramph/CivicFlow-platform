@@ -1,6 +1,6 @@
 import { withApiErrorHandling } from "@/lib/api-route";
 import { requireMobileMembership } from "@/lib/mobile-auth";
-import { prisma } from "@/lib/prisma";
+import { markAnnouncementReadForMember } from "@/lib/mobile-announcements";
 import { parseJsonBody, z } from "@/lib/validation";
 
 const bodySchema = z.object({ organizationId: z.string().min(1) });
@@ -17,10 +17,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const { organizationId, memberId } = await requireMobileMembership(request, input.organizationId);
     const { id: campaignId } = await params;
 
-    await prisma.communicationRecipient.updateMany({
-      where: { organizationId, memberId, campaignId, readAt: null },
-      data: { readAt: new Date() },
-    });
+    await markAnnouncementReadForMember(organizationId, memberId, campaignId);
 
     return Response.json({ ok: true });
   });

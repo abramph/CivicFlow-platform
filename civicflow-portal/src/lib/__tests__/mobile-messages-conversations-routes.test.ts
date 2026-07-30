@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const requireMobileMembership = vi.fn();
+const requireMobileOrgAccess = vi.fn();
 vi.mock("@/lib/mobile-auth", () => ({
-  requireMobileMembership: (...args: unknown[]) => requireMobileMembership(...args),
+  requireMobileOrgAccess: (...args: unknown[]) => requireMobileOrgAccess(...args),
 }));
 
 const findManyParticipant = vi.fn();
@@ -46,18 +46,18 @@ function jsonRequest(url: string, body: unknown) {
 
 describe("GET /api/mobile/messages/conversations", () => {
   beforeEach(() => {
-    requireMobileMembership.mockReset();
+    requireMobileOrgAccess.mockReset();
     findManyParticipant.mockReset();
   });
 
   it("requires organizationId", async () => {
     const response = await listGET(new Request("https://portal.test/api/mobile/messages/conversations"));
     expect(response.status).toBe(400);
-    expect(requireMobileMembership).not.toHaveBeenCalled();
+    expect(requireMobileOrgAccess).not.toHaveBeenCalled();
   });
 
   it("scopes the list to the caller's own participant rows within the verified org", async () => {
-    requireMobileMembership.mockResolvedValueOnce({
+    requireMobileOrgAccess.mockResolvedValueOnce({
       session: { userId: "member-user-1", email: "member@example.com" },
       organizationId: "org-a",
       memberId: "member-1",
@@ -70,17 +70,33 @@ describe("GET /api/mobile/messages/conversations", () => {
       expect.objectContaining({ where: { userId: "member-user-1", organizationId: "org-a" } })
     );
   });
+
+  it("works for a pure PTA parent with memberId: null — the point of using requireMobileOrgAccess instead of requireMobileMembership", async () => {
+    requireMobileOrgAccess.mockResolvedValueOnce({
+      session: { userId: "pta-parent-1", email: "parent@example.com" },
+      organizationId: "org-a",
+      memberId: null,
+    });
+    findManyParticipant.mockResolvedValueOnce([]);
+
+    const response = await listGET(new Request("https://portal.test/api/mobile/messages/conversations?organizationId=org-a"));
+
+    expect(response.status).toBe(200);
+    expect(findManyParticipant).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { userId: "pta-parent-1", organizationId: "org-a" } })
+    );
+  });
 });
 
 describe("GET /api/mobile/messages/conversations/[id]", () => {
   beforeEach(() => {
-    requireMobileMembership.mockReset();
+    requireMobileOrgAccess.mockReset();
     findFirstConversation.mockReset();
     updateManyParticipant.mockClear();
   });
 
   it("404s for a conversation the member isn't a participant of (cross-org / cross-member guesses)", async () => {
-    requireMobileMembership.mockResolvedValueOnce({
+    requireMobileOrgAccess.mockResolvedValueOnce({
       session: { userId: "member-user-1", email: "member@example.com" },
       organizationId: "org-a",
       memberId: "member-1",
@@ -99,14 +115,14 @@ describe("GET /api/mobile/messages/conversations/[id]", () => {
 
 describe("POST /api/mobile/messages/conversations/[id]/messages", () => {
   beforeEach(() => {
-    requireMobileMembership.mockReset();
+    requireMobileOrgAccess.mockReset();
     findFirstConversation.mockReset();
     createMessage.mockReset();
     notifyNewMessageParticipants.mockClear();
   });
 
   it("rejects sending to a conversation the member isn't a participant of", async () => {
-    requireMobileMembership.mockResolvedValueOnce({
+    requireMobileOrgAccess.mockResolvedValueOnce({
       session: { userId: "member-user-1", email: "member@example.com" },
       organizationId: "org-a",
       memberId: "member-1",
@@ -123,7 +139,7 @@ describe("POST /api/mobile/messages/conversations/[id]/messages", () => {
   });
 
   it("sends the reply and notifies the officer", async () => {
-    requireMobileMembership.mockResolvedValueOnce({
+    requireMobileOrgAccess.mockResolvedValueOnce({
       session: { userId: "member-user-1", email: "member@example.com" },
       organizationId: "org-a",
       memberId: "member-1",
