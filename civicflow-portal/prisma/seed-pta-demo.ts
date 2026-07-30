@@ -536,6 +536,118 @@ async function main() {
   });
   console.log("One approved sample-minutes document created.");
 
+  // ── Parent Membership & Dues Self-Service fictional scenarios ──────────────
+  // households[]: 0=Morgan(PAID), 1=Kim(PENDING), 2=Chen(PAID), 3=Osei(PENDING), 4=Patel(PAID)
+  const morganHousehold = await prisma.ptaHousehold.findUniqueOrThrow({ where: { id: households[0].id } });
+  const kimHousehold = await prisma.ptaHousehold.findUniqueOrThrow({ where: { id: households[1].id } });
+  const cheHousehold = await prisma.ptaHousehold.findUniqueOrThrow({ where: { id: households[2].id } });
+  const oseiHousehold = await prisma.ptaHousehold.findUniqueOrThrow({ where: { id: households[3].id } });
+
+  // Waived scenario — the Kim household's current charge is waived.
+  if (kimHousehold.orgMemberId) {
+    const kimCharge = await prisma.duesCharge.findFirst({ where: { organizationId: org.id, memberId: kimHousehold.orgMemberId } });
+    if (kimCharge && kimCharge.status !== "WAIVED") {
+      await prisma.duesCharge.update({ where: { id: kimCharge.id }, data: { status: "WAIVED", notes: "Financial hardship waiver (fictional)" } });
+      const existingWaiver = await prisma.duesAdjustment.findFirst({ where: { organizationId: org.id, duesChargeId: kimCharge.id, adjustmentType: "WAIVER" } });
+      if (!existingWaiver) {
+        await prisma.duesAdjustment.create({ data: { organizationId: org.id, memberId: kimHousehold.orgMemberId, duesChargeId: kimCharge.id, adjustmentType: "WAIVER", amount: 25, reason: "Financial hardship waiver (fictional)" } });
+      }
+    }
+  }
+
+  // "Refund" scenario — dues has no distinct REFUNDED status (see
+  // docs/pta-parent-dues-self-service.md's status-mapping section); a real
+  // refund is represented as a DuesAdjustment on an already-paid charge, with
+  // a reason documenting it. This demonstrates that representation, not a
+  // fabricated status.
+  if (morganHousehold.orgMemberId) {
+    const morganCharge = await prisma.duesCharge.findFirst({ where: { organizationId: org.id, memberId: morganHousehold.orgMemberId, status: "PAID" } });
+    if (morganCharge) {
+      const existingRefundNote = await prisma.duesAdjustment.findFirst({ where: { organizationId: org.id, duesChargeId: morganCharge.id, adjustmentType: "WRITE_OFF" } });
+      if (!existingRefundNote) {
+        await prisma.duesAdjustment.create({ data: { organizationId: org.id, memberId: morganHousehold.orgMemberId, duesChargeId: morganCharge.id, adjustmentType: "WRITE_OFF", amount: 25, reason: "Refund issued to family — duplicate payment (fictional)" } });
+      }
+    }
+  }
+
+  // Pending-review scenario — the Osei household has self-reported a payment awaiting officer approval.
+  if (oseiHousehold.orgMemberId) {
+    const oseiCharge = await prisma.duesCharge.findFirst({ where: { organizationId: org.id, memberId: oseiHousehold.orgMemberId } });
+    if (oseiCharge) {
+      const existingReport = await prisma.paymentReport.findFirst({ where: { organizationId: org.id, duesChargeId: oseiCharge.id } });
+      if (!existingReport) {
+        await prisma.paymentReport.create({
+          data: { organizationId: org.id, memberId: oseiHousehold.orgMemberId, amount: 25, paymentMethod: "ZELLE", paymentDate: new Date(), category: "MEMBERSHIP_DUES", duesChargeId: oseiCharge.id, status: "pending", note: "Paid via Zelle (fictional) — awaiting officer confirmation" },
+        });
+      }
+    }
+  }
+
+  // Prior-year history — the Chen household has a PAID charge from the prior school year.
+  if (cheHousehold.orgMemberId) {
+    const priorDuesAccount = await findOrCreateDuesAccount(org.id, cheHousehold.orgMemberId);
+    const priorPeriodStart = new Date("2025-08-01");
+    const priorPeriodEnd = new Date("2026-06-30");
+    const priorCharge = await prisma.duesCharge.upsert({
+      where: { organizationId_memberId_duesAccountId_periodStart_periodEnd: { organizationId: org.id, memberId: cheHousehold.orgMemberId, duesAccountId: priorDuesAccount.id, periodStart: priorPeriodStart, periodEnd: priorPeriodEnd } },
+      update: {},
+      create: { organizationId: org.id, memberId: cheHousehold.orgMemberId, duesAccountId: priorDuesAccount.id, amountDue: 20, amountPaid: 20, dueDate: new Date("2025-09-01"), periodStart: priorPeriodStart, periodEnd: priorPeriodEnd, status: "PAID" },
+    });
+    const existingPriorPayment = await prisma.duesPayment.findFirst({ where: { organizationId: org.id, duesChargeId: priorCharge.id } });
+    if (!existingPriorPayment) {
+      await prisma.duesPayment.create({ data: { organizationId: org.id, memberId: cheHousehold.orgMemberId, duesChargeId: priorCharge.id, amount: 20, paymentDate: new Date("2025-09-05"), method: "CHECK" } });
+    }
+  }
+  console.log("Waived, refund-adjustment, pending-review, and prior-year dues scenarios created.");
+
+  // Multi-org parent scenario — the same PTA president is also a parent at a second, smaller fictional PTA.
+  const riverside = await prisma.organization.upsert({
+    where: { slug: "riverside-elementary-pta" },
+    update: {},
+    create: { slug: "riverside-elementary-pta", name: "Riverside Elementary PTA", organizationType: "PTA", plan: "elite" },
+  });
+  await prisma.organizationLabFeature.upsert({
+    where: { organizationId_featureKey: { organizationId: riverside.id, featureKey: "ptaVertical" } },
+    update: { status: "ENABLED" },
+    create: { organizationId: riverside.id, featureKey: "ptaVertical", status: "ENABLED", enrollmentSource: "seed" },
+  });
+  await prisma.ptaProfile.upsert({
+    where: { organizationId: riverside.id },
+    update: {},
+    create: { organizationId: riverside.id, schoolOrPtaName: "Riverside Elementary PTA", designation: "PTA", currentSchoolYear: SCHOOL_YEAR, membershipModel: "HOUSEHOLD", defaultDuesAmountCents: 1500 },
+  });
+  await prisma.organizationMembership.upsert({
+    where: { organizationId_userId: { organizationId: riverside.id, userId: president.id } },
+    update: {},
+    create: { organizationId: riverside.id, userId: president.id, role: "MEMBER", status: "active", joinedAt: new Date() },
+  });
+  const riversideOrgMember = await prisma.orgMember.upsert({
+    where: { organizationId_memberNumber: { organizationId: riverside.id, memberNumber: "The Morgan Household (Riverside)" } },
+    update: {},
+    create: { organizationId: riverside.id, firstName: "The Morgan Household", lastName: "(PTA Household)", householdName: "The Morgan Household", memberNumber: "The Morgan Household (Riverside)" },
+  });
+  const riversideHousehold = await prisma.ptaHousehold.upsert({
+    where: { organizationId_displayName_schoolYear: { organizationId: riverside.id, displayName: "The Morgan Household", schoolYear: SCHOOL_YEAR } },
+    update: {},
+    create: { organizationId: riverside.id, displayName: "The Morgan Household", schoolYear: SCHOOL_YEAR, orgMemberId: riversideOrgMember.id },
+  });
+  await findOrCreateHouseholdAdult(riverside.id, riversideHousehold.id, { name: "Alex Morgan", email: president.email, phone: "555-0101", userId: president.id, relationshipLabel: "Parent" });
+  const riversideDuesAccount = await findOrCreateDuesAccount(riverside.id, riversideOrgMember.id);
+  await prisma.duesCharge.upsert({
+    where: {
+      organizationId_memberId_duesAccountId_periodStart_periodEnd: {
+        organizationId: riverside.id,
+        memberId: riversideOrgMember.id,
+        duesAccountId: riversideDuesAccount.id,
+        periodStart: new Date(`${SCHOOL_YEAR.slice(0, 4)}-08-01`),
+        periodEnd: new Date(`${SCHOOL_YEAR.slice(5)}-06-30`),
+      },
+    },
+    update: {},
+    create: { organizationId: riverside.id, memberId: riversideOrgMember.id, duesAccountId: riversideDuesAccount.id, amountDue: 15, dueDate: new Date(`${SCHOOL_YEAR.slice(0, 4)}-09-01`), periodStart: new Date(`${SCHOOL_YEAR.slice(0, 4)}-08-01`), periodEnd: new Date(`${SCHOOL_YEAR.slice(5)}-06-30`) },
+  });
+  console.log(`Second fictional PTA (${riverside.name}) created — same president user is a parent household there too, with a separate $15 unpaid charge, demonstrating multi-org isolation.`);
+
   console.log("\nPine Grove School PTA demo seed complete.");
 
   // ── Second fictional organization: a NON-PTA org, for cross-vertical
