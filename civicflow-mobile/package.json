@@ -35,12 +35,14 @@
   "devDependencies": {
     "@emnapi/core": "^1.11.2",
     "@emnapi/runtime": "^1.11.2",
+    "@testing-library/react-native": "^14.0.1",
     "@types/jest": "^29.5.14",
     "@types/react": "~19.1.10",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~10.0.0",
     "jest": "^29.7.0",
     "jest-expo": "~54.0.17",
+    "test-renderer": "^1.2.0",
     "typescript": "~5.9.2"
   },
   "scripts": {
@@ -56,7 +58,14 @@
   "jest": {
     "preset": "jest-expo",
     "testMatch": [
-      "**/__tests__/**/*.test.ts"
+      "**/__tests__/**/*.test.ts",
+      "**/__tests__/**/*.test.tsx"
+    ],
+    "moduleNameMapper": {
+      "\\.css$": "<rootDir>/jest.css-mock.js"
+    },
+    "setupFilesAfterEnv": [
+      "<rootDir>/jest.setup.js"
     ]
   }
 }
