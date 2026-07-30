@@ -82,6 +82,9 @@ export async function GET(request: Request) {
       include: { organization: { select: { id: true, name: true, logoUrl: true } } },
     });
     for (const adult of householdAdults) {
+      const labAccess = await getOrganizationLabAccess(adult.organizationId, "ptaVertical");
+      if (!labAccess.available) continue;
+
       const existing = rows.get(adult.organizationId);
       const [firstName, ...lastParts] = adult.name.split(" ");
       if (existing) {

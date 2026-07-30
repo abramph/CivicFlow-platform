@@ -66,6 +66,7 @@ describe("GET /api/mobile/organizations", () => {
     findManyHouseholdAdult.mockResolvedValueOnce([
       { id: "adult-1", organizationId: "org-pta", name: "Casey Kim", organization: { id: "org-pta", name: "Pine Grove School PTA", logoUrl: null } },
     ]);
+    getOrganizationLabAccess.mockResolvedValueOnce({ available: true });
     findManyMembership.mockResolvedValueOnce([]); // no staff memberships either
 
     const token = await signAccessToken("user-1", 0);
@@ -80,6 +81,22 @@ describe("GET /api/mobile/organizations", () => {
         pta: expect.objectContaining({ householdAdultId: "adult-1", isOfficer: false }),
       }),
     ]);
+  });
+
+  it("excludes a household adult's org entirely once PTA Labs enrollment is removed there — capability must not outlive enrollment", async () => {
+    findManyMembership.mockResolvedValueOnce([]);
+    findManyOrgMember.mockResolvedValueOnce([]);
+    findManyHouseholdAdult.mockResolvedValueOnce([
+      { id: "adult-1", organizationId: "org-pta", name: "Casey Kim", organization: { id: "org-pta", name: "Pine Grove School PTA", logoUrl: null } },
+    ]);
+    getOrganizationLabAccess.mockResolvedValueOnce({ available: false });
+    findManyMembership.mockResolvedValueOnce([]);
+
+    const token = await signAccessToken("user-1", 0);
+    const response = await GET(new Request("https://portal.test/api/mobile/organizations", { headers: { Authorization: `Bearer ${token}` } }));
+    const body = await response.json();
+
+    expect(body.data).toEqual([]);
   });
 
   it("surfaces a PTA officer org only when they hold checkin or hours-approve permission there", async () => {
@@ -124,7 +141,8 @@ describe("GET /api/mobile/organizations", () => {
     findManyHouseholdAdult.mockResolvedValueOnce([
       { id: "adult-1", organizationId: "org-pta", name: "Alex Morgan", organization: { id: "org-pta", name: "Pine Grove School PTA", logoUrl: null } },
     ]);
-    getOrganizationLabAccess.mockResolvedValueOnce({ available: true });
+    getOrganizationLabAccess.mockResolvedValueOnce({ available: true }); // household-adult branch's check
+    getOrganizationLabAccess.mockResolvedValueOnce({ available: true }); // officer branch's check
     getEffectivePermissions.mockResolvedValueOnce(["pta:volunteers:checkin", "pta:volunteer-hours:approve"]);
 
     const token = await signAccessToken("user-1", 0);
