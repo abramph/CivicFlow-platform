@@ -382,10 +382,10 @@ if ( ! defined( 'DISALLOW_FILE_EDIT' ) ) {
    permalinks" step required.
    ============================================= */
 function unestra_download_targets() {
-	$base = 'https://github.com/abramph/CivicFlow-platform/releases/download/v1.0.9/';
+	$base = 'https://github.com/abramph/CivicFlow-platform/releases/download/v1.0.10/';
 	return [
-		'windows' => $base . 'Unestra-Setup-1.0.9.exe',
-		'macos'   => $base . 'Unestra-1.0.9-mac-arm64.dmg',
+		'windows' => $base . 'Unestra-Setup-1.0.10.exe',
+		'macos'   => $base . 'Unestra-1.0.10-mac-arm64.dmg',
 	];
 }
 
