@@ -48,7 +48,7 @@ export default function MakePaymentScreen() {
       <ThemedText type="title">Make a Payment</ThemedText>
       <ThemedText type="small" themeColor="textSecondary">Choose what you&apos;d like to pay for.</ThemedText>
 
-      <Pressable onPress={() => router.push('/make-payment/dues')}>
+      <Pressable onPress={() => router.push('/make-payment/dues')} accessibilityRole="button" accessibilityLabel="Membership dues, pay ahead on your dues in any amount">
         <ThemedView type="backgroundElement" style={styles.card}>
           <ThemedText type="smallBold">Membership Dues</ThemedText>
           <ThemedText type="small" themeColor="textSecondary">Pay ahead on your dues, in any amount.</ThemedText>
@@ -63,6 +63,8 @@ export default function MakePaymentScreen() {
           <Pressable
             key={campaign.id}
             onPress={() => router.push({ pathname: '/make-payment/campaign/[id]', params: { id: campaign.id } })}
+            accessibilityRole="button"
+            accessibilityLabel={`${campaign.name}${campaign.goal ? `, goal ${formatCurrency(campaign.goal)}` : ''}`}
           >
             <ThemedView type="backgroundElement" style={styles.card}>
               <ThemedText type="smallBold">{campaign.name}</ThemedText>
@@ -82,6 +84,8 @@ export default function MakePaymentScreen() {
           <Pressable
             key={event.id}
             onPress={() => router.push({ pathname: '/make-payment/event/[id]', params: { id: event.id } })}
+            accessibilityRole="button"
+            accessibilityLabel={`${event.title}, ${event.startAt ? new Date(event.startAt).toLocaleDateString() : 'date TBD'}`}
           >
             <ThemedView type="backgroundElement" style={styles.card}>
               <ThemedText type="smallBold">{event.title}</ThemedText>

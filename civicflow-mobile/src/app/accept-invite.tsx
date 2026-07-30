@@ -56,6 +56,7 @@ export default function AcceptInviteScreen() {
             autoCapitalize="none"
             value={token}
             onChangeText={setToken}
+            accessibilityLabel="Invite token"
           />
           <TextInput
             style={styles.input}
@@ -63,6 +64,8 @@ export default function AcceptInviteScreen() {
             secureTextEntry
             value={password}
             onChangeText={setPassword}
+            accessibilityLabel="Create a password"
+            accessibilityHint="Must be at least 8 characters"
           />
           <TextInput
             style={styles.input}
@@ -70,10 +73,11 @@ export default function AcceptInviteScreen() {
             secureTextEntry
             value={confirmPassword}
             onChangeText={setConfirmPassword}
+            accessibilityLabel="Confirm password"
           />
 
           {error ? (
-            <ThemedText type="small" style={styles.error}>
+            <ThemedText type="small" style={styles.error} accessibilityRole="alert" accessibilityLiveRegion="assertive">
               {error}
             </ThemedText>
           ) : null}
@@ -82,6 +86,9 @@ export default function AcceptInviteScreen() {
             style={[styles.button, submitting && styles.buttonDisabled]}
             onPress={handleSubmit}
             disabled={submitting || !token || !password || !confirmPassword}
+            accessibilityRole="button"
+            accessibilityLabel="Create account"
+            accessibilityState={{ disabled: submitting || !token || !password || !confirmPassword, busy: submitting }}
           >
             {submitting ? <ActivityIndicator color="#fff" /> : <ThemedText style={styles.buttonText}>Create Account</ThemedText>}
           </Pressable>

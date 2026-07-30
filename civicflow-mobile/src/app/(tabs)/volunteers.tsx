@@ -94,7 +94,11 @@ export default function VolunteersScreen() {
       <ThemedText type="title">Volunteers</ThemedText>
 
       {isOfficer && today ? (
-        <Pressable onPress={() => router.push('/volunteer-checkin')}>
+        <Pressable
+          onPress={() => router.push('/volunteer-checkin')}
+          accessibilityRole="button"
+          accessibilityLabel={`Today's staffing, ${today.understaffedShiftCount} understaffed shift${today.understaffedShiftCount === 1 ? '' : 's'}, ${today.pendingHourApprovalCount} pending hour approval${today.pendingHourApprovalCount === 1 ? '' : 's'}. Open check-in`}
+        >
           <ThemedView type="backgroundElement" style={styles.card}>
             <ThemedText type="smallBold">Today&apos;s staffing</ThemedText>
             <ThemedText type="small" themeColor="textSecondary">
@@ -110,7 +114,12 @@ export default function VolunteersScreen() {
 
       {isParent ? (
         <>
-          <ThemedView type="backgroundElement" style={styles.card}>
+          <ThemedView
+            type="backgroundElement"
+            style={styles.card}
+            accessible
+            accessibilityLabel={`Family volunteer goal${hours ? `, ${formatMinutes(hours.approvedMinutes)} hours approved${hours.pendingMinutes > 0 ? `, ${formatMinutes(hours.pendingMinutes)} hours awaiting approval` : ''}${hours.requiredMinutes != null ? `, ${formatMinutes(hours.remainingMinutes ?? 0)} hours remaining toward the ${formatMinutes(hours.requiredMinutes)}-hour goal` : ", this PTA doesn't require a set number of hours"}` : ''}`}
+          >
             <ThemedText type="smallBold">Family volunteer goal</ThemedText>
             {hours ? (
               <>
@@ -133,7 +142,13 @@ export default function VolunteersScreen() {
             <>
               <ThemedText type="smallBold" style={styles.sectionLabel}>My upcoming shifts</ThemedText>
               {upcoming.map((c) => (
-                <ThemedView key={c.id} type="backgroundElement" style={styles.listCard}>
+                <ThemedView
+                  key={c.id}
+                  type="backgroundElement"
+                  style={styles.listCard}
+                  accessible
+                  accessibilityLabel={`${c.opportunityTitle}, ${c.slotLabel ?? 'Shift'}`}
+                >
                   <ThemedText type="smallBold">{c.opportunityTitle}</ThemedText>
                   <ThemedText type="small" themeColor="textSecondary">{c.slotLabel ?? 'Shift'}</ThemedText>
                 </ThemedView>
@@ -145,26 +160,41 @@ export default function VolunteersScreen() {
           {opportunities.length === 0 ? (
             <ThemedText type="small" themeColor="textSecondary">No open volunteer opportunities right now.</ThemedText>
           ) : (
-            opportunities.map((opp) => (
-              <Pressable key={opp.id} onPress={() => router.push(`/volunteer-opportunity/${opp.id}`)}>
-                <ThemedView type="backgroundElement" style={styles.listCard}>
-                  <ThemedText type="smallBold">{opp.title}</ThemedText>
-                  {opp.description ? (
-                    <ThemedText type="small" themeColor="textSecondary" numberOfLines={2}>{opp.description}</ThemedText>
-                  ) : null}
-                  <ThemedText type="small" themeColor="textSecondary">
-                    {opp.slots.reduce((sum, s) => sum + s.claimedCount, 0)}/{opp.slots.reduce((sum, s) => sum + s.capacity, 0)} filled
-                  </ThemedText>
-                </ThemedView>
-              </Pressable>
-            ))
+            opportunities.map((opp) => {
+              const claimed = opp.slots.reduce((sum, s) => sum + s.claimedCount, 0);
+              const capacity = opp.slots.reduce((sum, s) => sum + s.capacity, 0);
+              return (
+                <Pressable
+                  key={opp.id}
+                  onPress={() => router.push(`/volunteer-opportunity/${opp.id}`)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${opp.title}${opp.description ? `, ${opp.description}` : ''}, ${claimed} of ${capacity} filled`}
+                >
+                  <ThemedView type="backgroundElement" style={styles.listCard}>
+                    <ThemedText type="smallBold">{opp.title}</ThemedText>
+                    {opp.description ? (
+                      <ThemedText type="small" themeColor="textSecondary" numberOfLines={2}>{opp.description}</ThemedText>
+                    ) : null}
+                    <ThemedText type="small" themeColor="textSecondary">
+                      {claimed}/{capacity} filled
+                    </ThemedText>
+                  </ThemedView>
+                </Pressable>
+              );
+            })
           )}
 
           {completed.length > 0 ? (
             <>
               <ThemedText type="smallBold" style={styles.sectionLabel}>Completed service</ThemedText>
               {completed.map((c) => (
-                <ThemedView key={c.id} type="backgroundElement" style={styles.listCard}>
+                <ThemedView
+                  key={c.id}
+                  type="backgroundElement"
+                  style={styles.listCard}
+                  accessible
+                  accessibilityLabel={`${c.opportunityTitle}, ${c.status.replace('_', ' ')}`}
+                >
                   <ThemedText type="smallBold">{c.opportunityTitle}</ThemedText>
                   <ThemedText type="small" themeColor="textSecondary">{c.status.replace('_', ' ')}</ThemedText>
                 </ThemedView>

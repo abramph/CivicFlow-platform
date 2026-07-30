@@ -9,7 +9,7 @@ export default function Index() {
 
   if (status === 'loading') {
     return (
-      <ThemedView style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+      <ThemedView style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }} accessibilityRole="progressbar" accessibilityLabel="Loading">
         <ActivityIndicator />
       </ThemedView>
     );

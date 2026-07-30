@@ -42,7 +42,7 @@ export default function MakePaymentEventScreen() {
 
   if (loading) {
     return (
-      <ThemedView style={styles.loadingContainer}>
+      <ThemedView style={styles.loadingContainer} accessibilityRole="progressbar" accessibilityLabel="Loading event">
         <ActivityIndicator />
       </ThemedView>
     );
@@ -52,7 +52,9 @@ export default function MakePaymentEventScreen() {
     return (
       <ThemedView style={styles.container}>
         <ThemedText type="title">Event</ThemedText>
-        <ThemedText type="small" themeColor="textSecondary">This event isn&apos;t available.</ThemedText>
+        <ThemedText type="small" themeColor="textSecondary" accessibilityRole="alert" accessibilityLiveRegion="assertive">
+          This event isn&apos;t available.
+        </ThemedText>
       </ThemedView>
     );
   }

@@ -37,7 +37,7 @@ export default function MakePaymentDuesScreen() {
 
   if (loading) {
     return (
-      <ThemedView style={styles.loadingContainer}>
+      <ThemedView style={styles.loadingContainer} accessibilityRole="progressbar" accessibilityLabel="Loading">
         <ActivityIndicator />
       </ThemedView>
     );

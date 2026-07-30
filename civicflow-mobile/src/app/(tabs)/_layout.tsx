@@ -30,16 +30,23 @@ export default function TabsLayout() {
 
   return (
     <Tabs screenOptions={{ headerShown: false }}>
-      <Tabs.Screen name="dashboard" options={{ title: 'Home' }} />
+      <Tabs.Screen name="dashboard" options={{ title: 'Home', tabBarAccessibilityLabel: 'Home' }} />
       <Tabs.Screen
         name="inbox"
-        options={{ title: 'Inbox', tabBarBadge: unreadCount > 0 ? unreadCount : undefined }}
+        options={{
+          title: 'Inbox',
+          tabBarBadge: unreadCount > 0 ? unreadCount : undefined,
+          tabBarAccessibilityLabel: unreadCount > 0 ? `Inbox, ${unreadCount} unread` : 'Inbox',
+        }}
       />
-      <Tabs.Screen name="announcements" options={{ title: 'Announcements' }} />
-      <Tabs.Screen name="dues" options={{ title: 'Payments' }} />
-      <Tabs.Screen name="events" options={{ title: 'Events' }} />
-      <Tabs.Screen name="volunteers" options={{ title: 'Volunteer', href: hasPtaAccess ? undefined : null }} />
-      <Tabs.Screen name="profile" options={{ title: 'Profile' }} />
+      <Tabs.Screen name="announcements" options={{ title: 'Announcements', tabBarAccessibilityLabel: 'Announcements' }} />
+      <Tabs.Screen name="dues" options={{ title: 'Payments', tabBarAccessibilityLabel: 'Payments' }} />
+      <Tabs.Screen name="events" options={{ title: 'Events', tabBarAccessibilityLabel: 'Events' }} />
+      <Tabs.Screen
+        name="volunteers"
+        options={{ title: 'Volunteer', href: hasPtaAccess ? undefined : null, tabBarAccessibilityLabel: 'Volunteer' }}
+      />
+      <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarAccessibilityLabel: 'Profile' }} />
     </Tabs>
   );
 }

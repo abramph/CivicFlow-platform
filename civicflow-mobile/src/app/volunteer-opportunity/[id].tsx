@@ -70,7 +70,7 @@ export default function VolunteerOpportunityDetailScreen() {
 
   if (loading) {
     return (
-      <ThemedView style={styles.loadingContainer}>
+      <ThemedView style={styles.loadingContainer} accessibilityRole="progressbar" accessibilityLabel="Loading volunteer opportunity">
         <ActivityIndicator />
       </ThemedView>
     );
@@ -80,7 +80,9 @@ export default function VolunteerOpportunityDetailScreen() {
     return (
       <ThemedView style={styles.container}>
         <ThemedText type="title">Volunteer opportunity</ThemedText>
-        <ThemedText type="small" themeColor="textSecondary">This opportunity isn&apos;t available.</ThemedText>
+        <ThemedText type="small" themeColor="textSecondary" accessibilityRole="alert" accessibilityLiveRegion="assertive">
+          This opportunity isn&apos;t available.
+        </ThemedText>
       </ThemedView>
     );
   }
@@ -125,6 +127,9 @@ export default function VolunteerOpportunityDetailScreen() {
                 disabled={isPending}
                 onPress={() => handleCancel(slot.id)}
                 style={[styles.button, styles.buttonDanger, isPending && styles.buttonDisabled]}
+                accessibilityRole="button"
+                accessibilityLabel={`Cancel signup for ${slot.label ?? 'shift'}`}
+                accessibilityState={{ disabled: isPending, busy: isPending }}
               >
                 <ThemedText style={styles.buttonDangerText}>{isPending ? 'Cancelling…' : 'Cancel signup'}</ThemedText>
               </Pressable>
@@ -133,6 +138,9 @@ export default function VolunteerOpportunityDetailScreen() {
                 disabled={isPending || slot.full}
                 onPress={() => handleClaim(slot.id)}
                 style={[styles.button, slot.full ? styles.buttonDisabled : styles.buttonPrimary]}
+                accessibilityRole="button"
+                accessibilityLabel={slot.full ? `${slot.label ?? 'Shift'}, full` : `Claim ${slot.label ?? 'shift'}`}
+                accessibilityState={{ disabled: isPending || slot.full, busy: isPending }}
               >
                 <ThemedText style={styles.buttonPrimaryText}>
                   {isPending ? 'Signing up…' : slot.full ? 'Full' : 'Claim shift'}

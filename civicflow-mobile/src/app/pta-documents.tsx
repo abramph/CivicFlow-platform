@@ -37,7 +37,12 @@ export default function PtaDocumentsScreen() {
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
         renderItem={({ item }) => (
-          <ThemedView type="backgroundElement" style={styles.row}>
+          <ThemedView
+            type="backgroundElement"
+            style={styles.row}
+            accessible
+            accessibilityLabel={`${item.title}, ${item.fileName}, ${new Date(item.uploadedAt).toLocaleDateString()}, not downloadable in this demo`}
+          >
             <ThemedText type="smallBold">{item.title}</ThemedText>
             <ThemedText type="small" themeColor="textSecondary">
               {item.fileName} · {new Date(item.uploadedAt).toLocaleDateString()}

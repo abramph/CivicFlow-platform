@@ -57,7 +57,7 @@ export default function EventDetailScreen() {
 
   if (loading) {
     return (
-      <ThemedView style={styles.loadingContainer}>
+      <ThemedView style={styles.loadingContainer} accessibilityRole="progressbar" accessibilityLabel="Loading event">
         <ActivityIndicator />
       </ThemedView>
     );
@@ -67,7 +67,9 @@ export default function EventDetailScreen() {
     return (
       <ThemedView style={styles.container}>
         <ThemedText type="title">Event</ThemedText>
-        <ThemedText type="small" themeColor="textSecondary">This event isn&apos;t available.</ThemedText>
+        <ThemedText type="small" themeColor="textSecondary" accessibilityRole="alert" accessibilityLiveRegion="assertive">
+          This event isn&apos;t available.
+        </ThemedText>
       </ThemedView>
     );
   }
@@ -89,13 +91,16 @@ export default function EventDetailScreen() {
       {isPtaEvent(event) ? (
         <ThemedView type="backgroundElement" style={styles.rsvpCard}>
           <ThemedText type="smallBold">Your RSVP</ThemedText>
-          <ThemedView style={styles.rsvpRow}>
+          <ThemedView style={styles.rsvpRow} accessibilityRole="radiogroup" accessibilityLabel="RSVP status">
             {RSVP_OPTIONS.map((option) => (
               <Pressable
                 key={option.value}
                 disabled={rsvpSubmitting}
                 style={[styles.rsvpChip, event.myRsvp?.status === option.value && styles.rsvpChipSelected]}
                 onPress={() => handleRsvp(option.value)}
+                accessibilityRole="radio"
+                accessibilityLabel={option.label}
+                accessibilityState={{ selected: event.myRsvp?.status === option.value, disabled: rsvpSubmitting, busy: rsvpSubmitting }}
               >
                 <ThemedText
                   type="small"
@@ -107,7 +112,7 @@ export default function EventDetailScreen() {
             ))}
           </ThemedView>
           {event.myRsvp ? (
-            <ThemedText type="small" themeColor="textSecondary">
+            <ThemedText type="small" themeColor="textSecondary" accessibilityLiveRegion="polite">
               {event.myRsvp.attendeeCount} attendee{event.myRsvp.attendeeCount === 1 ? '' : 's'} from your household
             </ThemedText>
           ) : null}

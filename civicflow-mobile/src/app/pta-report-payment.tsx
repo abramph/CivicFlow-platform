@@ -88,7 +88,7 @@ export default function PtaReportPaymentScreen() {
 
   if (loading) {
     return (
-      <ThemedView style={styles.loadingContainer}>
+      <ThemedView style={styles.loadingContainer} accessibilityRole="progressbar" accessibilityLabel="Loading">
         <ActivityIndicator />
       </ThemedView>
     );
@@ -96,12 +96,12 @@ export default function PtaReportPaymentScreen() {
 
   if (success) {
     return (
-      <ThemedView style={styles.successContainer}>
+      <ThemedView style={styles.successContainer} accessibilityLiveRegion="polite">
         <ThemedText type="title" style={styles.center}>Payment Reported</ThemedText>
         <ThemedText type="default" themeColor="textSecondary" style={styles.center}>
           Your PTA&apos;s treasurer will review this and confirm it soon.
         </ThemedText>
-        <Pressable style={styles.button} onPress={() => router.replace('/dues')}>
+        <Pressable style={styles.button} onPress={() => router.replace('/dues')} accessibilityRole="button" accessibilityLabel="Back to dues">
           <ThemedText style={styles.buttonText}>Back to Dues</ThemedText>
         </Pressable>
       </ThemedView>
@@ -117,15 +117,25 @@ export default function PtaReportPaymentScreen() {
         </ThemedText>
 
         <ThemedText type="small" themeColor="textSecondary">Amount</ThemedText>
-        <TextInput style={styles.input} placeholder="0.00" keyboardType="decimal-pad" value={amount} onChangeText={setAmount} />
+        <TextInput
+          style={styles.input}
+          placeholder="0.00"
+          keyboardType="decimal-pad"
+          value={amount}
+          onChangeText={setAmount}
+          accessibilityLabel="Amount"
+        />
 
         <ThemedText type="small" themeColor="textSecondary">Payment Method</ThemedText>
-        <ThemedView style={styles.methodRow}>
+        <ThemedView style={styles.methodRow} accessibilityRole="radiogroup" accessibilityLabel="Payment method">
           {PAYMENT_METHODS.map((method) => (
             <Pressable
               key={method}
               style={[styles.methodChip, method === paymentMethod && styles.methodChipSelected]}
               onPress={() => setPaymentMethod(method)}
+              accessibilityRole="radio"
+              accessibilityLabel={method.replace('_', ' ')}
+              accessibilityState={{ selected: method === paymentMethod }}
             >
               <ThemedText type="small" style={method === paymentMethod ? styles.methodChipTextSelected : undefined}>
                 {method.replace('_', ' ')}
@@ -135,17 +145,47 @@ export default function PtaReportPaymentScreen() {
         </ThemedView>
 
         <ThemedText type="small" themeColor="textSecondary">Payment Date (YYYY-MM-DD)</ThemedText>
-        <TextInput style={styles.input} value={paymentDate} onChangeText={setPaymentDate} placeholder={todayIsoDate()} />
+        <TextInput
+          style={styles.input}
+          value={paymentDate}
+          onChangeText={setPaymentDate}
+          placeholder={todayIsoDate()}
+          accessibilityLabel="Payment date, format YYYY-MM-DD"
+        />
 
         <ThemedText type="small" themeColor="textSecondary">Reference Number (optional)</ThemedText>
-        <TextInput style={styles.input} value={referenceNumber} onChangeText={setReferenceNumber} placeholder="Check #, confirmation code, etc." />
+        <TextInput
+          style={styles.input}
+          value={referenceNumber}
+          onChangeText={setReferenceNumber}
+          placeholder="Check #, confirmation code, etc."
+          accessibilityLabel="Reference number, optional"
+        />
 
         <ThemedText type="small" themeColor="textSecondary">Note (optional)</ThemedText>
-        <TextInput style={[styles.input, styles.multiline]} value={note} onChangeText={setNote} placeholder="Anything the treasurer should know" multiline />
+        <TextInput
+          style={[styles.input, styles.multiline]}
+          value={note}
+          onChangeText={setNote}
+          placeholder="Anything the treasurer should know"
+          multiline
+          accessibilityLabel="Note, optional"
+        />
 
-        {error ? <ThemedText type="small" style={styles.error}>{error}</ThemedText> : null}
+        {error ? (
+          <ThemedText type="small" style={styles.error} accessibilityRole="alert" accessibilityLiveRegion="assertive">
+            {error}
+          </ThemedText>
+        ) : null}
 
-        <Pressable style={[styles.button, submitting && styles.buttonDisabled]} onPress={handleSubmit} disabled={submitting}>
+        <Pressable
+          style={[styles.button, submitting && styles.buttonDisabled]}
+          onPress={handleSubmit}
+          disabled={submitting}
+          accessibilityRole="button"
+          accessibilityLabel="Submit payment report"
+          accessibilityState={{ disabled: submitting, busy: submitting }}
+        >
           {submitting ? <ActivityIndicator color="#fff" /> : <ThemedText style={styles.buttonText}>Submit Payment Report</ThemedText>}
         </Pressable>
       </ScrollView>

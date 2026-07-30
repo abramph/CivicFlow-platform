@@ -38,7 +38,7 @@ export default function AnnouncementDetailScreen() {
 
   if (loading) {
     return (
-      <ThemedView style={styles.loadingContainer}>
+      <ThemedView style={styles.loadingContainer} accessibilityRole="progressbar" accessibilityLabel="Loading announcement">
         <ActivityIndicator />
       </ThemedView>
     );
@@ -48,7 +48,9 @@ export default function AnnouncementDetailScreen() {
     return (
       <ThemedView style={styles.container}>
         <ThemedText type="title">Announcement</ThemedText>
-        <ThemedText type="small" themeColor="textSecondary">This announcement isn&apos;t available.</ThemedText>
+        <ThemedText type="small" themeColor="textSecondary" accessibilityRole="alert" accessibilityLiveRegion="assertive">
+          This announcement isn&apos;t available.
+        </ThemedText>
       </ThemedView>
     );
   }

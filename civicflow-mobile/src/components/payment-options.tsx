@@ -54,6 +54,9 @@ export function PaymentOptions({
         <Pressable
           style={styles.payButton}
           onPress={() => WebBrowser.openBrowserAsync(`${API_BASE_URL}/pay/${paymentLinkSlug}`)}
+          accessibilityRole="button"
+          accessibilityLabel="Pay now via card"
+          accessibilityHint="Opens payment in your browser"
         >
           <ThemedText style={styles.payButtonText}>Pay Now via Card</ThemedText>
         </Pressable>
@@ -65,11 +68,26 @@ export function PaymentOptions({
           {methods.map((method) => {
             const payLink = method.accountIdentifier ? buildPayLink(method.method, method.accountIdentifier) : null;
             return (
-              <ThemedView key={method.id} style={styles.methodRow}>
-                <ThemedText type="smallBold">{method.label}</ThemedText>
+              <ThemedView
+                key={method.id}
+                style={styles.methodRow}
+                accessible={!payLink}
+                accessibilityLabel={!payLink ? `${method.label}${method.accountIdentifier ? `, ${method.accountIdentifier}` : ''}${method.instructions ? `, ${method.instructions}` : ''}` : undefined}
+              >
+                <ThemedText
+                  type="smallBold"
+                  accessibilityElementsHidden={Boolean(payLink)}
+                  importantForAccessibility={payLink ? 'no' : 'auto'}
+                >
+                  {method.label}
+                </ThemedText>
                 {method.accountIdentifier ? (
                   payLink ? (
-                    <Pressable onPress={() => WebBrowser.openBrowserAsync(payLink)}>
+                    <Pressable
+                      onPress={() => WebBrowser.openBrowserAsync(payLink)}
+                      accessibilityRole="link"
+                      accessibilityLabel={`Pay via ${method.label}, ${method.accountIdentifier}${method.instructions ? `, ${method.instructions}` : ''}`}
+                    >
                       <ThemedText type="small" style={styles.link}>{method.accountIdentifier}</ThemedText>
                     </Pressable>
                   ) : (
@@ -77,7 +95,14 @@ export function PaymentOptions({
                   )
                 ) : null}
                 {method.instructions ? (
-                  <ThemedText type="small" themeColor="textSecondary">{method.instructions}</ThemedText>
+                  <ThemedText
+                    type="small"
+                    themeColor="textSecondary"
+                    accessibilityElementsHidden={Boolean(payLink)}
+                    importantForAccessibility={payLink ? 'no' : 'auto'}
+                  >
+                    {method.instructions}
+                  </ThemedText>
                 ) : null}
               </ThemedView>
             );
@@ -88,6 +113,8 @@ export function PaymentOptions({
       <Pressable
         style={styles.reportButton}
         onPress={() => router.push({ pathname: '/report-payment', params: { category: reportCategory } })}
+        accessibilityRole="button"
+        accessibilityLabel="Report a payment"
       >
         <ThemedText style={styles.reportButtonText}>Report a Payment</ThemedText>
       </Pressable>

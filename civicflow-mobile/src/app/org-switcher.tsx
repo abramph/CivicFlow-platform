@@ -31,6 +31,9 @@ export default function OrgSwitcherScreen() {
           <Pressable
             style={[styles.row, item.organizationId === selectedOrganizationId && styles.rowSelected]}
             onPress={() => handleSelect(item.organizationId)}
+            accessibilityRole="button"
+            accessibilityLabel={`${item.organizationName}${item.isDelinquent ? ', dues past due' : ''}`}
+            accessibilityState={{ selected: item.organizationId === selectedOrganizationId }}
           >
             <ThemedText type="smallBold">{item.organizationName}</ThemedText>
             <ThemedText type="small" themeColor="textSecondary">
@@ -46,7 +49,7 @@ export default function OrgSwitcherScreen() {
         }
       />
 
-      <Pressable style={styles.logout} onPress={() => logout()}>
+      <Pressable style={styles.logout} onPress={() => logout()} accessibilityRole="button" accessibilityLabel="Log out">
         <ThemedText type="link" themeColor="textSecondary">
           Log out
         </ThemedText>

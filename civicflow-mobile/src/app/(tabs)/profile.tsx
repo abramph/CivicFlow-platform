@@ -70,13 +70,13 @@ export default function ProfileScreen() {
       </ThemedView>
 
       {organizations.length > 1 ? (
-        <Pressable style={styles.secondaryButton} onPress={() => router.push('/org-switcher')}>
+        <Pressable style={styles.secondaryButton} onPress={() => router.push('/org-switcher')} accessibilityRole="button" accessibilityLabel="Switch organization">
           <ThemedText type="link">Switch Organization</ThemedText>
         </Pressable>
       ) : null}
 
       {hasMemberIdentity ? (
-        <Pressable style={styles.secondaryButton} onPress={() => router.push('/attendance-history')}>
+        <Pressable style={styles.secondaryButton} onPress={() => router.push('/attendance-history')} accessibilityRole="button" accessibilityLabel="Attendance history">
           <ThemedText type="link">Attendance History</ThemedText>
         </Pressable>
       ) : null}
@@ -91,6 +91,7 @@ export default function ProfileScreen() {
                 value={profile?.commsPushEnabled ?? false}
                 disabled={!profile || saving === 'commsPushEnabled'}
                 onValueChange={(value) => handleToggle('commsPushEnabled', value)}
+                accessibilityLabel="Push notifications"
               />
             </ThemedView>
             <ThemedView style={styles.toggleRow}>
@@ -99,6 +100,7 @@ export default function ProfileScreen() {
                 value={profile?.commsEmailEnabled ?? false}
                 disabled={!profile || saving === 'commsEmailEnabled'}
                 onValueChange={(value) => handleToggle('commsEmailEnabled', value)}
+                accessibilityLabel="Email updates"
               />
             </ThemedView>
             <ThemedView style={styles.toggleRow}>
@@ -107,6 +109,8 @@ export default function ProfileScreen() {
                 value={profile?.commsSmsEnabled ?? false}
                 disabled={!profile || saving === 'commsSmsEnabled' || Boolean(profile?.smsOptedOutAt)}
                 onValueChange={(value) => handleToggle('commsSmsEnabled', value)}
+                accessibilityLabel="Text messages"
+                accessibilityHint={profile?.smsOptedOutAt ? "Blocked because you've texted STOP" : undefined}
               />
             </ThemedView>
             {profile?.smsOptedOutAt ? (
@@ -118,7 +122,7 @@ export default function ProfileScreen() {
         </>
       ) : null}
 
-      <Pressable style={styles.logoutButton} onPress={handleLogout}>
+      <Pressable style={styles.logoutButton} onPress={handleLogout} accessibilityRole="button" accessibilityLabel="Log out">
         <ThemedText style={styles.logoutText}>Log Out</ThemedText>
       </Pressable>
     </ScrollView>
