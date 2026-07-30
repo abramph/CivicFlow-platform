@@ -18,11 +18,17 @@ export async function GET() {
 const createSchema = z.object({
   title: z.string().min(1),
   eventId: z.string().nullable().optional(),
+  committeeId: z.string().nullable().optional(),
   description: z.string().nullable().optional(),
+  instructions: z.string().nullable().optional(),
+  schoolYear: z.string().nullable().optional(),
+  coordinatorUserId: z.string().nullable().optional(),
   startAt: z.coerce.date().nullable().optional(),
   endAt: z.coerce.date().nullable().optional(),
   signupDeadline: z.coerce.date().nullable().optional(),
+  cancellationDeadline: z.coerce.date().nullable().optional(),
   supplyRequest: z.string().nullable().optional(),
+  status: z.enum(["DRAFT", "OPEN"]).optional(),
 });
 
 export async function POST(request: Request) {

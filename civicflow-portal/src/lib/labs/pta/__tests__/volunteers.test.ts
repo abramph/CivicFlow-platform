@@ -42,9 +42,18 @@ vi.mock("@/lib/audit", () => ({ createAuditEvent: vi.fn().mockResolvedValue(unde
 
 beforeEach(() => vi.clearAllMocks());
 
+const openSlot = (overrides: Record<string, unknown> = {}) => ({
+  id: "slot-1",
+  organizationId: "org-a",
+  capacity: 2,
+  status: "OPEN",
+  opportunity: { status: "OPEN", signupDeadline: null },
+  ...overrides,
+});
+
 describe("claimPtaVolunteerSlot — atomic capacity enforcement", () => {
   it("claims successfully when the conditional UPDATE wins (count === 1)", async () => {
-    findFirstSlot.mockResolvedValueOnce({ id: "slot-1", organizationId: "org-a", capacity: 2 });
+    findFirstSlot.mockResolvedValueOnce(openSlot());
     findFirstAdult.mockResolvedValueOnce({ id: "adult-1", organizationId: "org-a" });
     findUniqueSignup.mockResolvedValueOnce(null);
     updateManySlot.mockResolvedValueOnce({ count: 1 });
@@ -57,7 +66,7 @@ describe("claimPtaVolunteerSlot — atomic capacity enforcement", () => {
   });
 
   it("rejects with PTA_SLOT_FULL when the conditional UPDATE loses the race (count === 0) — this is what actually prevents overbooking, not a prior read", async () => {
-    findFirstSlot.mockResolvedValueOnce({ id: "slot-1", organizationId: "org-a", capacity: 1 });
+    findFirstSlot.mockResolvedValueOnce(openSlot({ capacity: 1 }));
     findFirstAdult.mockResolvedValueOnce({ id: "adult-2", organizationId: "org-a" });
     findUniqueSignup.mockResolvedValueOnce(null);
     updateManySlot.mockResolvedValueOnce({ count: 0 }); // another concurrent claim won first
@@ -68,7 +77,7 @@ describe("claimPtaVolunteerSlot — atomic capacity enforcement", () => {
   });
 
   it("prevents a duplicate active signup by the same adult for the same slot without even attempting the claim", async () => {
-    findFirstSlot.mockResolvedValueOnce({ id: "slot-1", organizationId: "org-a", capacity: 5 });
+    findFirstSlot.mockResolvedValueOnce(openSlot({ capacity: 5 }));
     findFirstAdult.mockResolvedValueOnce({ id: "adult-1", organizationId: "org-a" });
     findUniqueSignup.mockResolvedValueOnce({ id: "signup-1", status: "SIGNED_UP" });
 
@@ -78,7 +87,7 @@ describe("claimPtaVolunteerSlot — atomic capacity enforcement", () => {
   });
 
   it("allows re-claiming after a prior cancellation (status CANCELLED does not block a new claim)", async () => {
-    findFirstSlot.mockResolvedValueOnce({ id: "slot-1", organizationId: "org-a", capacity: 5 });
+    findFirstSlot.mockResolvedValueOnce(openSlot({ capacity: 5 }));
     findFirstAdult.mockResolvedValueOnce({ id: "adult-1", organizationId: "org-a" });
     findUniqueSignup.mockResolvedValueOnce({ id: "signup-1", status: "CANCELLED" });
     updateManySlot.mockResolvedValueOnce({ count: 1 });
@@ -87,6 +96,19 @@ describe("claimPtaVolunteerSlot — atomic capacity enforcement", () => {
     const { claimPtaVolunteerSlot } = await import("../volunteers");
     await expect(claimPtaVolunteerSlot("org-a", "slot-1", "adult-1", "u1")).resolves.toMatchObject({ id: "signup-1" });
   });
+
+  it("refuses a claim once the opportunity's signup deadline has passed", async () => {
+    findFirstSlot.mockResolvedValueOnce(openSlot({ opportunity: { status: "OPEN", signupDeadline: new Date(Date.now() - 60_000) } }));
+    const { claimPtaVolunteerSlot } = await import("../volunteers");
+    await expect(claimPtaVolunteerSlot("org-a", "slot-1", "adult-1", "u1")).rejects.toMatchObject({ code: "PTA_OPPORTUNITY_SIGNUP_CLOSED" });
+    expect(updateManySlot).not.toHaveBeenCalled();
+  });
+
+  it("refuses a claim once the opportunity itself is no longer OPEN", async () => {
+    findFirstSlot.mockResolvedValueOnce(openSlot({ opportunity: { status: "CLOSED", signupDeadline: null } }));
+    const { claimPtaVolunteerSlot } = await import("../volunteers");
+    await expect(claimPtaVolunteerSlot("org-a", "slot-1", "adult-1", "u1")).rejects.toMatchObject({ code: "PTA_OPPORTUNITY_SIGNUP_CLOSED" });
+  });
 });
 
 describe("tenant isolation — cross-organization volunteer access denied", () => {
@@ -94,7 +116,7 @@ describe("tenant isolation — cross-organization volunteer access denied", () =
     findFirstSlot.mockResolvedValueOnce(null);
     const { claimPtaVolunteerSlot } = await import("../volunteers");
     await expect(claimPtaVolunteerSlot("org-b", "slot-belonging-to-org-a", "adult-1", "u1")).rejects.toMatchObject({ code: "PTA_SLOT_NOT_FOUND" });
-    expect(findFirstSlot).toHaveBeenCalledWith({ where: { id: "slot-belonging-to-org-a", organizationId: "org-b" } });
+    expect(findFirstSlot).toHaveBeenCalledWith({ where: { id: "slot-belonging-to-org-a", organizationId: "org-b" }, include: { opportunity: true } });
   });
 
   it("createPtaVolunteerOpportunity cannot attach to another organization's event", async () => {
@@ -107,7 +129,7 @@ describe("tenant isolation — cross-organization volunteer access denied", () =
 
 describe("cancelPtaVolunteerSignup — atomic release", () => {
   it("decrements claimedCount only when it is currently above zero, never going negative", async () => {
-    findFirstSignup.mockResolvedValueOnce({ id: "signup-1", status: "SIGNED_UP", organizationId: "org-a" });
+    findFirstSignup.mockResolvedValueOnce({ id: "signup-1", status: "SIGNED_UP", organizationId: "org-a", slot: { opportunity: { cancellationDeadline: null } } });
     updateSignup.mockResolvedValueOnce({ id: "signup-1", status: "CANCELLED" });
 
     const { cancelPtaVolunteerSignup } = await import("../volunteers");
@@ -117,10 +139,24 @@ describe("cancelPtaVolunteerSignup — atomic release", () => {
   });
 
   it("is a no-op (not an error) for a signup that's already cancelled", async () => {
-    findFirstSignup.mockResolvedValueOnce({ id: "signup-1", status: "CANCELLED" });
+    findFirstSignup.mockResolvedValueOnce({ id: "signup-1", status: "CANCELLED", slot: { opportunity: { cancellationDeadline: null } } });
     const { cancelPtaVolunteerSignup } = await import("../volunteers");
     const result = await cancelPtaVolunteerSignup("org-a", "slot-1", "adult-1", "u1");
     expect(result.status).toBe("CANCELLED");
     expect(updateSignup).not.toHaveBeenCalled();
+  });
+
+  it("refuses a late cancellation once the opportunity's cancellation deadline has passed, unless an officer override is given", async () => {
+    findFirstSignup.mockResolvedValueOnce({ id: "signup-1", status: "SIGNED_UP", slot: { opportunity: { cancellationDeadline: new Date(Date.now() - 60_000) } } });
+    const { cancelPtaVolunteerSignup } = await import("../volunteers");
+    await expect(cancelPtaVolunteerSignup("org-a", "slot-1", "adult-1", "u1")).rejects.toMatchObject({ code: "PTA_CANCELLATION_DEADLINE_PASSED" });
+    expect(updateSignup).not.toHaveBeenCalled();
+  });
+
+  it("allows a late cancellation when an officer explicitly overrides the deadline", async () => {
+    findFirstSignup.mockResolvedValueOnce({ id: "signup-1", status: "SIGNED_UP", slot: { opportunity: { cancellationDeadline: new Date(Date.now() - 60_000) } } });
+    updateSignup.mockResolvedValueOnce({ id: "signup-1", status: "CANCELLED" });
+    const { cancelPtaVolunteerSignup } = await import("../volunteers");
+    await expect(cancelPtaVolunteerSignup("org-a", "slot-1", "adult-1", "officer-1", { officerOverride: true })).resolves.toMatchObject({ status: "CANCELLED" });
   });
 });

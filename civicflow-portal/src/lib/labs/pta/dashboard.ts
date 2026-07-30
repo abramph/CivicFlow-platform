@@ -24,6 +24,9 @@ export interface PtaDashboardMetrics {
   teachersCount: number;
   pendingPaymentReportsCount: number;
   outstandingDuesCents: number;
+  approvedVolunteerMinutes: number;
+  pendingVolunteerHourApprovals: number;
+  understaffedShiftsCount: number;
 }
 
 export async function getPtaDashboardMetrics(organizationId: string, schoolYear: string): Promise<PtaDashboardMetrics> {
@@ -43,6 +46,9 @@ export async function getPtaDashboardMetrics(organizationId: string, schoolYear:
     teachersCount,
     pendingPaymentReportsCount,
     outstandingCharges,
+    approvedVolunteerHours,
+    pendingVolunteerHourApprovals,
+    slotsWithMinimums,
   ] = await Promise.all([
     prisma.ptaHousehold.count({ where: { organizationId, schoolYear, status: "ACTIVE" } }),
     prisma.ptaHousehold.count({ where: { organizationId, schoolYear, status: "ACTIVE", orgMember: { duesCharges: { some: { organizationId, status: "PAID" } } } } }),
@@ -62,6 +68,9 @@ export async function getPtaDashboardMetrics(organizationId: string, schoolYear:
       where: { organizationId, status: { in: ["PENDING", "PARTIAL"] }, member: { ptaHouseholdBilling: { isNot: null } } },
       select: { amountDue: true, amountPaid: true },
     }),
+    prisma.ptaVolunteerHourEntry.aggregate({ where: { organizationId, schoolYear, status: "APPROVED" }, _sum: { creditedMinutes: true } }),
+    prisma.ptaVolunteerHourEntry.count({ where: { organizationId, schoolYear, status: "PENDING" } }),
+    prisma.ptaVolunteerSlot.findMany({ where: { organizationId, minNeeded: { not: null } }, select: { capacity: true, claimedCount: true, minNeeded: true } }),
   ]);
 
   const volunteerSlotsOpen = slots.reduce((sum, s) => sum + Math.max(0, s.capacity - s.claimedCount), 0);
@@ -70,6 +79,7 @@ export async function getPtaDashboardMetrics(organizationId: string, schoolYear:
     (sum, c) => sum + Math.round((Number(c.amountDue) - Number(c.amountPaid)) * 100),
     0
   );
+  const understaffedShiftsCount = slotsWithMinimums.filter((s) => s.minNeeded !== null && s.claimedCount < s.minNeeded).length;
 
   return {
     activeHouseholds,
@@ -91,5 +101,8 @@ export async function getPtaDashboardMetrics(organizationId: string, schoolYear:
     teachersCount,
     pendingPaymentReportsCount,
     outstandingDuesCents,
+    approvedVolunteerMinutes: approvedVolunteerHours._sum.creditedMinutes ?? 0,
+    pendingVolunteerHourApprovals,
+    understaffedShiftsCount,
   };
 }

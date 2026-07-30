@@ -466,20 +466,24 @@ model Organization {
   meetingMinutesDrafts        MeetingMinutesDraft[]
   meetingIntelligenceFeedback MeetingIntelligenceFeedback[]
 
-  ptaProfile                PtaProfile?
-  ptaHouseholds             PtaHousehold[]
-  ptaStudents               PtaStudent[]
-  ptaGrades                 PtaGrade[]
-  ptaClassrooms             PtaClassroom[]
-  ptaTeachers               PtaTeacher[]
-  ptaStudentEnrollments     PtaStudentEnrollment[]
-  ptaVolunteerOpportunities PtaVolunteerOpportunity[]
-  ptaVolunteerSlots         PtaVolunteerSlot[]
-  ptaVolunteerSignups       PtaVolunteerSignup[]
-  ptaCommittees             PtaCommittee[]
-  ptaCommitteeMembers       PtaCommitteeMember[]
-  ptaEventRsvps             PtaEventRsvp[]
-  ptaHouseholdAdults        PtaHouseholdAdult[]
+  ptaProfile                  PtaProfile?
+  ptaHouseholds               PtaHousehold[]
+  ptaStudents                 PtaStudent[]
+  ptaGrades                   PtaGrade[]
+  ptaClassrooms               PtaClassroom[]
+  ptaTeachers                 PtaTeacher[]
+  ptaStudentEnrollments       PtaStudentEnrollment[]
+  ptaVolunteerOpportunities   PtaVolunteerOpportunity[]
+  ptaVolunteerSlots           PtaVolunteerSlot[]
+  ptaVolunteerSignups         PtaVolunteerSignup[]
+  ptaVolunteerAttendance      PtaVolunteerAttendance[]
+  ptaVolunteerHourEntries     PtaVolunteerHourEntry[]
+  ptaVolunteerHourAdjustments PtaVolunteerHourAdjustment[]
+  ptaVolunteerRequirements    PtaVolunteerRequirement[]
+  ptaCommittees               PtaCommittee[]
+  ptaCommitteeMembers         PtaCommitteeMember[]
+  ptaEventRsvps               PtaEventRsvp[]
+  ptaHouseholdAdults          PtaHouseholdAdult[]
 
   @@index([slug])
   @@index([status])
@@ -2438,49 +2442,81 @@ model PtaStudentEnrollment {
 }
 
 enum PtaVolunteerOpportunityStatus {
+  DRAFT
   OPEN
   CLOSED
   CANCELLED
   COMPLETED
+  ARCHIVED
 }
 
 model PtaVolunteerOpportunity {
-  id             String                        @id @default(cuid())
-  organizationId String
-  eventId        String?
-  title          String
-  description    String?
-  startAt        DateTime?
-  endAt          DateTime?
-  signupDeadline DateTime?
-  supplyRequest  String?
-  status         PtaVolunteerOpportunityStatus @default(OPEN)
-  createdAt      DateTime                      @default(now())
-  updatedAt      DateTime                      @updatedAt
+  id                   String                        @id @default(cuid())
+  organizationId       String
+  eventId              String?
+  committeeId          String?
+  title                String
+  description          String?
+  instructions         String?
+  /// Nullable for backward compatibility with rows created before this field
+  /// existed — new opportunities are always created with the org's current
+  /// school year (see createPtaVolunteerOpportunity()).
+  schoolYear           String?
+  /// Plain string, no formal relation — same convention as
+  /// DuesAdjustment.approvedByUserId (a coordinator is a User via
+  /// OrganizationMembership, not necessarily a PtaHouseholdAdult).
+  coordinatorUserId    String?
+  startAt              DateTime?
+  endAt                DateTime?
+  signupDeadline       DateTime?
+  cancellationDeadline DateTime?
+  supplyRequest        String?
+  status               PtaVolunteerOpportunityStatus @default(OPEN)
+  createdAt            DateTime                      @default(now())
+  updatedAt            DateTime                      @updatedAt
 
   organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   event        Event?             @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  committee    PtaCommittee?      @relation(fields: [committeeId], references: [id], onDelete: SetNull)
   slots        PtaVolunteerSlot[]
 
   @@index([organizationId])
   @@index([organizationId, status])
+  @@index([organizationId, schoolYear])
+  @@index([committeeId])
 }
 
 /// `claimedCount` is the atomic-claim counter (see claimPtaVolunteerSlot()) —
 /// never write it directly outside that function; a conditional
 /// `UPDATE ... WHERE claimedCount < capacity` is what actually prevents
 /// overbooking under concurrent signups, not an application-level read-then-write check.
+enum PtaVolunteerSlotStatus {
+  OPEN
+  CLOSED
+  CANCELLED
+}
+
 model PtaVolunteerSlot {
-  id             String    @id @default(cuid())
-  organizationId String
-  opportunityId  String
-  label          String?
-  startAt        DateTime?
-  endAt          DateTime?
-  capacity       Int       @default(1)
-  claimedCount   Int       @default(0)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  id                     String                 @id @default(cuid())
+  organizationId         String
+  opportunityId          String
+  label                  String?
+  startAt                DateTime?
+  endAt                  DateTime?
+  capacity               Int                    @default(1)
+  claimedCount           Int                    @default(0)
+  /// Below this, the shift is understaffed for reporting purposes — purely
+  /// informational, never enforced as a hard floor.
+  minNeeded              Int?
+  /// Default minutes credited when an officer confirms attendance without
+  /// entering an explicit duration — see hour-calculation precedence in
+  /// docs/pta-volunteer-management.md. Null means "use scheduled duration."
+  defaultCreditedMinutes Int?
+  locationOverride       String?
+  status                 PtaVolunteerSlotStatus @default(OPEN)
+  sortOrder              Int                    @default(0)
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
 
   organization Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   opportunity  PtaVolunteerOpportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
@@ -2490,10 +2526,27 @@ model PtaVolunteerSlot {
   @@index([opportunityId])
 }
 
+/// SIGNED_UP/CANCELLED/COMPLETED are the original statuses (kept for backward
+/// compatibility with existing rows and completePtaVolunteerSignup(), now
+/// deprecated in favor of the attendance+ledger pipeline below).
+/// WAITLISTED/ATTENDED/PARTIAL/NO_SHOW/EXCUSED are the new statuses the
+/// check-in/attendance workflow uses. SIGNED_UP is this assignment model's
+/// "confirmed" state — a separate CONFIRMED value was deliberately not added
+/// to avoid a disruptive enum-value rename across existing code and data.
 enum PtaVolunteerSignupStatus {
   SIGNED_UP
   CANCELLED
   COMPLETED
+  WAITLISTED
+  ATTENDED
+  PARTIAL
+  NO_SHOW
+  EXCUSED
+}
+
+enum PtaVolunteerSignupSource {
+  SELF
+  OFFICER_MANUAL
 }
 
 model PtaVolunteerSignup {
@@ -2501,22 +2554,160 @@ model PtaVolunteerSignup {
   organizationId   String
   slotId           String
   householdAdultId String
+  /// Denormalized from householdAdult.householdId at write time — reporting
+  /// convenience so household-level queries never need a second join hop.
+  householdId      String?
   status           PtaVolunteerSignupStatus @default(SIGNED_UP)
+  source           PtaVolunteerSignupSource @default(SELF)
   hoursLogged      Float?
   signedUpAt       DateTime                 @default(now())
   cancelledAt      DateTime?
+  cancelReason     String?
   completedAt      DateTime?
+  manuallyAssigned Boolean                  @default(false)
+  assignedByUserId String?
+  notes            String?
   createdAt        DateTime                 @default(now())
   updatedAt        DateTime                 @updatedAt
 
-  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  slot           PtaVolunteerSlot  @relation(fields: [slotId], references: [id], onDelete: Cascade)
-  householdAdult PtaHouseholdAdult @relation(fields: [householdAdultId], references: [id], onDelete: Cascade)
+  organization   Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  slot           PtaVolunteerSlot        @relation(fields: [slotId], references: [id], onDelete: Cascade)
+  householdAdult PtaHouseholdAdult       @relation(fields: [householdAdultId], references: [id], onDelete: Cascade)
+  attendance     PtaVolunteerAttendance?
+  hourEntries    PtaVolunteerHourEntry[]
 
   @@unique([slotId, householdAdultId])
   @@index([organizationId])
   @@index([slotId])
   @@index([householdAdultId])
+  @@index([householdId])
+}
+
+enum PtaVolunteerEntrySource {
+  OFFICER_MANUAL
+  SELF_REPORTED
+  QR
+  MOBILE
+  IMPORT
+}
+
+enum PtaVolunteerAttendanceStatus {
+  ATTENDED
+  PARTIAL
+  NO_SHOW
+  EXCUSED
+}
+
+/// What actually occurred at the shift — deliberately separate from
+/// PtaVolunteerSignup (the intent to show up) and PtaVolunteerHourEntry (the
+/// approved credit), per the module's design principle that a signup, its
+/// attendance, and its approved hours are three different facts that change
+/// at different times and must never be collapsed into one mutable field.
+model PtaVolunteerAttendance {
+  id               String                        @id @default(cuid())
+  organizationId   String
+  signupId         String                        @unique
+  /// Copied from the slot at check-in time so a later shift-time edit never
+  /// silently rewrites historical attendance records.
+  scheduledStart   DateTime?
+  scheduledEnd     DateTime?
+  checkInAt        DateTime?
+  checkOutAt       DateTime?
+  status           PtaVolunteerAttendanceStatus?
+  recordedByUserId String?
+  source           PtaVolunteerEntrySource       @default(OFFICER_MANUAL)
+  officerNotes     String?
+  parentNotes      String?
+  correctionReason String?
+  createdAt        DateTime                      @default(now())
+  updatedAt        DateTime                      @updatedAt
+
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  signup       PtaVolunteerSignup @relation(fields: [signupId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+}
+
+enum PtaVolunteerHourEntryStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  VOIDED
+}
+
+/// The authoritative volunteer-hours ledger. Only APPROVED entries ever
+/// count toward a household/member total — see getPtaVolunteerHourTotals().
+/// Minutes, never a float, to avoid the exact precision problem the module
+/// brief calls out; format as hours only at render time.
+model PtaVolunteerHourEntry {
+  id               String                      @id @default(cuid())
+  organizationId   String
+  schoolYear       String
+  signupId         String
+  householdAdultId String
+  householdId      String?
+  opportunityId    String
+  slotId           String
+  creditedMinutes  Int
+  status           PtaVolunteerHourEntryStatus @default(PENDING)
+  source           PtaVolunteerEntrySource     @default(OFFICER_MANUAL)
+  approvedByUserId String?
+  approvedAt       DateTime?
+  rejectedByUserId String?
+  rejectedAt       DateTime?
+  notes            String?
+  createdAt        DateTime                    @default(now())
+  updatedAt        DateTime                    @updatedAt
+
+  organization Organization                 @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  signup       PtaVolunteerSignup           @relation(fields: [signupId], references: [id], onDelete: Cascade)
+  adjustments  PtaVolunteerHourAdjustment[]
+
+  @@index([organizationId, schoolYear])
+  @@index([householdAdultId])
+  @@index([householdId])
+  @@index([opportunityId])
+  @@index([status])
+}
+
+/// Immutable audit trail for a correction to an already-approved hour entry —
+/// mirrors DuesAdjustment's existing pattern rather than silently overwriting
+/// history. minuteAdjustment is signed (+/-); the entry's own creditedMinutes
+/// is updated to reflect the net total, but every adjustment that produced it
+/// remains on record here.
+model PtaVolunteerHourAdjustment {
+  id               String   @id @default(cuid())
+  organizationId   String
+  hourEntryId      String
+  minuteAdjustment Int
+  reason           String
+  actorUserId      String?
+  createdAt        DateTime @default(now())
+
+  organization Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  hourEntry    PtaVolunteerHourEntry @relation(fields: [hourEntryId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([hourEntryId])
+}
+
+/// Optional per-organization, per-school-year volunteer-hour goal. Its mere
+/// absence means "this PTA doesn't use hour requirements" — every totals/
+/// progress calculation must treat a missing row as "no requirement
+/// configured," never as "requirement is zero."
+model PtaVolunteerRequirement {
+  id              String   @id @default(cuid())
+  organizationId  String
+  schoolYear      String
+  requiredMinutes Int
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, schoolYear])
+  @@index([organizationId])
 }
 
 model PtaCommittee {
@@ -2528,9 +2719,10 @@ model PtaCommittee {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  chair        PtaHouseholdAdult?   @relation("PtaCommitteeChair", fields: [chairAdultId], references: [id], onDelete: SetNull)
-  members      PtaCommitteeMember[]
+  organization           Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  chair                  PtaHouseholdAdult?        @relation("PtaCommitteeChair", fields: [chairAdultId], references: [id], onDelete: SetNull)
+  members                PtaCommitteeMember[]
+  volunteerOpportunities PtaVolunteerOpportunity[]
 
   @@unique([organizationId, name])
   @@index([organizationId])
