@@ -57,7 +57,7 @@ export default function InboxScreen() {
           <Pressable
             onPress={() => router.push(`/conversation/${item.id}`)}
             accessibilityRole="button"
-            accessibilityLabel={`${item.hasUnread ? 'Unread, ' : ''}${item.subject || otherParticipantNames(item)}, ${otherParticipantNames(item)}${item.lastMessageAt ? `, ${new Date(item.lastMessageAt).toLocaleDateString()}` : ''}`}
+            accessibilityLabel={`${item.hasUnread ? 'Unread, ' : ''}${item.subject || otherParticipantNames(item)}${item.subject ? `, ${otherParticipantNames(item)}` : ''}${item.lastMessageAt ? `, ${new Date(item.lastMessageAt).toLocaleDateString()}` : ''}`}
           >
             <ThemedView type="backgroundElement" style={styles.row}>
               <ThemedView style={styles.rowHeader}>

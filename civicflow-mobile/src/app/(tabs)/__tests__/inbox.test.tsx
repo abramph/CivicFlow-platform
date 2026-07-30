@@ -48,6 +48,24 @@ describe('Inbox unread state', () => {
     expect(screen.queryByLabelText(/^Unread, Field trip logistics/)).toBeNull();
   });
 
+  it("does not announce the participant name twice for a subject-less conversation", async () => {
+    mockGetConversations.mockResolvedValue([
+      {
+        id: 'conv-1',
+        subject: null,
+        hasUnread: true,
+        lastMessageAt: '2026-09-10T12:00:00.000Z',
+        otherParticipants: [{ displayName: 'Alex Morgan' }],
+      },
+    ]);
+
+    await render(<InboxScreen />);
+
+    await waitFor(() => expect(screen.getByText('Alex Morgan')).toBeTruthy());
+    expect(screen.getByLabelText('Unread, Alex Morgan, 9/10/2026')).toBeTruthy();
+    expect(screen.queryByLabelText(/Alex Morgan.*Alex Morgan/)).toBeNull();
+  });
+
   it('shows the empty state once loaded with no conversations', async () => {
     mockGetConversations.mockResolvedValue([]);
 

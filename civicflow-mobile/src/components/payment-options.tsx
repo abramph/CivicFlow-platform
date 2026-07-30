@@ -74,10 +74,20 @@ export function PaymentOptions({
                 accessible={!payLink}
                 accessibilityLabel={!payLink ? `${method.label}${method.accountIdentifier ? `, ${method.accountIdentifier}` : ''}${method.instructions ? `, ${method.instructions}` : ''}` : undefined}
               >
-                <ThemedText type="smallBold">{method.label}</ThemedText>
+                <ThemedText
+                  type="smallBold"
+                  accessibilityElementsHidden={Boolean(payLink)}
+                  importantForAccessibility={payLink ? 'no' : 'auto'}
+                >
+                  {method.label}
+                </ThemedText>
                 {method.accountIdentifier ? (
                   payLink ? (
-                    <Pressable onPress={() => WebBrowser.openBrowserAsync(payLink)} accessibilityRole="link" accessibilityLabel={`Pay via ${method.label}, ${method.accountIdentifier}`}>
+                    <Pressable
+                      onPress={() => WebBrowser.openBrowserAsync(payLink)}
+                      accessibilityRole="link"
+                      accessibilityLabel={`Pay via ${method.label}, ${method.accountIdentifier}${method.instructions ? `, ${method.instructions}` : ''}`}
+                    >
                       <ThemedText type="small" style={styles.link}>{method.accountIdentifier}</ThemedText>
                     </Pressable>
                   ) : (
@@ -85,7 +95,14 @@ export function PaymentOptions({
                   )
                 ) : null}
                 {method.instructions ? (
-                  <ThemedText type="small" themeColor="textSecondary">{method.instructions}</ThemedText>
+                  <ThemedText
+                    type="small"
+                    themeColor="textSecondary"
+                    accessibilityElementsHidden={Boolean(payLink)}
+                    importantForAccessibility={payLink ? 'no' : 'auto'}
+                  >
+                    {method.instructions}
+                  </ThemedText>
                 ) : null}
               </ThemedView>
             );

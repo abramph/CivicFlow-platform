@@ -120,9 +120,11 @@ export default function AttendanceScanScreen() {
 
   if (state.kind === 'error') {
     return (
-      <ThemedView style={styles.centered} accessibilityLiveRegion="assertive">
+      <ThemedView style={styles.centered}>
         <ThemedText style={styles.errorIcon} accessibilityElementsHidden importantForAccessibility="no">✕</ThemedText>
-        <ThemedText type="title" style={styles.title} accessibilityRole="alert">Check-In Didn&apos;t Go Through</ThemedText>
+        <ThemedText type="title" style={styles.title} accessibilityRole="alert" accessibilityLiveRegion="assertive">
+          Check-In Didn&apos;t Go Through
+        </ThemedText>
         <ThemedText type="default" themeColor="textSecondary" style={styles.explainer}>{state.message}</ThemedText>
         <Pressable style={styles.primaryButton} onPress={retry} accessibilityRole="button" accessibilityLabel="Scan again">
           <ThemedText style={styles.primaryButtonText}>Scan Again</ThemedText>
