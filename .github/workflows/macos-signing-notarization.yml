@@ -267,6 +267,23 @@ jobs:
             unset APPLE_API_KEY_ID APPLE_API_ISSUER_ID APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_API_PRIVATE_KEY_PATH
           fi
 
+          # electron-builder >=24 auto-notarizes internally (before this file's
+          # own afterSign hook ever runs) using its own env var names, which
+          # differ from the names used above / by scripts/notarize.js. Without
+          # this, electron-builder's built-in check sees APPLE_API_KEY_ID set,
+          # assumes API-key notarization is wanted, and throws
+          # "Env vars APPLE_API_KEY, APPLE_API_KEY_ID and APPLE_API_ISSUER need
+          # to be set" before packaging even starts — confirmed via a real
+          # credentialed local run, not a hypothetical. Exposing the same
+          # values under electron-builder's expected names lets its built-in
+          # notarization succeed directly; scripts/notarize.js's afterSign
+          # hook then runs afterward and safely no-ops since its own
+          # (differently-named) env vars aren't set.
+          if [ "$RUN_NOTARIZATION" = "true" ] && [ -n "$APPLE_API_KEY_ID" ]; then
+            export APPLE_API_KEY="$APPLE_API_PRIVATE_KEY_PATH"
+            export APPLE_API_ISSUER="$APPLE_API_ISSUER_ID"
+          fi
+
           npx electron-builder "${BUILD_ARGS[@]}" 2>&1 | tee "$RUNNER_TEMP/build-and-notarize.log"
 
       - name: Extract notarization result from build log
