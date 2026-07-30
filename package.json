@@ -103,6 +103,9 @@
       "src/preload.js",
       "package.json"
     ],
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**/*"
+    ],
     "win": {
       "target": [
         "nsis"
@@ -120,6 +123,12 @@
       "target": [
         {
           "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
           "arch": [
             "arm64"
           ]
