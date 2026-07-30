@@ -62,7 +62,7 @@ export default function VolunteerCheckinRosterScreen() {
 
   if (loading) {
     return (
-      <ThemedView style={styles.loadingContainer}>
+      <ThemedView style={styles.loadingContainer} accessibilityRole="progressbar" accessibilityLabel="Loading roster">
         <ActivityIndicator />
       </ThemedView>
     );
@@ -72,7 +72,9 @@ export default function VolunteerCheckinRosterScreen() {
     return (
       <ThemedView style={styles.container}>
         <ThemedText type="title">Roster</ThemedText>
-        <ThemedText type="small" themeColor="textSecondary">This opportunity isn&apos;t available.</ThemedText>
+        <ThemedText type="small" themeColor="textSecondary" accessibilityRole="alert" accessibilityLiveRegion="assertive">
+          This opportunity isn&apos;t available.
+        </ThemedText>
       </ThemedView>
     );
   }
@@ -93,6 +95,9 @@ export default function VolunteerCheckinRosterScreen() {
               disabled={isPending}
               onPress={() => runAction(signup.signupId, () => checkInPtaVolunteer(selectedOrganizationId!, signup.signupId))}
               style={[styles.button, styles.buttonPrimary, isPending && styles.buttonDisabled]}
+              accessibilityRole="button"
+              accessibilityLabel={`Check in ${signup.name}`}
+              accessibilityState={{ disabled: isPending, busy: isPending }}
             >
               <ThemedText style={styles.buttonPrimaryText}>{isPending ? '…' : 'Check in'}</ThemedText>
             </Pressable>
@@ -101,6 +106,9 @@ export default function VolunteerCheckinRosterScreen() {
               disabled={isPending}
               onPress={() => runAction(signup.signupId, () => checkOutPtaVolunteer(selectedOrganizationId!, signup.signupId))}
               style={[styles.button, styles.buttonAmber, isPending && styles.buttonDisabled]}
+              accessibilityRole="button"
+              accessibilityLabel={`Check out ${signup.name}`}
+              accessibilityState={{ disabled: isPending, busy: isPending }}
             >
               <ThemedText style={styles.buttonPrimaryText}>{isPending ? '…' : 'Check out'}</ThemedText>
             </Pressable>
@@ -114,6 +122,9 @@ export default function VolunteerCheckinRosterScreen() {
                 disabled={isPending}
                 onPress={() => runAction(signup.signupId, () => setPtaVolunteerAttendance(selectedOrganizationId!, signup.signupId, 'ATTENDED'))}
                 style={[styles.button, styles.buttonOutline, isPending && styles.buttonDisabled]}
+                accessibilityRole="button"
+                accessibilityLabel={`Mark ${signup.name} attended`}
+                accessibilityState={{ disabled: isPending, busy: isPending }}
               >
                 <ThemedText style={styles.buttonOutlineText}>Attended</ThemedText>
               </Pressable>
@@ -121,6 +132,9 @@ export default function VolunteerCheckinRosterScreen() {
                 disabled={isPending}
                 onPress={() => runAction(signup.signupId, () => setPtaVolunteerAttendance(selectedOrganizationId!, signup.signupId, 'NO_SHOW'))}
                 style={[styles.button, styles.buttonOutlineDanger, isPending && styles.buttonDisabled]}
+                accessibilityRole="button"
+                accessibilityLabel={`Mark ${signup.name} no-show`}
+                accessibilityState={{ disabled: isPending, busy: isPending }}
               >
                 <ThemedText style={styles.buttonOutlineDangerText}>No-show</ThemedText>
               </Pressable>
@@ -128,6 +142,9 @@ export default function VolunteerCheckinRosterScreen() {
                 disabled={isPending}
                 onPress={() => runAction(signup.signupId, () => setPtaVolunteerAttendance(selectedOrganizationId!, signup.signupId, 'EXCUSED'))}
                 style={[styles.button, styles.buttonOutline, isPending && styles.buttonDisabled]}
+                accessibilityRole="button"
+                accessibilityLabel={`Mark ${signup.name} excused`}
+                accessibilityState={{ disabled: isPending, busy: isPending }}
               >
                 <ThemedText style={styles.buttonOutlineText}>Excused</ThemedText>
               </Pressable>

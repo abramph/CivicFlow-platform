@@ -35,7 +35,7 @@ export default function OrganizationDeepLinkScreen() {
   }
 
   return (
-    <ThemedView style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+    <ThemedView style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }} accessibilityRole="progressbar" accessibilityLabel="Switching organization">
       <ActivityIndicator />
     </ThemedView>
   );

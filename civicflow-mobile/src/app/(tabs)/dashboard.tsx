@@ -119,14 +119,24 @@ export default function DashboardScreen() {
 
       {hasMemberIdentity ? (
         <ThemedView style={styles.summaryRow}>
-          <Pressable style={styles.summaryTile} onPress={() => router.push('/dues')}>
+          <Pressable
+            style={styles.summaryTile}
+            onPress={() => router.push('/dues')}
+            accessibilityRole="button"
+            accessibilityLabel={`Balance, ${dues ? formatCurrency(dues.outstandingBalance) : 'unknown'}${dues?.isDelinquent ? ', past due' : ''}`}
+          >
             <ThemedView type="backgroundElement" style={styles.card}>
               <ThemedText type="small" themeColor="textSecondary">Balance</ThemedText>
               <ThemedText type="subtitle">{dues ? formatCurrency(dues.outstandingBalance) : '—'}</ThemedText>
               {dues?.isDelinquent ? <ThemedText type="small" style={styles.delinquent}>Past due</ThemedText> : null}
             </ThemedView>
           </Pressable>
-          <Pressable style={styles.summaryTile} onPress={() => router.push('/inbox')}>
+          <Pressable
+            style={styles.summaryTile}
+            onPress={() => router.push('/inbox')}
+            accessibilityRole="button"
+            accessibilityLabel={`Unread messages, ${unreadCount}`}
+          >
             <ThemedView type="backgroundElement" style={styles.card}>
               <ThemedText type="small" themeColor="textSecondary">Unread Messages</ThemedText>
               <ThemedText type="subtitle">{unreadCount}</ThemedText>
@@ -137,7 +147,12 @@ export default function DashboardScreen() {
 
       {hasPtaIdentity && !hasMemberIdentity ? (
         <ThemedView style={styles.summaryRow}>
-          <Pressable style={styles.summaryTile} onPress={() => router.push('/dues')}>
+          <Pressable
+            style={styles.summaryTile}
+            onPress={() => router.push('/dues')}
+            accessibilityRole="button"
+            accessibilityLabel={`Dues balance, ${ptaDues?.currentCharge ? formatCentsCurrency(ptaDues.currentCharge.remainingBalanceCents) : 'unknown'}${ptaDues?.currentCharge?.status === 'PENDING_REVIEW' ? ', payment pending review' : ''}${ptaDues?.hasBillingIdentity === false ? ', no billing record' : ''}`}
+          >
             <ThemedView type="backgroundElement" style={styles.card}>
               <ThemedText type="small" themeColor="textSecondary">Dues Balance</ThemedText>
               <ThemedText type="subtitle">
@@ -151,7 +166,12 @@ export default function DashboardScreen() {
               ) : null}
             </ThemedView>
           </Pressable>
-          <Pressable style={styles.summaryTile} onPress={() => router.push('/inbox')}>
+          <Pressable
+            style={styles.summaryTile}
+            onPress={() => router.push('/inbox')}
+            accessibilityRole="button"
+            accessibilityLabel={`Unread messages, ${unreadCount}`}
+          >
             <ThemedView type="backgroundElement" style={styles.card}>
               <ThemedText type="small" themeColor="textSecondary">Unread Messages</ThemedText>
               <ThemedText type="subtitle">{unreadCount}</ThemedText>
@@ -161,7 +181,11 @@ export default function DashboardScreen() {
       ) : null}
 
       {pta?.householdAdultId ? (
-        <Pressable onPress={() => router.push('/volunteers')}>
+        <Pressable
+          onPress={() => router.push('/volunteers')}
+          accessibilityRole="button"
+          accessibilityLabel={`Volunteer hours approved, ${ptaHours ? formatHours(ptaHours.approvedMinutes) : 'unknown'}${ptaHours?.requiredMinutes != null ? `, ${formatHours(ptaHours.remainingMinutes ?? 0)} remaining toward the ${formatHours(ptaHours.requiredMinutes)}-hour goal` : ''}${ptaUpcoming ? `, next: ${ptaUpcoming.opportunityTitle}, ${ptaUpcoming.slotLabel ?? 'shift'}` : ''}`}
+        >
           <ThemedView type="backgroundElement" style={styles.card}>
             <ThemedText type="small" themeColor="textSecondary">Volunteer hours approved</ThemedText>
             <ThemedText type="subtitle">{ptaHours ? formatHours(ptaHours.approvedMinutes) : '—'}</ThemedText>
@@ -180,7 +204,11 @@ export default function DashboardScreen() {
       ) : null}
 
       {pendingReportCount > 0 ? (
-        <Pressable onPress={() => router.push(hasMemberIdentity ? '/payment-history' : '/dues')}>
+        <Pressable
+          onPress={() => router.push(hasMemberIdentity ? '/payment-history' : '/dues')}
+          accessibilityRole="button"
+          accessibilityLabel={`${pendingReportCount} payment report${pendingReportCount === 1 ? '' : 's'} awaiting review`}
+        >
           <ThemedView type="backgroundElement" style={styles.card}>
             <ThemedText type="smallBold">
               {pendingReportCount} payment report{pendingReportCount === 1 ? '' : 's'} awaiting review
@@ -190,7 +218,11 @@ export default function DashboardScreen() {
       ) : null}
 
       {nextEvent ? (
-        <Pressable onPress={() => router.push(`/event/${nextEvent.id}`)}>
+        <Pressable
+          onPress={() => router.push(`/event/${nextEvent.id}`)}
+          accessibilityRole="button"
+          accessibilityLabel={`Next upcoming event, ${nextEvent.title}${nextEvent.startAt ? `, ${new Date(nextEvent.startAt).toLocaleString()}` : ''}${'myRsvp' in nextEvent && nextEvent.myRsvp ? `, you're ${nextEvent.myRsvp.status.replace('_', ' ').toLowerCase()}` : ''}`}
+        >
           <ThemedView type="backgroundElement" style={styles.card}>
             <ThemedText type="small" themeColor="textSecondary">Next Upcoming Event</ThemedText>
             <ThemedText type="smallBold">{nextEvent.title}</ThemedText>
@@ -207,7 +239,7 @@ export default function DashboardScreen() {
       <ThemedText type="smallBold" style={styles.sectionLabel}>Quick Actions</ThemedText>
       <ThemedView style={styles.quickActionsRow}>
         {hasMemberIdentity ? (
-          <Pressable style={styles.actionButton} onPress={() => router.push('/make-payment')}>
+          <Pressable style={styles.actionButton} onPress={() => router.push('/make-payment')} accessibilityRole="button" accessibilityLabel="Make a payment">
             <ThemedText style={styles.actionButtonText}>Make a Payment</ThemedText>
           </Pressable>
         ) : null}
@@ -215,36 +247,40 @@ export default function DashboardScreen() {
           <Pressable
             style={styles.actionButton}
             onPress={() => WebBrowser.openBrowserAsync(`${API_BASE_URL}/pay/${ptaDues.onlinePaymentLinkSlug}`)}
+            accessibilityRole="button"
+            accessibilityLabel="Make a payment"
           >
             <ThemedText style={styles.actionButtonText}>Make a Payment</ThemedText>
           </Pressable>
         ) : null}
         {hasMemberIdentity ? (
-          <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/attendance-scan')}>
+          <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/attendance-scan')} accessibilityRole="button" accessibilityLabel="Scan attendance code">
             <ThemedText style={styles.actionButtonSecondaryText}>Scan Attendance Code</ThemedText>
           </Pressable>
         ) : null}
         <Pressable
           style={styles.actionButtonSecondary}
           onPress={() => router.push(hasMemberIdentity ? '/report-payment' : '/pta-report-payment')}
+          accessibilityRole="button"
+          accessibilityLabel="Report a payment"
         >
           <ThemedText style={styles.actionButtonSecondaryText}>Report a Payment</ThemedText>
         </Pressable>
-        <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/inbox')}>
+        <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/inbox')} accessibilityRole="button" accessibilityLabel="Inbox">
           <ThemedText style={styles.actionButtonSecondaryText}>Inbox</ThemedText>
         </Pressable>
-        <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/announcements')}>
+        <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/announcements')} accessibilityRole="button" accessibilityLabel="Announcements">
           <ThemedText style={styles.actionButtonSecondaryText}>Announcements</ThemedText>
         </Pressable>
-        <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/events')}>
+        <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/events')} accessibilityRole="button" accessibilityLabel="Events">
           <ThemedText style={styles.actionButtonSecondaryText}>Events</ThemedText>
         </Pressable>
         {hasPtaIdentity ? (
           <>
-            <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/minutes')}>
+            <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/minutes')} accessibilityRole="button" accessibilityLabel="Meeting minutes">
               <ThemedText style={styles.actionButtonSecondaryText}>Meeting Minutes</ThemedText>
             </Pressable>
-            <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/pta-documents')}>
+            <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/pta-documents')} accessibilityRole="button" accessibilityLabel="Documents">
               <ThemedText style={styles.actionButtonSecondaryText}>Documents</ThemedText>
             </Pressable>
           </>
@@ -261,7 +297,12 @@ export default function DashboardScreen() {
         <ThemedText type="small" themeColor="textSecondary">No announcements yet.</ThemedText>
       ) : (
         announcements.map((item) => (
-          <Pressable key={item.id} onPress={() => router.push(`/announcement/${item.id}`)}>
+          <Pressable
+            key={item.id}
+            onPress={() => router.push(`/announcement/${item.id}`)}
+            accessibilityRole="button"
+            accessibilityLabel={`${item.isRead ? '' : 'Unread, '}${item.subject || item.title}`}
+          >
             <ThemedView type="backgroundElement" style={styles.listCard}>
               <ThemedText type={item.isRead ? 'small' : 'smallBold'}>{item.subject || item.title}</ThemedText>
             </ThemedView>
@@ -274,7 +315,12 @@ export default function DashboardScreen() {
         <ThemedText type="small" themeColor="textSecondary">No upcoming events.</ThemedText>
       ) : (
         events.map((item) => (
-          <Pressable key={item.id} onPress={() => router.push(`/event/${item.id}`)}>
+          <Pressable
+            key={item.id}
+            onPress={() => router.push(`/event/${item.id}`)}
+            accessibilityRole="button"
+            accessibilityLabel={`${item.title}${item.startAt ? `, ${new Date(item.startAt).toLocaleString()}` : ''}`}
+          >
             <ThemedView type="backgroundElement" style={styles.listCard}>
               <ThemedText type="smallBold">{item.title}</ThemedText>
               {item.startAt ? (

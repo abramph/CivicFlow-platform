@@ -57,7 +57,12 @@ export default function AttendanceHistoryScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
         contentContainerStyle={styles.list}
         renderItem={({ item }) => (
-          <ThemedView type="backgroundElement" style={styles.row}>
+          <ThemedView
+            type="backgroundElement"
+            style={styles.row}
+            accessible
+            accessibilityLabel={`${item.meetingTitle ?? 'Meeting'}, ${new Date(item.meetingDate).toLocaleDateString()}, ${STATUS_LABEL[item.attendanceStatus]}`}
+          >
             <ThemedText type="smallBold">{item.meetingTitle ?? 'Meeting'}</ThemedText>
             <ThemedText type="small" themeColor="textSecondary">
               {new Date(item.meetingDate).toLocaleDateString()} · {STATUS_LABEL[item.attendanceStatus]}

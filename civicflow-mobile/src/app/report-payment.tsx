@@ -103,12 +103,12 @@ export default function ReportPaymentScreen() {
 
   if (success) {
     return (
-      <ThemedView style={styles.successContainer}>
+      <ThemedView style={styles.successContainer} accessibilityLiveRegion="polite">
         <ThemedText type="title" style={styles.center}>Payment Reported</ThemedText>
         <ThemedText type="default" themeColor="textSecondary" style={styles.center}>
           Your organization&apos;s treasurer will review this and confirm it soon.
         </ThemedText>
-        <Pressable style={styles.button} onPress={() => router.replace('/dues')}>
+        <Pressable style={styles.button} onPress={() => router.replace('/dues')} accessibilityRole="button" accessibilityLabel="Back to dues">
           <ThemedText style={styles.buttonText}>Back to Dues</ThemedText>
         </Pressable>
       </ThemedView>
@@ -124,14 +124,14 @@ export default function ReportPaymentScreen() {
           <ThemedView type="backgroundElement" style={styles.orgRow}>
             <ThemedText type="small" themeColor="textSecondary">Reporting for</ThemedText>
             <ThemedText type="smallBold">{selectedOrg?.organizationName ?? 'Select an organization'}</ThemedText>
-            <Pressable onPress={() => router.push('/org-switcher')}>
+            <Pressable onPress={() => router.push('/org-switcher')} accessibilityRole="button" accessibilityLabel="Change organization">
               <ThemedText type="link">Change organization</ThemedText>
             </Pressable>
           </ThemedView>
         ) : null}
 
         <ThemedText type="small" themeColor="textSecondary">What&apos;s this payment for?</ThemedText>
-        <ThemedView style={styles.methodRow}>
+        <ThemedView style={styles.methodRow} accessibilityRole="radiogroup" accessibilityLabel="Payment category">
           {CATEGORIES.map((option) => (
             <Pressable
               key={option.value}
@@ -140,6 +140,9 @@ export default function ReportPaymentScreen() {
                 setCategory(option.value);
                 if (option.value !== 'MEMBERSHIP_DUES') setDuesChargeId(null);
               }}
+              accessibilityRole="radio"
+              accessibilityLabel={option.label}
+              accessibilityState={{ selected: option.value === category }}
             >
               <ThemedText type="small" style={option.value === category ? styles.methodChipTextSelected : undefined}>
                 {option.label}
@@ -151,12 +154,15 @@ export default function ReportPaymentScreen() {
         {category === 'MEMBERSHIP_DUES' && duesCharges.length > 0 ? (
           <>
             <ThemedText type="small" themeColor="textSecondary">Which charge is this for? (optional)</ThemedText>
-            <ThemedView style={styles.methodRow}>
+            <ThemedView style={styles.methodRow} accessibilityRole="radiogroup" accessibilityLabel="Dues charge">
               {duesCharges.map((charge) => (
                 <Pressable
                   key={charge.id}
                   style={[styles.methodChip, charge.id === duesChargeId && styles.methodChipSelected]}
                   onPress={() => setDuesChargeId(charge.id === duesChargeId ? null : charge.id)}
+                  accessibilityRole="radio"
+                  accessibilityLabel={`${charge.duesAccount.name}, $${Number(charge.amountDue).toFixed(2)}`}
+                  accessibilityState={{ selected: charge.id === duesChargeId }}
                 >
                   <ThemedText type="small" style={charge.id === duesChargeId ? styles.methodChipTextSelected : undefined}>
                     {charge.duesAccount.name} · ${Number(charge.amountDue).toFixed(2)}
@@ -168,15 +174,18 @@ export default function ReportPaymentScreen() {
         ) : null}
 
         <ThemedText type="small" themeColor="textSecondary">Amount</ThemedText>
-        <TextInput style={styles.input} placeholder="0.00" keyboardType="decimal-pad" value={amount} onChangeText={setAmount} />
+        <TextInput style={styles.input} placeholder="0.00" keyboardType="decimal-pad" value={amount} onChangeText={setAmount} accessibilityLabel="Amount" />
 
         <ThemedText type="small" themeColor="textSecondary">Payment Method</ThemedText>
-        <ThemedView style={styles.methodRow}>
+        <ThemedView style={styles.methodRow} accessibilityRole="radiogroup" accessibilityLabel="Payment method">
           {PAYMENT_METHODS.map((method) => (
             <Pressable
               key={method}
               style={[styles.methodChip, method === paymentMethod && styles.methodChipSelected]}
               onPress={() => setPaymentMethod(method)}
+              accessibilityRole="radio"
+              accessibilityLabel={method.replace('_', ' ')}
+              accessibilityState={{ selected: method === paymentMethod }}
             >
               <ThemedText type="small" style={method === paymentMethod ? styles.methodChipTextSelected : undefined}>
                 {method.replace('_', ' ')}
@@ -186,22 +195,33 @@ export default function ReportPaymentScreen() {
         </ThemedView>
 
         <ThemedText type="small" themeColor="textSecondary">Payment Date (YYYY-MM-DD)</ThemedText>
-        <TextInput style={styles.input} value={paymentDate} onChangeText={setPaymentDate} placeholder={todayIsoDate()} />
+        <TextInput style={styles.input} value={paymentDate} onChangeText={setPaymentDate} placeholder={todayIsoDate()} accessibilityLabel="Payment date, format YYYY-MM-DD" />
 
         <ThemedText type="small" themeColor="textSecondary">Reference Number (optional)</ThemedText>
-        <TextInput style={styles.input} value={referenceNumber} onChangeText={setReferenceNumber} placeholder="Check #, confirmation code, etc." />
+        <TextInput style={styles.input} value={referenceNumber} onChangeText={setReferenceNumber} placeholder="Check #, confirmation code, etc." accessibilityLabel="Reference number, optional" />
 
         <ThemedText type="small" themeColor="textSecondary">Note (optional)</ThemedText>
-        <TextInput style={[styles.input, styles.multiline]} value={note} onChangeText={setNote} placeholder="Anything the treasurer should know" multiline />
+        <TextInput style={[styles.input, styles.multiline]} value={note} onChangeText={setNote} placeholder="Anything the treasurer should know" multiline accessibilityLabel="Note, optional" />
 
-        <Pressable style={styles.secondaryButton} onPress={pickReceipt}>
+        <Pressable style={styles.secondaryButton} onPress={pickReceipt} accessibilityRole="button" accessibilityLabel={receipt ? 'Change receipt photo' : 'Attach receipt photo, optional'}>
           <ThemedText type="link">{receipt ? 'Change Receipt Photo' : 'Attach Receipt Photo (optional)'}</ThemedText>
         </Pressable>
-        {receipt ? <Image source={{ uri: receipt.uri }} style={styles.preview} /> : null}
+        {receipt ? <Image source={{ uri: receipt.uri }} style={styles.preview} accessibilityLabel="Receipt photo preview" /> : null}
 
-        {error ? <ThemedText type="small" style={styles.error}>{error}</ThemedText> : null}
+        {error ? (
+          <ThemedText type="small" style={styles.error} accessibilityRole="alert" accessibilityLiveRegion="assertive">
+            {error}
+          </ThemedText>
+        ) : null}
 
-        <Pressable style={[styles.button, submitting && styles.buttonDisabled]} onPress={handleSubmit} disabled={submitting}>
+        <Pressable
+          style={[styles.button, submitting && styles.buttonDisabled]}
+          onPress={handleSubmit}
+          disabled={submitting}
+          accessibilityRole="button"
+          accessibilityLabel="Submit payment report"
+          accessibilityState={{ disabled: submitting, busy: submitting }}
+        >
           {submitting ? <ActivityIndicator color="#fff" /> : <ThemedText style={styles.buttonText}>Submit Payment Report</ThemedText>}
         </Pressable>
       </ScrollView>

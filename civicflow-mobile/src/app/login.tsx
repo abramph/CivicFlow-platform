@@ -59,6 +59,7 @@ export default function LoginScreen() {
           keyboardType="email-address"
           value={email}
           onChangeText={setEmail}
+          accessibilityLabel="Email address"
         />
         <TextInput
           style={styles.input}
@@ -67,10 +68,17 @@ export default function LoginScreen() {
           autoComplete="password"
           value={password}
           onChangeText={setPassword}
+          accessibilityLabel="Password"
         />
 
         {error ? (
-          <ThemedText type="small" themeColor="text" style={styles.error}>
+          <ThemedText
+            type="small"
+            themeColor="text"
+            style={styles.error}
+            accessibilityRole="alert"
+            accessibilityLiveRegion="assertive"
+          >
             {error}
           </ThemedText>
         ) : null}
@@ -79,11 +87,14 @@ export default function LoginScreen() {
           style={[styles.button, submitting && styles.buttonDisabled]}
           onPress={handleSubmit}
           disabled={submitting || !email || !password}
+          accessibilityRole="button"
+          accessibilityLabel="Log in"
+          accessibilityState={{ disabled: submitting || !email || !password, busy: submitting }}
         >
           {submitting ? <ActivityIndicator color="#fff" /> : <ThemedText style={styles.buttonText}>Log In</ThemedText>}
         </Pressable>
 
-        <Link href="/accept-invite" style={styles.link}>
+        <Link href="/accept-invite" style={styles.link} accessibilityRole="link">
           <ThemedText type="link" themeColor="textSecondary">
             Have an invite link? Set up your account
           </ThemedText>

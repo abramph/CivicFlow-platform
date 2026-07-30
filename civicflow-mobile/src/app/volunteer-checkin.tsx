@@ -56,7 +56,11 @@ export default function VolunteerCheckinScreen() {
       <ThemedText type="title">Event-Day Check-In</ThemedText>
 
       {canApproveHours && summary && summary.pendingHourApprovalCount > 0 ? (
-        <Pressable onPress={() => router.push('/volunteer-hour-approvals')}>
+        <Pressable
+          onPress={() => router.push('/volunteer-hour-approvals')}
+          accessibilityRole="button"
+          accessibilityLabel={`${summary.pendingHourApprovalCount} hour approval${summary.pendingHourApprovalCount === 1 ? '' : 's'} pending. Review now`}
+        >
           <ThemedView type="backgroundElement" style={styles.card}>
             <ThemedText type="smallBold">
               {summary.pendingHourApprovalCount} hour approval{summary.pendingHourApprovalCount === 1 ? '' : 's'} pending
@@ -71,7 +75,12 @@ export default function VolunteerCheckinScreen() {
         <ThemedText type="small" themeColor="textSecondary">No open opportunities.</ThemedText>
       ) : (
         summary.opportunities.map((opp) => (
-          <Pressable key={opp.id} onPress={() => router.push(`/volunteer-checkin/${opp.id}`)}>
+          <Pressable
+            key={opp.id}
+            onPress={() => router.push(`/volunteer-checkin/${opp.id}`)}
+            accessibilityRole="button"
+            accessibilityLabel={`${opp.title}, ${opp.claimedCount} of ${opp.capacity} filled across ${opp.slotCount} shift${opp.slotCount === 1 ? '' : 's'}`}
+          >
             <ThemedView type="backgroundElement" style={styles.listCard}>
               <ThemedText type="smallBold">{opp.title}</ThemedText>
               <ThemedText type="small" themeColor="textSecondary">

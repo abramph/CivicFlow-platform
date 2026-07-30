@@ -96,12 +96,15 @@ export default function PaymentHistoryScreen() {
   return (
     <ThemedView style={styles.container}>
       <ThemedText type="title">Payment History</ThemedText>
-      <ThemedView style={styles.filterRow}>
+      <ThemedView style={styles.filterRow} accessibilityRole="radiogroup" accessibilityLabel="Filter by status">
         {STATUS_FILTERS.map((option) => (
           <Pressable
             key={option}
             style={[styles.filterChip, option === filter && styles.filterChipSelected]}
             onPress={() => setFilter(option)}
+            accessibilityRole="radio"
+            accessibilityLabel={option}
+            accessibilityState={{ selected: option === filter }}
           >
             <ThemedText type="small" style={option === filter ? styles.filterChipTextSelected : undefined}>
               {option}
@@ -115,7 +118,12 @@ export default function PaymentHistoryScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
         contentContainerStyle={styles.list}
         renderItem={({ item }) => (
-          <ThemedView type="backgroundElement" style={styles.row}>
+          <ThemedView
+            type="backgroundElement"
+            style={styles.row}
+            accessible
+            accessibilityLabel={`$${Number(item.amount).toFixed(2)}, ${new Date(item.date).toLocaleDateString()}, ${item.category}, ${item.label}${item.kind === 'report' ? `, ${item.status}` : ''}${item.kind === 'report' && item.status === 'rejected' && item.rejectionReason ? `, ${item.rejectionReason}` : ''}`}
+          >
             <ThemedText type="smallBold">
               ${Number(item.amount).toFixed(2)} · {new Date(item.date).toLocaleDateString()}
             </ThemedText>

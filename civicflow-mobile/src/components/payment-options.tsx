@@ -54,6 +54,9 @@ export function PaymentOptions({
         <Pressable
           style={styles.payButton}
           onPress={() => WebBrowser.openBrowserAsync(`${API_BASE_URL}/pay/${paymentLinkSlug}`)}
+          accessibilityRole="button"
+          accessibilityLabel="Pay now via card"
+          accessibilityHint="Opens payment in your browser"
         >
           <ThemedText style={styles.payButtonText}>Pay Now via Card</ThemedText>
         </Pressable>
@@ -65,11 +68,16 @@ export function PaymentOptions({
           {methods.map((method) => {
             const payLink = method.accountIdentifier ? buildPayLink(method.method, method.accountIdentifier) : null;
             return (
-              <ThemedView key={method.id} style={styles.methodRow}>
+              <ThemedView
+                key={method.id}
+                style={styles.methodRow}
+                accessible={!payLink}
+                accessibilityLabel={!payLink ? `${method.label}${method.accountIdentifier ? `, ${method.accountIdentifier}` : ''}${method.instructions ? `, ${method.instructions}` : ''}` : undefined}
+              >
                 <ThemedText type="smallBold">{method.label}</ThemedText>
                 {method.accountIdentifier ? (
                   payLink ? (
-                    <Pressable onPress={() => WebBrowser.openBrowserAsync(payLink)}>
+                    <Pressable onPress={() => WebBrowser.openBrowserAsync(payLink)} accessibilityRole="link" accessibilityLabel={`Pay via ${method.label}, ${method.accountIdentifier}`}>
                       <ThemedText type="small" style={styles.link}>{method.accountIdentifier}</ThemedText>
                     </Pressable>
                   ) : (
@@ -88,6 +96,8 @@ export function PaymentOptions({
       <Pressable
         style={styles.reportButton}
         onPress={() => router.push({ pathname: '/report-payment', params: { category: reportCategory } })}
+        accessibilityRole="button"
+        accessibilityLabel="Report a payment"
       >
         <ThemedText style={styles.reportButtonText}>Report a Payment</ThemedText>
       </Pressable>

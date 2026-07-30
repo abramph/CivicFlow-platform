@@ -79,7 +79,7 @@ export default function AttendanceScanScreen() {
           Unestra uses your camera to scan the meeting QR code so you can check in to attendance. Nothing is recorded
           or stored from your camera — it&apos;s only used to read the code.
         </ThemedText>
-        <Pressable style={styles.primaryButton} onPress={requestPermission}>
+        <Pressable style={styles.primaryButton} onPress={requestPermission} accessibilityRole="button" accessibilityLabel={permission.canAskAgain ? 'Grant camera access' : 'Open settings to grant access'}>
           <ThemedText style={styles.primaryButtonText}>
             {permission.canAskAgain ? 'Grant Camera Access' : 'Open Settings to Grant Access'}
           </ThemedText>
@@ -91,12 +91,17 @@ export default function AttendanceScanScreen() {
   if (state.kind === 'success') {
     const { result } = state;
     return (
-      <ThemedView style={styles.centered}>
-        <ThemedText style={styles.successIcon}>✓</ThemedText>
+      <ThemedView style={styles.centered} accessibilityLiveRegion="assertive">
+        <ThemedText style={styles.successIcon} accessibilityElementsHidden importantForAccessibility="no">✓</ThemedText>
         <ThemedText type="title" style={styles.title}>
           {result.alreadyCheckedIn ? "You're Already Checked In" : "You're Checked In"}
         </ThemedText>
-        <ThemedView type="backgroundElement" style={styles.summaryCard}>
+        <ThemedView
+          type="backgroundElement"
+          style={styles.summaryCard}
+          accessible
+          accessibilityLabel={`${result.meetingTitle}, ${new Date(result.meetingDate).toLocaleString()}, checked in at ${new Date(result.checkInTime).toLocaleTimeString()}, ${result.attendanceStatus === 'LATE' ? 'marked late' : 'present'}`}
+        >
           <ThemedText type="smallBold">{result.meetingTitle}</ThemedText>
           <ThemedText type="small" themeColor="textSecondary">{new Date(result.meetingDate).toLocaleString()}</ThemedText>
           <ThemedText type="small" themeColor="textSecondary">
@@ -106,7 +111,7 @@ export default function AttendanceScanScreen() {
             {result.attendanceStatus === 'LATE' ? 'Marked Late' : 'Present'}
           </ThemedText>
         </ThemedView>
-        <Pressable style={styles.secondaryButton} onPress={() => router.replace('/dashboard')}>
+        <Pressable style={styles.secondaryButton} onPress={() => router.replace('/dashboard')} accessibilityRole="button" accessibilityLabel="Back to dashboard">
           <ThemedText type="link">Back to Dashboard</ThemedText>
         </Pressable>
       </ThemedView>
@@ -115,11 +120,11 @@ export default function AttendanceScanScreen() {
 
   if (state.kind === 'error') {
     return (
-      <ThemedView style={styles.centered}>
-        <ThemedText style={styles.errorIcon}>✕</ThemedText>
-        <ThemedText type="title" style={styles.title}>Check-In Didn&apos;t Go Through</ThemedText>
+      <ThemedView style={styles.centered} accessibilityLiveRegion="assertive">
+        <ThemedText style={styles.errorIcon} accessibilityElementsHidden importantForAccessibility="no">✕</ThemedText>
+        <ThemedText type="title" style={styles.title} accessibilityRole="alert">Check-In Didn&apos;t Go Through</ThemedText>
         <ThemedText type="default" themeColor="textSecondary" style={styles.explainer}>{state.message}</ThemedText>
-        <Pressable style={styles.primaryButton} onPress={retry}>
+        <Pressable style={styles.primaryButton} onPress={retry} accessibilityRole="button" accessibilityLabel="Scan again">
           <ThemedText style={styles.primaryButtonText}>Scan Again</ThemedText>
         </Pressable>
       </ThemedView>

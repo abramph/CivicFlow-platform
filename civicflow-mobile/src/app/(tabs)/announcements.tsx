@@ -41,11 +41,15 @@ export default function AnnouncementsScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
         contentContainerStyle={styles.list}
         renderItem={({ item }) => (
-          <Pressable onPress={() => router.push(`/announcement/${item.id}`)}>
+          <Pressable
+            onPress={() => router.push(`/announcement/${item.id}`)}
+            accessibilityRole="button"
+            accessibilityLabel={`${item.isRead ? '' : 'Unread, '}${item.subject || item.title}${item.sentAt ? `, ${new Date(item.sentAt).toLocaleDateString()}` : ''}`}
+          >
             <ThemedView type="backgroundElement" style={styles.row}>
               <ThemedView style={styles.rowHeader}>
                 <ThemedText type={item.isRead ? 'small' : 'smallBold'}>{item.subject || item.title}</ThemedText>
-                {!item.isRead ? <ThemedView style={styles.unreadDot} /> : null}
+                {!item.isRead ? <ThemedView style={styles.unreadDot} accessibilityElementsHidden importantForAccessibility="no" /> : null}
               </ThemedView>
               {item.sentAt ? (
                 <ThemedText type="small" themeColor="textSecondary">{new Date(item.sentAt).toLocaleDateString()}</ThemedText>

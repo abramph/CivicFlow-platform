@@ -66,7 +66,7 @@ export default function ConversationThreadScreen() {
         <ThemedText type="title">{conversation?.subject || 'Conversation'}</ThemedText>
 
         {loading && !conversation ? (
-          <ActivityIndicator style={styles.loading} />
+          <ActivityIndicator style={styles.loading} accessibilityLabel="Loading conversation" />
         ) : (
           <FlatList
             ref={listRef}
@@ -80,6 +80,8 @@ export default function ConversationThreadScreen() {
                 <ThemedView
                   type="backgroundElement"
                   style={[styles.bubble, isMine ? styles.bubbleMine : styles.bubbleTheirs]}
+                  accessible
+                  accessibilityLabel={`${isMine ? 'You' : item.senderDisplayName} said, ${item.body}, at ${new Date(item.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`}
                 >
                   {!isMine ? (
                     <ThemedText type="small" themeColor="textSecondary">{item.senderDisplayName}</ThemedText>
@@ -99,7 +101,11 @@ export default function ConversationThreadScreen() {
           />
         )}
 
-        {error ? <ThemedText type="small" style={styles.error}>{error}</ThemedText> : null}
+        {error ? (
+          <ThemedText type="small" style={styles.error} accessibilityRole="alert" accessibilityLiveRegion="assertive">
+            {error}
+          </ThemedText>
+        ) : null}
 
         <ThemedView style={styles.composer}>
           <TextInput
@@ -108,8 +114,16 @@ export default function ConversationThreadScreen() {
             onChangeText={setDraft}
             placeholder="Type a message"
             multiline
+            accessibilityLabel="Message"
           />
-          <Pressable style={[styles.sendButton, sending && styles.sendButtonDisabled]} onPress={handleSend} disabled={sending || !draft.trim()}>
+          <Pressable
+            style={[styles.sendButton, sending && styles.sendButtonDisabled]}
+            onPress={handleSend}
+            disabled={sending || !draft.trim()}
+            accessibilityRole="button"
+            accessibilityLabel="Send message"
+            accessibilityState={{ disabled: sending || !draft.trim(), busy: sending }}
+          >
             {sending ? <ActivityIndicator color="#fff" size="small" /> : <ThemedText style={styles.sendButtonText}>Send</ThemedText>}
           </Pressable>
         </ThemedView>

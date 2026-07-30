@@ -70,15 +70,22 @@ export default function MfaChallengeScreen() {
             keyboardType="default"
             value={code}
             onChangeText={setCode}
+            accessibilityLabel="Verification code"
           />
 
           {error ? (
-            <ThemedText type="small" themeColor="text" style={styles.error}>
+            <ThemedText
+              type="small"
+              themeColor="text"
+              style={styles.error}
+              accessibilityRole="alert"
+              accessibilityLiveRegion="assertive"
+            >
               {error}
             </ThemedText>
           ) : null}
           {smsStatus ? (
-            <ThemedText type="small" themeColor="textSecondary">
+            <ThemedText type="small" themeColor="textSecondary" accessibilityLiveRegion="polite">
               {smsStatus}
             </ThemedText>
           ) : null}
@@ -87,11 +94,21 @@ export default function MfaChallengeScreen() {
             style={[styles.button, submitting && styles.buttonDisabled]}
             onPress={handleSubmit}
             disabled={submitting || !code}
+            accessibilityRole="button"
+            accessibilityLabel="Verify"
+            accessibilityState={{ disabled: submitting || !code, busy: submitting }}
           >
             {submitting ? <ActivityIndicator color="#fff" /> : <ThemedText style={styles.buttonText}>Verify</ThemedText>}
           </Pressable>
 
-          <Pressable style={styles.secondaryButton} onPress={handleSendSms} disabled={sendingSms}>
+          <Pressable
+            style={styles.secondaryButton}
+            onPress={handleSendSms}
+            disabled={sendingSms}
+            accessibilityRole="button"
+            accessibilityLabel="Text me a code instead"
+            accessibilityState={{ disabled: sendingSms, busy: sendingSms }}
+          >
             <ThemedText type="link" themeColor="textSecondary">
               {sendingSms ? 'Sending…' : 'Text me a code instead'}
             </ThemedText>

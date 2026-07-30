@@ -84,6 +84,9 @@ export default function VolunteerHourApprovalsScreen() {
                 disabled={isPending}
                 onPress={() => handleApprove(entry.id)}
                 style={[styles.button, isPending && styles.buttonDisabled]}
+                accessibilityRole="button"
+                accessibilityLabel={`Approve ${(entry.creditedMinutes / 60).toFixed(1)} hours for ${entry.volunteerName}, ${entry.opportunityTitle}`}
+                accessibilityState={{ disabled: isPending, busy: isPending }}
               >
                 <ThemedText style={styles.buttonText}>{isPending ? 'Approving…' : 'Approve'}</ThemedText>
               </Pressable>

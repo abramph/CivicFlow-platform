@@ -46,7 +46,7 @@ export default function MakePaymentCampaignScreen() {
 
   if (loading) {
     return (
-      <ThemedView style={styles.loadingContainer}>
+      <ThemedView style={styles.loadingContainer} accessibilityRole="progressbar" accessibilityLabel="Loading campaign">
         <ActivityIndicator />
       </ThemedView>
     );
@@ -56,7 +56,9 @@ export default function MakePaymentCampaignScreen() {
     return (
       <ThemedView style={styles.container}>
         <ThemedText type="title">Campaign</ThemedText>
-        <ThemedText type="small" themeColor="textSecondary">This campaign isn&apos;t available.</ThemedText>
+        <ThemedText type="small" themeColor="textSecondary" accessibilityRole="alert" accessibilityLiveRegion="assertive">
+          This campaign isn&apos;t available.
+        </ThemedText>
       </ThemedView>
     );
   }

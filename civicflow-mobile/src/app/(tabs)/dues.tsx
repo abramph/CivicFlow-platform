@@ -88,7 +88,12 @@ export default function DuesScreen() {
         ) : null}
 
         {!loading && charge ? (
-          <ThemedView type="backgroundElement" style={styles.summaryCard}>
+          <ThemedView
+            type="backgroundElement"
+            style={styles.summaryCard}
+            accessible
+            accessibilityLabel={`${ptaSummary?.currentSchoolYear ?? 'Current'} membership, ${formatCentsCurrency(charge.remainingBalanceCents)} remaining, ${STATUS_LABELS[charge.status]}, due ${new Date(charge.dueDate).toLocaleDateString()}`}
+          >
             <ThemedText type="small" themeColor="textSecondary">
               {ptaSummary?.currentSchoolYear ?? 'Current'} membership
             </ThemedText>
@@ -130,13 +135,21 @@ export default function DuesScreen() {
           <Pressable
             style={styles.payButton}
             onPress={() => WebBrowser.openBrowserAsync(`${API_BASE_URL}/pay/${ptaSummary.onlinePaymentLinkSlug}`)}
+            accessibilityRole="button"
+            accessibilityLabel="Open payment options"
+            accessibilityHint="Opens payment options in your browser"
           >
             <ThemedText style={styles.payButtonText}>Open Payment Options</ThemedText>
           </Pressable>
         ) : null}
 
         {charge && charge.status !== 'PAID' && charge.status !== 'WAIVED' && charge.status !== 'VOIDED' ? (
-          <Pressable style={styles.reportButton} onPress={() => router.push('/pta-report-payment')}>
+          <Pressable
+            style={styles.reportButton}
+            onPress={() => router.push('/pta-report-payment')}
+            accessibilityRole="button"
+            accessibilityLabel="Report a payment"
+          >
             <ThemedText style={styles.reportButtonText}>Report a Payment</ThemedText>
           </Pressable>
         ) : null}
@@ -169,7 +182,12 @@ export default function DuesScreen() {
       <ThemedText type="title">Dues Status</ThemedText>
 
       {!loading && summary ? (
-        <ThemedView type="backgroundElement" style={styles.summaryCard}>
+        <ThemedView
+          type="backgroundElement"
+          style={styles.summaryCard}
+          accessible
+          accessibilityLabel={`Outstanding balance, ${formatCurrency(summary.outstandingBalance)}${summary.isDelinquent ? `, past due${summary.delinquentSince ? ` since ${new Date(summary.delinquentSince).toLocaleDateString()}` : ''}` : ''}`}
+        >
           <ThemedText type="small" themeColor="textSecondary">Outstanding Balance</ThemedText>
           <ThemedText type="subtitle">{formatCurrency(summary.outstandingBalance)}</ThemedText>
           {summary.isDelinquent ? (
@@ -180,15 +198,15 @@ export default function DuesScreen() {
         </ThemedView>
       ) : null}
 
-      <Pressable style={styles.payButton} onPress={() => router.push('/make-payment')}>
+      <Pressable style={styles.payButton} onPress={() => router.push('/make-payment')} accessibilityRole="button" accessibilityLabel="Make a payment">
         <ThemedText style={styles.payButtonText}>Make a Payment</ThemedText>
       </Pressable>
 
-      <Pressable style={styles.reportButton} onPress={() => router.push('/report-payment')}>
+      <Pressable style={styles.reportButton} onPress={() => router.push('/report-payment')} accessibilityRole="button" accessibilityLabel="Report a payment">
         <ThemedText style={styles.reportButtonText}>Report a Payment</ThemedText>
       </Pressable>
 
-      <Pressable style={styles.linkButton} onPress={() => router.push('/payment-history')}>
+      <Pressable style={styles.linkButton} onPress={() => router.push('/payment-history')} accessibilityRole="link" accessibilityLabel="View payment history">
         <ThemedText type="link">View Payment History</ThemedText>
       </Pressable>
 

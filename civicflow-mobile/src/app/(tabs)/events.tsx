@@ -36,7 +36,12 @@ export default function EventsScreen() {
     <ThemedView style={styles.container}>
       <ThemedText type="title">Events</ThemedText>
       {hasMemberIdentity ? (
-        <Pressable style={styles.scanButton} onPress={() => router.push('/attendance-scan')}>
+        <Pressable
+          style={styles.scanButton}
+          onPress={() => router.push('/attendance-scan')}
+          accessibilityRole="button"
+          accessibilityLabel="Scan attendance code"
+        >
           <ThemedText style={styles.scanButtonText}>Scan Attendance Code</ThemedText>
         </Pressable>
       ) : null}
@@ -46,7 +51,11 @@ export default function EventsScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
         contentContainerStyle={styles.list}
         renderItem={({ item }) => (
-          <Pressable onPress={() => router.push(`/event/${item.id}`)}>
+          <Pressable
+            onPress={() => router.push(`/event/${item.id}`)}
+            accessibilityRole="button"
+            accessibilityLabel={`${item.title}, ${item.startAt ? new Date(item.startAt).toLocaleString() : 'date TBD'}${item.location ? `, ${item.location}` : ''}${'myRsvp' in item && item.myRsvp ? `, you're ${item.myRsvp.status.replace('_', ' ').toLowerCase()}` : ''}`}
+          >
             <ThemedView type="backgroundElement" style={styles.row}>
               <ThemedText type="smallBold">{item.title}</ThemedText>
               <ThemedText type="small" themeColor="textSecondary">

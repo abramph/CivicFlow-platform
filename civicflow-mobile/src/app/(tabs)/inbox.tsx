@@ -54,13 +54,17 @@ export default function InboxScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
         contentContainerStyle={styles.list}
         renderItem={({ item }) => (
-          <Pressable onPress={() => router.push(`/conversation/${item.id}`)}>
+          <Pressable
+            onPress={() => router.push(`/conversation/${item.id}`)}
+            accessibilityRole="button"
+            accessibilityLabel={`${item.hasUnread ? 'Unread, ' : ''}${item.subject || otherParticipantNames(item)}, ${otherParticipantNames(item)}${item.lastMessageAt ? `, ${new Date(item.lastMessageAt).toLocaleDateString()}` : ''}`}
+          >
             <ThemedView type="backgroundElement" style={styles.row}>
               <ThemedView style={styles.rowHeader}>
                 <ThemedText type={item.hasUnread ? 'smallBold' : 'small'}>
                   {item.subject || otherParticipantNames(item)}
                 </ThemedText>
-                {item.hasUnread ? <ThemedView style={styles.unreadDot} /> : null}
+                {item.hasUnread ? <ThemedView style={styles.unreadDot} accessibilityElementsHidden importantForAccessibility="no" /> : null}
               </ThemedView>
               <ThemedText type="small" themeColor="textSecondary">
                 {otherParticipantNames(item)}
