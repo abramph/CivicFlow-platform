@@ -61,13 +61,17 @@ export function PrimaryVerticalManager({
   }
 
   async function confirmChange() {
+    if (!reason.trim()) {
+      setError("A reason is required to correct an organization's type.");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
       const res = await fetch(`/api/admin/organizations/${organizationId}/primary-vertical`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ newVertical: target, reason: reason.trim() || null, confirm: true }),
+        body: JSON.stringify({ newVertical: target, reason: reason.trim(), confirm: true }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok) {
@@ -88,7 +92,7 @@ export function PrimaryVerticalManager({
     <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
       <div className="flex flex-wrap items-end gap-3">
         <label className="space-y-1 text-xs font-medium text-slate-700">
-          <span>Change primary vertical to</span>
+          <span>Correct organization type to</span>
           <select
             value={target}
             onChange={(e) => {
@@ -140,11 +144,14 @@ export function PrimaryVerticalManager({
           ) : null}
 
           <label className="block space-y-1 text-xs font-medium text-amber-900">
-            <span>Reason (optional, recorded in the audit log)</span>
+            <span>
+              Reason <span className="text-red-700">(required — recorded in the audit log)</span>
+            </span>
             <textarea
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               rows={2}
+              required
               className="w-full rounded-lg border border-amber-300 px-3 py-2 text-sm outline-none focus:border-amber-600 focus:ring-2 focus:ring-amber-200"
             />
           </label>
@@ -152,11 +159,11 @@ export function PrimaryVerticalManager({
           <div className="flex gap-2">
             <button
               type="button"
-              disabled={saving}
+              disabled={saving || !reason.trim()}
               onClick={confirmChange}
               className="rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800 disabled:opacity-60"
             >
-              {saving ? "Saving…" : "Confirm Change"}
+              {saving ? "Saving…" : "Confirm Correction"}
             </button>
             <button
               type="button"

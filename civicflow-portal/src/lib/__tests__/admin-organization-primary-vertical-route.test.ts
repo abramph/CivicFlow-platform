@@ -106,6 +106,38 @@ describe("PUT /api/admin/organizations/[organizationId]/primary-vertical", () =>
     expect(changeOrganizationPrimaryVertical).not.toHaveBeenCalled();
   });
 
+  it("rejects a request with no reason", async () => {
+    requireSuperAdmin.mockResolvedValueOnce(authed);
+    const response = await PUT(putReq({ newVertical: "COMMUNITY", confirm: true }), ctx("org-1"));
+    expect(response.status).toBe(400);
+    expect(changeOrganizationPrimaryVertical).not.toHaveBeenCalled();
+  });
+
+  it("rejects a request with a whitespace-only reason", async () => {
+    requireSuperAdmin.mockResolvedValueOnce(authed);
+    const response = await PUT(putReq({ newVertical: "COMMUNITY", reason: "   ", confirm: true }), ctx("org-1"));
+    expect(response.status).toBe(400);
+    expect(changeOrganizationPrimaryVertical).not.toHaveBeenCalled();
+  });
+
+  // Correcting an organization's type is a Platform Administrator-only
+  // action — this is enforced by requireSuperAdmin, the exact same guard
+  // used regardless of which non-platform-admin role attempts it. These
+  // three are named explicitly (rather than relying on one generic
+  // "forbidden" test) because the immutability requirement is specifically
+  // that ORG_OWNER/ORG_ADMIN/STAFF can never self-serve this change, no
+  // matter how privileged they are *within* their own organization.
+  it.each(["ORG_OWNER", "ORG_ADMIN", "STAFF"])(
+    "rejects a %s attempting the correction — organization-level roles have no platform authority here",
+    async () => {
+      const { ForbiddenError } = await import("@/lib/auth-guards");
+      requireSuperAdmin.mockRejectedValueOnce(new ForbiddenError("Not a platform super-admin"));
+      const response = await PUT(putReq({ newVertical: "COMMUNITY", reason: "Attempted self-service change", confirm: true }), ctx("org-1"));
+      expect(response.status).toBe(403);
+      expect(changeOrganizationPrimaryVertical).not.toHaveBeenCalled();
+    }
+  );
+
   it("applies the change and passes the acting admin's identity through for audit attribution", async () => {
     requireSuperAdmin.mockResolvedValueOnce(authed);
     changeOrganizationPrimaryVertical.mockResolvedValueOnce({
