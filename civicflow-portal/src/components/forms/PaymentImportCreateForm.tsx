@@ -4,7 +4,7 @@ import { useState, type ChangeEvent, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { fieldClassName } from "@/components/forms/formStyles";
 
-const sources = ["ZELLE", "CASH_APP", "VENMO", "PAYPAL", "STRIPE", "BANK", "MANUAL_CSV", "OTHER"];
+const sources = ["ZELLE", "CASH_APP", "VENMO", "PAYPAL", "STRIPE", "BANK", "MANUAL_CSV", "PAYROLL_CHECKOFF", "OTHER"];
 
 export function PaymentImportCreateForm() {
   const router = useRouter();

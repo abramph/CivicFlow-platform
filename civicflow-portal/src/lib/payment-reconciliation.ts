@@ -11,6 +11,7 @@ const methodBySource: Partial<Record<PaymentImportSourceType, string>> = {
   STRIPE: "STRIPE",
   BANK: "ACH",
   MANUAL_CSV: "OTHER",
+  PAYROLL_CHECKOFF: "PAYROLL_CHECKOFF",
   OTHER: "OTHER",
 };
 
@@ -161,7 +162,7 @@ export async function postPaymentImportItem(input: {
     const charge = input.duesChargeId
       ? await prisma.duesCharge.findFirst({ where: { id: input.duesChargeId, organizationId: input.organizationId, memberId } })
       : null;
-    const method = (methodBySource[item.sourceType] ?? "OTHER") as "ZELLE" | "CASH_APP" | "VENMO" | "PAYPAL" | "STRIPE" | "ACH" | "OTHER";
+    const method = (methodBySource[item.sourceType] ?? "OTHER") as "ZELLE" | "CASH_APP" | "VENMO" | "PAYPAL" | "STRIPE" | "ACH" | "PAYROLL_CHECKOFF" | "OTHER";
     const payment = await prisma.$transaction(async (tx) => {
       const row = await tx.duesPayment.create({
         data: {
@@ -203,7 +204,7 @@ export async function postPaymentImportItem(input: {
         eventId: input.eventId || item.matchedEventId,
         amount: item.amount,
         contributionDate: item.transactionDate,
-        paymentMethod: (methodBySource[item.sourceType] ?? "OTHER") as "ZELLE" | "CASH_APP" | "VENMO" | "PAYPAL" | "STRIPE" | "ACH" | "OTHER",
+        paymentMethod: (methodBySource[item.sourceType] ?? "OTHER") as "ZELLE" | "CASH_APP" | "VENMO" | "PAYPAL" | "STRIPE" | "ACH" | "PAYROLL_CHECKOFF" | "OTHER",
         source: "IMPORT",
         receiptRequested: input.receiptRequested ?? false,
         notes: item.memo,

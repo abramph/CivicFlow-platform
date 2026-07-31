@@ -1,3 +1,4 @@
+import type { DuesPaymentMethod } from "@prisma/client";
 import { requirePermission } from "@/lib/auth-guards";
 import { withApiErrorHandling } from "@/lib/api-route";
 import { createAuditEvent } from "@/lib/audit";
@@ -130,7 +131,14 @@ export async function POST(request: Request) {
       );
     }
 
-    let resolvedMethod = input.method ?? "CASH";
+    // Widened to the full DuesPaymentMethod enum (not the narrower manual-entry
+    // Zod literal union above) because a configured PaymentMethodConfig row's
+    // .method column is typed as the full enum, which now has one more
+    // bulk-import-only value than this manual-entry schema exposes. That value
+    // can never actually reach here in practice — no PaymentMethodConfig row
+    // can hold it (see settings/payment-methods route's own, still-narrower
+    // Zod schema) — but the variable's type must honestly reflect the column.
+    let resolvedMethod: DuesPaymentMethod = input.method ?? "CASH";
     if (input.paymentMethodId) {
       const paymentMethod = await prisma.paymentMethodConfig.findFirst({
         where: { id: input.paymentMethodId, organizationId, isActive: true },
