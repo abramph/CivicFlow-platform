@@ -6,6 +6,7 @@ import { PlanFeatureError, PlanLimitError } from "@/lib/plan-gate";
 import { LabFeatureError } from "@/lib/labs/access";
 import { MeetingIntelligenceError } from "@/lib/labs/meeting-intelligence/errors";
 import { PtaError } from "@/lib/labs/pta/errors";
+import { MeetingMinutesError, meetingMinutesErrorResponse } from "@/lib/meeting-minutes";
 
 export async function withApiErrorHandling(
   fn: () => Promise<Response>
@@ -43,6 +44,9 @@ export async function withApiErrorHandling(
       }
       if (error instanceof PtaError) {
         return Response.json({ ok: false, error: error.message, code: error.code }, { status: error.status });
+      }
+      if (error instanceof MeetingMinutesError) {
+        return meetingMinutesErrorResponse(error);
       }
       if (error instanceof MobileAuthError || error instanceof MobileForbiddenError) {
         return jsonError(error.message, error.status);

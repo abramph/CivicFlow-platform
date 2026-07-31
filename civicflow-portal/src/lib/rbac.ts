@@ -74,6 +74,15 @@ export const PERMISSIONS = {
   // Meetings
   MEETINGS_READ:  "meetings:read",
   MEETINGS_WRITE: "meetings:write",
+  // Meeting minutes approval workflow: deliberately separate from
+  // MEETINGS_WRITE (drafting) so a Secretary can draft/submit minutes
+  // without also holding review or approval authority, and separate from
+  // each other so a reviewer can request changes without being able to
+  // give final approval. Mirrors the PTA_MINUTES_REVIEW/APPROVE naming
+  // below, which was already reserved for exactly this purpose but never
+  // wired up to any real code path.
+  MEETINGS_MINUTES_REVIEW:  "meetings:minutes:review",
+  MEETINGS_MINUTES_APPROVE: "meetings:minutes:approve",
 
   // Expenditures
   EXPENDITURES_READ:  "expenditures:read",
@@ -191,6 +200,8 @@ const ORG_OWNER_PERMISSIONS: Permission[] = [
   PERMISSIONS.ATTENDANCE_WRITE,
   PERMISSIONS.MEETINGS_READ,
   PERMISSIONS.MEETINGS_WRITE,
+  PERMISSIONS.MEETINGS_MINUTES_REVIEW,
+  PERMISSIONS.MEETINGS_MINUTES_APPROVE,
   PERMISSIONS.EXPENDITURES_READ,
   PERMISSIONS.EXPENDITURES_WRITE,
   PERMISSIONS.REPORTS_READ,
@@ -254,6 +265,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.ATTENDANCE_WRITE,
     PERMISSIONS.MEETINGS_READ,
     PERMISSIONS.MEETINGS_WRITE,
+    PERMISSIONS.MEETINGS_MINUTES_REVIEW,
+    PERMISSIONS.MEETINGS_MINUTES_APPROVE,
     PERMISSIONS.EXPENDITURES_READ,
     PERMISSIONS.EXPENDITURES_WRITE,
     PERMISSIONS.REPORTS_READ,
@@ -341,6 +354,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.ATTENDANCE_WRITE,
     PERMISSIONS.MEETINGS_READ,
     PERMISSIONS.MEETINGS_WRITE,
+    PERMISSIONS.MEETINGS_MINUTES_REVIEW,
     PERMISSIONS.REPORTS_READ,
     PERMISSIONS.MESSAGES_READ,
     PERMISSIONS.MESSAGES_WRITE,

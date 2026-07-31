@@ -1,25 +1,25 @@
 import { prisma } from "@/lib/prisma";
+import { getApprovedMeetingMinutes } from "@/lib/meeting-minutes";
 
 /**
- * PTA meeting minutes reuse the existing Meeting + Attachment models
- * unchanged — a Meeting's approved-minutes document is just an Attachment
- * with entityType MEETING and purpose "approved_minutes". This is
- * deliberately independent of Meeting Intelligence's MeetingMinutesDraft
- * pipeline (an AI-generation concept) — the PTA vertical must never depend
- * on, or implicitly require, Meeting Intelligence being enrolled.
+ * PTA meeting minutes now reuse the general MeetingMinutes approval
+ * workflow (src/lib/meeting-minutes.ts), available to every organization.
  *
- * The staff-facing Attachment route already gates MEETING attachments by the
- * "meetings:read" permission, which a plain parent (MEMBER role, zero
- * permissions by design) never holds — so parents need a separate,
- * household-authorized read path. This module is that path: it returns only
- * attachments explicitly marked purpose: "approved_minutes", never a draft,
- * never any other attachment on the meeting.
+ * Previously this queried Attachment rows with purpose "approved_minutes" —
+ * a filter no application code anywhere ever wrote (only the demo seed
+ * script did), so the "approved minutes visible to parents" feature could
+ * never produce real data for a real customer. getApprovedMeetingMinutes()
+ * only ever selects MeetingMinutes.status APPROVED, which is a real,
+ * reachable state now that a real write path (draft -> review -> approve)
+ * exists — see src/app/api/meetings/[id]/minutes/**.
+ *
+ * This is deliberately independent of Meeting Intelligence's
+ * MeetingMinutesDraft (an AI-generation concept, internal-only pilot) — the
+ * PTA vertical must never depend on, or implicitly require, Meeting
+ * Intelligence being enrolled.
  */
 export async function listApprovedPtaMinutes(organizationId: string) {
-  return prisma.attachment.findMany({
-    where: { organizationId, entityType: "MEETING", purpose: "approved_minutes", deletedAt: null },
-    orderBy: { uploadedAt: "desc" },
-  });
+  return getApprovedMeetingMinutes(organizationId);
 }
 
 /**

@@ -60,7 +60,12 @@ export async function getPtaDashboardMetrics(organizationId: string, schoolYear:
     prisma.contribution.aggregate({ where: { organizationId }, _sum: { amount: true } }),
     prisma.communicationCampaign.count({ where: { organizationId, status: "SENT", createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } } }),
     prisma.meeting.findFirst({ where: { organizationId, meetingDate: { gte: new Date() } }, orderBy: { meetingDate: "asc" }, select: { title: true, meetingDate: true } }),
-    prisma.meetingMinutesDraft.count({ where: { organizationId, status: "APPROVED", approvedAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } } }),
+    // Previously queried MeetingMinutesDraft (the internal-only, AI-generation
+    // Meeting Intelligence model) -- always 0 for a real customer org, since
+    // that feature is never enabled outside the internal pilot. This is the
+    // general minutes-approval workflow instead (src/lib/meeting-minutes.ts),
+    // available to every organization.
+    prisma.meetingMinutes.count({ where: { organizationId, status: "APPROVED", approvedAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } } }),
     prisma.ptaCommittee.count({ where: { organizationId } }),
     prisma.ptaTeacher.count({ where: { organizationId } }),
     prisma.paymentReport.count({ where: { organizationId, status: "pending", member: { ptaHouseholdBilling: { isNot: null } } } }),

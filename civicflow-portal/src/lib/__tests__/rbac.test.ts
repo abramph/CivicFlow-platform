@@ -43,6 +43,27 @@ describe("rbac: labs:read (Unestra Labs, organization-facing)", () => {
   });
 });
 
+describe("rbac: meetings:minutes:review / meetings:minutes:approve", () => {
+  it("grants ORG_OWNER and ORG_ADMIN both review and approve authority", () => {
+    expect(canDo("ORG_OWNER", "meetings:minutes:review")).toBe(true);
+    expect(canDo("ORG_OWNER", "meetings:minutes:approve")).toBe(true);
+    expect(canDo("ORG_ADMIN", "meetings:minutes:review")).toBe(true);
+    expect(canDo("ORG_ADMIN", "meetings:minutes:approve")).toBe(true);
+  });
+
+  it("grants STAFF review authority only, not approval -- a Secretary can request changes but not finalize minutes", () => {
+    expect(canDo("STAFF", "meetings:minutes:review")).toBe(true);
+    expect(canDo("STAFF", "meetings:minutes:approve")).toBe(false);
+  });
+
+  it("grants neither to FINANCE, READ_ONLY, or MEMBER", () => {
+    for (const role of ["FINANCE", "READ_ONLY", "MEMBER"] as const) {
+      expect(canDo(role, "meetings:minutes:review")).toBe(false);
+      expect(canDo(role, "meetings:minutes:approve")).toBe(false);
+    }
+  });
+});
+
 describe("rbac: meetingIntelligence:* (internal APH pilot)", () => {
   const permissions = [
     "meetingIntelligence:read",

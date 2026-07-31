@@ -594,15 +594,17 @@ export function reportPtaDuesPayment(input: ReportPtaDuesPaymentInput) {
   return apiFetch(`/api/mobile/pta/dues/report-payment`, { method: 'POST', body: JSON.stringify(input) });
 }
 
-export interface PtaApprovedMinutes {
+export interface ApprovedMeetingMinutes {
   id: string;
   title: string;
-  fileName: string;
-  uploadedAt: string;
+  meetingTitle: string;
+  meetingDate: string;
+  approvedAt: string;
 }
 
-export function getPtaMinutes(organizationId: string) {
-  return apiFetch<PtaApprovedMinutes[]>(`/api/mobile/pta/minutes?organizationId=${encodeURIComponent(organizationId)}`);
+/** Approved-only meeting minutes for ANY identity (conventional member or PTA household) -- one shared route, unlike announcements/events which still have separate PTA vs. conventional endpoints. */
+export function getMinutes(organizationId: string) {
+  return apiFetch<ApprovedMeetingMinutes[]>(`/api/mobile/minutes?organizationId=${encodeURIComponent(organizationId)}`);
 }
 
 export interface PtaDocument {

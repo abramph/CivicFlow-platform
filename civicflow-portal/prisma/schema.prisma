@@ -465,6 +465,7 @@ model Organization {
   meetingTranscripts          MeetingTranscript[]
   meetingMinutesDrafts        MeetingMinutesDraft[]
   meetingIntelligenceFeedback MeetingIntelligenceFeedback[]
+  meetingMinutes              MeetingMinutes[]
 
   ptaProfile                  PtaProfile?
   ptaHouseholds               PtaHousehold[]
@@ -549,8 +550,13 @@ model User {
   meetingIntelligenceJobsUploaded         MeetingIntelligenceJob[]      @relation("MeetingIntelligenceJobUploadedBy")
   meetingIntelligenceJobsConsentConfirmed MeetingIntelligenceJob[]      @relation("MeetingIntelligenceJobConsentConfirmedBy")
   meetingMinutesDraftsEdited              MeetingMinutesDraft[]         @relation("MeetingMinutesDraftLastEditedBy")
-  meetingMinutesDraftsApproved            MeetingMinutesDraft[]         @relation("MeetingMinutesDraftApprovedBy")
-  meetingMinutesDraftsRejected            MeetingMinutesDraft[]         @relation("MeetingMinutesDraftRejectedBy")
+  meetingMinutesDraftsApproved             MeetingMinutesDraft[]         @relation("MeetingMinutesDraftApprovedBy")
+  meetingMinutesDraftsRejected             MeetingMinutesDraft[]         @relation("MeetingMinutesDraftRejectedBy")
+  meetingMinutesCreated                    MeetingMinutes[]              @relation("MeetingMinutesCreatedBy")
+  meetingMinutesLastEdited                 MeetingMinutes[]              @relation("MeetingMinutesLastEditedBy")
+  meetingMinutesSubmitted                  MeetingMinutes[]              @relation("MeetingMinutesSubmittedBy")
+  meetingMinutesChangesRequested           MeetingMinutes[]              @relation("MeetingMinutesChangesRequestedBy")
+  meetingMinutesApproved                   MeetingMinutes[]              @relation("MeetingMinutesApprovedBy")
   meetingIntelligenceFeedbackSubmitted    MeetingIntelligenceFeedback[] @relation("MeetingIntelligenceFeedbackSubmittedBy")
 
   ptaHouseholdAdultProfiles PtaHouseholdAdult[]
@@ -1762,10 +1768,74 @@ model Meeting {
   meetingIntelligenceJobs MeetingIntelligenceJob[]
   meetingTranscripts      MeetingTranscript[]
   meetingMinutesDrafts    MeetingMinutesDraft[]
+  meetingMinutes          MeetingMinutes[]
 
   @@index([organizationId])
   @@index([meetingDate])
   @@index([createdByUserId])
+}
+
+// ─── Meeting Minutes Approval (general availability, all organizations) ──────
+// Deliberately separate from MeetingMinutesDraft below (an internal-only
+// Meeting Intelligence AI-transcription artifact never enabled for a real
+// customer org) -- this is the plain, human-authored minutes workflow
+// available to every organization. See src/lib/meeting-minutes.ts.
+
+enum MeetingMinutesStatus {
+  DRAFT
+  IN_REVIEW
+  CHANGES_REQUESTED
+  APPROVED
+  SUPERSEDED
+}
+
+/// One row per minutes *version* for a meeting. Approving a version freezes
+/// it (status: APPROVED) -- the application layer refuses further edits to
+/// an approved row; amending approved minutes creates a new row at
+/// version+1 and marks the previous APPROVED row SUPERSEDED, so the
+/// approved snapshot members actually saw is never silently rewritten.
+/// Members (conventional or PTA household) are only ever shown rows with
+/// status APPROVED -- see getApprovedMeetingMinutes in
+/// src/lib/meeting-minutes.ts, the single shared read path for web, the PTA
+/// vertical, and mobile.
+/// organizationId/meetingId are onDelete: Restrict (not Cascade), matching
+/// MeetingMinutesDraft/MeetingTranscript above -- an approved minutes record
+/// is a governance document; deleting its Meeting or Organization must not
+/// silently destroy it.
+model MeetingMinutes {
+  id                       String               @id @default(cuid())
+  organizationId           String
+  meetingId                String
+  version                  Int                  @default(1)
+  status                   MeetingMinutesStatus @default(DRAFT)
+  title                    String
+  bodyText                 String
+  createdByUserId          String?
+  lastEditedByUserId       String?
+  lastEditedAt             DateTime?
+  submittedByUserId        String?
+  submittedAt              DateTime?
+  changesRequestedByUserId String?
+  changesRequestedAt       DateTime?
+  changesRequestedReason   String?
+  approvedByUserId         String?
+  approvedAt               DateTime?
+  supersededAt             DateTime?
+  createdAt                DateTime             @default(now())
+  updatedAt                DateTime             @updatedAt
+
+  organization           Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  meeting                Meeting      @relation(fields: [meetingId], references: [id], onDelete: Restrict)
+  createdByUser          User?        @relation("MeetingMinutesCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  lastEditedByUser       User?        @relation("MeetingMinutesLastEditedBy", fields: [lastEditedByUserId], references: [id], onDelete: SetNull)
+  submittedByUser        User?        @relation("MeetingMinutesSubmittedBy", fields: [submittedByUserId], references: [id], onDelete: SetNull)
+  changesRequestedByUser User?        @relation("MeetingMinutesChangesRequestedBy", fields: [changesRequestedByUserId], references: [id], onDelete: SetNull)
+  approvedByUser         User?        @relation("MeetingMinutesApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([meetingId, version])
+  @@index([organizationId])
+  @@index([meetingId])
+  @@index([organizationId, status])
 }
 
 // ─── Meeting Intelligence (Unestra Labs, internal APH pilot) ─────────────────

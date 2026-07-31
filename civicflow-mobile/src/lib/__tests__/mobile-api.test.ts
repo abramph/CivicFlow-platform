@@ -16,9 +16,9 @@ import {
   getProfile,
   getPtaAnnouncements,
   getPtaDocuments,
+  getMinutes,
   getPtaDues,
   getPtaEvents,
-  getPtaMinutes,
   getPtaVolunteerCommitments,
   getPtaVolunteerHours,
   getPtaVolunteerOpportunities,
@@ -323,10 +323,10 @@ describe('mobile-api', () => {
       });
     });
 
-    it('getPtaMinutes and getPtaDocuments request the household-authorized read-only lists', async () => {
+    it('getMinutes and getPtaDocuments request the authorized read-only lists', async () => {
       mockApiFetch.mockResolvedValueOnce([]);
-      await getPtaMinutes('org-1');
-      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/minutes?organizationId=org-1');
+      await getMinutes('org-1');
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/minutes?organizationId=org-1');
 
       mockApiFetch.mockResolvedValueOnce([]);
       await getPtaDocuments('org-1');

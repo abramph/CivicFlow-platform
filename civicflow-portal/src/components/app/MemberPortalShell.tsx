@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   { href: "/m/inbox", label: "Inbox" },
   { href: "/m/announcements", label: "Announcements" },
   { href: "/m/events", label: "Events" },
+  { href: "/m/minutes", label: "Meeting Minutes" },
   { href: "/m/payment-history", label: "Payment History" },
   { href: "/m/make-payment", label: "Make a Payment" },
   { href: "/m/report-payment", label: "Report a Payment" },

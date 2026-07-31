@@ -284,15 +284,13 @@ export default function DashboardScreen() {
         <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/events')} accessibilityRole="button" accessibilityLabel="Events">
           <ThemedText style={styles.actionButtonSecondaryText}>Events</ThemedText>
         </Pressable>
+        <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/minutes')} accessibilityRole="button" accessibilityLabel="Meeting minutes">
+          <ThemedText style={styles.actionButtonSecondaryText}>Meeting Minutes</ThemedText>
+        </Pressable>
         {hasPtaIdentity ? (
-          <>
-            <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/minutes')} accessibilityRole="button" accessibilityLabel="Meeting minutes">
-              <ThemedText style={styles.actionButtonSecondaryText}>Meeting Minutes</ThemedText>
-            </Pressable>
-            <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/pta-documents')} accessibilityRole="button" accessibilityLabel="Documents">
-              <ThemedText style={styles.actionButtonSecondaryText}>Documents</ThemedText>
-            </Pressable>
-          </>
+          <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/pta-documents')} accessibilityRole="button" accessibilityLabel="Documents">
+            <ThemedText style={styles.actionButtonSecondaryText}>Documents</ThemedText>
+          </Pressable>
         ) : null}
       </ThemedView>
 
