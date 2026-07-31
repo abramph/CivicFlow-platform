@@ -55,6 +55,9 @@ interface ApiFetchOptions extends RequestInit {
   _isRetry?: boolean;
 }
 
+/** No caller currently passes its own `signal` (verified: nothing in this codebase uses AbortController), so it's safe for apiFetch to own the controller outright rather than composing with a caller-supplied one. */
+const REQUEST_TIMEOUT_MS = 20_000;
+
 export async function apiFetch<T = unknown>(path: string, options: ApiFetchOptions = {}): Promise<T> {
   const { authenticated = true, _isRetry, headers, ...rest } = options;
 
@@ -66,7 +69,29 @@ export async function apiFetch<T = unknown>(path: string, options: ApiFetchOptio
     finalHeaders.set('Authorization', `Bearer ${tokenState.accessToken}`);
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, { ...rest, headers: finalHeaders });
+  // Previously a bare fetch() with no timeout and no try/catch around
+  // network-level failures -- a dropped connection or a server that never
+  // responds hung forever rather than surfacing an error, and every caller
+  // (every screen's load()) had nothing to catch anyway. Both halves of that
+  // are fixed here: a timeout so a hang becomes a real error, and a
+  // try/catch so network-level failures (not just HTTP error responses)
+  // become a normal ApiError callers can catch.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, { ...rest, headers: finalHeaders, signal: controller.signal });
+  } catch (error) {
+    throw new ApiError(
+      error instanceof Error && error.name === 'AbortError'
+        ? 'Request timed out. Check your connection and try again.'
+        : 'Network request failed. Check your connection and try again.',
+      0
+    );
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (response.status === 401 && authenticated && !_isRetry) {
     const refreshed = await refreshAccessToken();

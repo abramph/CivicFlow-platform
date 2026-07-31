@@ -2,7 +2,9 @@ import Link from "next/link";
 import { requirePermission } from "@/lib/auth-guards";
 import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { AttachmentManager } from "@/components/forms/AttachmentManager";
+import { CancelEventButton } from "@/components/forms/CancelEventButton";
 import { prisma } from "@/lib/prisma";
+import { EVENT_STATUS_LABELS, isCancelledEventStatus, normalizeEventStatus } from "@/lib/event-status";
 import {
   formatCurrency,
   formatDateTime,
@@ -75,7 +77,15 @@ export default async function EventDetailPage({
       />
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Status" value={formatEnumLabel(event.status)} />
+        <StatCard
+          label="Status"
+          value={EVENT_STATUS_LABELS[normalizeEventStatus(event.status)]}
+          helper={
+            !isCancelledEventStatus(event.status) && can("events:write") ? (
+              <CancelEventButton eventId={event.id} />
+            ) : undefined
+          }
+        />
         <StatCard label="Start" value={formatDateTime(event.startAt)} />
         <StatCard label="End" value={formatDateTime(event.endAt)} />
         <StatCard

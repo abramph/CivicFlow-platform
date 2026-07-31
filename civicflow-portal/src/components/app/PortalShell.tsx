@@ -240,12 +240,18 @@ export function PortalShell({ children }: { children: ReactNode }) {
             </p>
             <h1 className="mt-1 text-2xl font-semibold text-slate-950">SaaS Portal</h1>
             <p className="mt-2 text-sm leading-6 text-slate-700">
-              Desktop-parity workflows for members, dues, fundraising, and setup.
+              Members, dues, fundraising, and event management in one place.
             </p>
           </div>
 
           <nav className="space-y-1 px-4 py-5">
-            {visibleNavItems.map((item) => (
+            {/* Dashboard first, then (for PTA-enrolled orgs) the PTA vertical
+                immediately after it — this is the core reason a PTA customer
+                is paying for the product, so it belongs near the top of the
+                nav, not buried below Billing/Security/Migration/Import Data
+                at the very end of a 30-item flat list (a real discoverability
+                gap found via a live persona walkthrough). */}
+            {visibleNavItems.slice(0, 1).map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
@@ -259,7 +265,7 @@ export function PortalShell({ children }: { children: ReactNode }) {
               </Link>
             ))}
             {ptaAvailable && can("pta:directory:read") ? (
-              <div className="mt-3 border-t border-slate-200 pt-3">
+              <div className="mb-3 border-b border-slate-200 pb-3">
                 <p className="px-4 pb-1.5 text-xs font-semibold uppercase tracking-[0.15em] text-emerald-700">
                   PTA
                 </p>
@@ -275,6 +281,19 @@ export function PortalShell({ children }: { children: ReactNode }) {
                 </Link>
               </div>
             ) : null}
+            {visibleNavItems.slice(1).map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`block rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
+                  isActive(pathname, item.href)
+                    ? "bg-emerald-700 text-white shadow-sm"
+                    : "text-slate-800 hover:bg-slate-100"
+                }`}
+              >
+                {item.label}
+              </Link>
+            ))}
             {canSeePlatformAdmin ? (
               <Link
                 href="/admin/platform"

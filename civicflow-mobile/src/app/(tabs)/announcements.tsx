@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { FlatList, Pressable, RefreshControl, StyleSheet } from 'react-native';
 
+import { LoadErrorBanner } from '@/components/load-error-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
@@ -14,10 +15,16 @@ export default function AnnouncementsScreen() {
   const hasPtaIdentity = Boolean(selectedOrganization?.pta?.householdAdultId);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!selectedOrganizationId || (!hasMemberIdentity && !hasPtaIdentity)) return;
-    setAnnouncements(await getAnnouncementsForIdentity(selectedOrganizationId, hasMemberIdentity));
+    try {
+      setAnnouncements(await getAnnouncementsForIdentity(selectedOrganizationId, hasMemberIdentity));
+      setLoadError(null);
+    } catch {
+      setLoadError('Unable to load announcements. Check your connection and try again.');
+    }
   }, [selectedOrganizationId, hasMemberIdentity, hasPtaIdentity]);
 
   useEffect(() => {
@@ -35,6 +42,7 @@ export default function AnnouncementsScreen() {
   return (
     <ThemedView style={styles.container}>
       <ThemedText type="title">Announcements</ThemedText>
+      <LoadErrorBanner message={loadError} onRetry={load} />
       <FlatList
         data={announcements}
         keyExtractor={(item) => item.id}
