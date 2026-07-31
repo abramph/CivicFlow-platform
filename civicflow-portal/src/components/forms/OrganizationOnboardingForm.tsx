@@ -8,6 +8,7 @@ import {
   fieldErrorClassName,
   helperTextClassName,
 } from "@/components/forms/formStyles";
+import { VERTICAL_SELECTION_CARDS } from "@/lib/vertical-terminology";
 
 const PAYMENT_METHOD_OPTIONS = [
   { method: "CASH", label: "Cash" },
@@ -60,6 +61,7 @@ type Step = 1 | 2 | 3 | 4;
 const defaultForm = {
   name: "",
   slug: "",
+  primaryVertical: "",
   organizationType: "",
   email: "",
   phone: "",
@@ -120,6 +122,7 @@ export function OrganizationOnboardingForm() {
 
   function validateStep1(): Record<string, string> {
     const errs: Record<string, string> = {};
+    if (!form.primaryVertical) errs.primaryVertical = "Choose what type of organization you're setting up.";
     if (!form.name.trim()) errs.name = "Organization name is required.";
     if (!form.slug.trim()) errs.slug = "Slug is required.";
     else if (!/^[a-z0-9-]+$/.test(form.slug.trim()))
@@ -161,6 +164,7 @@ export function OrganizationOnboardingForm() {
         body: JSON.stringify({
           name: form.name.trim(),
           slug: form.slug.trim(),
+          primaryVertical: form.primaryVertical,
           organizationType: form.organizationType.trim() || null,
           email: form.email.trim() || null,
           phone: form.phone.trim() || null,
@@ -209,7 +213,7 @@ export function OrganizationOnboardingForm() {
           }
           if (Object.keys(nextFieldErrors).length > 0) {
             setFieldErrors(nextFieldErrors);
-            const step1Fields = ["name", "slug", "organizationType"];
+            const step1Fields = ["name", "slug", "organizationType", "primaryVertical"];
             if (step1Fields.some((f) => nextFieldErrors[f])) setStep(1);
           }
         }
@@ -277,6 +281,48 @@ export function OrganizationOnboardingForm() {
       {/* Step 1: Organization identity */}
       {step === 1 && (
         <div className="space-y-4">
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-medium text-slate-900">
+              What type of organization are you setting up? <span className="text-red-600">*</span>
+            </legend>
+            <div className="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-required="true">
+              {VERTICAL_SELECTION_CARDS.map((card) => (
+                <label
+                  key={card.vertical}
+                  className={classNames(
+                    "flex cursor-pointer flex-col gap-2 rounded-xl border px-4 py-3 text-sm transition-colors",
+                    form.primaryVertical === card.vertical
+                      ? "border-emerald-400 bg-emerald-50"
+                      : "border-slate-200 bg-white hover:border-slate-300"
+                  )}
+                >
+                  <span className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="primaryVertical"
+                      value={card.vertical}
+                      checked={form.primaryVertical === card.vertical}
+                      onChange={() => setField("primaryVertical", card.vertical)}
+                      className="h-4 w-4 border-slate-300 text-emerald-700 focus:ring-emerald-600"
+                    />
+                    <span className="font-semibold text-slate-950">{card.title}</span>
+                  </span>
+                  <span className="text-slate-600">{card.description}</span>
+                  <span className="flex flex-wrap gap-1.5">
+                    {card.highlights.map((h) => (
+                      <span key={h} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                        {h}
+                      </span>
+                    ))}
+                  </span>
+                </label>
+              ))}
+            </div>
+            {fieldErrors.primaryVertical && (
+              <p className="text-sm font-medium text-red-700">{fieldErrors.primaryVertical}</p>
+            )}
+          </fieldset>
+
           <label className="block space-y-1.5 text-sm font-medium text-slate-900">
             <span>
               Organization name <span className="text-red-600">*</span>

@@ -80,6 +80,23 @@ enum OrgStatus {
   cancelled
 }
 
+/// The product experience an organization primarily sees — drives onboarding,
+/// terminology, navigation, and dashboard defaults. Deliberately separate from:
+///   - `Organization.organizationType` (free-text, user-typed, display-only —
+///     never drives behavior; kept as-is, not migrated into this enum)
+///   - `OrganizationLabFeature` / Labs enrollment (a technical feature-gate,
+///     e.g. PTA's data model being enabled at all — this enum is the
+///     product-experience classification, Labs enrollment is one input signal
+///     used to backfill it, not the same concept)
+///   - subscription tier / optional paid modules (this enum never implies
+///     entitlement — see resolveOrganizationExperience)
+enum OrganizationVertical {
+  COMMUNITY
+  PTA
+  UNION
+  HOA
+}
+
 enum MembershipStatus {
   active
   inactive
@@ -387,10 +404,16 @@ enum TollFreeVerificationStatus {
 
 /// A tenant organization on the Unestra SaaS platform.
 model Organization {
-  id               String    @id @default(cuid())
-  slug             String    @unique
+  id               String               @id @default(cuid())
+  slug             String               @unique
   name             String
   organizationType String?
+  /// Authoritative product-experience classification — see enum doc.
+  /// Required for every organization (default COMMUNITY, the safe
+  /// classification for anything not confirmed PTA/Union/HOA). Changed only
+  /// via Platform Admin (audited) or explicit signup selection, never
+  /// inferred from `organizationType` or free-text name matching.
+  primaryVertical  OrganizationVertical @default(COMMUNITY)
   logoUrl          String?
   email            String?
   website          String?
@@ -402,7 +425,7 @@ model Organization {
   state            String?
   zipCode          String?
   country          String?
-  plan             String    @default("free") // "free" | "essential" | "elite"
+  plan             String               @default("free") // "free" | "essential" | "elite"
   trialEndsAt      DateTime? // set at org creation; nil once subscribed or expired
   seatLimit        Int? // null = use plan default; set explicitly when seats are purchased
   /// Marks an organization as internal/platform-owned — exempt from trial
@@ -414,10 +437,10 @@ model Organization {
   /// script), keyed by immutable organization id, never by name or slug
   /// (both of those ARE user-editable). As of this field's introduction,
   /// true for exactly one organization: APH Technologies, LLC.
-  billingExempt    Boolean   @default(false)
-  status           OrgStatus @default(active)
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  billingExempt    Boolean              @default(false)
+  status           OrgStatus            @default(active)
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
 
   memberships   OrganizationMembership[]
   subscriptions Subscription[]
@@ -550,13 +573,13 @@ model User {
   meetingIntelligenceJobsUploaded         MeetingIntelligenceJob[]      @relation("MeetingIntelligenceJobUploadedBy")
   meetingIntelligenceJobsConsentConfirmed MeetingIntelligenceJob[]      @relation("MeetingIntelligenceJobConsentConfirmedBy")
   meetingMinutesDraftsEdited              MeetingMinutesDraft[]         @relation("MeetingMinutesDraftLastEditedBy")
-  meetingMinutesDraftsApproved             MeetingMinutesDraft[]         @relation("MeetingMinutesDraftApprovedBy")
-  meetingMinutesDraftsRejected             MeetingMinutesDraft[]         @relation("MeetingMinutesDraftRejectedBy")
-  meetingMinutesCreated                    MeetingMinutes[]              @relation("MeetingMinutesCreatedBy")
-  meetingMinutesLastEdited                 MeetingMinutes[]              @relation("MeetingMinutesLastEditedBy")
-  meetingMinutesSubmitted                  MeetingMinutes[]              @relation("MeetingMinutesSubmittedBy")
-  meetingMinutesChangesRequested           MeetingMinutes[]              @relation("MeetingMinutesChangesRequestedBy")
-  meetingMinutesApproved                   MeetingMinutes[]              @relation("MeetingMinutesApprovedBy")
+  meetingMinutesDraftsApproved            MeetingMinutesDraft[]         @relation("MeetingMinutesDraftApprovedBy")
+  meetingMinutesDraftsRejected            MeetingMinutesDraft[]         @relation("MeetingMinutesDraftRejectedBy")
+  meetingMinutesCreated                   MeetingMinutes[]              @relation("MeetingMinutesCreatedBy")
+  meetingMinutesLastEdited                MeetingMinutes[]              @relation("MeetingMinutesLastEditedBy")
+  meetingMinutesSubmitted                 MeetingMinutes[]              @relation("MeetingMinutesSubmittedBy")
+  meetingMinutesChangesRequested          MeetingMinutes[]              @relation("MeetingMinutesChangesRequestedBy")
+  meetingMinutesApproved                  MeetingMinutes[]              @relation("MeetingMinutesApprovedBy")
   meetingIntelligenceFeedbackSubmitted    MeetingIntelligenceFeedback[] @relation("MeetingIntelligenceFeedbackSubmittedBy")
 
   ptaHouseholdAdultProfiles PtaHouseholdAdult[]
@@ -909,7 +932,7 @@ model Event {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  organization              Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization              Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   contributions             Contribution[]
   communicationLogs         CommunicationLog[]
   attendanceRecords         AttendanceRecord[]

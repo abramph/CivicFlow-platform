@@ -3,6 +3,7 @@ import { requireSuperAdmin } from "@/lib/auth-guards";
 import { PageHeader, SectionCard } from "@/components/app/PageChrome";
 import { formatDate, formatEnumLabel } from "@/lib/formatting";
 import { listOrganizations, type OrganizationSortField } from "@/lib/platform-operations/organizations";
+import { getVerticalTerminology } from "@/lib/vertical-terminology";
 import { Breadcrumbs, Pagination, StatusPill, EmptyState } from "@/components/admin/OperationsUI";
 
 const inputClass =
@@ -24,9 +25,14 @@ export default async function PlatformOrganizationsPage({
   const status = get("status");
   const plan = get("plan");
   const organizationType = get("organizationType");
+  const primaryVertical = get("primaryVertical");
   const subscriptionStatus = get("subscriptionStatus");
   const sortField = (SORT_FIELDS.includes(get("sort") as OrganizationSortField) ? get("sort") : "createdAt") as OrganizationSortField;
   const page = Number(get("page")) || 1;
+
+  const validVertical = ["COMMUNITY", "PTA", "UNION", "HOA"].includes(primaryVertical)
+    ? (primaryVertical as "COMMUNITY" | "PTA" | "UNION" | "HOA")
+    : undefined;
 
   const result = await listOrganizations(
     {
@@ -34,6 +40,7 @@ export default async function PlatformOrganizationsPage({
       status: status || undefined,
       plan: plan || undefined,
       organizationType: organizationType || undefined,
+      primaryVertical: validVertical,
       subscriptionStatus: subscriptionStatus || undefined,
     },
     { page, pageSize: 25 },
@@ -70,6 +77,16 @@ export default async function PlatformOrganizationsPage({
             </select>
           </label>
           <label className="space-y-2 text-sm font-medium text-slate-900">
+            <span>Vertical</span>
+            <select name="primaryVertical" defaultValue={primaryVertical} className={inputClass}>
+              <option value="">All verticals</option>
+              <option value="COMMUNITY">Community</option>
+              <option value="PTA">PTA / PTO</option>
+              <option value="UNION">Union</option>
+              <option value="HOA">HOA</option>
+            </select>
+          </label>
+          <label className="space-y-2 text-sm font-medium text-slate-900">
             <span>Subscription status</span>
             <select name="subscriptionStatus" defaultValue={subscriptionStatus} className={inputClass}>
               <option value="">Any</option>
@@ -100,6 +117,7 @@ export default async function PlatformOrganizationsPage({
               <thead className="bg-slate-50 text-left text-slate-700">
                 <tr>
                   <th scope="col" className="px-4 py-3">Organization</th>
+                  <th scope="col" className="px-4 py-3">Vertical</th>
                   <th scope="col" className="px-4 py-3">Plan</th>
                   <th scope="col" className="px-4 py-3">Status</th>
                   <th scope="col" className="px-4 py-3">Subscription</th>
@@ -123,6 +141,11 @@ export default async function PlatformOrganizationsPage({
                         </span>
                       ) : null}
                     </td>
+                    <td className="px-4 py-3">
+                      <span className="inline-block rounded-full bg-sky-100 px-2 py-0.5 text-xs font-semibold text-sky-800">
+                        {getVerticalTerminology(org.primaryVertical).productLabel}
+                      </span>
+                    </td>
                     <td className="px-4 py-3 text-slate-900">{formatEnumLabel(org.plan)}</td>
                     <td className="px-4 py-3"><StatusPill status={org.status} /></td>
                     <td className="px-4 py-3 text-slate-900">
@@ -142,7 +165,7 @@ export default async function PlatformOrganizationsPage({
         <div className="mt-4">
           <Pagination
             basePath="/admin/platform/organizations"
-            searchParams={{ search, status, plan, subscriptionStatus }}
+            searchParams={{ search, status, plan, primaryVertical, subscriptionStatus }}
             page={result.pagination.page}
             totalPages={result.pagination.totalPages}
           />

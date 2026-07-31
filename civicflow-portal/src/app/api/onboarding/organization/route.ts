@@ -18,6 +18,7 @@ function normalizeOptionalText(value: string | null | undefined) {
 const createOrganizationSchema = z.object({
   name: z.string().trim().min(1).max(200),
   slug: z.string().trim().regex(/^[a-z0-9-]+$/).max(120),
+  primaryVertical: z.enum(["COMMUNITY", "PTA", "UNION", "HOA"]),
   organizationType: optionalTextField(120),
   email: z.union([z.string().trim().email(), z.literal(""), z.null()]).optional(),
   phone: optionalTextField(50),
@@ -60,6 +61,7 @@ export async function POST(request: Request) {
       data: {
         slug: input.slug.trim(),
         name: input.name.trim(),
+        primaryVertical: input.primaryVertical,
         organizationType: normalizeOptionalText(input.organizationType) ?? null,
         email: normalizeOptionalText(input.email) ?? null,
         phone: normalizeOptionalText(input.phone) ?? null,
@@ -213,6 +215,7 @@ export async function POST(request: Request) {
       metadata: {
         slug: organization.slug,
         name: organization.name,
+        primaryVertical: organization.primaryVertical,
       },
     });
 
