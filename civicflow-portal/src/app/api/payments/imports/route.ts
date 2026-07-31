@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { parseJsonBody, z } from "@/lib/validation";
 
-const sourceTypes = ["ZELLE", "CASH_APP", "VENMO", "PAYPAL", "STRIPE", "BANK", "MANUAL_CSV", "OTHER"] as const;
+const sourceTypes = ["ZELLE", "CASH_APP", "VENMO", "PAYPAL", "STRIPE", "BANK", "MANUAL_CSV", "PAYROLL_CHECKOFF", "OTHER"] as const;
 
 const createImportSchema = z.object({
   sourceType: z.enum(sourceTypes),

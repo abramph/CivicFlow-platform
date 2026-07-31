@@ -138,6 +138,12 @@ enum DuesPaymentMethod {
   PAYPAL
   STRIPE
   ZEFFY
+  /// Employer payroll deduction, remitted to the union in bulk on behalf of
+  /// many members at once — never member-initiated, so deliberately absent
+  /// from any member-facing payment-method picker (PaymentMethodConfig,
+  /// PayableMethodsList) or self-reported PaymentReport method list. See
+  /// docs/union-capability-audit.md.
+  PAYROLL_CHECKOFF
   OTHER
 }
 
@@ -267,6 +273,10 @@ enum PaymentImportSourceType {
   STRIPE
   BANK
   MANUAL_CSV
+  /// An employer's bulk dues-checkoff remittance file — one row per member,
+  /// reconciled through the existing PaymentImportBatch/Item pipeline exactly
+  /// like any other bulk import. See docs/union-capability-audit.md.
+  PAYROLL_CHECKOFF
   OTHER
 }
 
