@@ -1,6 +1,7 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { prisma } from "@/lib/prisma";
 import { createAuditEvent } from "@/lib/audit";
+import { formatCurrency } from "@/lib/formatting";
 import { paymentMethodLabels } from "@/lib/payment-methods";
 import { buildSafeObjectKey, uploadBufferToSpaces } from "@/lib/storage";
 
@@ -145,7 +146,7 @@ export async function generateAndStoreReceiptPdf(params: {
     memberName: receipt.member
       ? `${receipt.member.firstName} ${receipt.member.lastName}`
       : undefined,
-    amount: receipt.contribution.amount.toString(),
+    amount: formatCurrency(receipt.contribution.amount),
     date: receipt.contribution.contributionDate.toISOString().slice(0, 10),
     receiptNumber: receipt.receiptNumber,
     paymentMethod: receipt.contribution.paymentMethod
