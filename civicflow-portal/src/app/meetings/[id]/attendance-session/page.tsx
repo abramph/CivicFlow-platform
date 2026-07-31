@@ -29,7 +29,7 @@ export default async function MeetingAttendanceSessionPage({ params }: { params:
       />
       <SectionCard title="Attendance Session" description="Configure the check-in window, then open attendance to start accepting scans.">
         <AttendanceSessionManager
-          meetingId={meeting.id}
+          entity={{ type: "meeting", id: meeting.id }}
           canWrite={can("attendance:write")}
           canReopen={roleRank(role) >= roleRank("ORG_ADMIN")}
         />

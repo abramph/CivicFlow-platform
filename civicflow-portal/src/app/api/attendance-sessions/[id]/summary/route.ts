@@ -19,7 +19,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       prisma.orgMember.count({ where: { organizationId, membershipStatus: "active" } }),
       prisma.attendanceRecord.groupBy({
         by: ["attendanceStatus"],
-        where: { organizationId, meetingId: session.meetingId },
+        where: session.meetingId
+          ? { organizationId, meetingId: session.meetingId }
+          : { organizationId, eventId: session.eventId },
         _count: true,
       }),
     ]);

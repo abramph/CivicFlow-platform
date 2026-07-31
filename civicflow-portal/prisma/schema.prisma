@@ -913,6 +913,7 @@ model Event {
   contributions             Contribution[]
   communicationLogs         CommunicationLog[]
   attendanceRecords         AttendanceRecord[]
+  attendanceSessions        MeetingAttendanceSession[]
   expenditures              Expenditure[]
   paymentImportItems        PaymentImportItem[]
   paymentLinks              PaymentLink[]
@@ -1738,6 +1739,10 @@ model AttendanceRecord {
   /// only constrains rows that actually reference a Meeting; it doesn't
   /// affect Event-only or freeform-title rows.
   @@unique([organizationId, memberId, meetingId])
+  /// Same duplicate-prevention for Event-backed attendance (QR check-in
+  /// against an event session) — added alongside generalizing
+  /// MeetingAttendanceSession to support events.
+  @@unique([organizationId, memberId, eventId])
   @@index([organizationId])
   @@index([memberId])
   @@index([eventId])
@@ -2057,7 +2062,13 @@ model MeetingIntelligenceFeedback {
 model MeetingAttendanceSession {
   id                   String                  @id @default(cuid())
   organizationId       String
-  meetingId            String
+  /// Exactly one of meetingId/eventId is set — enforced by a CHECK constraint
+  /// (see migration 20260731120000_generalize_attendance_sessions_to_events),
+  /// not just application logic. Mirrors AttendanceRecord's own independent
+  /// nullable eventId/meetingId, which has supported both since its original
+  /// migration.
+  meetingId            String?
+  eventId              String?
   status               AttendanceSessionStatus @default(DRAFT)
   mode                 AttendanceSessionMode   @default(ROTATING_QR)
   opensAt              DateTime?
@@ -2079,7 +2090,8 @@ model MeetingAttendanceSession {
   updatedAt            DateTime                @updatedAt
 
   organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  meeting           Meeting            @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  meeting           Meeting?           @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  event             Event?             @relation(fields: [eventId], references: [id], onDelete: Cascade)
   createdBy         User?              @relation("AttendanceSessionCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   openedBy          User?              @relation("AttendanceSessionOpenedBy", fields: [openedByUserId], references: [id], onDelete: SetNull)
   closedBy          User?              @relation("AttendanceSessionClosedBy", fields: [closedByUserId], references: [id], onDelete: SetNull)
@@ -2087,6 +2099,7 @@ model MeetingAttendanceSession {
 
   @@index([organizationId])
   @@index([meetingId])
+  @@index([eventId])
   @@index([status])
 }
 
