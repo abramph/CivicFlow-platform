@@ -37,7 +37,16 @@ function formatResource(resource: string) {
 }
 
 function formatAction(permission: string) {
-  return permission.split(":")[1] ?? permission;
+  // Some permissions have a third segment (e.g. "pta:minutes:review" vs.
+  // "pta:minutes:approve") -- taking only split(":")[1] dropped that segment
+  // entirely, so distinct permissions like those two rendered as identical
+  // "Minutes"/"Minutes" checkboxes with no way to tell them apart. Take
+  // everything after the first colon instead, so the full action is shown.
+  const action = permission.slice(permission.indexOf(":") + 1);
+  return action
+    .split(":")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
 }
 
 export function RolePermissionsManager({

@@ -6,17 +6,15 @@ import { ValidationError } from "@/lib/validation";
 /**
  * GET /api/mobile/pta/minutes?organizationId=...
  * Approved minutes only — mirrors the web's `GET /api/labs/pta/minutes`
- * exactly (listApprovedPtaMinutes(), unmodified). Draft minutes and
- * Meeting Intelligence transcripts are never returned by this function —
- * see minutes.ts's doc comment.
+ * exactly (listApprovedPtaMinutes(), unmodified). Draft/in-review minutes
+ * are never returned — see meeting-minutes.ts's getApprovedMeetingMinutes.
  *
  * Note: there is no mobile "list upcoming meetings / agenda" route — the
  * web's own meeting list is gated by the staff-only `meetings:read`
  * permission, so there is no existing parent-facing precedent to bridge.
  * Building one would be a new product/authorization decision (should
  * parents see meeting agendas and officer notes?), not a bridge onto
- * existing behavior — deliberately left out of this pass; see
- * docs/mobile-architecture.md.
+ * existing behavior — deliberately left out of this pass.
  */
 export async function GET(request: Request) {
   return withApiErrorHandling(async () => {
@@ -27,7 +25,13 @@ export async function GET(request: Request) {
     const { organizationId: verifiedOrgId } = await requireMobilePtaHouseholdAccess(request, organizationId);
 
     const minutes = await listApprovedPtaMinutes(verifiedOrgId);
-    const data = minutes.map((m) => ({ id: m.id, title: m.title ?? m.fileName, fileName: m.fileName, uploadedAt: m.uploadedAt }));
+    const data = minutes.map((m) => ({
+      id: m.id,
+      title: m.title,
+      meetingTitle: m.meeting.title,
+      meetingDate: m.meeting.meetingDate,
+      approvedAt: m.approvedAt,
+    }));
 
     return Response.json({ ok: true, data });
   });

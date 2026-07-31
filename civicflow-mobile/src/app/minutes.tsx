@@ -6,18 +6,18 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/lib/auth-context';
-import { getPtaMinutes, type PtaApprovedMinutes } from '@/lib/mobile-api';
+import { getMinutes, type ApprovedMeetingMinutes } from '@/lib/mobile-api';
 
 export default function MinutesScreen() {
   const { selectedOrganizationId } = useAuth();
-  const [minutes, setMinutes] = useState<PtaApprovedMinutes[]>([]);
+  const [minutes, setMinutes] = useState<ApprovedMeetingMinutes[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!selectedOrganizationId) return;
     try {
-      setMinutes(await getPtaMinutes(selectedOrganizationId));
+      setMinutes(await getMinutes(selectedOrganizationId));
       setLoadError(null);
     } catch {
       setLoadError('Unable to load meeting minutes. Check your connection and try again.');
@@ -49,11 +49,11 @@ export default function MinutesScreen() {
             type="backgroundElement"
             style={styles.row}
             accessible
-            accessibilityLabel={`${item.title}, ${item.fileName}, ${new Date(item.uploadedAt).toLocaleDateString()}`}
+            accessibilityLabel={`${item.title}, ${item.meetingTitle}, ${new Date(item.meetingDate).toLocaleDateString()}`}
           >
             <ThemedText type="smallBold">{item.title}</ThemedText>
             <ThemedText type="small" themeColor="textSecondary">
-              {item.fileName} · {new Date(item.uploadedAt).toLocaleDateString()}
+              {item.meetingTitle} · {new Date(item.meetingDate).toLocaleDateString()}
             </ThemedText>
           </ThemedView>
         )}
