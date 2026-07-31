@@ -1,10 +1,10 @@
 /**
- * Unestra SaaS — Meeting attendance QR check-in tokens
+ * Unestra SaaS — Meeting/Event attendance QR check-in tokens
  *
  * The QR code a member scans never contains a raw MeetingAttendanceSession id,
- * meeting id, or organization id alone — it's a signed, short-lived JWT whose
- * signing key is *derived* per (sessionId, tokenVersion) from the server-wide
- * ATTENDANCE_QR_SECRET. This means:
+ * meeting/event id, or organization id alone — it's a signed, short-lived JWT
+ * whose signing key is *derived* per (sessionId, tokenVersion) from the
+ * server-wide ATTENDANCE_QR_SECRET. This means:
  *
  *   - No reusable plaintext QR secret is ever stored in the database — only
  *     `tokenVersion` (an integer) lives on MeetingAttendanceSession.
@@ -17,11 +17,14 @@
  *     server can validate against the current slot without a DB write per
  *     rotation — the QR image itself changes, no new row does.
  *
- * The payload is intentionally minimal (session/org/meeting ids, version,
- * slot, mode) — no member-identifying data, since the same code is shown to
- * everyone in the room. Verification always re-derives organizationId and
- * meetingId from the MeetingAttendanceSession row looked up by sessionId,
- * never trusts them from the token payload for authorization decisions.
+ * The payload is intentionally minimal (session/org/meeting-or-event ids,
+ * version, slot, mode) — no member-identifying data, since the same code is
+ * shown to everyone in the room. A session is backed by exactly one of
+ * meetingId/eventId (enforced by a DB check constraint — see schema.prisma),
+ * so exactly one of mid/eid is non-null. Verification always re-derives
+ * organizationId and meetingId/eventId from the MeetingAttendanceSession row
+ * looked up by sessionId, never trusts them from the token payload for
+ * authorization decisions.
  */
 import { SignJWT, jwtVerify, decodeJwt } from "jose";
 import crypto from "crypto";
@@ -33,7 +36,8 @@ const TOKEN_ISSUER = "unestra-attendance";
 interface AttendanceTokenPayload {
   sid: string; // MeetingAttendanceSession id
   oid: string; // organizationId (defense-in-depth only — never trusted alone)
-  mid: string; // meetingId (defense-in-depth only — never trusted alone)
+  mid: string | null; // meetingId (defense-in-depth only — never trusted alone)
+  eid: string | null; // eventId (defense-in-depth only — never trusted alone)
   v: number; // tokenVersion this token was signed under
   mode: AttendanceSessionMode;
   slot: number; // rotating: floor(now / rotationSeconds); static: 0
@@ -64,7 +68,8 @@ const TOKEN_TTL_SECONDS = 120;
 export async function signAttendanceToken(params: {
   sessionId: string;
   organizationId: string;
-  meetingId: string;
+  meetingId: string | null;
+  eventId: string | null;
   tokenVersion: number;
   mode: AttendanceSessionMode;
   rotationSeconds: number;
@@ -75,6 +80,7 @@ export async function signAttendanceToken(params: {
     sid: params.sessionId,
     oid: params.organizationId,
     mid: params.meetingId,
+    eid: params.eventId,
     v: params.tokenVersion,
     mode: params.mode,
     slot,
@@ -97,7 +103,7 @@ export type AttendanceTokenRejection =
   | "slot_too_old";
 
 export type AttendanceTokenResult =
-  | { ok: true; sessionId: string; organizationId: string; meetingId: string }
+  | { ok: true; sessionId: string; organizationId: string; meetingId: string | null; eventId: string | null }
   | { ok: false; reason: AttendanceTokenRejection };
 
 /** How many rotation slots in the past are still accepted, to absorb clock
@@ -116,7 +122,8 @@ export async function verifyAttendanceToken(
   session: {
     id: string;
     organizationId: string;
-    meetingId: string;
+    meetingId: string | null;
+    eventId: string | null;
     status: string;
     mode: AttendanceSessionMode;
     tokenVersion: number;
@@ -161,7 +168,11 @@ export async function verifyAttendanceToken(
   // regenerate/revoke bumps tokenVersion, so a validly-signed-but-old-version
   // token is rejected here even though its own signature checks out.
   if (payload.v !== session.tokenVersion) return { ok: false, reason: "stale_version" };
-  if (payload.oid !== session.organizationId || payload.mid !== session.meetingId) {
+  if (
+    payload.oid !== session.organizationId ||
+    payload.mid !== session.meetingId ||
+    payload.eid !== session.eventId
+  ) {
     return { ok: false, reason: "invalid" };
   }
 
@@ -171,7 +182,13 @@ export async function verifyAttendanceToken(
     if (currentSlot - payload.slot > ROTATION_TOLERANCE_SLOTS) return { ok: false, reason: "slot_too_old" };
   }
 
-  return { ok: true, sessionId: session.id, organizationId: session.organizationId, meetingId: session.meetingId };
+  return {
+    ok: true,
+    sessionId: session.id,
+    organizationId: session.organizationId,
+    meetingId: session.meetingId,
+    eventId: session.eventId,
+  };
 }
 
 /** Peeks the session id from a token *without* verifying its signature, so

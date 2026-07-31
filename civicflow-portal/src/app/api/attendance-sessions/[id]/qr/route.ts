@@ -27,6 +27,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       sessionId: session.id,
       organizationId: session.organizationId,
       meetingId: session.meetingId,
+      eventId: session.eventId,
       tokenVersion: session.tokenVersion,
       mode: session.mode,
       rotationSeconds: session.rotationSeconds,

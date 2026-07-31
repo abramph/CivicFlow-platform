@@ -1,10 +1,13 @@
 /**
- * Unestra SaaS — Shared meeting-attendance QR check-in core.
+ * Unestra SaaS — Shared meeting/event-attendance QR check-in core.
  *
  * Both the mobile app (bearer-token auth) and the web fallback
  * (/attendance/check-in, NextAuth cookie session) funnel through this same
  * module so the actual attendance-recording logic — idempotency, the
- * PRESENT/LATE cutoff, audit trail, notification — exists exactly once.
+ * PRESENT/LATE cutoff, audit trail, notification — exists exactly once. A
+ * MeetingAttendanceSession is backed by exactly one of meetingId/eventId
+ * (enforced by a DB check constraint — see schema.prisma), so every function
+ * here branches on whichever is set rather than assuming meetingId.
  * Each caller is responsible for its own authentication and for deriving
  * memberId from organizationId the way its guard system already does
  * (requireMobileMembership / requireMemberWebSession) — this module never
@@ -30,7 +33,7 @@ const REJECTION_MESSAGES: Record<CheckInRejectionReason, string> = {
   stale_version: "This code was replaced with a new one. Scan the current QR code shown at the meeting.",
   future_slot: "This code isn't valid yet. Scan the current QR code shown at the meeting.",
   slot_too_old: "This code has expired. Scan the current QR code shown at the meeting.",
-  not_found: "This meeting is no longer available.",
+  not_found: "This meeting or event is no longer available.",
   not_eligible: "You're not eligible to check into this meeting.",
 };
 
@@ -41,7 +44,8 @@ export function checkInRejectionMessage(reason: CheckInRejectionReason): string 
 export interface ResolvedAttendanceSession {
   id: string;
   organizationId: string;
-  meetingId: string;
+  meetingId: string | null;
+  eventId: string | null;
   meetingTitle: string;
   meetingDate: Date;
   lateThresholdMinutes: number;
@@ -64,12 +68,23 @@ export async function resolveAttendanceSession(qrToken: string): Promise<Resolve
 
   const session = await prisma.meetingAttendanceSession.findUnique({
     where: { id: sessionId },
-    include: { meeting: { select: { id: true, title: true, meetingDate: true } } },
+    include: {
+      meeting: { select: { id: true, title: true, meetingDate: true } },
+      event: { select: { id: true, title: true, startAt: true } },
+    },
   });
   if (!session) return { ok: false, reason: "session_not_found" };
 
   const verified = await verifyAttendanceToken(qrToken, session);
   if (!verified.ok) return { ok: false, reason: verified.reason };
+
+  // Exactly one of meeting/event is set, by the DB check constraint. An
+  // event's startAt is nullable in general, but session creation requires it
+  // to be set before a QR session can be opened for that event — this null
+  // check only ever trips if that invariant were somehow violated.
+  const contextTitle = session.meeting?.title ?? session.event?.title;
+  const contextDate = session.meeting?.meetingDate ?? session.event?.startAt;
+  if (!contextTitle || !contextDate) return { ok: false, reason: "not_found" };
 
   return {
     ok: true,
@@ -77,8 +92,9 @@ export async function resolveAttendanceSession(qrToken: string): Promise<Resolve
       id: session.id,
       organizationId: session.organizationId,
       meetingId: session.meetingId,
-      meetingTitle: session.meeting.title,
-      meetingDate: session.meeting.meetingDate,
+      eventId: session.eventId,
+      meetingTitle: contextTitle,
+      meetingDate: contextDate,
       lateThresholdMinutes: session.lateThresholdMinutes,
     },
   };
@@ -100,12 +116,12 @@ export interface CheckInOutcome {
 
 /**
  * Records the check-in. Idempotent: if a record already exists for this
- * (organizationId, memberId, meetingId) — whether from an earlier valid scan,
- * a concurrent duplicate request, or prior manual entry — returns that
- * existing record's confirmation instead of erroring or creating a second
- * row. PRESENT vs LATE is computed here, server-side, from the meeting's
- * scheduled start and the session's grace period — never from anything the
- * scanning device reports about its own clock.
+ * (organizationId, memberId, meetingId-or-eventId) — whether from an earlier
+ * valid scan, a concurrent duplicate request, or prior manual entry —
+ * returns that existing record's confirmation instead of erroring or
+ * creating a second row. PRESENT vs LATE is computed here, server-side, from
+ * the meeting/event's scheduled start and the session's grace period — never
+ * from anything the scanning device reports about its own clock.
  */
 export async function recordAttendanceCheckIn(params: {
   session: ResolvedAttendanceSession;
@@ -123,6 +139,7 @@ export async function recordAttendanceCheckIn(params: {
         organizationId: session.organizationId,
         memberId,
         meetingId: session.meetingId,
+        eventId: session.eventId,
         meetingTitle: session.meetingTitle,
         meetingDate: session.meetingDate,
         attendanceStatus: status,
@@ -137,7 +154,7 @@ export async function recordAttendanceCheckIn(params: {
       action: "check_in",
       entityType: "attendance_record",
       entityId: created.id,
-      metadata: { memberId, meetingId: session.meetingId, method, attendanceStatus: status },
+      metadata: { memberId, meetingId: session.meetingId, eventId: session.eventId, method, attendanceStatus: status },
     });
 
     // Best-effort — a notification failure must never fail the check-in itself.
@@ -161,10 +178,20 @@ export async function recordAttendanceCheckIn(params: {
     if (!isUniqueConstraintError(error)) throw error;
 
     // Concurrent or repeat scan — the unique constraint is the actual source
-    // of truth for "only one record", this just fetches it back.
-    const existing = await prisma.attendanceRecord.findUnique({
-      where: { organizationId_memberId_meetingId: { organizationId: session.organizationId, memberId, meetingId: session.meetingId } },
-    });
+    // of truth for "only one record", this just fetches it back. Branches on
+    // whichever FK the session is backed by, since AttendanceRecord has an
+    // independent unique index for each.
+    const existing = session.meetingId
+      ? await prisma.attendanceRecord.findUnique({
+          where: {
+            organizationId_memberId_meetingId: { organizationId: session.organizationId, memberId, meetingId: session.meetingId },
+          },
+        })
+      : await prisma.attendanceRecord.findUnique({
+          where: {
+            organizationId_memberId_eventId: { organizationId: session.organizationId, memberId, eventId: session.eventId as string },
+          },
+        });
     if (!existing) throw error; // genuinely unexpected — surface the original error
 
     return {

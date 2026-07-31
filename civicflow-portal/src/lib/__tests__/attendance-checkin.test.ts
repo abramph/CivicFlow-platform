@@ -51,6 +51,7 @@ function baseResolvedSession() {
     id: "session-1",
     organizationId: "org-a",
     meetingId: "meeting-1",
+    eventId: null,
     meetingTitle: "Board Meeting",
     meetingDate: new Date("2026-01-01T18:00:00.000Z"),
     lateThresholdMinutes: 10,
@@ -115,6 +116,25 @@ describe("recordAttendanceCheckIn", () => {
       recordAttendanceCheckIn({ session: baseResolvedSession(), memberId: "member-1", method: "QR_APP" })
     ).rejects.toThrow("connection reset");
   });
+
+  it("is idempotent for an event-backed session, keyed on eventId rather than meetingId", async () => {
+    createAttendanceRecord.mockRejectedValueOnce(new FakePrismaKnownError("P2002"));
+    findUniqueAttendanceRecord.mockResolvedValueOnce({
+      id: "att-existing-event",
+      attendanceStatus: "PRESENT",
+      checkInTime: new Date("2026-01-01T18:01:00.000Z"),
+      createdAt: new Date("2026-01-01T18:01:00.000Z"),
+    });
+    const eventSession = { ...baseResolvedSession(), meetingId: null, eventId: "event-1" };
+
+    const outcome = await recordAttendanceCheckIn({ session: eventSession, memberId: "member-1", method: "QR_APP" });
+
+    expect(outcome.alreadyCheckedIn).toBe(true);
+    expect(outcome.attendanceRecordId).toBe("att-existing-event");
+    expect(findUniqueAttendanceRecord).toHaveBeenCalledWith({
+      where: { organizationId_memberId_eventId: { organizationId: "org-a", memberId: "member-1", eventId: "event-1" } },
+    });
+  });
 });
 
 describe("resolveAttendanceSession", () => {
@@ -134,6 +154,7 @@ describe("resolveAttendanceSession", () => {
       sessionId: "session-missing",
       organizationId: "org-a",
       meetingId: "meeting-1",
+      eventId: null,
       tokenVersion: 1,
       mode: "ROTATING_QR",
       rotationSeconds: 30,
@@ -149,6 +170,7 @@ describe("resolveAttendanceSession", () => {
       sessionId: "session-1",
       organizationId: "org-a",
       meetingId: "meeting-1",
+      eventId: null,
       tokenVersion: 1,
       mode: "ROTATING_QR",
       rotationSeconds: 30,
@@ -157,6 +179,7 @@ describe("resolveAttendanceSession", () => {
       id: "session-1",
       organizationId: "org-a",
       meetingId: "meeting-1",
+      eventId: null,
       status: "OPEN",
       mode: "ROTATING_QR",
       tokenVersion: 1,
@@ -165,6 +188,7 @@ describe("resolveAttendanceSession", () => {
       opensAt: null,
       closesAt: null,
       meeting: { id: "meeting-1", title: "Board Meeting", meetingDate: new Date("2026-01-01T18:00:00.000Z") },
+      event: null,
     });
 
     const result = await resolveAttendanceSession(token);
@@ -174,7 +198,49 @@ describe("resolveAttendanceSession", () => {
         id: "session-1",
         organizationId: "org-a",
         meetingId: "meeting-1",
+        eventId: null,
         meetingTitle: "Board Meeting",
+        meetingDate: new Date("2026-01-01T18:00:00.000Z"),
+        lateThresholdMinutes: 10,
+      },
+    });
+  });
+
+  it("resolves organizationId/eventId from the database row for an event-backed session", async () => {
+    const token = await signAttendanceToken({
+      sessionId: "session-2",
+      organizationId: "org-a",
+      meetingId: null,
+      eventId: "event-1",
+      tokenVersion: 1,
+      mode: "ROTATING_QR",
+      rotationSeconds: 30,
+    });
+    findUniqueSession.mockResolvedValueOnce({
+      id: "session-2",
+      organizationId: "org-a",
+      meetingId: null,
+      eventId: "event-1",
+      status: "OPEN",
+      mode: "ROTATING_QR",
+      tokenVersion: 1,
+      rotationSeconds: 30,
+      lateThresholdMinutes: 10,
+      opensAt: null,
+      closesAt: null,
+      meeting: null,
+      event: { id: "event-1", title: "Fall Festival", startAt: new Date("2026-01-01T18:00:00.000Z") },
+    });
+
+    const result = await resolveAttendanceSession(token);
+    expect(result).toEqual({
+      ok: true,
+      session: {
+        id: "session-2",
+        organizationId: "org-a",
+        meetingId: null,
+        eventId: "event-1",
+        meetingTitle: "Fall Festival",
         meetingDate: new Date("2026-01-01T18:00:00.000Z"),
         lateThresholdMinutes: 10,
       },

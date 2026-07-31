@@ -11,6 +11,7 @@ function baseSession(overrides: Partial<Parameters<typeof verifyAttendanceToken>
     id: "session_1",
     organizationId: "org_1",
     meetingId: "meeting_1",
+    eventId: null,
     status: "OPEN",
     mode: "ROTATING_QR" as const,
     tokenVersion: 1,
@@ -31,12 +32,30 @@ describe("attendance-token", () => {
       sessionId: "session_1",
       organizationId: "org_1",
       meetingId: "meeting_1",
+      eventId: null,
       tokenVersion: 1,
       mode: "ROTATING_QR",
       rotationSeconds: 30,
     });
     const result = await verifyAttendanceToken(token, baseSession());
-    expect(result).toEqual({ ok: true, sessionId: "session_1", organizationId: "org_1", meetingId: "meeting_1" });
+    expect(result).toEqual({ ok: true, sessionId: "session_1", organizationId: "org_1", meetingId: "meeting_1", eventId: null });
+  });
+
+  it("round-trips a valid token for an event-backed session", async () => {
+    const token = await signAttendanceToken({
+      sessionId: "session_3",
+      organizationId: "org_1",
+      meetingId: null,
+      eventId: "event_1",
+      tokenVersion: 1,
+      mode: "ROTATING_QR",
+      rotationSeconds: 30,
+    });
+    const result = await verifyAttendanceToken(
+      token,
+      baseSession({ id: "session_3", meetingId: null, eventId: "event_1" })
+    );
+    expect(result).toEqual({ ok: true, sessionId: "session_3", organizationId: "org_1", meetingId: null, eventId: "event_1" });
   });
 
   it("round-trips a valid static token", async () => {
@@ -44,6 +63,7 @@ describe("attendance-token", () => {
       sessionId: "session_2",
       organizationId: "org_1",
       meetingId: "meeting_1",
+      eventId: null,
       tokenVersion: 1,
       mode: "STATIC_QR",
       rotationSeconds: 30,
@@ -60,6 +80,7 @@ describe("attendance-token", () => {
       sessionId: "session_1",
       organizationId: "org_1",
       meetingId: "meeting_1",
+      eventId: null,
       tokenVersion: 1,
       mode: "ROTATING_QR",
       rotationSeconds: 30,
@@ -73,6 +94,7 @@ describe("attendance-token", () => {
       sessionId: "session_1",
       organizationId: "org_1",
       meetingId: "meeting_1",
+      eventId: null,
       tokenVersion: 1,
       mode: "ROTATING_QR",
       rotationSeconds: 30,
@@ -91,6 +113,7 @@ describe("attendance-token", () => {
         sessionId: "session_1",
         organizationId: "org_1",
         meetingId: "meeting_1",
+        eventId: null,
         tokenVersion: 1,
         mode: "ROTATING_QR",
         rotationSeconds: 30,
@@ -108,6 +131,7 @@ describe("attendance-token", () => {
       sessionId: "session_1",
       organizationId: "org_1",
       meetingId: "meeting_1",
+      eventId: null,
       tokenVersion: 1,
       mode: "ROTATING_QR",
       rotationSeconds: 30,
@@ -122,6 +146,7 @@ describe("attendance-token", () => {
       sessionId: "session_1",
       organizationId: "org_1",
       meetingId: "meeting_1",
+      eventId: null,
       tokenVersion: 1,
       mode: "ROTATING_QR",
       rotationSeconds: 30,
@@ -135,6 +160,7 @@ describe("attendance-token", () => {
       sessionId: "session_1",
       organizationId: "org_1",
       meetingId: "meeting_1",
+      eventId: null,
       tokenVersion: 1,
       mode: "ROTATING_QR",
       rotationSeconds: 30,
@@ -148,6 +174,7 @@ describe("attendance-token", () => {
       sessionId: "session_1",
       organizationId: "org_1",
       meetingId: "meeting_1",
+      eventId: null,
       tokenVersion: 1,
       mode: "ROTATING_QR",
       rotationSeconds: 30,
@@ -162,6 +189,7 @@ describe("attendance-token", () => {
       sessionId: "session_1",
       organizationId: "org_1",
       meetingId: "meeting_1",
+      eventId: null,
       tokenVersion: 1,
       mode: "ROTATING_QR",
       rotationSeconds: 30,
@@ -176,6 +204,7 @@ describe("attendance-token", () => {
       sessionId: "session_1",
       organizationId: "org_1",
       meetingId: "meeting_1",
+      eventId: null,
       tokenVersion: 1,
       mode: "ROTATING_QR",
       rotationSeconds: 30,
@@ -191,6 +220,7 @@ describe("attendance-token", () => {
         sessionId: "session_1",
         organizationId: "org_1",
         meetingId: "meeting_1",
+        eventId: null,
         tokenVersion: 1,
         mode: "ROTATING_QR",
         rotationSeconds: 30,
@@ -210,6 +240,7 @@ describe("attendance-token", () => {
         sessionId: "session_1",
         organizationId: "org_1",
         meetingId: "meeting_1",
+        eventId: null,
         tokenVersion: 1,
         mode: "ROTATING_QR",
         rotationSeconds: 30,
@@ -233,6 +264,7 @@ describe("attendance-token", () => {
       sessionId: "session_1",
       organizationId: "org_1",
       meetingId: "meeting_1",
+      eventId: null,
       tokenVersion: 1,
       mode: "ROTATING_QR",
       rotationSeconds: 30,

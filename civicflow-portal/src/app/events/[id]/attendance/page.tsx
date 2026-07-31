@@ -27,7 +27,8 @@ export default async function EventAttendancePage({ params }: { params: Promise<
         title={`${event.title} Attendance`}
         description="Attendance recorded for this event."
         actions={[
-          { href: `/attendance/new?eventId=${event.id}`, label: "Record Attendance", tone: "primary" },
+          { href: `/events/${event.id}/attendance-session`, label: "QR Check-In Session", tone: "primary" },
+          { href: `/attendance/new?eventId=${event.id}`, label: "Record Attendance" },
           { href: `/events/${event.id}`, label: "Back to Event" },
         ]}
       />

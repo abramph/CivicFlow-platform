@@ -48,15 +48,18 @@ const STATUS_COLOR: Record<SessionStatus, string> = {
   CANCELLED: "bg-red-100 text-red-700",
 };
 
+export type AttendanceEntity = { type: "meeting"; id: string } | { type: "event"; id: string };
+
 export function AttendanceSessionManager({
-  meetingId,
+  entity,
   canWrite,
   canReopen,
 }: {
-  meetingId: string;
+  entity: AttendanceEntity;
   canWrite: boolean;
   canReopen: boolean;
 }) {
+  const entityPath = entity.type === "meeting" ? "meetings" : "events";
   const [session, setSession] = useState<AttendanceSession | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [roster, setRoster] = useState<RosterRow[]>([]);
@@ -68,16 +71,16 @@ export function AttendanceSessionManager({
   const [correcting, setCorrecting] = useState<RosterRow | null>(null);
 
   const loadSession = useCallback(async () => {
-    const res = await fetch(`/api/meetings/${meetingId}/attendance-session`);
+    const res = await fetch(`/api/${entityPath}/${entity.id}/attendance-session`);
     const data = await res.json();
     if (data.ok) setSession(data.data);
-  }, [meetingId]);
+  }, [entityPath, entity.id]);
 
   const loadRoster = useCallback(async () => {
-    const res = await fetch(`/api/meetings/${meetingId}/attendance`);
+    const res = await fetch(`/api/${entityPath}/${entity.id}/attendance`);
     const data = await res.json();
     if (data.ok) setRoster(data.data);
-  }, [meetingId]);
+  }, [entityPath, entity.id]);
 
   useEffect(() => {
     (async () => {
@@ -118,7 +121,7 @@ export function AttendanceSessionManager({
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`/api/meetings/${meetingId}/attendance-session`, {
+      const res = await fetch(`/api/${entityPath}/${entity.id}/attendance-session`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode }),
@@ -207,14 +210,14 @@ export function AttendanceSessionManager({
               {session.status === "OPEN" ? (
                 <>
                   <Link
-                    href={`/meetings/${meetingId}/attendance-session/display`}
+                    href={`/${entityPath}/${entity.id}/attendance-session/display`}
                     target="_blank"
                     className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800"
                   >
                     Full-Screen QR
                   </Link>
                   <Link
-                    href={`/meetings/${meetingId}/attendance-session/print`}
+                    href={`/${entityPath}/${entity.id}/attendance-session/print`}
                     target="_blank"
                     className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50"
                   >
@@ -234,7 +237,7 @@ export function AttendanceSessionManager({
                 </button>
               ) : null}
               <Link
-                href={`/api/meetings/${meetingId}/attendance/export`}
+                href={`/api/${entityPath}/${entity.id}/attendance/export`}
                 className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50"
               >
                 Export CSV
@@ -303,7 +306,7 @@ export function AttendanceSessionManager({
             </div>
           </div>
 
-          <Link href={`/meetings/${meetingId}/attendance-session/audit`} className="text-sm font-medium text-emerald-700 hover:underline">
+          <Link href={`/${entityPath}/${entity.id}/attendance-session/audit`} className="text-sm font-medium text-emerald-700 hover:underline">
             View attendance audit history
           </Link>
         </>

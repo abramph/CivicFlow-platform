@@ -9,19 +9,20 @@ import { formatDateTime } from "@/lib/formatting";
  * A printed sheet is inherently static — paper can't rotate a QR code — so
  * this mints one token good for the session's full window (or, for a
  * ROTATING_QR session, effectively just "right now"; printing is really
- * meant to be paired with a STATIC_QR session, called out below).
+ * meant to be paired with a STATIC_QR session, called out below). Mirrors
+ * the Meeting print page.
  */
-export default async function AttendancePrintPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function EventAttendancePrintPage({ params }: { params: Promise<{ id: string }> }) {
   const { organizationId } = await requirePermission("attendance:write");
   const { id } = await params;
-  const [meeting, session, organization] = await Promise.all([
-    prisma.meeting.findFirst({ where: { id, organizationId } }),
-    prisma.meetingAttendanceSession.findFirst({ where: { organizationId, meetingId: id, status: "OPEN" } }),
+  const [event, session, organization] = await Promise.all([
+    prisma.event.findFirst({ where: { id, organizationId } }),
+    prisma.meetingAttendanceSession.findFirst({ where: { organizationId, eventId: id, status: "OPEN" } }),
     prisma.organization.findUnique({ where: { id: organizationId }, select: { name: true } }),
   ]);
 
-  if (!meeting || !session) {
-    return <div className="p-8 text-center">Attendance isn&apos;t open for this meeting. Open it first, then reload this page.</div>;
+  if (!event || !session || !event.startAt) {
+    return <div className="p-8 text-center">Attendance isn&apos;t open for this event. Open it first, then reload this page.</div>;
   }
 
   const token = await signAttendanceToken({
@@ -39,8 +40,8 @@ export default async function AttendancePrintPage({ params }: { params: Promise<
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-white p-10 text-center print:p-0">
       <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">{organization?.name}</p>
-      <h1 className="text-3xl font-bold text-slate-950">{meeting.title}</h1>
-      <p className="text-slate-600">{formatDateTime(meeting.meetingDate)}</p>
+      <h1 className="text-3xl font-bold text-slate-950">{event.title}</h1>
+      <p className="text-slate-600">{formatDateTime(event.startAt)}</p>
 
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={qrDataUrl} alt="Attendance check-in QR code" className="my-6 h-80 w-80" />
@@ -55,8 +56,8 @@ export default async function AttendancePrintPage({ params }: { params: Promise<
       </p>
       {session.mode === "ROTATING_QR" ? (
         <p className="max-w-md text-xs text-slate-500">
-          This meeting uses a rotating code — this printed code is only valid for a short window from when it was
-          printed. For a code that stays valid the whole meeting, use a Static QR session instead.
+          This event uses a rotating code — this printed code is only valid for a short window from when it was
+          printed. For a code that stays valid the whole event, use a Static QR session instead.
         </p>
       ) : null}
     </div>
