@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { FlatList, StyleSheet } from 'react-native';
 
+import { LoadErrorBanner } from '@/components/load-error-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
@@ -11,10 +12,16 @@ export default function MinutesScreen() {
   const { selectedOrganizationId } = useAuth();
   const [minutes, setMinutes] = useState<PtaApprovedMinutes[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!selectedOrganizationId) return;
-    setMinutes(await getPtaMinutes(selectedOrganizationId));
+    try {
+      setMinutes(await getPtaMinutes(selectedOrganizationId));
+      setLoadError(null);
+    } catch {
+      setLoadError('Unable to load meeting minutes. Check your connection and try again.');
+    }
   }, [selectedOrganizationId]);
 
   useEffect(() => {
@@ -32,6 +39,7 @@ export default function MinutesScreen() {
     <ThemedView style={styles.container}>
       <ThemedText type="title">Meeting Minutes</ThemedText>
       <ThemedText type="small" themeColor="textSecondary">Approved minutes only.</ThemedText>
+      <LoadErrorBanner message={loadError} onRetry={load} />
       <FlatList
         data={minutes}
         keyExtractor={(item) => item.id}

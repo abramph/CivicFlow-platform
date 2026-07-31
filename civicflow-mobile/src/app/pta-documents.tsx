@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { FlatList, StyleSheet } from 'react-native';
 
+import { LoadErrorBanner } from '@/components/load-error-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
@@ -11,10 +12,16 @@ export default function PtaDocumentsScreen() {
   const { selectedOrganizationId } = useAuth();
   const [documents, setDocuments] = useState<PtaDocument[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!selectedOrganizationId) return;
-    setDocuments(await getPtaDocuments(selectedOrganizationId));
+    try {
+      setDocuments(await getPtaDocuments(selectedOrganizationId));
+      setLoadError(null);
+    } catch {
+      setLoadError('Unable to load documents. Check your connection and try again.');
+    }
   }, [selectedOrganizationId]);
 
   useEffect(() => {
@@ -32,6 +39,7 @@ export default function PtaDocumentsScreen() {
     <ThemedView style={styles.container}>
       <ThemedText type="title">Documents</ThemedText>
       <ThemedText type="small" themeColor="textSecondary">Bylaws, budgets, and other PTA documents.</ThemedText>
+      <LoadErrorBanner message={loadError} onRetry={load} />
       <FlatList
         data={documents}
         keyExtractor={(item) => item.id}

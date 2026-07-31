@@ -2,7 +2,8 @@ import Link from "next/link";
 import { requirePermission } from "@/lib/auth-guards";
 import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { prisma } from "@/lib/prisma";
-import { formatCurrency, formatDateTime, formatEnumLabel, formatText } from "@/lib/formatting";
+import { formatCurrency, formatDateTime, formatText } from "@/lib/formatting";
+import { EVENT_STATUS_LABELS, isActiveEventStatus, normalizeEventStatus } from "@/lib/event-status";
 
 export default async function EventsPage() {
   const { organizationId } = await requirePermission("events:read");
@@ -59,7 +60,7 @@ export default async function EventsPage() {
         <StatCard label="Events" value={events.length} />
         <StatCard
           label="Upcoming / Active"
-          value={events.filter((event) => !["completed", "cancelled"].includes(event.status.toLowerCase())).length}
+          value={events.filter((event) => isActiveEventStatus(event.status)).length}
         />
         <StatCard
           label="Event Contributions"
@@ -102,7 +103,7 @@ export default async function EventsPage() {
                           <p className="mt-1 max-w-md text-xs leading-5 text-slate-700">{event.description}</p>
                         ) : null}
                       </td>
-                      <td className="px-4 py-3 text-slate-900">{formatEnumLabel(event.status)}</td>
+                      <td className="px-4 py-3 text-slate-900">{EVENT_STATUS_LABELS[normalizeEventStatus(event.status)]}</td>
                       <td className="px-4 py-3 text-slate-900">
                         {formatDateTime(event.startAt)} to {formatDateTime(event.endAt)}
                       </td>

@@ -1,11 +1,14 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/authOptions";
 import { prisma } from "@/lib/prisma";
 import { getAnalytics } from "@/lib/apiClient";
 import type { Permission, Role } from "@/lib/rbac";
 import { getEffectivePermissions } from "@/lib/role-permissions";
+import { setupBannerDismissCookieName } from "@/lib/dashboard-setup";
+import { DismissSetupBannerButton } from "@/components/app/DismissSetupBannerButton";
 import {
   Users, Calendar, DollarSign, TrendingDown, AlertCircle, UserCheck,
   Target, Receipt, ChevronRight, Mail, Shield, FileText,
@@ -144,8 +147,7 @@ export default async function DashboardPage() {
     upcomingEventsCount,
     activeCampaigns,
     duesPaymentMethods,
-    membershipCategoryCount,
-    duesSetupCount,
+    duesAccountCount,
     recentTimelineEvents,
     upcomingMeetings,
     openingBalance,
@@ -220,8 +222,12 @@ export default async function DashboardPage() {
       _sum: { amount: true },
       orderBy: { _sum: { amount: "desc" } },
     }),
-    prisma.category.count({ where: { organizationId: orgId, type: "MEMBERSHIP" } }),
-    prisma.category.count({ where: { organizationId: orgId, type: "DUES" } }),
+    // The real signal that "dues billing is set up" is whether a DuesAccount
+    // exists, not whether the org has created any (purely optional) Category
+    // tag rows -- verified live that an org with real members, real dues
+    // charges, and real payments still showed zero Category rows and was
+    // nagged forever by this banner despite already being fully operational.
+    prisma.duesAccount.count({ where: { organizationId: orgId, isActive: true } }),
     prisma.memberTimelineEvent.findMany({
       where: { organizationId: orgId },
       orderBy: [{ occurredAt: "desc" }, { createdAt: "desc" }],
@@ -257,7 +263,10 @@ export default async function DashboardPage() {
   );
 
   const profileIncomplete = !organization?.email || !organization?.phone || !organization?.addressLine1 || !organization?.city || !organization?.state || !organization?.zipCode;
-  const showSetupBanner = profileIncomplete || membershipCategoryCount === 0 || duesSetupCount === 0;
+  const noMembersYet = memberCount === 0;
+  const noDuesSetUpYet = duesAccountCount === 0;
+  const setupBannerDismissed = Boolean((await cookies()).get(setupBannerDismissCookieName(orgId))?.value);
+  const showSetupBanner = !setupBannerDismissed && (profileIncomplete || noMembersYet || noDuesSetUpYet);
 
   const campaignProgress = activeCampaigns.map((c) => ({
     id: c.id,
@@ -288,16 +297,19 @@ export default async function DashboardPage() {
       {/* Setup Banner */}
       {showSetupBanner && (
         <div className="rounded-xl border border-amber-300 bg-amber-50 p-5 shadow-sm">
-          <h3 className="text-lg font-semibold text-amber-950">Finish organization setup</h3>
+          <div className="flex items-start justify-between gap-4">
+            <h3 className="text-lg font-semibold text-amber-950">Finish organization setup</h3>
+            <DismissSetupBannerButton />
+          </div>
           <p className="mt-2 text-sm leading-6 text-amber-900">Some setup areas still need attention before your portal is fully configured.</p>
           <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-amber-900">
             {profileIncomplete && <li>Complete the organization profile with contact and address details.</li>}
-            {membershipCategoryCount === 0 && <li>Create at least one membership category.</li>}
-            {duesSetupCount === 0 && <li>Create at least one dues category or plan.</li>}
+            {noMembersYet && <li>Add your first member.</li>}
+            {noDuesSetUpYet && <li>Set up a dues plan for at least one member.</li>}
           </ul>
           <div className="mt-4 flex flex-wrap gap-3">
             <Link href="/settings/organization" className="rounded-lg bg-amber-600 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-700">Organization Profile</Link>
-            <Link href="/settings/categories" className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-950 hover:bg-amber-100">Categories</Link>
+            <Link href="/members/new" className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-950 hover:bg-amber-100">Add a Member</Link>
             <Link href="/settings/dues" className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-950 hover:bg-amber-100">Dues Setup</Link>
           </div>
         </div>

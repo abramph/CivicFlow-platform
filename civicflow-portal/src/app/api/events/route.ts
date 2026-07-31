@@ -1,6 +1,7 @@
 import { requirePermission } from "@/lib/auth-guards";
 import { withApiErrorHandling } from "@/lib/api-route";
 import { createAuditEvent } from "@/lib/audit";
+import { EVENT_STATUSES } from "@/lib/event-status";
 import { prisma } from "@/lib/prisma";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { parseJsonBody, ValidationError, z } from "@/lib/validation";
@@ -29,7 +30,7 @@ const createEventSchema = z.object({
   location: optionalTextField(240),
   startAt: optionalDateTimeField,
   endAt: optionalDateTimeField,
-  status: z.string().trim().min(1).max(40),
+  status: z.enum(EVENT_STATUSES),
   notes: optionalTextField(4000),
 });
 

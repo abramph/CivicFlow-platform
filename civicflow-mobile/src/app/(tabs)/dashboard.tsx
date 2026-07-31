@@ -3,6 +3,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { useCallback, useEffect, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet } from 'react-native';
 
+import { LoadErrorBanner } from '@/components/load-error-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
@@ -49,6 +50,7 @@ export default function DashboardScreen() {
   const [ptaHours, setPtaHours] = useState<PtaVolunteerHours | null>(null);
   const [ptaUpcoming, setPtaUpcoming] = useState<PtaVolunteerCommitment | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const unreadCount = useUnreadConversationCount(selectedOrganizationId);
   const hasMemberIdentity = Boolean(selectedOrganization?.memberId);
   const pta = selectedOrganization?.pta ?? null;
@@ -63,30 +65,35 @@ export default function DashboardScreen() {
   const load = useCallback(async () => {
     if (!selectedOrganizationId || !hasAnyIdentity) return;
 
-    const [announcementsData, eventsData] = await Promise.all([
-      getAnnouncementsForIdentity(selectedOrganizationId, hasMemberIdentity),
-      getEventsForIdentity(selectedOrganizationId, hasMemberIdentity),
-    ]);
-    setAnnouncements(announcementsData.slice(0, 3));
-    setEvents(eventsData.slice(0, 3));
-
-    if (hasMemberIdentity) {
-      const [duesData, historyData] = await Promise.all([getDues(selectedOrganizationId), getPaymentHistory(selectedOrganizationId)]);
-      setDues(duesData);
-      setPendingReportCount(historyData.reports.filter((r) => r.status === 'pending').length);
-    } else if (hasPtaIdentity) {
-      const duesData = await getPtaDues(selectedOrganizationId);
-      setPtaDues(duesData);
-      setPendingReportCount(duesData.currentCharge?.pendingReportCount ?? 0);
-    }
-
-    if (pta?.householdAdultId) {
-      const [hoursData, commitments] = await Promise.all([
-        getPtaVolunteerHours(selectedOrganizationId),
-        getPtaVolunteerCommitments(selectedOrganizationId),
+    try {
+      const [announcementsData, eventsData] = await Promise.all([
+        getAnnouncementsForIdentity(selectedOrganizationId, hasMemberIdentity),
+        getEventsForIdentity(selectedOrganizationId, hasMemberIdentity),
       ]);
-      setPtaHours(hoursData);
-      setPtaUpcoming(commitments.find((c) => c.status === 'SIGNED_UP') ?? null);
+      setAnnouncements(announcementsData.slice(0, 3));
+      setEvents(eventsData.slice(0, 3));
+
+      if (hasMemberIdentity) {
+        const [duesData, historyData] = await Promise.all([getDues(selectedOrganizationId), getPaymentHistory(selectedOrganizationId)]);
+        setDues(duesData);
+        setPendingReportCount(historyData.reports.filter((r) => r.status === 'pending').length);
+      } else if (hasPtaIdentity) {
+        const duesData = await getPtaDues(selectedOrganizationId);
+        setPtaDues(duesData);
+        setPendingReportCount(duesData.currentCharge?.pendingReportCount ?? 0);
+      }
+
+      if (pta?.householdAdultId) {
+        const [hoursData, commitments] = await Promise.all([
+          getPtaVolunteerHours(selectedOrganizationId),
+          getPtaVolunteerCommitments(selectedOrganizationId),
+        ]);
+        setPtaHours(hoursData);
+        setPtaUpcoming(commitments.find((c) => c.status === 'SIGNED_UP') ?? null);
+      }
+      setLoadError(null);
+    } catch {
+      setLoadError('Unable to load your dashboard. Check your connection and try again.');
     }
   }, [selectedOrganizationId, hasAnyIdentity, hasMemberIdentity, hasPtaIdentity, pta?.householdAdultId]);
 
@@ -116,6 +123,8 @@ export default function DashboardScreen() {
       <ThemedText type="subtitle" themeColor="textSecondary">
         Welcome back, {selectedOrganization?.firstName ?? 'member'}
       </ThemedText>
+
+      <LoadErrorBanner message={loadError} onRetry={load} />
 
       {hasMemberIdentity ? (
         <ThemedView style={styles.summaryRow}>

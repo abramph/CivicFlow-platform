@@ -3,6 +3,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { useCallback, useEffect, useState } from 'react';
 import { FlatList, Pressable, RefreshControl, StyleSheet } from 'react-native';
 
+import { LoadErrorBanner } from '@/components/load-error-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
@@ -46,13 +47,19 @@ export default function DuesScreen() {
   const [ptaSummary, setPtaSummary] = useState<PtaDuesSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!selectedOrganizationId) return;
-    if (hasMemberIdentity) {
-      setSummary(await getDues(selectedOrganizationId));
-    } else if (hasPtaIdentity) {
-      setPtaSummary(await getPtaDues(selectedOrganizationId));
+    try {
+      if (hasMemberIdentity) {
+        setSummary(await getDues(selectedOrganizationId));
+      } else if (hasPtaIdentity) {
+        setPtaSummary(await getPtaDues(selectedOrganizationId));
+      }
+      setLoadError(null);
+    } catch {
+      setLoadError('Unable to load dues status. Check your connection and try again.');
     }
   }, [selectedOrganizationId, hasMemberIdentity, hasPtaIdentity]);
 
@@ -80,6 +87,7 @@ export default function DuesScreen() {
     return (
       <ThemedView style={styles.container}>
         <ThemedText type="title">Membership Dues</ThemedText>
+        <LoadErrorBanner message={loadError} onRetry={load} />
 
         {!loading && ptaSummary?.hasBillingIdentity === false ? (
           <ThemedText type="small" themeColor="textSecondary" style={styles.empty}>
@@ -180,6 +188,7 @@ export default function DuesScreen() {
   return (
     <ThemedView style={styles.container}>
       <ThemedText type="title">Dues Status</ThemedText>
+      <LoadErrorBanner message={loadError} onRetry={load} />
 
       {!loading && summary ? (
         <ThemedView

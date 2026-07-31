@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet } from 'react-native';
 
+import { LoadErrorBanner } from '@/components/load-error-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
@@ -41,21 +42,27 @@ export default function VolunteersScreen() {
   const [hours, setHours] = useState<PtaVolunteerHours | null>(null);
   const [today, setToday] = useState<PtaVolunteerTodaySummary | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!selectedOrganizationId || !pta) return;
-    const tasks: Promise<void>[] = [];
-    if (isParent) {
-      tasks.push(
-        getPtaVolunteerOpportunities(selectedOrganizationId).then(setOpportunities),
-        getPtaVolunteerCommitments(selectedOrganizationId).then(setCommitments),
-        getPtaVolunteerHours(selectedOrganizationId).then(setHours)
-      );
+    try {
+      const tasks: Promise<void>[] = [];
+      if (isParent) {
+        tasks.push(
+          getPtaVolunteerOpportunities(selectedOrganizationId).then(setOpportunities),
+          getPtaVolunteerCommitments(selectedOrganizationId).then(setCommitments),
+          getPtaVolunteerHours(selectedOrganizationId).then(setHours)
+        );
+      }
+      if (isOfficer) {
+        tasks.push(getPtaVolunteerToday(selectedOrganizationId).then(setToday));
+      }
+      await Promise.all(tasks);
+      setLoadError(null);
+    } catch {
+      setLoadError('Unable to load volunteer data. Check your connection and try again.');
     }
-    if (isOfficer) {
-      tasks.push(getPtaVolunteerToday(selectedOrganizationId).then(setToday));
-    }
-    await Promise.all(tasks);
   }, [selectedOrganizationId, pta, isParent, isOfficer]);
 
   useEffect(() => {
@@ -92,6 +99,7 @@ export default function VolunteersScreen() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
     >
       <ThemedText type="title">Volunteers</ThemedText>
+      <LoadErrorBanner message={loadError} onRetry={load} />
 
       {isOfficer && today ? (
         <Pressable

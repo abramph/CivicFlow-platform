@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { FlatList, Pressable, RefreshControl, StyleSheet } from 'react-native';
 
+import { LoadErrorBanner } from '@/components/load-error-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
@@ -19,11 +20,17 @@ export default function InboxScreen() {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!selectedOrganizationId) return;
-    const data = await getConversations(selectedOrganizationId);
-    setConversations(data);
+    try {
+      const data = await getConversations(selectedOrganizationId);
+      setConversations(data);
+      setLoadError(null);
+    } catch {
+      setLoadError('Unable to load your inbox. Check your connection and try again.');
+    }
   }, [selectedOrganizationId]);
 
   useEffect(() => {
@@ -48,6 +55,7 @@ export default function InboxScreen() {
   return (
     <ThemedView style={styles.container}>
       <ThemedText type="title">Inbox</ThemedText>
+      <LoadErrorBanner message={loadError} onRetry={load} />
       <FlatList
         data={conversations}
         keyExtractor={(item) => item.id}

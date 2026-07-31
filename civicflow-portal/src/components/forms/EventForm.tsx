@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { EVENT_STATUSES, EVENT_STATUS_LABELS, normalizeEventStatus } from "@/lib/event-status";
 
 type EventFormProps = {
   mode: "create" | "edit";
@@ -33,7 +34,7 @@ export function EventForm({ mode, event }: EventFormProps) {
     location: event?.location ?? "",
     startAt: event?.startAt ?? "",
     endAt: event?.endAt ?? "",
-    status: event?.status ?? "upcoming",
+    status: event?.status ? normalizeEventStatus(event.status) : "upcoming",
     notes: event?.notes ?? "",
   });
   const [saving, setSaving] = useState(false);
@@ -67,7 +68,7 @@ export function EventForm({ mode, event }: EventFormProps) {
             location: form.location.trim() || null,
             startAt,
             endAt,
-            status: form.status.trim() || "upcoming",
+            status: form.status,
             notes: form.notes.trim() || null,
           }),
         }
@@ -115,11 +116,19 @@ export function EventForm({ mode, event }: EventFormProps) {
         </label>
         <label className="space-y-2 text-sm font-medium text-slate-900">
           <span>Status</span>
-          <input
+          <select
             className={fieldClassName}
             value={form.status}
-            onChange={(eventObject) => setForm((current) => ({ ...current, status: eventObject.target.value }))}
-          />
+            onChange={(eventObject) =>
+              setForm((current) => ({ ...current, status: eventObject.target.value as (typeof EVENT_STATUSES)[number] }))
+            }
+          >
+            {EVENT_STATUSES.map((status) => (
+              <option key={status} value={status}>
+                {EVENT_STATUS_LABELS[status]}
+              </option>
+            ))}
+          </select>
         </label>
         <label className="space-y-2 text-sm font-medium text-slate-900">
           <span>Start time</span>
