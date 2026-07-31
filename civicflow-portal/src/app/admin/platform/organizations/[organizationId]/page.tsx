@@ -9,6 +9,8 @@ import { Breadcrumbs, StatusPill, EmptyState } from "@/components/admin/Operatio
 import { CopyIdButton } from "@/components/admin/CopyIdButton";
 import { OpenInOrganizationPortalButton } from "@/components/admin/OpenInOrganizationPortalButton";
 import { ImpersonateUserPanel } from "@/components/admin/ImpersonateUserPanel";
+import { PrimaryVerticalManager } from "@/components/admin/PrimaryVerticalManager";
+import { getVerticalTerminology } from "@/lib/vertical-terminology";
 
 export default async function PlatformOrganizationDetailPage({
   params,
@@ -64,6 +66,10 @@ export default async function PlatformOrganizationDetailPage({
             <p className="mt-1 text-sm text-slate-900">{identity.organizationType ? formatEnumLabel(identity.organizationType) : "Not set"}</p>
           </div>
           <div>
+            <p className="text-sm font-medium text-slate-700">Vertical</p>
+            <p className="mt-1 text-sm text-slate-900">{getVerticalTerminology(identity.primaryVertical).productLabel}</p>
+          </div>
+          <div>
             <p className="text-sm font-medium text-slate-700">Status</p>
             <div className="mt-1"><StatusPill status={identity.status} /></div>
           </div>
@@ -89,6 +95,13 @@ export default async function PlatformOrganizationDetailPage({
         <div className="mt-4">
           <OpenInOrganizationPortalButton organizationId={identity.id} />
         </div>
+      </SectionCard>
+
+      <SectionCard
+        title="Primary vertical"
+        description="The product experience this organization sees. Changing it never deletes data — see the impact preview before confirming."
+      >
+        <PrimaryVerticalManager organizationId={identity.id} currentVertical={identity.primaryVertical} />
       </SectionCard>
 
       <SectionCard

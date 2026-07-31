@@ -1,6 +1,7 @@
 import "server-only";
-import type { Prisma } from "@prisma/client";
+import type { OrganizationVertical, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { createAuditEvent } from "@/lib/audit";
 import {
   normalizePagination,
   paginationResult,
@@ -28,6 +29,7 @@ export interface OrganizationListFilters {
   status?: string;
   plan?: string;
   organizationType?: string;
+  primaryVertical?: OrganizationVertical;
   createdAfter?: Date;
   createdBefore?: Date;
   subscriptionStatus?: string;
@@ -40,6 +42,7 @@ export interface OrganizationListItem {
   name: string;
   slug: string;
   organizationType: string | null;
+  primaryVertical: OrganizationVertical;
   plan: string;
   status: string;
   createdAt: string;
@@ -66,6 +69,7 @@ function buildWhere(filters: OrganizationListFilters): Prisma.OrganizationWhereI
   if (filters.status) where.status = filters.status as Prisma.EnumOrgStatusFilter["equals"];
   if (filters.plan) where.plan = filters.plan;
   if (filters.organizationType) where.organizationType = filters.organizationType;
+  if (filters.primaryVertical) where.primaryVertical = filters.primaryVertical;
   if (filters.createdAfter || filters.createdBefore) {
     where.createdAt = {
       ...(filters.createdAfter ? { gte: filters.createdAfter } : {}),
@@ -99,6 +103,7 @@ export async function listOrganizations(
         name: true,
         slug: true,
         organizationType: true,
+        primaryVertical: true,
         plan: true,
         status: true,
         createdAt: true,
@@ -139,6 +144,7 @@ export async function listOrganizations(
       name: org.name,
       slug: org.slug,
       organizationType: org.organizationType,
+      primaryVertical: org.primaryVertical,
       plan: org.plan,
       status: org.status,
       createdAt: org.createdAt.toISOString(),
@@ -160,6 +166,7 @@ export interface OrganizationDetail {
     name: string;
     slug: string;
     organizationType: string | null;
+    primaryVertical: OrganizationVertical;
     status: string;
     plan: string;
     createdAt: string;
@@ -206,6 +213,7 @@ export async function getOrganizationDetail(organizationId: string): Promise<Org
       name: true,
       slug: true,
       organizationType: true,
+      primaryVertical: true,
       status: true,
       plan: true,
       createdAt: true,
@@ -286,6 +294,7 @@ export async function getOrganizationDetail(organizationId: string): Promise<Org
       name: org.name,
       slug: org.slug,
       organizationType: org.organizationType,
+      primaryVertical: org.primaryVertical,
       status: org.status,
       plan: org.plan,
       createdAt: org.createdAt.toISOString(),
@@ -329,4 +338,111 @@ export async function getOrganizationDetail(organizationId: string): Promise<Org
       })),
     },
   };
+}
+
+export class OrganizationVerticalChangeError extends Error {}
+
+export interface PrimaryVerticalChangePreview {
+  organizationId: string;
+  currentVertical: OrganizationVertical;
+  proposedVertical: OrganizationVertical;
+  /** Data that stays intact but goes dormant (hidden from navigation) if the
+   * org is moving away from PTA — never deleted, restorable by switching
+   * back or re-enrolling. Empty unless currentVertical is PTA. */
+  dormantOnChange: { label: string; count: number }[];
+  /** True when the PTA Labs feature is enrolled but the org is not (or is no
+   * longer) classified PTA — a state worth flagging, not blocking. */
+  ptaLabsEnrollmentMismatch: boolean;
+}
+
+/**
+ * Read-only impact preview shown before a Platform Admin confirms a
+ * primary-vertical change — Phase 7's "preview the impact before changing."
+ * Never mutates anything.
+ */
+export async function previewPrimaryVerticalChange(
+  organizationId: string,
+  proposedVertical: OrganizationVertical
+): Promise<PrimaryVerticalChangePreview> {
+  const org = await prisma.organization.findUnique({
+    where: { id: organizationId },
+    select: { primaryVertical: true },
+  });
+  if (!org) throw new OrganizationVerticalChangeError(`Organization not found: ${organizationId}`);
+
+  const dormantOnChange: { label: string; count: number }[] = [];
+  if (org.primaryVertical === "PTA" && proposedVertical !== "PTA") {
+    const [households, students, volunteerHours] = await Promise.all([
+      prisma.ptaHousehold.count({ where: { organizationId } }),
+      prisma.ptaStudent.count({ where: { organizationId } }),
+      prisma.ptaVolunteerHourEntry.count({ where: { organizationId } }),
+    ]);
+    if (households > 0) dormantOnChange.push({ label: "Households", count: households });
+    if (students > 0) dormantOnChange.push({ label: "Students", count: students });
+    if (volunteerHours > 0) dormantOnChange.push({ label: "Volunteer hour entries", count: volunteerHours });
+  }
+
+  const ptaLabFeature =
+    proposedVertical === "PTA"
+      ? await prisma.organizationLabFeature.findUnique({
+          where: { organizationId_featureKey: { organizationId, featureKey: "ptaVertical" } },
+          select: { status: true },
+        })
+      : null;
+
+  return {
+    organizationId,
+    currentVertical: org.primaryVertical,
+    proposedVertical,
+    dormantOnChange,
+    ptaLabsEnrollmentMismatch: proposedVertical === "PTA" && ptaLabFeature?.status !== "ENABLED",
+  };
+}
+
+/**
+ * Changes an organization's primary vertical. Touches only the
+ * `primaryVertical` column — never deletes or modifies PTA households,
+ * students, dues, Labs enrollment, subscriptions, or any other data, so
+ * switching back later (or re-enrolling) restores full access to
+ * unmodified history. Always audited.
+ */
+export async function changeOrganizationPrimaryVertical(input: {
+  organizationId: string;
+  newVertical: OrganizationVertical;
+  actorUserId: string;
+  actorEmail: string;
+  reason?: string | null;
+}): Promise<{ organizationId: string; previousVertical: OrganizationVertical; newVertical: OrganizationVertical }> {
+  const org = await prisma.organization.findUnique({
+    where: { id: input.organizationId },
+    select: { primaryVertical: true },
+  });
+  if (!org) throw new OrganizationVerticalChangeError(`Organization not found: ${input.organizationId}`);
+
+  const previousVertical = org.primaryVertical;
+
+  if (previousVertical === input.newVertical) {
+    return { organizationId: input.organizationId, previousVertical, newVertical: input.newVertical };
+  }
+
+  await prisma.organization.update({
+    where: { id: input.organizationId },
+    data: { primaryVertical: input.newVertical },
+  });
+
+  await createAuditEvent({
+    organizationId: input.organizationId,
+    actorUserId: input.actorUserId,
+    actorEmail: input.actorEmail,
+    action: "organization.primary_vertical_changed",
+    entityType: "organization",
+    entityId: input.organizationId,
+    metadata: {
+      previousVertical,
+      newVertical: input.newVertical,
+      reason: input.reason ?? null,
+    },
+  });
+
+  return { organizationId: input.organizationId, previousVertical, newVertical: input.newVertical };
 }

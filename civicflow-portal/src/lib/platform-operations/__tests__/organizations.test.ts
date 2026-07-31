@@ -38,6 +38,7 @@ describe("deriveOrganizationHealth", () => {
 const organizationFindMany = vi.fn();
 const organizationCount = vi.fn();
 const organizationFindUnique = vi.fn();
+const organizationUpdate = vi.fn();
 const organizationMembershipGroupBy = vi.fn();
 const organizationMembershipFindMany = vi.fn();
 const organizationMembershipCount = vi.fn();
@@ -49,6 +50,10 @@ const subscriptionFindFirst = vi.fn();
 const organizationSmsSettingsFindUnique = vi.fn();
 const orgMemberCount = vi.fn();
 const smsMessageCount = vi.fn();
+const ptaHouseholdCount = vi.fn();
+const ptaStudentCount = vi.fn();
+const ptaVolunteerHourEntryCount = vi.fn();
+const organizationLabFeatureFindUnique = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -56,6 +61,7 @@ vi.mock("@/lib/prisma", () => ({
       findMany: (...args: unknown[]) => organizationFindMany(...args),
       count: (...args: unknown[]) => organizationCount(...args),
       findUnique: (...args: unknown[]) => organizationFindUnique(...args),
+      update: (...args: unknown[]) => organizationUpdate(...args),
     },
     organizationMembership: {
       groupBy: (...args: unknown[]) => organizationMembershipGroupBy(...args),
@@ -72,7 +78,16 @@ vi.mock("@/lib/prisma", () => ({
     organizationSmsSettings: { findUnique: (...args: unknown[]) => organizationSmsSettingsFindUnique(...args) },
     orgMember: { count: (...args: unknown[]) => orgMemberCount(...args) },
     smsMessage: { count: (...args: unknown[]) => smsMessageCount(...args) },
+    ptaHousehold: { count: (...args: unknown[]) => ptaHouseholdCount(...args) },
+    ptaStudent: { count: (...args: unknown[]) => ptaStudentCount(...args) },
+    ptaVolunteerHourEntry: { count: (...args: unknown[]) => ptaVolunteerHourEntryCount(...args) },
+    organizationLabFeature: { findUnique: (...args: unknown[]) => organizationLabFeatureFindUnique(...args) },
   },
+}));
+
+const createAuditEvent = vi.fn().mockResolvedValue(undefined);
+vi.mock("@/lib/audit", () => ({
+  createAuditEvent: (...args: unknown[]) => createAuditEvent(...args),
 }));
 
 describe("getOrganizationDetail — tenant-boundary safety", () => {
@@ -144,5 +159,107 @@ describe("getOrganizationDetail — tenant-boundary safety", () => {
     const result = await getOrganizationDetail("aph-org");
 
     expect(result?.identity.billingExempt).toBe(true);
+  });
+});
+
+describe("previewPrimaryVerticalChange", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("throws for an organization that doesn't exist", async () => {
+    organizationFindUnique.mockResolvedValueOnce(null);
+    const { previewPrimaryVerticalChange, OrganizationVerticalChangeError } = await import("../organizations");
+    await expect(previewPrimaryVerticalChange("missing", "COMMUNITY")).rejects.toThrow(OrganizationVerticalChangeError);
+  });
+
+  it("lists dormant PTA data only when moving away from PTA", async () => {
+    organizationFindUnique.mockResolvedValueOnce({ primaryVertical: "PTA" });
+    ptaHouseholdCount.mockResolvedValueOnce(4);
+    ptaStudentCount.mockResolvedValueOnce(6);
+    ptaVolunteerHourEntryCount.mockResolvedValueOnce(0);
+
+    const { previewPrimaryVerticalChange } = await import("../organizations");
+    const preview = await previewPrimaryVerticalChange("org-pta", "COMMUNITY");
+
+    expect(preview.dormantOnChange).toEqual([
+      { label: "Households", count: 4 },
+      { label: "Students", count: 6 },
+    ]);
+  });
+
+  it("reports no dormant data when the org was never PTA", async () => {
+    organizationFindUnique.mockResolvedValueOnce({ primaryVertical: "COMMUNITY" });
+
+    const { previewPrimaryVerticalChange } = await import("../organizations");
+    const preview = await previewPrimaryVerticalChange("org-community", "UNION");
+
+    expect(preview.dormantOnChange).toEqual([]);
+    expect(ptaHouseholdCount).not.toHaveBeenCalled();
+  });
+
+  it("flags a mismatch when moving to PTA without active PTA Labs enrollment", async () => {
+    organizationFindUnique.mockResolvedValueOnce({ primaryVertical: "COMMUNITY" });
+    organizationLabFeatureFindUnique.mockResolvedValueOnce({ status: "DISABLED" });
+
+    const { previewPrimaryVerticalChange } = await import("../organizations");
+    const preview = await previewPrimaryVerticalChange("org-1", "PTA");
+
+    expect(preview.ptaLabsEnrollmentMismatch).toBe(true);
+  });
+});
+
+describe("changeOrganizationPrimaryVertical", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("throws for an organization that doesn't exist", async () => {
+    organizationFindUnique.mockResolvedValueOnce(null);
+    const { changeOrganizationPrimaryVertical, OrganizationVerticalChangeError } = await import("../organizations");
+    await expect(
+      changeOrganizationPrimaryVertical({ organizationId: "missing", newVertical: "COMMUNITY", actorUserId: "u1", actorEmail: "a@x.com" })
+    ).rejects.toThrow(OrganizationVerticalChangeError);
+    expect(organizationUpdate).not.toHaveBeenCalled();
+  });
+
+  it("is a no-op (no write, no audit event) when the requested vertical matches the current one", async () => {
+    organizationFindUnique.mockResolvedValueOnce({ primaryVertical: "COMMUNITY" });
+    const { changeOrganizationPrimaryVertical } = await import("../organizations");
+
+    const result = await changeOrganizationPrimaryVertical({
+      organizationId: "org-1",
+      newVertical: "COMMUNITY",
+      actorUserId: "u1",
+      actorEmail: "a@x.com",
+    });
+
+    expect(result).toEqual({ organizationId: "org-1", previousVertical: "COMMUNITY", newVertical: "COMMUNITY" });
+    expect(organizationUpdate).not.toHaveBeenCalled();
+    expect(createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("updates only primaryVertical and records a before/after audit event", async () => {
+    organizationFindUnique.mockResolvedValueOnce({ primaryVertical: "PTA" });
+    organizationUpdate.mockResolvedValueOnce({});
+
+    const { changeOrganizationPrimaryVertical } = await import("../organizations");
+    const result = await changeOrganizationPrimaryVertical({
+      organizationId: "org-1",
+      newVertical: "COMMUNITY",
+      actorUserId: "admin-1",
+      actorEmail: "admin@aphtechnologies.example",
+      reason: "Test reclassification",
+    });
+
+    expect(result).toEqual({ organizationId: "org-1", previousVertical: "PTA", newVertical: "COMMUNITY" });
+    expect(organizationUpdate).toHaveBeenCalledWith({
+      where: { id: "org-1" },
+      data: { primaryVertical: "COMMUNITY" },
+    });
+    expect(createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: "org-1",
+        actorUserId: "admin-1",
+        action: "organization.primary_vertical_changed",
+        metadata: expect.objectContaining({ previousVertical: "PTA", newVertical: "COMMUNITY", reason: "Test reclassification" }),
+      })
+    );
   });
 });
