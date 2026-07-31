@@ -11,6 +11,8 @@ Two real, previously-undocumented gaps were found and fixed by the scripts in `s
 
 Neither of the new `.env.development.local` files is committed to git (both projects' `.gitignore` already covers `.env*.local`).
 
+3. **A bare `npx prisma ...` command in `civicflow-portal` ignored `.env.development.local` entirely and resolved to production.** `prisma.config.ts` called `@next/env`'s `loadEnvConfig(dir)` without its `dev` argument, which defaults to *production*-mode file order (`.env.production.local` > `.env.local` > `.env.production` > `.env`) rather than looking at `.env.development.local` at all — confirmed by reading `@next/env`'s actual source. `next dev` itself was never affected (it always passes `dev: true` internally), but any other Prisma CLI invocation was. Fixed by passing `dev: process.env.NODE_ENV !== "production"` — matching Next.js's own convention, and unaffected in the real production deploy since `.do/app.yaml` explicitly sets `NODE_ENV=production` before `npm run db:deploy`. The wrapper scripts below still set `$env:DATABASE_URL` explicitly before every Prisma call as a second, redundant layer of protection — deliberately kept even though the root cause is now fixed, given the cost of getting this specific thing wrong.
+
 ## Prerequisites
 
 - **Node.js**: developed and verified against v24.x on this machine. No `engines` field or `.nvmrc` currently pins a version in this repo.
