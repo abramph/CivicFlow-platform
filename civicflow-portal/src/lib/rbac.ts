@@ -418,3 +418,28 @@ export function canDo(role: Role, permission: Permission): boolean {
 export function permissionsFor(role: Role): Permission[] {
   return ROLE_PERMISSIONS[role] ?? [];
 }
+
+// SUPER_ADMIN is ranked above ORG_OWNER for historical-data/type completeness
+// only — no OrganizationMembership is ever assigned this role (the Users &
+// Roles UI excludes it from assignable options), so in practice this rank is
+// unreachable. It grants no additional reach beyond ORG_OWNER; platform-wide
+// authorization comes exclusively from PlatformAccess (see requireSuperAdmin
+// in auth-guards.ts), never from this org-scoped rank table.
+//
+// Lives here (rather than only in auth-guards.ts, which is server-only)
+// because client components (e.g. PortalShell's navigation-visibility check)
+// need it too, and this module has no server-only dependencies. auth-guards.ts
+// imports roleRank from here rather than keeping its own copy.
+const ROLE_RANK: Record<Role, number> = {
+  MEMBER:      -1,
+  READ_ONLY:   0,
+  STAFF:       1,
+  FINANCE:     2,
+  ORG_ADMIN:   3,
+  ORG_OWNER:   4,
+  SUPER_ADMIN: 5,
+};
+
+export function roleRank(role: Role): number {
+  return ROLE_RANK[role];
+}

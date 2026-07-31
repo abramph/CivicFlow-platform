@@ -188,6 +188,18 @@ describe("getUserOrgMemberships", () => {
       },
     ]);
   });
+
+  it("reports a conventional membership's RAW stored vertical, not reconciled against Labs — this list is read on every session hydration for every org, so reconciling each entry would mean a Labs-access query per org per session read; only the active org gets reconciled (see resolveSessionIdentity)", async () => {
+    findManyMembership.mockResolvedValueOnce([
+      membershipRow({ organizationId: "org-pta", organization: { id: "org-pta", name: "Pine Grove PTA", logoUrl: null, primaryVertical: "PTA" } as never }),
+    ]);
+    findManyOrgMember.mockResolvedValueOnce([]);
+
+    const result = await getUserOrgMemberships("user-staff");
+
+    expect(result[0].primaryVertical).toBe("PTA");
+    expect(getOrganizationLabAccess).not.toHaveBeenCalled();
+  });
 });
 
 describe("resolveActiveOrganization", () => {

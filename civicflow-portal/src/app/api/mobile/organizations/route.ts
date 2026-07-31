@@ -2,8 +2,11 @@ import { withApiErrorHandling } from "@/lib/api-route";
 import { requireMobileAuth } from "@/lib/mobile-auth";
 import { getOrganizationLabAccess } from "@/lib/labs/access";
 import { getEffectivePermissions } from "@/lib/role-permissions";
+import { resolveEffectiveVertical } from "@/lib/organization-experience";
+import { getVerticalTerminology, getQuickActions } from "@/lib/vertical-terminology";
 import { prisma } from "@/lib/prisma";
 import { PERMISSIONS, type Role } from "@/lib/rbac";
+import type { OrganizationVertical } from "@prisma/client";
 
 interface OrgRow {
   organizationId: string;
@@ -21,6 +24,45 @@ interface OrgRow {
     canCheckIn: boolean;
     canApproveHours: boolean;
   } | null;
+}
+
+/**
+ * Additive capability fields (Phase 10 of the vertical-product architecture
+ * work) — old mobile app builds that don't know these fields exist simply
+ * ignore them; nothing here changes existing behavior (the "Volunteer" tab,
+ * for instance, still keys off `pta` truthiness exactly as before). This
+ * prepares a future mobile release to adapt tab labels/quick actions/landing
+ * tab per vertical without another schema or endpoint change.
+ */
+interface OrgCapability {
+  primaryVertical: OrganizationVertical;
+  terminology: {
+    productLabel: string;
+    member: string;
+    dashboardTitle: string;
+  };
+  quickActions: { href: string; label: string }[];
+  /** Which of the mobile app's fixed tabs are meaningful for this org. */
+  supportedModules: string[];
+  /** Tab name (not a web path) the app should land on after selecting this org. */
+  landingPage: string;
+}
+
+/** `vertical` must already be the effective vertical (see
+ * resolveEffectiveVertical) — resolved once per row by the caller, which
+ * knows whether that check is even necessary (rows already confirmed PTA by
+ * branches 2/3 below don't need a second Labs-access check). */
+function buildCapability(vertical: OrganizationVertical, hasPtaAccess: boolean) {
+  const terminology = getVerticalTerminology(vertical);
+  const supportedModules = ["dashboard", "inbox", "announcements", "dues", "events", "profile"];
+  if (hasPtaAccess) supportedModules.push("volunteers");
+  return {
+    primaryVertical: vertical,
+    terminology: { productLabel: terminology.productLabel, member: terminology.member, dashboardTitle: terminology.dashboardTitle },
+    quickActions: getQuickActions(vertical),
+    supportedModules,
+    landingPage: "dashboard",
+  };
 }
 
 /**
@@ -48,12 +90,19 @@ export async function GET(request: Request) {
     const { userId } = await requireMobileAuth(request);
 
     const rows = new Map<string, OrgRow>();
+    // Raw (stored) vertical per org — branches 2/3 only ever include orgs
+    // with confirmed-enabled PTA Labs, so they're definitionally "PTA" here;
+    // branch 1 (regular members) can be any vertical.
+    const rawVerticalByOrgId = new Map<string, OrganizationVertical>();
+    // orgIds where branches 2/3 already confirmed PTA Labs is enabled — no
+    // need to ask resolveEffectiveVertical to check again for these.
+    const confirmedPtaOrgIds = new Set<string>();
 
     // ── 1. Regular members (unchanged) ──────────────────────────────────
     const memberships = await prisma.organizationMembership.findMany({
       where: { userId, role: "MEMBER", organization: { status: "active" } },
       orderBy: { joinedAt: "asc" },
-      include: { organization: { select: { id: true, name: true, logoUrl: true } } },
+      include: { organization: { select: { id: true, name: true, logoUrl: true, primaryVertical: true } } },
     });
     const members = await prisma.orgMember.findMany({
       where: { userId, organizationId: { in: memberships.map((m) => m.organizationId) } },
@@ -63,6 +112,7 @@ export async function GET(request: Request) {
     for (const membership of memberships) {
       const member = memberByOrgId.get(membership.organizationId);
       if (!member) continue;
+      rawVerticalByOrgId.set(membership.organizationId, membership.organization.primaryVertical);
       rows.set(membership.organizationId, {
         organizationId: membership.organizationId,
         organizationName: membership.organization.name,
@@ -85,6 +135,8 @@ export async function GET(request: Request) {
       const labAccess = await getOrganizationLabAccess(adult.organizationId, "ptaVertical");
       if (!labAccess.available) continue;
 
+      rawVerticalByOrgId.set(adult.organizationId, "PTA");
+      confirmedPtaOrgIds.add(adult.organizationId);
       const existing = rows.get(adult.organizationId);
       const [firstName, ...lastParts] = adult.name.split(" ");
       if (existing) {
@@ -118,6 +170,8 @@ export async function GET(request: Request) {
       const canApproveHours = effective.includes(PERMISSIONS.PTA_VOLUNTEER_HOURS_APPROVE);
       if (!canCheckIn && !canApproveHours) continue;
 
+      rawVerticalByOrgId.set(membership.organizationId, "PTA");
+      confirmedPtaOrgIds.add(membership.organizationId);
       const existing = rows.get(membership.organizationId);
       if (existing) {
         existing.pta = { householdAdultId: existing.pta?.householdAdultId ?? null, householdName: null, isOfficer: true, canCheckIn, canApproveHours };
@@ -136,6 +190,15 @@ export async function GET(request: Request) {
       }
     }
 
-    return Response.json({ ok: true, data: Array.from(rows.values()) });
+    const data: (OrgRow & { capability: OrgCapability })[] = await Promise.all(
+      Array.from(rows.values()).map(async (row) => {
+        const vertical = confirmedPtaOrgIds.has(row.organizationId)
+          ? "PTA"
+          : await resolveEffectiveVertical(row.organizationId, rawVerticalByOrgId.get(row.organizationId) ?? "COMMUNITY");
+        return { ...row, capability: buildCapability(vertical, row.pta !== null) };
+      })
+    );
+
+    return Response.json({ ok: true, data });
   });
 }

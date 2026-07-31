@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import type { OrgRole } from "@prisma/client";
+import type { OrganizationVertical, OrgRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getOrganizationLabAccess } from "@/lib/labs/access";
 
@@ -16,6 +16,10 @@ export interface OrgMembershipSummary {
   organizationId: string;
   organizationName: string;
   organizationLogoUrl: string | null;
+  /** So the org switcher can route to the right landing page (and the client
+   * can regenerate nav/terminology) the instant a switch is selected, without
+   * waiting on a second round-trip. */
+  primaryVertical: OrganizationVertical;
   role: OrgRole;
   /** This user's OrgMember.id in this org, if a constituent record exists (e.g. MEMBER-role users, or staff who are also dues-paying members). */
   memberId: string | null;
@@ -49,7 +53,7 @@ export async function getUserOrgMemberships(userId: string): Promise<OrgMembersh
   const memberships = await prisma.organizationMembership.findMany({
     where: { userId, status: "active", organization: { status: "active" } },
     orderBy: { joinedAt: "asc" },
-    include: { organization: { select: { id: true, name: true, logoUrl: true } } },
+    include: { organization: { select: { id: true, name: true, logoUrl: true, primaryVertical: true } } },
   });
 
   const members = memberships.length
@@ -61,12 +65,24 @@ export async function getUserOrgMemberships(userId: string): Promise<OrgMembersh
   const memberByOrg = new Map(members.map((m) => [m.organizationId, m]));
   const coveredOrgIds = new Set(memberships.map((m) => m.organizationId));
 
+  // Deliberately the RAW stored vertical here, not the effective one — this
+  // list is read on every session hydration for every org the user belongs
+  // to, and reconciling each entry against live PTA Labs enrollment (an
+  // extra query per org, per session read) is real, avoidable database load
+  // for a list that's mostly just used to render switcher labels. The one
+  // place effective-vs-raw actually matters — deciding whether the ACTIVE
+  // org's UI/dashboard should show PTA or fall back to COMMUNITY — is
+  // reconciled exactly once, for the active org only, in
+  // resolveSessionIdentity (authOptions.ts). The switcher's post-switch
+  // redirect (PortalShell.switchOrganization) waits for the refreshed
+  // session rather than trusting this raw value for that decision.
   const results: (OrgMembershipSummary & { sortKey: Date })[] = memberships.map((m) => {
     const member = memberByOrg.get(m.organizationId);
     return {
       organizationId: m.organizationId,
       organizationName: m.organization.name,
       organizationLogoUrl: m.organization.logoUrl,
+      primaryVertical: m.organization.primaryVertical,
       role: m.role,
       memberId: member?.id ?? null,
       memberStatus: member?.membershipStatus ?? null,
@@ -77,7 +93,7 @@ export async function getUserOrgMemberships(userId: string): Promise<OrgMembersh
 
   const householdAdults = await prisma.ptaHouseholdAdult.findMany({
     where: { userId, organization: { status: "active" }, household: { status: "ACTIVE" } },
-    include: { organization: { select: { id: true, name: true, logoUrl: true } } },
+    include: { organization: { select: { id: true, name: true, logoUrl: true, primaryVertical: true } } },
   });
   for (const adult of householdAdults) {
     if (coveredOrgIds.has(adult.organizationId)) continue;
@@ -88,6 +104,7 @@ export async function getUserOrgMemberships(userId: string): Promise<OrgMembersh
       organizationId: adult.organizationId,
       organizationName: adult.organization.name,
       organizationLogoUrl: adult.organization.logoUrl,
+      primaryVertical: adult.organization.primaryVertical,
       role: "MEMBER",
       memberId: null,
       memberStatus: null,

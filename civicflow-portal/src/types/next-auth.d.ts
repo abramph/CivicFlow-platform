@@ -1,6 +1,6 @@
 import "next-auth";
 import "next-auth/jwt";
-import type { OrgRole, PlatformRole } from "@prisma/client";
+import type { OrgRole, OrganizationVertical, PlatformRole } from "@prisma/client";
 
 declare module "next-auth" {
   interface User {
@@ -29,6 +29,12 @@ declare module "next-auth" {
     userId?: string;
     organizationId?: string | null;
     orgName?: string | null;
+    // The active organization's authoritative product-experience
+    // classification (see Organization.primaryVertical) — resolved fresh
+    // from the database on every session read, same as role/permissions.
+    // Drives client-side navigation/terminology; never itself a source of
+    // server-side authorization.
+    primaryVertical?: OrganizationVertical | null;
     role?: OrgRole | null;
     userEmail?: string;
     // The active org's OrgMember.id for this user, if a constituent record
@@ -40,6 +46,7 @@ declare module "next-auth" {
       organizationId: string;
       organizationName: string;
       organizationLogoUrl: string | null;
+      primaryVertical: OrganizationVertical;
       role: OrgRole;
       memberId: string | null;
       memberStatus: string | null;

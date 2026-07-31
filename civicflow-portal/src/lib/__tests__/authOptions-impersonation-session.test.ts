@@ -5,6 +5,10 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     user: { findUnique: (...args: unknown[]) => findUniqueUser(...args) },
     mfaChallengeToken: { findUnique: vi.fn() },
+    // This file predates primaryVertical, which the session callback now
+    // also resolves for the active org — stub a stable default so the
+    // existing impersonation-overlay assertions below are unaffected.
+    organization: { findUnique: vi.fn().mockResolvedValue({ primaryVertical: "COMMUNITY" }) },
   },
 }));
 

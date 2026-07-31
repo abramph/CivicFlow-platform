@@ -201,6 +201,7 @@ export function OrganizationOnboardingForm() {
       const payload = (await res.json().catch(() => null)) as {
         ok?: boolean;
         error?: string;
+        data?: { id: string; primaryVertical?: string };
         details?: { fieldErrors?: Record<string, string[] | undefined> };
       } | null;
 
@@ -222,7 +223,10 @@ export function OrganizationOnboardingForm() {
         return;
       }
 
-      router.push("/dashboard");
+      // PTA/PTO gets its own rich setup checklist (Unestra Labs); every other
+      // vertical lands on the generic dashboard, which already shows a
+      // "finish setup" banner for a brand-new organization.
+      router.push(payload?.data?.primaryVertical === "PTA" ? "/labs/pta/onboarding" : "/dashboard");
       router.refresh();
     } catch {
       setServerError("Network error. Please try again.");
