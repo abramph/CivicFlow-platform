@@ -3,8 +3,11 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { LogoutButton } from "@/components/LogoutButton";
+import { getNavigationProfile } from "@/lib/vertical-navigation";
+import { getVerticalTerminology } from "@/lib/vertical-terminology";
+import { roleRank, type Role } from "@/lib/rbac";
 
 function isHiddenPath(pathname: string) {
   // Member-facing pages render their own chrome — never wrap them in the
@@ -42,30 +45,6 @@ export function PortalShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const { data: session, status, update } = useSession();
   const [switching, setSwitching] = useState(false);
-  const [ptaAvailable, setPtaAvailable] = useState(false);
-
-  // Whether "Unestra for PTA" is enrolled+enabled for the ACTIVE organization
-  // — refetched whenever the active org changes (including via the switcher
-  // below), since enrollment is per-organization, not per-user.
-  useEffect(() => {
-    const organizationId = session?.organizationId;
-    if (!organizationId) {
-      setPtaAvailable(false);
-      return;
-    }
-    let cancelled = false;
-    fetch("/api/labs/pta/access")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((body) => {
-        if (!cancelled) setPtaAvailable(Boolean(body?.data?.available));
-      })
-      .catch(() => {
-        if (!cancelled) setPtaAvailable(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [session?.organizationId]);
 
   async function switchOrganization(organizationId: string) {
     if (!session?.organizations || organizationId === session.organizationId) return;
@@ -81,10 +60,23 @@ export function PortalShell({ children }: { children: ReactNode }) {
       });
       if (!response.ok) return;
 
-      await update();
+      // Read the refreshed session's own primaryVertical rather than
+      // target.primaryVertical (the RAW stored value from the org list,
+      // which is deliberately not reconciled against live PTA Labs
+      // enrollment — see getUserOrgMemberships). The refreshed session's
+      // value IS reconciled (see resolveSessionIdentity), so it's the only
+      // trustworthy source for "does the new active org actually get the
+      // PTA experience right now."
+      const refreshed = await update();
       if (target.role === "MEMBER") {
         router.push(target.memberId ? "/m/dues" : "/m/my-household");
       } else {
+        // Land on the new organization's own vertical dashboard rather than
+        // refreshing whatever page happened to be open — that page may not
+        // even exist in the new organization's nav (e.g. switching away from
+        // a PTA org while on a /labs/pta/* page), which would otherwise leave
+        // stale, wrong-vertical context on screen after the switch.
+        router.push(refreshed?.primaryVertical === "PTA" ? "/labs/pta/dashboard" : "/dashboard");
         router.refresh();
       }
     } finally {
@@ -122,113 +114,39 @@ export function PortalShell({ children }: { children: ReactNode }) {
     return <>{children}</>;
   }
 
-  const saasNav = [
-    { href: "/dashboard", label: "Dashboard" },
-    { href: "/inbox", label: "Inbox" },
-    { href: "/members", label: "Members" },
-    { href: "/contributions", label: "Contributions" },
-    { href: "/dues", label: "Dues" },
-    { href: "/dues/reminders", label: "Dues Campaigns" },
-    { href: "/payment-reports", label: "Payment Reports" },
-    { href: "/campaigns", label: "Campaigns" },
-    { href: "/events", label: "Events" },
-    { href: "/meetings", label: "Meetings" },
-    { href: "/communications", label: "Communications" },
-    { href: "/communications/campaigns", label: "Communication Campaigns" },
-    { href: "/attendance", label: "Attendance" },
-    { href: "/expenditures", label: "Expenditures" },
-    { href: "/reports", label: "Reports" },
-    { href: "/receipts", label: "Receipts" },
-    { href: "/reminders", label: "Reminders" },
-    { href: "/payments/imports", label: "Payment Imports" },
-    { href: "/payments/reconciliation", label: "Reconciliation" },
-    { href: "/audit-logs", label: "Audit Logs" },
-    { href: "/settings/sms-consent", label: "SMS Consent" },
-    { href: "/payment-links", label: "Payment Links" },
-    { href: "/settings", label: "Settings" },
-    { href: "/settings/organization", label: "Organization" },
-    { href: "/settings/categories", label: "Categories" },
-    { href: "/settings/dues", label: "Dues Setup" },
-    { href: "/settings/payment-methods", label: "Payment Methods" },
-    { href: "/settings/users", label: "Users & Roles" },
-    { href: "/settings/roles", label: "Role Permissions" },
-    { href: "/settings/security", label: "Security" },
-    { href: "/settings/billing", label: "Billing" },
-    { href: "/onboarding/organization", label: "Onboarding" },
-    { href: "/migration", label: "Migration" },
-    { href: "/import", label: "Import Data" },
-  ];
-
   const legacyNav = [
     { href: "/dashboard", label: "Dashboard" },
     { href: "/payments", label: "Payments" },
     { href: "/settings", label: "Settings" },
   ];
 
-  const navItems = hasSaasSession ? saasNav : legacyNav;
   // Global platform access (PlatformAccess), independent of the active
   // organization's role — deliberately NOT session?.role, so switching
   // organizations never hides or reveals this link.
   const canSeePlatformAdmin =
     hasSaasSession && Boolean(session?.hasPlatformAccess);
   const can = (permission: string) => (session?.permissions ?? []).includes(permission);
+  const roleAtLeast = (minRole: Role) => (session?.role ? roleRank(session.role) >= roleRank(minRole) : false);
+
+  // Each vertical (Community/PTA/Union/HOA) gets its own navigation profile
+  // — a PTA organization sees only PTA-flavored items, never the Community
+  // list with a PTA section bolted on (see getNavigationProfile).
+  const verticalNavItems = getNavigationProfile(session?.primaryVertical ?? "COMMUNITY");
+  const navItems = hasSaasSession ? verticalNavItems : legacyNav;
 
   const visibleNavItems = hasSaasSession
-    ? navItems.filter((item) => {
-        if (item.href.startsWith("/settings/organization")) {
-          return can("org_settings:read");
-        }
-        if (item.href.startsWith("/settings/categories")) {
-          return can("org_settings:read");
-        }
-        if (item.href.startsWith("/settings/dues")) {
-          return can("dues:read");
-        }
-        if (item.href.startsWith("/settings/payment-methods")) {
-          return can("org_settings:read");
-        }
-        if (item.href.startsWith("/settings/roles")) {
-          return session?.role === "ORG_OWNER" || session?.role === "SUPER_ADMIN";
-        }
-        if (item.href.startsWith("/settings/users")) {
-          return can("users:read");
-        }
-        if (item.href.startsWith("/settings/billing")) {
-          return can("billing:read");
-        }
-        if (item.href.startsWith("/communications")) {
-          return can("communications:read");
-        }
-        if (item.href.startsWith("/payments/imports") || item.href.startsWith("/payments/reconciliation")) {
-          return can("dues:read");
-        }
-        if (item.href === "/audit-logs") {
-          return can("audit_logs:read");
-        }
-        if (item.href === "/payment-links") {
-          return can("contributions:read");
-        }
-        if (item.href === "/import") {
-          return can("members:write");
-        }
-        if (item.href === "/migration") {
-          return can("org_settings:write");
-        }
-        if (item.href.startsWith("/attendance")) {
-          return can("attendance:read");
-        }
-        if (item.href.startsWith("/meetings")) {
-          return can("meetings:read");
-        }
-        if (item.href.startsWith("/inbox")) {
-          return can("messages:read");
-        }
+    ? verticalNavItems.filter((item) => {
+        if (item.permission && !can(item.permission)) return false;
+        if (item.minRole && !roleAtLeast(item.minRole)) return false;
         return true;
       })
     : navItems;
 
   const orgLabel =
     session?.orgName || session?.org_id || "(setup required)";
+  const activeVertical = session?.primaryVertical ?? "COMMUNITY";
+  const landingPage = activeVertical === "PTA" ? "/labs/pta/dashboard" : "/dashboard";
+  const verticalTerminology = getVerticalTerminology(activeVertical);
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-950">
@@ -238,50 +156,12 @@ export function PortalShell({ children }: { children: ReactNode }) {
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-700">
               Unestra
             </p>
-            <h1 className="mt-1 text-2xl font-semibold text-slate-950">SaaS Portal</h1>
-            <p className="mt-2 text-sm leading-6 text-slate-700">
-              Members, dues, fundraising, and event management in one place.
-            </p>
+            <h1 className="mt-1 text-2xl font-semibold text-slate-950">{verticalTerminology.productLabel}</h1>
+            <p className="mt-2 text-sm leading-6 text-slate-700">{verticalTerminology.dashboardWelcome}</p>
           </div>
 
           <nav className="space-y-1 px-4 py-5">
-            {/* Dashboard first, then (for PTA-enrolled orgs) the PTA vertical
-                immediately after it — this is the core reason a PTA customer
-                is paying for the product, so it belongs near the top of the
-                nav, not buried below Billing/Security/Migration/Import Data
-                at the very end of a 30-item flat list (a real discoverability
-                gap found via a live persona walkthrough). */}
-            {visibleNavItems.slice(0, 1).map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`block rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
-                  isActive(pathname, item.href)
-                    ? "bg-emerald-700 text-white shadow-sm"
-                    : "text-slate-800 hover:bg-slate-100"
-                }`}
-              >
-                {item.label}
-              </Link>
-            ))}
-            {ptaAvailable && can("pta:directory:read") ? (
-              <div className="mb-3 border-b border-slate-200 pb-3">
-                <p className="px-4 pb-1.5 text-xs font-semibold uppercase tracking-[0.15em] text-emerald-700">
-                  PTA
-                </p>
-                <Link
-                  href="/labs/pta/dashboard"
-                  className={`block rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
-                    isActive(pathname, "/labs/pta")
-                      ? "bg-emerald-700 text-white shadow-sm"
-                      : "text-slate-800 hover:bg-slate-100"
-                  }`}
-                >
-                  Unestra for PTA
-                </Link>
-              </div>
-            ) : null}
-            {visibleNavItems.slice(1).map((item) => (
+            {visibleNavItems.map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
@@ -358,10 +238,10 @@ export function PortalShell({ children }: { children: ReactNode }) {
               </div>
               <div className="flex flex-wrap items-center gap-3">
                 <Link
-                  href="/dashboard"
+                  href={landingPage}
                   className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50"
                 >
-                  Dashboard
+                  {verticalTerminology.dashboardTitle}
                 </Link>
                 <LogoutButton />
               </div>

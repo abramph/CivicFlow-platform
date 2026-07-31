@@ -219,6 +219,6 @@ export async function POST(request: Request) {
       },
     });
 
-    return Response.json({ ok: true, data: { id: organization.id } }, { status: 201 });
+    return Response.json({ ok: true, data: { id: organization.id, primaryVertical: organization.primaryVertical } }, { status: 201 });
   });
 }

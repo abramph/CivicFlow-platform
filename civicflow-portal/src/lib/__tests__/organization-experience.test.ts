@@ -19,6 +19,11 @@ vi.mock("@/lib/plan-gate", () => ({
   getOrganizationEntitlements: (...args: unknown[]) => getOrganizationEntitlements(...args),
 }));
 
+const getOrganizationLabAccess = vi.fn();
+vi.mock("@/lib/labs/access", () => ({
+  getOrganizationLabAccess: (...args: unknown[]) => getOrganizationLabAccess(...args),
+}));
+
 import { OrganizationNotFoundError, resolveOrganizationExperience } from "@/lib/organization-experience";
 
 describe("resolveOrganizationExperience", () => {
@@ -27,13 +32,15 @@ describe("resolveOrganizationExperience", () => {
     findManyLabFeature.mockReset();
     getEffectivePermissions.mockReset();
     getOrganizationEntitlements.mockReset();
+    getOrganizationLabAccess.mockReset();
   });
 
-  it("composes vertical, entitlements, labs, permissions, and terminology from server-resolved inputs only", async () => {
+  it("composes vertical, entitlements, labs, permissions, and terminology from server-resolved inputs only, when PTA Labs is actually enrolled", async () => {
     findUniqueOrganization.mockResolvedValueOnce({ id: "org-1", name: "Pine Grove School PTA", primaryVertical: "PTA", status: "active" });
     findManyLabFeature.mockResolvedValueOnce([{ featureKey: "ptaVertical" }]);
     getEffectivePermissions.mockResolvedValueOnce(["members:read", "members:write"]);
     getOrganizationEntitlements.mockResolvedValueOnce({ planId: "free", planName: "Free" });
+    getOrganizationLabAccess.mockResolvedValueOnce({ available: true });
 
     const result = await resolveOrganizationExperience({ organizationId: "org-1", role: "ORG_OWNER" });
 
@@ -42,6 +49,20 @@ describe("resolveOrganizationExperience", () => {
     expect(result.permissions).toEqual(["members:read", "members:write"]);
     expect(result.terminology.member).toBe("Parent");
     expect(getEffectivePermissions).toHaveBeenCalledWith("org-1", "ORG_OWNER");
+  });
+
+  it("falls back to COMMUNITY when classified PTA but PTA Labs isn't actually enrolled — never a dead-end nav/dashboard", async () => {
+    findUniqueOrganization.mockResolvedValueOnce({ id: "org-1", name: "Some Org", primaryVertical: "PTA", status: "active" });
+    findManyLabFeature.mockResolvedValueOnce([]);
+    getEffectivePermissions.mockResolvedValueOnce([]);
+    getOrganizationEntitlements.mockResolvedValueOnce({});
+    getOrganizationLabAccess.mockResolvedValueOnce({ available: false });
+
+    const result = await resolveOrganizationExperience({ organizationId: "org-1", role: "ORG_OWNER" });
+
+    expect(result.primaryVertical).toBe("COMMUNITY");
+    expect(result.landingPage).toBe("/dashboard");
+    expect(result.navigation.some((item) => item.href.startsWith("/labs/pta"))).toBe(false);
   });
 
   it("throws when the organization doesn't exist rather than returning a partial/undefined experience", async () => {
@@ -66,5 +87,7 @@ describe("resolveOrganizationExperience", () => {
 
     const result = await resolveOrganizationExperience({ organizationId: "org-2", role: "MEMBER" });
     expect(result.primaryVertical).toBe("COMMUNITY");
+    // COMMUNITY never calls the PTA Labs check at all.
+    expect(getOrganizationLabAccess).not.toHaveBeenCalled();
   });
 });

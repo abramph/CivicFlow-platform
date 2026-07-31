@@ -6,6 +6,7 @@ import { getEffectivePermissions } from "@/lib/role-permissions";
 import { resolveActiveOrganization, getUserOrgMemberships } from "@/lib/org-context";
 import { getPlatformAccessForUser } from "@/lib/platform-access";
 import { resolveImpersonationOverlay } from "@/lib/impersonation";
+import { resolveEffectiveVertical } from "@/lib/organization-experience";
 
 const defaultApiBase = process.env.NEXT_PUBLIC_API_BASE || "https://api.civicflowapp.com/api";
 
@@ -25,7 +26,17 @@ async function resolveSessionIdentity(userId: string) {
     getPlatformAccessForUser(userId),
   ]);
   const permissions = active?.organizationId && active?.role ? await getEffectivePermissions(active.organizationId, active.role) : [];
-  return { active, organizations, user, platformAccess, permissions };
+  const activeOrgRecord = active?.organizationId
+    ? await prisma.organization.findUnique({ where: { id: active.organizationId }, select: { primaryVertical: true } })
+    : null;
+  // Effective vertical (see resolveEffectiveVertical) — what the client
+  // should actually build navigation/dashboard/terminology from, not
+  // necessarily the raw stored classification.
+  const primaryVertical =
+    active?.organizationId && activeOrgRecord
+      ? await resolveEffectiveVertical(active.organizationId, activeOrgRecord.primaryVertical)
+      : null;
+  return { active, organizations, user, platformAccess, permissions, primaryVertical };
 }
 
 export const authOptions: NextAuthOptions = {
@@ -242,6 +253,7 @@ export const authOptions: NextAuthOptions = {
         session.userEmail = identity.user?.email ?? (overlay ? overlay.targetEmail : String(token.userEmail || ""));
         session.organizationId = identity.active?.organizationId ?? null;
         session.orgName = identity.active?.organizationName ?? null;
+        session.primaryVertical = identity.primaryVertical;
         session.role = identity.active?.role ?? null;
         session.memberId = identity.active?.memberId ?? null;
         session.organizations = identity.organizations;
@@ -272,6 +284,7 @@ export const authOptions: NextAuthOptions = {
         session.userId = token.userId;
         session.userEmail = token.userEmail;
         session.organizationId = token.organizationId ?? null;
+        session.primaryVertical = null;
         session.role = token.role ?? null;
         session.hasPlatformAccess = false;
         session.platformRoles = [];

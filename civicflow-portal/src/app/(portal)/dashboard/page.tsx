@@ -9,10 +9,40 @@ import type { Permission, Role } from "@/lib/rbac";
 import { getEffectivePermissions } from "@/lib/role-permissions";
 import { setupBannerDismissCookieName } from "@/lib/dashboard-setup";
 import { DismissSetupBannerButton } from "@/components/app/DismissSetupBannerButton";
+import { getVerticalTerminology, getQuickActions, getHelpTopics, getEmptyStateCopy } from "@/lib/vertical-terminology";
+import type { OrganizationVertical } from "@prisma/client";
 import {
   Users, Calendar, DollarSign, TrendingDown, AlertCircle, UserCheck,
   Target, Receipt, ChevronRight, Mail, Shield, FileText,
 } from "lucide-react";
+
+/** Community shows the full widget set (unchanged, existing behavior). Union
+ * and HOA reuse the same underlying data but only the widgets the spec calls
+ * for — "no fake metrics," so campaign/expenditure/governance-breakdown
+ * widgets (which have no Union/HOA equivalent yet) are hidden rather than
+ * relabeled into something they aren't. */
+function dashboardWidgets(vertical: OrganizationVertical) {
+  const showFundraisingAndGovernance = vertical === "COMMUNITY";
+  return {
+    fundraising: showFundraisingAndGovernance,
+    governance: showFundraisingAndGovernance,
+    paymentMethodBreakdown: showFundraisingAndGovernance,
+  };
+}
+
+/** Small keyword match so each vertical's quick actions (Phase 7) get a
+ * reasonable icon without a second per-vertical icon map to keep in sync. */
+function quickActionIcon(label: string) {
+  const lower = label.toLowerCase();
+  if (lower.includes("invite")) return Users;
+  if (lower.includes("event")) return Calendar;
+  if (lower.includes("meeting")) return Calendar;
+  if (lower.includes("announcement") || lower.includes("communication")) return Mail;
+  if (lower.includes("upload") || lower.includes("document")) return FileText;
+  if (lower.includes("dues") || lower.includes("volunteer")) return Receipt;
+  if (lower.includes("student")) return UserCheck;
+  return Target;
+}
 
 function toCurrency(cents: number) {
   return new Intl.NumberFormat("en-US", {
@@ -90,6 +120,13 @@ export default async function DashboardPage() {
     redirect(session.memberId ? "/m/dues" : "/m/my-household");
   }
 
+  // A PTA/PTO organization has its own dashboard (Unestra Labs) — a PTA
+  // president landing here would see Community wording and metrics that
+  // don't describe their organization. Redirect rather than duplicate.
+  if (hasSaasSession && session?.primaryVertical === "PTA") {
+    redirect("/labs/pta/dashboard");
+  }
+
   // ── Legacy API path ────────────────────────────────────────────────────────
   if (hasLegacySession) {
     const analytics = await getAnalytics({
@@ -123,6 +160,11 @@ export default async function DashboardPage() {
   const permissions = await getEffectivePermissions(orgId, role);
   const can = (permission: Permission) => permissions.includes(permission);
   const canSeeExpenditures = can("expenditures:read");
+  const vertical: OrganizationVertical = session?.primaryVertical ?? "COMMUNITY";
+  const terminology = getVerticalTerminology(vertical);
+  const widgets = dashboardWidgets(vertical);
+  const quickActionDefs = getQuickActions(vertical);
+  const helpTopics = getHelpTopics(vertical);
 
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -289,8 +331,8 @@ export default async function DashboardPage() {
           <img src={organization.logoUrl} alt="" className="h-12 w-12 rounded object-contain bg-slate-100 border border-slate-200" />
         )}
         <div>
-          <h2 className="text-2xl font-bold text-slate-800">Dashboard</h2>
-          <p className="text-slate-600">Welcome to Unestra. Overview metrics below.</p>
+          <h2 className="text-2xl font-bold text-slate-800">{terminology.dashboardTitle}</h2>
+          <p className="text-slate-600">{terminology.dashboardWelcome}</p>
         </div>
       </div>
 
@@ -317,16 +359,16 @@ export default async function DashboardPage() {
 
       {/* Stat Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <StatCard label="Total Members"           value={memberCount}             subtext="All members"        icon={Users}       color="emerald" href="/members" />
-        <StatCard label="Total Dues"              value={toCurrency(totalDuesCents)}    subtext="All time"     icon={DollarSign}  color="emerald" href="/dues" />
+        <StatCard label={`Total ${terminology.memberPlural}`} value={memberCount}             subtext={`All ${terminology.memberPlural.toLowerCase()}`}        icon={Users}       color="emerald" href="/members" />
+        <StatCard label={`Total ${terminology.duesLabel}`}    value={toCurrency(totalDuesCents)}    subtext="All time"     icon={DollarSign}  color="emerald" href="/dues" />
         <StatCard label="Total Contributions"     value={toCurrency(totalContribCents)} subtext="All time"     icon={DollarSign}  color="sky"     href="/contributions" />
-        <StatCard label="Campaign Contributions"  value={toCurrency(campaignCents)}     subtext="All time"     icon={Target}      color="emerald" href="/campaigns" />
+        {widgets.fundraising && <StatCard label="Campaign Contributions"  value={toCurrency(campaignCents)}     subtext="All time"     icon={Target}      color="emerald" href="/campaigns" />}
         <StatCard label="Event Revenue"           value={toCurrency(eventCents)}        subtext="All time"     icon={Calendar}    color="sky"     href="/events" />
-        <StatCard label="Current Members"         value={statusCounts["active"] ?? 0}   subtext="Active status" icon={UserCheck}  color="emerald" />
-        <StatCard label="Delinquent"              value={delinquentCount}               subtext="Behind on dues" icon={AlertCircle} color="red"   href="/dues" />
+        <StatCard label={`Current ${terminology.memberPlural}`} value={statusCounts["active"] ?? 0}   subtext="Active status" icon={UserCheck}  color="emerald" />
+        <StatCard label="Delinquent"              value={delinquentCount}               subtext={`Behind on ${terminology.duesLabel.toLowerCase()}`} icon={AlertCircle} color="red"   href="/dues" />
         <StatCard label="Past Due"                value={pastDueCount}                  subtext="Pending action" icon={AlertCircle} color="amber" href="/dues" />
-        <StatCard label="Dues Outstanding"        value={toCurrency(outstandingCents)}  subtext="Unpaid charges" icon={DollarSign} color="amber" href="/dues" />
-        <StatCard label="Dues Collected (30d)"    value={toCurrency(dues30dCents)}      subtext="Last 30 days"  icon={DollarSign}  color="emerald" href="/dues" />
+        <StatCard label={`${terminology.duesLabel} Outstanding`} value={toCurrency(outstandingCents)}  subtext="Unpaid charges" icon={DollarSign} color="amber" href="/dues" />
+        <StatCard label={`${terminology.duesLabel} Collected (30d)`} value={toCurrency(dues30dCents)}      subtext="Last 30 days"  icon={DollarSign}  color="emerald" href="/dues" />
         {canSeeExpenditures && <StatCard label="Expenses (30d)"          value={toCurrency(exp30dCents)}       subtext="Last 30 days"  icon={TrendingDown} color="amber" href="/expenditures" />}
         {canSeeExpenditures && <StatCard label="Ledger Total"            value={toCurrency(ledgerCents)}       subtext="Income minus expenses" icon={DollarSign} color="sky" />}
         {canSeeExpenditures && <StatCard label="Expenditures (Month)"    value={toCurrency(expMonthCents)}     subtext="Current month" icon={Receipt}     color="red"     href="/expenditures" />}
@@ -334,7 +376,9 @@ export default async function DashboardPage() {
         <StatCard label="Upcoming Events"         value={upcomingEventsCount}           subtext="Next 30 days"  icon={Calendar}    color="sky"     href="/events" />
       </div>
 
-      {/* Membership Governance */}
+      {/* Membership Governance — Community only; Union/HOA don't have a
+          distinct governance-status breakdown concept yet (no fake metrics). */}
+      {widgets.governance && (
       <div className="rounded-xl border-2 border-slate-200 bg-white p-6 shadow-sm">
         <h3 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
           <Shield className="h-5 w-5 text-blue-600" />
@@ -359,9 +403,10 @@ export default async function DashboardPage() {
           </div>
         </div>
       </div>
+      )}
 
       {/* Campaign Progress */}
-      {campaignProgress.length > 0 && (
+      {widgets.fundraising && campaignProgress.length > 0 && (
         <div className="rounded-xl border-2 border-slate-200 bg-white p-6 shadow-sm">
           <h3 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
             <Target className="h-5 w-5 text-emerald-600" />
@@ -392,7 +437,7 @@ export default async function DashboardPage() {
       )}
 
       {/* Payment Method Breakdown */}
-      {duesPaymentMethods.length > 0 && (
+      {widgets.paymentMethodBreakdown && duesPaymentMethods.length > 0 && (
         <div className="rounded-xl border-2 border-slate-200 bg-white p-6 shadow-sm">
           <h3 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
             <FileText className="h-5 w-5 text-slate-600" />
@@ -417,17 +462,9 @@ export default async function DashboardPage() {
       <div>
         <h3 className="text-lg font-semibold text-slate-800 mb-4">Quick Actions</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[
-            { href: "/members",       label: "Members",       sub: "Manage membership",   icon: Users,      color: "emerald" as Color, visible: true },
-            { href: "/campaigns",     label: "Campaigns",     sub: "Track fundraising",   icon: Target,     color: "emerald" as Color, visible: true },
-            { href: "/events",        label: "Events",        sub: "Schedule & manage",   icon: Calendar,   color: "sky"     as Color, visible: true },
-            { href: "/communications",label: "Communications",sub: "Mass email & notices",icon: Mail,       color: "sky"     as Color, visible: true },
-            { href: "/contributions", label: "Contributions", sub: "View all income",     icon: DollarSign, color: "emerald" as Color, visible: true },
-            { href: "/dues",          label: "Dues",          sub: "Billing & payments",  icon: Receipt,    color: "amber"   as Color, visible: true },
-            { href: "/expenditures",  label: "Expenditures",  sub: "Track spending",      icon: TrendingDown, color: "red"  as Color, visible: canSeeExpenditures },
-            { href: "/reports",       label: "Reports",       sub: "Financial overview",  icon: FileText,   color: "sky"     as Color, visible: true },
-          ].filter((action) => action.visible).map(({ href, label, sub, icon: Icon, color }) => {
-            const c = colorMap[color];
+          {quickActionDefs.map(({ href, label }) => {
+            const c = colorMap.emerald;
+            const Icon = quickActionIcon(label);
             return (
               <Link
                 key={href}
@@ -439,7 +476,6 @@ export default async function DashboardPage() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-slate-800">{label}</p>
-                  <p className="text-sm text-slate-500 truncate">{sub}</p>
                 </div>
                 <ChevronRight className="h-5 w-5 text-slate-400 group-hover:text-emerald-600 transition-colors" />
               </Link>
@@ -448,10 +484,26 @@ export default async function DashboardPage() {
         </div>
       </div>
 
+      {/* Get Help — context-sensitive per vertical (Phase 9): a PTA user
+          never sees Community fundraising instructions here, etc. */}
+      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h3 className="font-semibold text-slate-800 mb-3">Get Help</h3>
+        <ul className="grid gap-2 sm:grid-cols-2">
+          {helpTopics.map((topic) => (
+            <li key={topic.href}>
+              <Link href={topic.href} className="block rounded-lg bg-slate-50 px-3 py-2 hover:bg-slate-100">
+                <p className="text-sm font-semibold text-emerald-700">{topic.title}</p>
+                <p className="text-xs text-slate-600">{topic.description}</p>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </div>
+
       {/* Recent Activity */}
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h3 className="font-semibold text-slate-800 mb-3">Recent Member Activity</h3>
+          <h3 className="font-semibold text-slate-800 mb-3">Recent {terminology.member} Activity</h3>
           <ul className="space-y-2 text-sm">
             {recentTimelineEvents.length === 0 ? (
               <li className="text-slate-500">No recent activity.</li>
@@ -464,10 +516,10 @@ export default async function DashboardPage() {
           </ul>
         </div>
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h3 className="font-semibold text-slate-800 mb-3">Upcoming Meetings</h3>
+          <h3 className="font-semibold text-slate-800 mb-3">Upcoming {terminology.meetingLabel}s</h3>
           <ul className="space-y-2 text-sm">
             {upcomingMeetings.length === 0 ? (
-              <li className="text-slate-500">No upcoming meetings.</li>
+              <li className="text-slate-500">{getEmptyStateCopy(vertical, "meetings")}</li>
             ) : upcomingMeetings.map((row) => (
               <li key={row.id} className="rounded-lg bg-slate-50 px-3 py-2">
                 <Link href={`/meetings/${row.id}`} className="font-semibold text-emerald-700 hover:underline">{row.title}</Link>

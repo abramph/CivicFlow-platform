@@ -58,6 +58,13 @@ describe("GET /api/mobile/organizations", () => {
     expect(body.data).toEqual([
       expect.objectContaining({ organizationId: "org-a", memberId: "member-1", firstName: "Jamie", pta: null }),
     ]);
+    // New, additive capability field (Phase 10) — falls back to COMMUNITY
+    // since this mocked org has no primaryVertical, and never touches
+    // volunteer-only "supportedModules" since pta is null here.
+    expect(body.data[0].capability).toEqual(
+      expect.objectContaining({ primaryVertical: "COMMUNITY", landingPage: "dashboard" })
+    );
+    expect(body.data[0].capability.supportedModules).not.toContain("volunteers");
   });
 
   it("returns a pure PTA parent's org even with zero OrganizationMembership rows — the load-bearing fix", async () => {
@@ -81,6 +88,13 @@ describe("GET /api/mobile/organizations", () => {
         pta: expect.objectContaining({ householdAdultId: "adult-1", isOfficer: false }),
       }),
     ]);
+    // A confirmed PTA household adult is never re-checked against Labs
+    // access a second time (only one getOrganizationLabAccess call total).
+    expect(body.data[0].capability).toEqual(
+      expect.objectContaining({ primaryVertical: "PTA", terminology: expect.objectContaining({ member: "Parent" }) })
+    );
+    expect(body.data[0].capability.supportedModules).toContain("volunteers");
+    expect(getOrganizationLabAccess).toHaveBeenCalledTimes(1);
   });
 
   it("excludes a household adult's org entirely once PTA Labs enrollment is removed there — capability must not outlive enrollment", async () => {
