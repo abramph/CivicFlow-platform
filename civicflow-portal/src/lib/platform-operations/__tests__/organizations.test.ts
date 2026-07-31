@@ -214,7 +214,7 @@ describe("changeOrganizationPrimaryVertical", () => {
     organizationFindUnique.mockResolvedValueOnce(null);
     const { changeOrganizationPrimaryVertical, OrganizationVerticalChangeError } = await import("../organizations");
     await expect(
-      changeOrganizationPrimaryVertical({ organizationId: "missing", newVertical: "COMMUNITY", actorUserId: "u1", actorEmail: "a@x.com" })
+      changeOrganizationPrimaryVertical({ organizationId: "missing", newVertical: "COMMUNITY", actorUserId: "u1", actorEmail: "a@x.com", reason: "Test" })
     ).rejects.toThrow(OrganizationVerticalChangeError);
     expect(organizationUpdate).not.toHaveBeenCalled();
   });
@@ -228,6 +228,7 @@ describe("changeOrganizationPrimaryVertical", () => {
       newVertical: "COMMUNITY",
       actorUserId: "u1",
       actorEmail: "a@x.com",
+      reason: "Test no-op",
     });
 
     expect(result).toEqual({ organizationId: "org-1", previousVertical: "COMMUNITY", newVertical: "COMMUNITY" });

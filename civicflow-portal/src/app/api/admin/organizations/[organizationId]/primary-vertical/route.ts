@@ -32,7 +32,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ orga
 
 const bodySchema = z.object({
   newVertical: verticalEnum,
-  reason: z.union([z.string().max(2000), z.literal(""), z.null()]).optional(),
+  /** Required — a vertical correction must always be explainable in the
+   * audit trail (Phase 5: "Require a written reason"). Rejects an empty or
+   * whitespace-only string rather than silently accepting it. */
+  reason: z.string().trim().min(1, "A reason is required to correct an organization's type.").max(2000),
   /** Explicit confirmation flag the UI must send — mirrors the Labs
    * enrollment PUT route's pattern (see /api/admin/labs/enrollments). */
   confirm: z.literal(true),
@@ -61,7 +64,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ orga
         newVertical: input.newVertical,
         actorUserId: session.userId,
         actorEmail: session.userEmail,
-        reason: input.reason ?? null,
+        reason: input.reason,
       });
       return Response.json({ ok: true, data: result });
     } catch (error) {

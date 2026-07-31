@@ -4,6 +4,7 @@ import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { OrganizationSettingsForm } from "@/components/forms/OrganizationSettingsForm";
 import { AttachmentManager } from "@/components/forms/AttachmentManager";
 import { OpeningBalanceForm } from "@/components/forms/OpeningBalanceForm";
+import { getVerticalTerminology } from "@/lib/vertical-terminology";
 
 export default async function OrgSettingsPage() {
   const { organizationId, role, can } = await requirePermission("org_settings:read");
@@ -15,6 +16,7 @@ export default async function OrgSettingsPage() {
         name: true,
         slug: true,
         organizationType: true,
+        primaryVertical: true,
         email: true,
         phone: true,
         website: true,
@@ -81,6 +83,20 @@ export default async function OrgSettingsPage() {
         <StatCard label="Dues Categories" value={duesCategoryCount} />
         <StatCard label="Timezone" value={settings?.timezone ?? "America/New_York"} />
       </div>
+
+      <SectionCard
+        title="Organization Type"
+        description="Selected when your organization was set up — it drives navigation, terminology, and your dashboard, and isn't part of routine organization settings."
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+          <span className="rounded-full bg-sky-100 px-3 py-1 text-sm font-semibold text-sky-800">
+            {getVerticalTerminology(organization.primaryVertical).productLabel}
+          </span>
+          <p className="text-sm text-slate-600">
+            This can&apos;t be changed here. Contact Unestra Support if it was set incorrectly during setup.
+          </p>
+        </div>
+      </SectionCard>
 
       <SectionCard title="Organization Profile" description="Changes save through the protected organization settings API and stay scoped to the organization attached to your session.">
         <OrganizationSettingsForm organization={organization} settings={settings} canWrite={can("org_settings:write")} />

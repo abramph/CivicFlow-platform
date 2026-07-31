@@ -411,7 +411,8 @@ export async function changeOrganizationPrimaryVertical(input: {
   newVertical: OrganizationVertical;
   actorUserId: string;
   actorEmail: string;
-  reason?: string | null;
+  /** Required — every correction must be explainable in the audit trail. */
+  reason: string;
 }): Promise<{ organizationId: string; previousVertical: OrganizationVertical; newVertical: OrganizationVertical }> {
   const org = await prisma.organization.findUnique({
     where: { id: input.organizationId },
@@ -440,7 +441,7 @@ export async function changeOrganizationPrimaryVertical(input: {
     metadata: {
       previousVertical,
       newVertical: input.newVertical,
-      reason: input.reason ?? null,
+      reason: input.reason,
     },
   });
 

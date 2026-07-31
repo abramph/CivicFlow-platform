@@ -66,7 +66,7 @@ export default async function PlatformOrganizationDetailPage({
             <p className="mt-1 text-sm text-slate-900">{identity.organizationType ? formatEnumLabel(identity.organizationType) : "Not set"}</p>
           </div>
           <div>
-            <p className="text-sm font-medium text-slate-700">Vertical</p>
+            <p className="text-sm font-medium text-slate-700">Organization type</p>
             <p className="mt-1 text-sm text-slate-900">{getVerticalTerminology(identity.primaryVertical).productLabel}</p>
           </div>
           <div>
@@ -98,8 +98,8 @@ export default async function PlatformOrganizationDetailPage({
       </SectionCard>
 
       <SectionCard
-        title="Primary vertical"
-        description="The product experience this organization sees. Changing it never deletes data — see the impact preview before confirming."
+        title="Organization type correction"
+        description="This is a support-assisted correction for a genuine setup or migration mistake, not a routine setting — organizations do not change their type in normal use. Never deletes data; see the impact preview before confirming, and a reason is always recorded."
       >
         <PrimaryVerticalManager organizationId={identity.id} currentVertical={identity.primaryVertical} />
       </SectionCard>
