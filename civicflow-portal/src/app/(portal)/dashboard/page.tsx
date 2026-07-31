@@ -10,6 +10,7 @@ import { getEffectivePermissions } from "@/lib/role-permissions";
 import { setupBannerDismissCookieName } from "@/lib/dashboard-setup";
 import { DismissSetupBannerButton } from "@/components/app/DismissSetupBannerButton";
 import { getVerticalTerminology, getQuickActions, getHelpTopics, getEmptyStateCopy } from "@/lib/vertical-terminology";
+import { getLandingRoute } from "@/lib/vertical-navigation";
 import type { OrganizationVertical } from "@prisma/client";
 import {
   Users, Calendar, DollarSign, TrendingDown, AlertCircle, UserCheck,
@@ -123,8 +124,9 @@ export default async function DashboardPage() {
   // A PTA/PTO organization has its own dashboard (Unestra Labs) — a PTA
   // president landing here would see Community wording and metrics that
   // don't describe their organization. Redirect rather than duplicate.
-  if (hasSaasSession && session?.primaryVertical === "PTA") {
-    redirect("/labs/pta/dashboard");
+  if (hasSaasSession && session?.primaryVertical) {
+    const landingRoute = getLandingRoute(session.primaryVertical);
+    if (landingRoute !== "/dashboard") redirect(landingRoute);
   }
 
   // ── Legacy API path ────────────────────────────────────────────────────────

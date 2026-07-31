@@ -11,7 +11,7 @@ import {
   type QuickAction,
   type HelpTopic,
 } from "@/lib/vertical-terminology";
-import { getNavigationProfile, type NavItem } from "@/lib/vertical-navigation";
+import { getNavigationProfile, getLandingRoute, type NavItem } from "@/lib/vertical-navigation";
 import { roleRank, type Permission, type Role } from "@/lib/rbac";
 
 /**
@@ -36,15 +36,6 @@ export async function resolveEffectiveVertical(
   if (primaryVertical !== "PTA") return primaryVertical;
   const access = await getOrganizationLabAccess(organizationId, "ptaVertical");
   return access.available ? "PTA" : "COMMUNITY";
-}
-
-/** Where a user should land after selecting/switching into this
- * organization — PTA gets its own dashboard, everything else shares the
- * generic one (relabeled/filtered per vertical on that page itself).
- * `vertical` here must already be the effective vertical (see
- * resolveEffectiveVertical), not necessarily the raw stored one. */
-function landingPageFor(vertical: OrganizationVertical): string {
-  return vertical === "PTA" ? "/labs/pta/dashboard" : "/dashboard";
 }
 
 export class OrganizationNotFoundError extends Error {
@@ -139,6 +130,6 @@ export async function resolveOrganizationExperience(params: {
     navigation,
     quickActions: getQuickActions(effectiveVertical),
     helpTopics: getHelpTopics(effectiveVertical),
-    landingPage: landingPageFor(effectiveVertical),
+    landingPage: getLandingRoute(effectiveVertical),
   };
 }

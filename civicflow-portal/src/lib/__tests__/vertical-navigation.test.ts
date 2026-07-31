@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getNavigationProfile } from "@/lib/vertical-navigation";
+import { getNavigationProfile, getLandingRoute } from "@/lib/vertical-navigation";
 
 describe("getNavigationProfile", () => {
   it("gives PTA its own fully distinct nav — no Community-only labels leak through", () => {
@@ -51,5 +51,17 @@ describe("getNavigationProfile", () => {
     const unionDues = union.find((n) => n.href === "/settings/dues");
     expect(communityDues?.permission).toBe("dues:read");
     expect(unionDues?.permission).toBe("dues:read");
+  });
+});
+
+describe("getLandingRoute", () => {
+  it("sends PTA to its own Labs dashboard", () => {
+    expect(getLandingRoute("PTA")).toBe("/labs/pta/dashboard");
+  });
+
+  it("sends every other vertical to the generic dashboard", () => {
+    expect(getLandingRoute("COMMUNITY")).toBe("/dashboard");
+    expect(getLandingRoute("UNION")).toBe("/dashboard");
+    expect(getLandingRoute("HOA")).toBe("/dashboard");
   });
 });

@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useState, type ReactNode } from "react";
 import { LogoutButton } from "@/components/LogoutButton";
-import { getNavigationProfile } from "@/lib/vertical-navigation";
+import { getNavigationProfile, getLandingRoute } from "@/lib/vertical-navigation";
 import { getVerticalTerminology } from "@/lib/vertical-terminology";
 import { roleRank, type Role } from "@/lib/rbac";
 
@@ -76,7 +76,7 @@ export function PortalShell({ children }: { children: ReactNode }) {
         // even exist in the new organization's nav (e.g. switching away from
         // a PTA org while on a /labs/pta/* page), which would otherwise leave
         // stale, wrong-vertical context on screen after the switch.
-        router.push(refreshed?.primaryVertical === "PTA" ? "/labs/pta/dashboard" : "/dashboard");
+        router.push(getLandingRoute(refreshed?.primaryVertical ?? "COMMUNITY"));
         router.refresh();
       }
     } finally {
@@ -145,7 +145,7 @@ export function PortalShell({ children }: { children: ReactNode }) {
   const orgLabel =
     session?.orgName || session?.org_id || "(setup required)";
   const activeVertical = session?.primaryVertical ?? "COMMUNITY";
-  const landingPage = activeVertical === "PTA" ? "/labs/pta/dashboard" : "/dashboard";
+  const landingPage = getLandingRoute(activeVertical);
   const verticalTerminology = getVerticalTerminology(activeVertical);
 
   return (
