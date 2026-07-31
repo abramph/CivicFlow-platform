@@ -28,7 +28,7 @@ describe("getNavigationProfile", () => {
 
     expect(community.find((n) => n.href === "/dashboard")?.label).toBe("Dashboard");
     expect(union.find((n) => n.href === "/dashboard")?.label).toBe("Union Dashboard");
-    expect(hoa.find((n) => n.href === "/dashboard")?.label).toBe("Community Dashboard");
+    expect(hoa.find((n) => n.href === "/dashboard")?.label).toBe("HOA Dashboard");
 
     expect(union.find((n) => n.href === "/dues")?.label).toBe("Union Dues");
     expect(hoa.find((n) => n.href === "/dues")?.label).toBe("Assessments");

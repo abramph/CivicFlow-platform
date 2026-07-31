@@ -64,7 +64,7 @@ const TERMINOLOGY: Record<OrganizationVertical, VerticalTerminology> = {
     duesLabel: "Assessments",
     meetingLabel: "Board Meeting",
     documentsLabel: "Community Documents",
-    dashboardTitle: "Community Dashboard",
+    dashboardTitle: "HOA Dashboard",
     dashboardWelcome: "Welcome to Unestra for HOAs. Resident and assessment activity below.",
   },
 };
