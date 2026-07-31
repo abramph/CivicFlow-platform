@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import type { OrgRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { getOrganizationLabAccess } from "@/lib/labs/access";
 
 /**
  * Single cookie used to remember the active organization for BOTH staff
@@ -19,6 +20,17 @@ export interface OrgMembershipSummary {
   /** This user's OrgMember.id in this org, if a constituent record exists (e.g. MEMBER-role users, or staff who are also dues-paying members). */
   memberId: string | null;
   memberStatus: string | null;
+  /**
+   * True when this entry exists only because the user is a PTA household
+   * adult (PtaHouseholdAdult.userId) with no OrganizationMembership row at
+   * all in this org — the household's one shared OrgMember is a billing
+   * identity, not a per-adult one (see mobile-auth.ts), so a pure parent
+   * has no conventional membership to derive a session from. Without this
+   * synthetic entry, such a user has zero entries here, resolveActiveOrganization
+   * returns null, and the web portal shows "you don't belong to any
+   * organization" — a real dead end found via live testing, not a hypothetical.
+   */
+  isPtaHouseholdOnly: boolean;
 }
 
 /**
@@ -26,6 +38,12 @@ export interface OrgMembershipSummary {
  * Excludes suspended `OrganizationMembership` rows and orgs whose own
  * status isn't "active" — a suspended membership or org behaves exactly
  * like the user isn't a member there at all.
+ *
+ * Also includes a synthetic entry (role "MEMBER", no memberId) for any org
+ * where the user is a PTA household adult but holds no OrganizationMembership
+ * there — mirrors the equivalent branch in
+ * src/app/api/mobile/organizations/route.ts, which the mobile app already
+ * relies on for this exact identity; the web side never had it.
  */
 export async function getUserOrgMemberships(userId: string): Promise<OrgMembershipSummary[]> {
   const memberships = await prisma.organizationMembership.findMany({
@@ -33,15 +51,17 @@ export async function getUserOrgMemberships(userId: string): Promise<OrgMembersh
     orderBy: { joinedAt: "asc" },
     include: { organization: { select: { id: true, name: true, logoUrl: true } } },
   });
-  if (memberships.length === 0) return [];
 
-  const members = await prisma.orgMember.findMany({
-    where: { userId, organizationId: { in: memberships.map((m) => m.organizationId) } },
-    select: { id: true, organizationId: true, membershipStatus: true },
-  });
+  const members = memberships.length
+    ? await prisma.orgMember.findMany({
+        where: { userId, organizationId: { in: memberships.map((m) => m.organizationId) } },
+        select: { id: true, organizationId: true, membershipStatus: true },
+      })
+    : [];
   const memberByOrg = new Map(members.map((m) => [m.organizationId, m]));
+  const coveredOrgIds = new Set(memberships.map((m) => m.organizationId));
 
-  return memberships.map((m) => {
+  const results: (OrgMembershipSummary & { sortKey: Date })[] = memberships.map((m) => {
     const member = memberByOrg.get(m.organizationId);
     return {
       organizationId: m.organizationId,
@@ -50,8 +70,35 @@ export async function getUserOrgMemberships(userId: string): Promise<OrgMembersh
       role: m.role,
       memberId: member?.id ?? null,
       memberStatus: member?.membershipStatus ?? null,
+      isPtaHouseholdOnly: false,
+      sortKey: m.joinedAt,
     };
   });
+
+  const householdAdults = await prisma.ptaHouseholdAdult.findMany({
+    where: { userId, organization: { status: "active" }, household: { status: "ACTIVE" } },
+    include: { organization: { select: { id: true, name: true, logoUrl: true } } },
+  });
+  for (const adult of householdAdults) {
+    if (coveredOrgIds.has(adult.organizationId)) continue;
+    const labAccess = await getOrganizationLabAccess(adult.organizationId, "ptaVertical");
+    if (!labAccess.available) continue;
+    coveredOrgIds.add(adult.organizationId);
+    results.push({
+      organizationId: adult.organizationId,
+      organizationName: adult.organization.name,
+      organizationLogoUrl: adult.organization.logoUrl,
+      role: "MEMBER",
+      memberId: null,
+      memberStatus: null,
+      isPtaHouseholdOnly: true,
+      sortKey: adult.createdAt,
+    });
+  }
+
+  return results
+    .sort((a, b) => a.sortKey.getTime() - b.sortKey.getTime())
+    .map(({ sortKey: _sortKey, ...rest }) => rest);
 }
 
 /**

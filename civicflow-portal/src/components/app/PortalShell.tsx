@@ -83,7 +83,7 @@ export function PortalShell({ children }: { children: ReactNode }) {
 
       await update();
       if (target.role === "MEMBER") {
-        router.push("/m/dues");
+        router.push(target.memberId ? "/m/dues" : "/m/my-household");
       } else {
         router.refresh();
       }

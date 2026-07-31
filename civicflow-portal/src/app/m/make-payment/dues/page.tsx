@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { OpenInAppBanner } from "@/components/app/OpenInAppBanner";
+import { DuesCheckoutButton } from "@/components/app/DuesCheckoutButton";
 import { filterPayableMethods, PayableMethodsList } from "@/components/app/PayableMethodsList";
 import { getMemberWebSession } from "@/lib/member-web-session";
 import { findActivePaymentLink } from "@/lib/payment-links";
@@ -35,14 +36,11 @@ export default async function MemberPayDuesInAdvancePage({ searchParams }: { sea
       </p>
 
       {paymentLink ? (
-        <a
-          href={`/pay/${paymentLink.slug}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="block rounded-lg bg-emerald-600 px-4 py-3 text-center text-sm font-semibold text-white hover:bg-emerald-700"
-        >
-          Pay Now via Card
-        </a>
+        <DuesCheckoutButton
+          organizationId={memberSession.organizationId}
+          fixedAmount={paymentLink.amount ? Number(paymentLink.amount) : null}
+          minAmount={paymentLink.minAmount ? Number(paymentLink.minAmount) : 1}
+        />
       ) : null}
 
       <PayableMethodsList methods={filterPayableMethods(paymentMethods)} />

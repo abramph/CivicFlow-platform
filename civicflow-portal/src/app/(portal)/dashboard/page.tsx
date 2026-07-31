@@ -80,9 +80,11 @@ export default async function DashboardPage() {
 
   // Members have zero staff permissions and must never see this
   // organization-wide financial/member summary — send them to their own
-  // member-facing view instead.
+  // member-facing view instead. A MEMBER-role session with no memberId is a
+  // pure PTA household parent (no OrgMember record at all) — /m/dues has
+  // nothing to show them, so send them to their household page instead.
   if (hasSaasSession && session?.role === "MEMBER") {
-    redirect("/m/dues");
+    redirect(session.memberId ? "/m/dues" : "/m/my-household");
   }
 
   // ── Legacy API path ────────────────────────────────────────────────────────

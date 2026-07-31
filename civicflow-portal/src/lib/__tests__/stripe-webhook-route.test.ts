@@ -17,6 +17,11 @@ const updateOrganization = vi.fn().mockResolvedValue({});
 const findUniqueOrganizationSmsSettings = vi.fn().mockResolvedValue(null);
 const upsertOrganizationSmsSettings = vi.fn().mockResolvedValue({});
 const createAuditEventMock = vi.fn().mockResolvedValue({});
+const contributionCreate = vi.fn().mockResolvedValue({});
+const paymentLinkUpdate = vi.fn().mockResolvedValue({});
+const duesChargeFindFirst = vi.fn().mockResolvedValue(null);
+const duesPaymentCreate = vi.fn().mockResolvedValue({ id: "dues-payment-1" });
+const duesChargeUpdate = vi.fn().mockResolvedValue({});
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -37,11 +42,19 @@ vi.mock("@/lib/prisma", () => ({
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     contribution: {
-      create: vi.fn().mockResolvedValue({}),
+      create: (...args: unknown[]) => contributionCreate(...args),
     },
     paymentLink: {
-      update: vi.fn().mockResolvedValue({}),
+      update: (...args: unknown[]) => paymentLinkUpdate(...args),
     },
+    duesCharge: {
+      findFirst: (...args: unknown[]) => duesChargeFindFirst(...args),
+    },
+    $transaction: (fn: (tx: unknown) => unknown) =>
+      fn({
+        duesPayment: { create: (...args: unknown[]) => duesPaymentCreate(...args) },
+        duesCharge: { update: (...args: unknown[]) => duesChargeUpdate(...args) },
+      }),
   },
 }));
 
@@ -99,6 +112,11 @@ describe("Stripe platform webhook", () => {
     upsertSubscription.mockClear();
     updateOrganization.mockClear();
     createAuditEventMock.mockClear();
+    contributionCreate.mockClear();
+    paymentLinkUpdate.mockClear();
+    duesChargeFindFirst.mockReset().mockResolvedValue(null);
+    duesPaymentCreate.mockClear();
+    duesChargeUpdate.mockClear();
   });
 
   afterEach(() => {
@@ -166,5 +184,88 @@ describe("Stripe platform webhook", () => {
     expect(response.status).toBe(200);
     expect(body).toEqual({ ok: true, duplicate: true });
     expect(upsertSubscription).not.toHaveBeenCalled();
+  });
+
+  it("applies a completed dues payment-link checkout to the member's oldest outstanding charge, not a Contribution", async () => {
+    duesChargeFindFirst.mockResolvedValueOnce({ id: "charge-1", amountPaid: 0, amountDue: 60 });
+
+    const request = buildSignedRequest({
+      id: "evt_dues_checkout",
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: "cs_test_1",
+          payment_status: "paid",
+          amount_total: 6000,
+          metadata: {
+            organizationId: "org_1",
+            paymentType: "dues",
+            paymentLinkId: "link_1",
+            memberId: "member_1",
+          },
+        },
+      },
+    });
+
+    const response = await POST(request);
+    expect(response.status).toBe(200);
+
+    expect(duesChargeFindFirst).toHaveBeenCalledWith({
+      where: { organizationId: "org_1", memberId: "member_1", status: { in: ["PENDING", "PARTIAL"] } },
+      orderBy: [{ dueDate: "asc" }],
+    });
+    expect(duesPaymentCreate).toHaveBeenCalledTimes(1);
+    expect(duesPaymentCreate.mock.calls[0][0]).toMatchObject({
+      data: expect.objectContaining({
+        organizationId: "org_1",
+        memberId: "member_1",
+        duesChargeId: "charge-1",
+        amount: 60,
+        method: "STRIPE",
+      }),
+    });
+    expect(duesChargeUpdate).toHaveBeenCalledWith({
+      where: { id: "charge-1" },
+      data: { amountPaid: 60, status: "PAID" },
+    });
+    expect(contributionCreate).not.toHaveBeenCalled();
+    expect(paymentLinkUpdate).toHaveBeenCalledWith({
+      where: { id: "link_1" },
+      data: { useCount: { increment: 1 } },
+    });
+  });
+
+  it("still records a Contribution for a non-dues (campaign) payment-link checkout", async () => {
+    const request = buildSignedRequest({
+      id: "evt_campaign_checkout",
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: "cs_test_2",
+          payment_status: "paid",
+          amount_total: 2500,
+          metadata: {
+            organizationId: "org_1",
+            paymentType: "campaign",
+            paymentLinkId: "link_2",
+            campaignId: "campaign_1",
+          },
+        },
+      },
+    });
+
+    const response = await POST(request);
+    expect(response.status).toBe(200);
+
+    expect(contributionCreate).toHaveBeenCalledTimes(1);
+    expect(contributionCreate.mock.calls[0][0]).toMatchObject({
+      data: expect.objectContaining({
+        organizationId: "org_1",
+        amount: 25,
+        source: "CAMPAIGN_PAGE",
+        campaignId: "campaign_1",
+      }),
+    });
+    expect(duesPaymentCreate).not.toHaveBeenCalled();
   });
 });
