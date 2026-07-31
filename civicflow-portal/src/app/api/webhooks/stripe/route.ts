@@ -6,6 +6,7 @@ import { requireRateLimit } from "@/lib/rate-limit";
 import { planFromPriceId, isSeatPriceId, isSmsAddOnPriceId } from "@/lib/stripe";
 import { getPlan } from "@/lib/plans";
 import { SMS_ADDON } from "@/lib/sms-pricing";
+import { recordDuesPayment } from "@/lib/dues-payments";
 import type { SubscriptionStatus } from "@prisma/client";
 
 export const runtime = "nodejs";
@@ -192,36 +193,65 @@ export async function POST(request: Request) {
           await upsertSubscriptionFromStripe(sub, orgId ?? undefined);
         }
 
-        // Record a Contribution when a payment link checkout completes
+        // Record a Contribution (or, for dues, a DuesPayment applied to the
+        // member's balance) when a payment link checkout completes.
         const paymentLinkId = session.metadata?.paymentLinkId;
+        const paymentType = session.metadata?.paymentType || null;
+        const payingMemberId = session.metadata?.memberId || null;
+
         if (paymentLinkId && orgId && session.payment_status === "paid") {
           const amountTotal = session.amount_total ?? 0;
           const amountDollars = amountTotal / 100;
 
-          const campaignId = session.metadata?.campaignId || null;
-          const eventId = session.metadata?.eventId || null;
-          const contributorName = session.metadata?.contributorName || null;
-          const contributorEmail =
-            typeof session.customer_details?.email === "string"
-              ? session.customer_details.email
-              : null;
+          if (paymentType === "dues" && payingMemberId) {
+            // Re-resolve the oldest outstanding charge now (not at
+            // checkout-session creation time) — it may have already been
+            // paid through another channel in the interim, exactly like the
+            // payment-report approval flow (src/app/api/admin/payment-reports/
+            // [id]/approve/route.ts) re-queries at approval time rather than
+            // trusting a possibly-stale charge reference.
+            const charge = await prisma.duesCharge.findFirst({
+              where: { organizationId: orgId, memberId: payingMemberId, status: { in: ["PENDING", "PARTIAL"] } },
+              orderBy: [{ dueDate: "asc" }],
+            });
 
-          await prisma.contribution.create({
-            data: {
+            await recordDuesPayment({
               organizationId: orgId,
+              memberId: payingMemberId,
+              duesChargeId: charge?.id ?? null,
               amount: amountDollars,
-              contributionDate: new Date(),
-              paymentMethod: "STRIPE",
-              source: "CAMPAIGN_PAGE",
-              campaignId: campaignId || null,
-              eventId: eventId || null,
-              contributorName:
-                contributorName ||
-                (contributorEmail ? contributorEmail : null),
-              notes: `Payment link: ${paymentLinkId}`,
-              receiptRequested: Boolean(contributorEmail),
-            },
-          });
+              paymentDate: new Date(),
+              method: "STRIPE",
+              reference: session.id,
+              notes: `Paid by card via payment link ${paymentLinkId}`,
+              charge,
+            });
+          } else {
+            const campaignId = session.metadata?.campaignId || null;
+            const eventId = session.metadata?.eventId || null;
+            const contributorName = session.metadata?.contributorName || null;
+            const contributorEmail =
+              typeof session.customer_details?.email === "string"
+                ? session.customer_details.email
+                : null;
+
+            await prisma.contribution.create({
+              data: {
+                organizationId: orgId,
+                amount: amountDollars,
+                contributionDate: new Date(),
+                paymentMethod: "STRIPE",
+                source: campaignId ? "CAMPAIGN_PAGE" : eventId ? "EVENT_PAGE" : "MANUAL",
+                campaignId: campaignId || null,
+                eventId: eventId || null,
+                contributorName:
+                  contributorName ||
+                  (contributorEmail ? contributorEmail : null),
+                notes: `Payment link: ${paymentLinkId}`,
+                receiptRequested: Boolean(contributorEmail),
+              },
+            });
+          }
 
           await prisma.paymentLink.update({
             where: { id: paymentLinkId },

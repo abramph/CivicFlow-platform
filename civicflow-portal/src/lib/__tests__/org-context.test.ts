@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const findManyMembership = vi.fn();
 const findManyOrgMember = vi.fn();
+const findManyPtaHouseholdAdult = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -11,7 +12,15 @@ vi.mock("@/lib/prisma", () => ({
     orgMember: {
       findMany: (...args: unknown[]) => findManyOrgMember(...args),
     },
+    ptaHouseholdAdult: {
+      findMany: (...args: unknown[]) => findManyPtaHouseholdAdult(...args),
+    },
   },
+}));
+
+const getOrganizationLabAccess = vi.fn();
+vi.mock("@/lib/labs/access", () => ({
+  getOrganizationLabAccess: (...args: unknown[]) => getOrganizationLabAccess(...args),
 }));
 
 const getCookie = vi.fn();
@@ -40,10 +49,12 @@ describe("getUserOrgMemberships", () => {
   beforeEach(() => {
     findManyMembership.mockReset();
     findManyOrgMember.mockReset();
+    findManyPtaHouseholdAdult.mockReset().mockResolvedValue([]);
+    getOrganizationLabAccess.mockReset();
     getCookie.mockReset();
   });
 
-  it("returns an empty list when the user has no active memberships", async () => {
+  it("returns an empty list when the user has no active memberships or PTA households", async () => {
     findManyMembership.mockResolvedValueOnce([]);
 
     const result = await getUserOrgMemberships("user-1");
@@ -87,6 +98,7 @@ describe("getUserOrgMemberships", () => {
         role: "MEMBER",
         memberId: "member-1",
         memberStatus: "active",
+        isPtaHouseholdOnly: false,
       },
       {
         organizationId: "org-b",
@@ -95,6 +107,84 @@ describe("getUserOrgMemberships", () => {
         role: "ORG_ADMIN",
         memberId: null,
         memberStatus: null,
+        isPtaHouseholdOnly: false,
+      },
+    ]);
+  });
+
+  it("adds a synthetic MEMBER entry for a PTA household adult with no OrganizationMembership, when the org has ptaVertical access", async () => {
+    findManyMembership.mockResolvedValueOnce([]);
+    findManyPtaHouseholdAdult.mockReset().mockResolvedValueOnce([
+      {
+        organizationId: "org-pta",
+        createdAt: new Date("2024-03-01"),
+        organization: { id: "org-pta", name: "Pine Grove PTA", logoUrl: null },
+      },
+    ]);
+    getOrganizationLabAccess.mockResolvedValueOnce({ available: true });
+
+    const result = await getUserOrgMemberships("user-parent");
+
+    expect(getOrganizationLabAccess).toHaveBeenCalledWith("org-pta", "ptaVertical");
+    expect(findManyOrgMember).not.toHaveBeenCalled();
+    expect(result).toEqual([
+      {
+        organizationId: "org-pta",
+        organizationName: "Pine Grove PTA",
+        organizationLogoUrl: null,
+        role: "MEMBER",
+        memberId: null,
+        memberStatus: null,
+        isPtaHouseholdOnly: true,
+      },
+    ]);
+  });
+
+  it("excludes a PTA household adult entry when the org's ptaVertical access is unavailable", async () => {
+    findManyMembership.mockResolvedValueOnce([]);
+    findManyPtaHouseholdAdult.mockReset().mockResolvedValueOnce([
+      {
+        organizationId: "org-pta",
+        createdAt: new Date("2024-03-01"),
+        organization: { id: "org-pta", name: "Pine Grove PTA", logoUrl: null },
+      },
+    ]);
+    getOrganizationLabAccess.mockResolvedValueOnce({ available: false });
+
+    const result = await getUserOrgMemberships("user-parent");
+
+    expect(result).toEqual([]);
+  });
+
+  it("does not duplicate an org where the user already has a real OrganizationMembership and is also a household adult", async () => {
+    findManyMembership.mockResolvedValueOnce([
+      membershipRow({
+        organizationId: "org-pta",
+        role: "STAFF",
+        organization: { id: "org-pta", name: "Pine Grove PTA", logoUrl: null },
+      }),
+    ]);
+    findManyOrgMember.mockResolvedValueOnce([]);
+    findManyPtaHouseholdAdult.mockReset().mockResolvedValueOnce([
+      {
+        organizationId: "org-pta",
+        createdAt: new Date("2024-03-01"),
+        organization: { id: "org-pta", name: "Pine Grove PTA", logoUrl: null },
+      },
+    ]);
+
+    const result = await getUserOrgMemberships("user-president");
+
+    expect(getOrganizationLabAccess).not.toHaveBeenCalled();
+    expect(result).toEqual([
+      {
+        organizationId: "org-pta",
+        organizationName: "Pine Grove PTA",
+        organizationLogoUrl: null,
+        role: "STAFF",
+        memberId: null,
+        memberStatus: null,
+        isPtaHouseholdOnly: false,
       },
     ]);
   });
@@ -104,6 +194,8 @@ describe("resolveActiveOrganization", () => {
   beforeEach(() => {
     findManyMembership.mockReset();
     findManyOrgMember.mockReset();
+    findManyPtaHouseholdAdult.mockReset().mockResolvedValue([]);
+    getOrganizationLabAccess.mockReset();
     getCookie.mockReset();
     getCookie.mockReturnValue(undefined);
   });

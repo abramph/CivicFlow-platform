@@ -38,7 +38,8 @@ export default async function SelectOrganizationPage() {
   }
 
   if (memberships.length === 1) {
-    redirect(memberships[0].role === "MEMBER" ? "/m/dues" : "/dashboard");
+    const only = memberships[0];
+    redirect(only.role === "MEMBER" ? (only.memberId ? "/m/dues" : "/m/my-household") : "/dashboard");
   }
 
   return (

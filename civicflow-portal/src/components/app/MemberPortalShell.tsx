@@ -9,6 +9,7 @@ import { formatEnumLabel } from "@/lib/formatting";
 
 const NAV_ITEMS = [
   { href: "/m/dues", label: "Dues" },
+  { href: "/m/my-household", label: "My Household" },
   { href: "/m/inbox", label: "Inbox" },
   { href: "/m/announcements", label: "Announcements" },
   { href: "/m/events", label: "Events" },

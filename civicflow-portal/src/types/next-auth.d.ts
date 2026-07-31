@@ -43,6 +43,7 @@ declare module "next-auth" {
       role: OrgRole;
       memberId: string | null;
       memberStatus: string | null;
+      isPtaHouseholdOnly: boolean;
     }[];
     // Effective (org-customized) permission set for the current role
     permissions?: string[];

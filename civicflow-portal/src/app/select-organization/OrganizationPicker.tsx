@@ -10,6 +10,7 @@ interface MembershipOption {
   organizationName: string;
   organizationLogoUrl: string | null;
   role: OrgRole;
+  memberId: string | null;
   memberStatus: string | null;
 }
 
@@ -29,7 +30,8 @@ export function OrganizationPicker({ memberships }: { memberships: MembershipOpt
   const [pendingOrgId, setPendingOrgId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function selectOrganization(organizationId: string, role: OrgRole) {
+  async function selectOrganization(option: MembershipOption) {
+    const { organizationId, role, memberId } = option;
     setPendingOrgId(organizationId);
     setError(null);
     try {
@@ -51,7 +53,9 @@ export function OrganizationPicker({ memberships }: { memberships: MembershipOpt
       // session still said "MEMBER") even though the server-rendered page
       // underneath is already correct for the new org.
       await update();
-      router.push(role === "MEMBER" ? "/m/dues" : "/dashboard");
+      // A MEMBER-role entry with no memberId is a pure PTA household parent
+      // (no OrgMember record at all) — /m/dues has nothing to show them.
+      router.push(role === "MEMBER" ? (memberId ? "/m/dues" : "/m/my-household") : "/dashboard");
       router.refresh();
     } catch {
       setError("Unable to connect. Please try again.");
@@ -70,7 +74,7 @@ export function OrganizationPicker({ memberships }: { memberships: MembershipOpt
             key={option.organizationId}
             type="button"
             disabled={pendingOrgId !== null}
-            onClick={() => selectOrganization(option.organizationId, option.role)}
+            onClick={() => selectOrganization(option)}
             className="flex w-full items-center gap-3 rounded-lg border border-slate-200 px-4 py-3 text-left transition hover:border-emerald-400 hover:bg-emerald-50 disabled:opacity-60"
           >
             {option.organizationLogoUrl ? (

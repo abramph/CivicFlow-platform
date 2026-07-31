@@ -18,9 +18,11 @@ export default async function SettingsPage() {
   }
 
   // Members have zero staff permissions — send them to their own
-  // member-facing view instead of the organization settings hub.
+  // member-facing view instead of the organization settings hub. A
+  // MEMBER-role session with no memberId is a pure PTA household parent
+  // (no OrgMember record at all) — /m/dues has nothing to show them.
   if (hasSaasSession && session?.role === "MEMBER") {
-    redirect("/m/dues");
+    redirect(session.memberId ? "/m/dues" : "/m/my-household");
   }
 
   if (hasLegacySession) {
