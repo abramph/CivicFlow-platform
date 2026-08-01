@@ -1,4 +1,4 @@
-# HOA Mobile Strategy (PR #41 discovery)
+# HOA Mobile Strategy (PR #42 discovery)
 
 Design only — no mobile screens, API fields, or `supportedModules` values
 were added in this PR.

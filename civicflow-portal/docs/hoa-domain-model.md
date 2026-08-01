@@ -1,4 +1,4 @@
-# HOA Domain Model (PR #41 discovery)
+# HOA Domain Model (PR #42 discovery)
 
 Design only — **no Prisma models were created or modified**. This is the
 proposed shape for a future implementation PR. See

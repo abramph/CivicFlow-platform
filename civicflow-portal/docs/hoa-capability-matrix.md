@@ -1,4 +1,4 @@
-# HOA Capability Matrix (PR #41 discovery)
+# HOA Capability Matrix (PR #42 discovery)
 
 One row per capability identified in `docs/hoa-capability-audit.md`,
 classified into exactly one column. See that document and

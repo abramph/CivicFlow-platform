@@ -1,4 +1,4 @@
-# HOA Capability Audit (PR #41 discovery)
+# HOA Capability Audit (PR #42 discovery)
 
 Discovery only — no schema, route, or code changes in this PR. See
 `docs/hoa-domain-model.md`, `docs/hoa-capability-matrix.md`,

@@ -1,4 +1,4 @@
-# HOA MVP and Technical Recommendation (PR #41 discovery)
+# HOA MVP and Technical Recommendation (PR #42 discovery)
 
 Recommendation only — no code, schema, or migrations in this PR. See
 `docs/hoa-capability-audit.md`, `docs/hoa-domain-model.md`,
@@ -97,21 +97,23 @@ a spreadsheet for the other, undermining the whole pitch.
 | **Mobile impact** | **Low.** Zero required new mobile work beyond one small read-only screen; everything else already works or is explicitly sequenced after its web counterpart. | `docs/hoa-mobile-strategy.md`. |
 | **Deployment impact** | **Low.** Additive-only migration (same "no production data affected" pattern every prior vertical PR in this repo has used), no billing changes, no changes to existing customer-facing behavior for any other vertical, no changes to authentication/session/onboarding flows. | Consistent with this repo's established migration discipline (`prisma migrate deploy`, additive-only, confirmed by every prior vertical PR's own validation report). |
 
-## Recommendation for PR #42 (the first HOA implementation PR)
+## Recommendation for PR #43 (the first HOA implementation PR)
 
-Scope PR #42 to exactly the "Must have" list above:
+This discovery PR is #42; the first HOA implementation PR should be #43.
+
+Scope PR #43 to exactly the "Must have" list above:
 `Property` + `PropertyResident` + `Violation` + `ArchitecturalRequest`,
 plus the relabeling/reuse of existing pages for residents, assessments,
 board, meetings, documents, communications, and reports. Explicitly
 exclude `MaintenanceRequest` and everything in "Future"/"Never" from
-PR #42's scope — those are separate, later PRs by design, not because
-they're unimportant, but because keeping PR #42 to the two
+PR #43's scope — those are separate, later PRs by design, not because
+they're unimportant, but because keeping PR #43 to the two
 highest-validated new capabilities keeps it reviewable, keeps risk low,
 and lets real usage from an actual HOA MVP inform whether
 `MaintenanceRequest`/`Amenity`/anything else is worth building next,
 rather than guessing all of it upfront.
 
-Before PR #42 starts, apply this discovery's one open technical
+Before PR #43 starts, apply this discovery's one open technical
 prerequisite: design the centralized HOA access-guard module (property
 resolution, resident-vs-board authorization, cross-property isolation)
 *before* writing the first page — not as a refactor afterward, learning

@@ -1,4 +1,4 @@
-# HOA Permissions, Navigation, and Dashboard Proposal (PR #41 discovery)
+# HOA Permissions, Navigation, and Dashboard Proposal (PR #42 discovery)
 
 Design only — no permissions, routes, or navigation code were added or
 changed in this PR.
