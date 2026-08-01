@@ -138,24 +138,32 @@ export const LAB_FEATURES = {
     metered: true,
     riskClassification: "medium",
   },
+  // RETIRED, not deleted (PR #40 — PTA/PTO graduation from Labs to a
+  // first-class vertical; see docs/pta-access-architecture.md and
+  // docs/labs-feature-lifecycle.md). Core PTA access is now gated
+  // exclusively by `Organization.primaryVertical === "PTA"` — this key no
+  // longer has any bearing on access. It is kept in the registry (rather
+  // than deleted) purely so existing `OrganizationLabFeature` rows and
+  // audit history referencing "ptaVertical" remain resolvable and
+  // meaningful; RETIRED lifecycle already makes getOrganizationLabAccess()
+  // deny new enrollment attempts and listOrganizationLabAccess() hide it
+  // from the org-facing Labs page. setOrganizationLabEnrollment() separately
+  // blocks new ENABLED/PENDING writes for any RETIRED feature (mirroring the
+  // existing internalOnly write-time block) so Platform Admin cannot
+  // "re-enable" it either. Never reuse this key for a different feature; a
+  // genuinely new experimental PTA capability gets its own key (e.g.
+  // ptaAdvancedAnalyticsPreview).
   ptaVertical: {
     key: "ptaVertical",
-    name: "Unestra for PTA",
+    name: "Unestra for PTA (retired — see primaryVertical)",
     description:
-      "A parent-teacher-association vertical validating whether Unestra can support household/family membership, school-year-scoped students and classrooms, volunteer signups, and PTA-specific dues/events/communications — built by reusing existing dues, payments, events, campaigns, and communications infrastructure. Not a student information system: no academic, discipline, health, or custody records are stored. See docs/pta-labs-mvp.md.",
-    lifecycle: "ALPHA",
+      "Retired. PTA/PTO graduated from this Labs-gated pilot to a first-class Unestra vertical in PR #40 — access is now controlled exclusively by Organization.primaryVertical === \"PTA\", not Labs enrollment. This entry is kept only so historical OrganizationLabFeature rows and audit events remain resolvable. See docs/pta-access-architecture.md.",
+    lifecycle: "RETIRED",
     requiresEntitlement: true,
     requiresEnrollment: true,
-    // Unlike the internal-ops Labs features above, this is a genuine
-    // product-validation vertical intended (if it proves out) for a real
-    // paying customer someday — not an APH-only tool. internalOnly: false
-    // means the registry itself doesn't forbid enrolling a non-billing-exempt
-    // organization; nothing in this PR enrolls any production organization
-    // regardless (see docs/pta-labs-mvp.md's pilot procedure — enrollment is
-    // local/fictional-org only).
     internalOnly: false,
     metered: false,
-    helpText: "Household/family membership, school-year-scoped students and classrooms, volunteer signups, and PTA-specific dues/events/communications.",
+    helpText: "Retired — PTA/PTO is now a first-class vertical, not a Labs feature. See docs/pta-access-architecture.md.",
     riskClassification: "medium",
   },
 } as const satisfies Record<string, LabFeatureDefinition>;

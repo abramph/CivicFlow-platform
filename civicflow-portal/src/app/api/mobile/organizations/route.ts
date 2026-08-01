@@ -1,6 +1,5 @@
 import { withApiErrorHandling } from "@/lib/api-route";
 import { requireMobileAuth } from "@/lib/mobile-auth";
-import { getOrganizationLabAccess } from "@/lib/labs/access";
 import { getEffectivePermissions } from "@/lib/role-permissions";
 import { resolveEffectiveVertical } from "@/lib/organization-experience";
 import { getVerticalTerminology, getQuickActions } from "@/lib/vertical-terminology";
@@ -129,11 +128,13 @@ export async function GET(request: Request) {
     // ── 2. PTA household adults ──────────────────────────────────────────
     const householdAdults = await prisma.ptaHouseholdAdult.findMany({
       where: { userId, organization: { status: "active" }, household: { status: "ACTIVE" } },
-      include: { organization: { select: { id: true, name: true, logoUrl: true } } },
+      include: { organization: { select: { id: true, name: true, logoUrl: true, primaryVertical: true } } },
     });
     for (const adult of householdAdults) {
-      const labAccess = await getOrganizationLabAccess(adult.organizationId, "ptaVertical");
-      if (!labAccess.available) continue;
+      // PTA/PTO is a first-class vertical (PR #40) — included whenever the
+      // organization's own primaryVertical is PTA, never a separate Labs
+      // enrollment (see docs/pta-access-architecture.md).
+      if (adult.organization.primaryVertical !== "PTA") continue;
 
       rawVerticalByOrgId.set(adult.organizationId, "PTA");
       confirmedPtaOrgIds.add(adult.organizationId);
@@ -159,11 +160,12 @@ export async function GET(request: Request) {
     // ── 3. PTA officers with a relevant permission ──────────────────────
     const staffMemberships = await prisma.organizationMembership.findMany({
       where: { userId, role: { not: "MEMBER" }, status: "active", organization: { status: "active" } },
-      include: { organization: { select: { id: true, name: true, logoUrl: true, status: true } } },
+      include: { organization: { select: { id: true, name: true, logoUrl: true, status: true, primaryVertical: true } } },
     });
     for (const membership of staffMemberships) {
-      const labAccess = await getOrganizationLabAccess(membership.organizationId, "ptaVertical");
-      if (!labAccess.available) continue;
+      // PTA/PTO is a first-class vertical (PR #40) — see the household-adult
+      // branch above for the same rationale.
+      if (membership.organization.primaryVertical !== "PTA") continue;
 
       const effective = await getEffectivePermissions(membership.organizationId, membership.role as Role);
       const canCheckIn = effective.includes(PERMISSIONS.PTA_VOLUNTEERS_CHECKIN);

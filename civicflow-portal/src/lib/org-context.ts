@@ -1,7 +1,6 @@
 import { cookies } from "next/headers";
 import type { OrganizationVertical, OrgRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { getOrganizationLabAccess } from "@/lib/labs/access";
 
 /**
  * Single cookie used to remember the active organization for BOTH staff
@@ -97,8 +96,12 @@ export async function getUserOrgMemberships(userId: string): Promise<OrgMembersh
   });
   for (const adult of householdAdults) {
     if (coveredOrgIds.has(adult.organizationId)) continue;
-    const labAccess = await getOrganizationLabAccess(adult.organizationId, "ptaVertical");
-    if (!labAccess.available) continue;
+    // PTA/PTO is a first-class vertical (PR #40) — a household adult's org
+    // is included whenever the organization's own primaryVertical is PTA,
+    // never gated behind a separate Labs enrollment (which previously could
+    // silently strand a real PTA parent with zero organizations in their
+    // switcher — see docs/pta-access-architecture.md).
+    if (adult.organization.primaryVertical !== "PTA") continue;
     coveredOrgIds.add(adult.organizationId);
     results.push({
       organizationId: adult.organizationId,

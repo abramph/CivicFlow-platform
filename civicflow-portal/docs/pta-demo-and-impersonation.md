@@ -1,5 +1,11 @@
 # Fictional Demo Environment & Platform Administrator Impersonation
 
+> **Superseded by PR #40 (2026-07-29):** `ptaVertical` enrollment mentions
+> below are historical. Pine Grove's PTA access now comes from
+> `primaryVertical: "PTA"` set directly on the organization; the seed script
+> no longer creates a `ptaVertical` Labs enrollment row at all. See
+> `docs/pta-access-architecture.md`.
+
 Two permanent, reusable internal tools: a fictional PTA (and non-PTA) demo
 environment, and a secure way for a Platform Administrator to experience the
 product exactly as any real member does. Both are intended for demos, QA,

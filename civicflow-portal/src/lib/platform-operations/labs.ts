@@ -154,6 +154,17 @@ export async function setOrganizationLabEnrollment(input: {
     );
   }
 
+  // A retired feature (e.g. ptaVertical as of PR #40) can never be newly
+  // enabled/re-enabled — the whole point of retiring it is that Platform
+  // Admin can no longer grant access through it. DISABLED/SUSPENDED
+  // transitions on an existing row remain allowed (cleanup), mirroring the
+  // internalOnly block above.
+  if (feature.lifecycle === "RETIRED" && (input.status === "ENABLED" || input.status === "PENDING")) {
+    throw new LabEnrollmentValidationError(
+      `${feature.key} is retired and can no longer be enabled for any organization.`
+    );
+  }
+
   const existing = await prisma.organizationLabFeature.findUnique({
     where: { organizationId_featureKey: { organizationId: input.organizationId, featureKey: feature.key } },
   });

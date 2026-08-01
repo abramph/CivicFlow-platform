@@ -46,48 +46,43 @@ each independently unit-tested:
 - `src/lib/organization-experience.ts` — the composing resolver plus
   `resolveEffectiveVertical`
 
-### Effective vs. raw vertical
+### Effective vs. raw vertical (superseded by PR #40 — see below)
+
+> **PR #40 update:** the fallback described in this subsection no longer
+> exists. `Organization.primaryVertical` is now the sole, authoritative gate
+> for the PTA experience — `resolveEffectiveVertical(organizationId,
+> primaryVertical)` returns `primaryVertical` unchanged, for every vertical,
+> with no database lookup and no Labs check. A `PTA`-classified organization
+> gets the full PTA navigation and dashboard immediately, with no Platform
+> Admin enrollment step. See `docs/pta-access-architecture.md` for the
+> current architecture. The history below is kept for context on why the
+> "effective vertical" concept existed at all.
 
 `Organization.primaryVertical` (the column) is the raw, stored,
-Platform-Admin-controlled classification. PTA Labs enrollment
-(`OrganizationLabFeature`, `featureKey: "ptaVertical"`) has **no self-service
-path** — every real enrollment row today has `enrollmentSource:
-"operations_center"`, meaning only a Platform Admin can turn it on. If an
-organization were classified `PTA` but not (yet) enrolled, giving it PTA
-navigation and a PTA dashboard redirect would point at pages that all say
-"not available for this organization" — a dead end the spec explicitly
-prohibits.
+Platform-Admin-controlled classification. Historically, PTA Labs enrollment
+(`OrganizationLabFeature`, `featureKey: "ptaVertical"`) had **no self-service
+path** — every enrollment row had `enrollmentSource: "operations_center"`,
+meaning only a Platform Admin could turn it on. If an organization were
+classified `PTA` but not (yet) enrolled, giving it PTA navigation and a PTA
+dashboard redirect would point at pages that all said "not available for
+this organization" — a dead end.
 
-`resolveEffectiveVertical(organizationId, primaryVertical)` closes this gap:
-it falls back to `COMMUNITY` for a `PTA`-classified org until Labs enrollment
-actually exists. The moment Platform Admin enables it, the same org
-seamlessly gets the full PTA experience — no further action needed.
+`resolveEffectiveVertical` used to close this gap by falling back to
+`COMMUNITY` for a `PTA`-classified org until Labs enrollment existed. PR #40
+removed this fallback entirely: it was the exact "contradictory state"
+(an org correctly classified PTA, silently shown a different product) the
+graduation work exists to eliminate. Now there is nothing to reconcile —
+`primaryVertical` alone is the answer everywhere it's read.
 
-**Where reconciliation happens (and where it deliberately doesn't):**
+**Where the (now-identity) resolution happens:**
 
-- `authOptions.ts`'s session callback reconciles **once, for the active
-  organization only** — this is what `session.primaryVertical` (and
-  therefore `PortalShell`'s nav and the dashboard's PTA redirect) is built
-  from.
-- `resolveOrganizationExperience()` reconciles the same way for its own
-  `organizationId` argument.
-- `getUserOrgMemberships()` (`org-context.ts`) — the list backing the
-  organization **switcher** — deliberately does **not** reconcile each
-  entry. That function runs on every session hydration, for every
-  organization a user belongs to; reconciling every entry would mean an
-  extra Labs-access database query per organization per session read. Since
-  the switcher itself doesn't render vertical-specific content (it's just
-  organization names in a dropdown), this raw value is fine there. The
-  post-switch redirect decision (`PortalShell.switchOrganization`) instead
-  waits for the refreshed session — which *is* reconciled — rather than
-  trusting the pre-switch raw value.
-
-  This split was discovered by manual testing, not designed upfront: an
-  earlier version reconciled every switcher entry and measurably increased
-  per-request database load in a way that, combined with an already-thin
-  connection ceiling on the shared database this project uses for both dev
-  and production, could exhaust available connections. Fixed before this PR
-  merged.
+- `authOptions.ts`'s session callback, `resolveOrganizationExperience()`,
+  and `getUserOrgMemberships()` (`org-context.ts`) all read
+  `primaryVertical` directly. There is no reconciliation query left to skip
+  in the organization-switcher path — the earlier "switcher deliberately
+  doesn't reconcile, for database-load reasons" split (previously
+  documented here) no longer applies, since there is nothing left to
+  reconcile.
 
 ## Navigation
 
@@ -171,9 +166,9 @@ Payments, Events, Volunteer [PTA-only], Profile) is unchanged; this prepares
 a future mobile release to consume vertical-aware labels/actions without
 another endpoint change.
 
-For efficiency, the endpoint never asks for a PTA Labs-access check twice —
-rows already confirmed PTA-enrolled by the existing household-adult/officer
-branches reuse that confirmation instead of re-querying.
+As of PR #40, PTA inclusion in this endpoint's household-adult and officer
+branches is decided directly from each organization's already-selected
+`primaryVertical` field — no separate Labs-access query is made at all.
 
 ## Known limitations
 

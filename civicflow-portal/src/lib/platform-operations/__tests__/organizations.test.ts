@@ -196,14 +196,14 @@ describe("previewPrimaryVerticalChange", () => {
     expect(ptaHouseholdCount).not.toHaveBeenCalled();
   });
 
-  it("flags a mismatch when moving to PTA without active PTA Labs enrollment", async () => {
+  it("never consults Labs enrollment when moving to PTA (PR #40 — PTA is a first-class vertical, no Labs mismatch concept remains)", async () => {
     organizationFindUnique.mockResolvedValueOnce({ primaryVertical: "COMMUNITY" });
-    organizationLabFeatureFindUnique.mockResolvedValueOnce({ status: "DISABLED" });
 
     const { previewPrimaryVerticalChange } = await import("../organizations");
     const preview = await previewPrimaryVerticalChange("org-1", "PTA");
 
-    expect(preview.ptaLabsEnrollmentMismatch).toBe(true);
+    expect(preview.proposedVertical).toBe("PTA");
+    expect(organizationLabFeatureFindUnique).not.toHaveBeenCalled();
   });
 });
 

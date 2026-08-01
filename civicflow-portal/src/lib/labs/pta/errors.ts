@@ -5,6 +5,12 @@
  */
 export const PTA_ERROR_CODES = [
   "PTA_NOT_ENABLED",
+  /** Organization.primaryVertical is not PTA — the authoritative reason core
+   * PTA access is denied, since PR #40 (PTA graduated from a Labs-gated
+   * pilot to a first-class vertical; see docs/pta-access-architecture.md). */
+  "PTA_ORGANIZATION_NOT_PTA_VERTICAL",
+  /** The organization is PTA but not currently active (suspended/cancelled). */
+  "PTA_ORGANIZATION_INACTIVE",
   "PTA_PROFILE_NOT_FOUND",
   "PTA_HOUSEHOLD_NOT_FOUND",
   "PTA_STUDENT_NOT_FOUND",
@@ -35,6 +41,8 @@ export type PtaErrorCode = (typeof PTA_ERROR_CODES)[number];
 
 const STATUS_FOR_CODE: Record<PtaErrorCode, number> = {
   PTA_NOT_ENABLED: 403,
+  PTA_ORGANIZATION_NOT_PTA_VERTICAL: 403,
+  PTA_ORGANIZATION_INACTIVE: 403,
   PTA_PROFILE_NOT_FOUND: 404,
   PTA_HOUSEHOLD_NOT_FOUND: 404,
   PTA_STUDENT_NOT_FOUND: 404,

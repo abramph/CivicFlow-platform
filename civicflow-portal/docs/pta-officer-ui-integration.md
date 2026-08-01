@@ -1,5 +1,11 @@
 # Unestra for PTA — Officer UI Integration Sprint
 
+> **Superseded by PR #40 (2026-07-29):** references below to `ptaVertical`
+> as the entry-point/enrollment gate are historical — PTA/PTO is now a
+> first-class vertical gated by `Organization.primaryVertical === "PTA"`
+> alone, with no Labs enrollment step. See
+> `docs/pta-access-architecture.md`.
+
 Follow-up to the Product Readiness & UX Review, which found that the PTA
 Labs MVP's backend was substantially complete but almost entirely
 unreachable through the product's own interface: only 3 of 27 PTA API

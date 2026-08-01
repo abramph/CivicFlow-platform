@@ -18,11 +18,6 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
-const getOrganizationLabAccess = vi.fn();
-vi.mock("@/lib/labs/access", () => ({
-  getOrganizationLabAccess: (...args: unknown[]) => getOrganizationLabAccess(...args),
-}));
-
 const getCookie = vi.fn();
 vi.mock("next/headers", () => ({
   cookies: () => Promise.resolve({ get: getCookie }),
@@ -50,7 +45,6 @@ describe("getUserOrgMemberships", () => {
     findManyMembership.mockReset();
     findManyOrgMember.mockReset();
     findManyPtaHouseholdAdult.mockReset().mockResolvedValue([]);
-    getOrganizationLabAccess.mockReset();
     getCookie.mockReset();
   });
 
@@ -112,26 +106,25 @@ describe("getUserOrgMemberships", () => {
     ]);
   });
 
-  it("adds a synthetic MEMBER entry for a PTA household adult with no OrganizationMembership, when the org has ptaVertical access", async () => {
+  it("adds a synthetic MEMBER entry for a PTA household adult with no OrganizationMembership, when the org is PTA-vertical (PR #40 — no Labs check involved)", async () => {
     findManyMembership.mockResolvedValueOnce([]);
     findManyPtaHouseholdAdult.mockReset().mockResolvedValueOnce([
       {
         organizationId: "org-pta",
         createdAt: new Date("2024-03-01"),
-        organization: { id: "org-pta", name: "Pine Grove PTA", logoUrl: null },
+        organization: { id: "org-pta", name: "Pine Grove PTA", logoUrl: null, primaryVertical: "PTA" },
       },
     ]);
-    getOrganizationLabAccess.mockResolvedValueOnce({ available: true });
 
     const result = await getUserOrgMemberships("user-parent");
 
-    expect(getOrganizationLabAccess).toHaveBeenCalledWith("org-pta", "ptaVertical");
     expect(findManyOrgMember).not.toHaveBeenCalled();
     expect(result).toEqual([
       {
         organizationId: "org-pta",
         organizationName: "Pine Grove PTA",
         organizationLogoUrl: null,
+        primaryVertical: "PTA",
         role: "MEMBER",
         memberId: null,
         memberStatus: null,
@@ -140,16 +133,15 @@ describe("getUserOrgMemberships", () => {
     ]);
   });
 
-  it("excludes a PTA household adult entry when the org's ptaVertical access is unavailable", async () => {
+  it("excludes a PTA household adult entry when the org's primaryVertical isn't PTA — a household link at a non-PTA org (e.g. after a Platform Admin correction) grants nothing", async () => {
     findManyMembership.mockResolvedValueOnce([]);
     findManyPtaHouseholdAdult.mockReset().mockResolvedValueOnce([
       {
         organizationId: "org-pta",
         createdAt: new Date("2024-03-01"),
-        organization: { id: "org-pta", name: "Pine Grove PTA", logoUrl: null },
+        organization: { id: "org-pta", name: "Pine Grove PTA", logoUrl: null, primaryVertical: "COMMUNITY" },
       },
     ]);
-    getOrganizationLabAccess.mockResolvedValueOnce({ available: false });
 
     const result = await getUserOrgMemberships("user-parent");
 
@@ -175,7 +167,6 @@ describe("getUserOrgMemberships", () => {
 
     const result = await getUserOrgMemberships("user-president");
 
-    expect(getOrganizationLabAccess).not.toHaveBeenCalled();
     expect(result).toEqual([
       {
         organizationId: "org-pta",
@@ -189,7 +180,7 @@ describe("getUserOrgMemberships", () => {
     ]);
   });
 
-  it("reports a conventional membership's RAW stored vertical, not reconciled against Labs — this list is read on every session hydration for every org, so reconciling each entry would mean a Labs-access query per org per session read; only the active org gets reconciled (see resolveSessionIdentity)", async () => {
+  it("reports a conventional membership's RAW stored primaryVertical directly — this list is read on every session hydration for every org, so any per-entry reconciliation would be extra, avoidable database load; only the active org's vertical is what actually drives the UI (via resolveSessionIdentity)", async () => {
     findManyMembership.mockResolvedValueOnce([
       membershipRow({ organizationId: "org-pta", organization: { id: "org-pta", name: "Pine Grove PTA", logoUrl: null, primaryVertical: "PTA" } as never }),
     ]);
@@ -198,7 +189,6 @@ describe("getUserOrgMemberships", () => {
     const result = await getUserOrgMemberships("user-staff");
 
     expect(result[0].primaryVertical).toBe("PTA");
-    expect(getOrganizationLabAccess).not.toHaveBeenCalled();
   });
 });
 
@@ -207,7 +197,6 @@ describe("resolveActiveOrganization", () => {
     findManyMembership.mockReset();
     findManyOrgMember.mockReset();
     findManyPtaHouseholdAdult.mockReset().mockResolvedValue([]);
-    getOrganizationLabAccess.mockReset();
     getCookie.mockReset();
     getCookie.mockReturnValue(undefined);
   });

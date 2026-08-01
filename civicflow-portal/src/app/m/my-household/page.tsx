@@ -1,5 +1,5 @@
 import { requireOrganization } from "@/lib/auth-guards";
-import { getOrganizationLabAccess } from "@/lib/labs/access";
+import { checkPtaVerticalAvailable } from "@/lib/labs/pta/guard";
 import { prisma } from "@/lib/prisma";
 import { getPtaHousehold } from "@/lib/labs/pta/households";
 import { EmptyState } from "@/components/admin/OperationsUI";
@@ -15,7 +15,7 @@ import { EmptyState } from "@/components/admin/OperationsUI";
  */
 export default async function MemberHouseholdPage() {
   const { organizationId, session } = await requireOrganization();
-  const access = await getOrganizationLabAccess(organizationId, "ptaVertical");
+  const access = await checkPtaVerticalAvailable(organizationId);
 
   if (!access.available) {
     return (

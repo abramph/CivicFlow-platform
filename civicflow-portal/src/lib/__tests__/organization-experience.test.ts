@@ -19,12 +19,7 @@ vi.mock("@/lib/plan-gate", () => ({
   getOrganizationEntitlements: (...args: unknown[]) => getOrganizationEntitlements(...args),
 }));
 
-const getOrganizationLabAccess = vi.fn();
-vi.mock("@/lib/labs/access", () => ({
-  getOrganizationLabAccess: (...args: unknown[]) => getOrganizationLabAccess(...args),
-}));
-
-import { OrganizationNotFoundError, resolveOrganizationExperience } from "@/lib/organization-experience";
+import { OrganizationNotFoundError, resolveOrganizationExperience, resolveEffectiveVertical } from "@/lib/organization-experience";
 
 describe("resolveOrganizationExperience", () => {
   beforeEach(() => {
@@ -32,37 +27,34 @@ describe("resolveOrganizationExperience", () => {
     findManyLabFeature.mockReset();
     getEffectivePermissions.mockReset();
     getOrganizationEntitlements.mockReset();
-    getOrganizationLabAccess.mockReset();
   });
 
-  it("composes vertical, entitlements, labs, permissions, and terminology from server-resolved inputs only, when PTA Labs is actually enrolled", async () => {
+  it("composes vertical, entitlements, labs, permissions, and terminology from server-resolved inputs only", async () => {
     findUniqueOrganization.mockResolvedValueOnce({ id: "org-1", name: "Pine Grove School PTA", primaryVertical: "PTA", status: "active" });
-    findManyLabFeature.mockResolvedValueOnce([{ featureKey: "ptaVertical" }]);
+    findManyLabFeature.mockResolvedValueOnce([{ featureKey: "meetingIntelligence" }]);
     getEffectivePermissions.mockResolvedValueOnce(["members:read", "members:write"]);
     getOrganizationEntitlements.mockResolvedValueOnce({ planId: "free", planName: "Free" });
-    getOrganizationLabAccess.mockResolvedValueOnce({ available: true });
 
     const result = await resolveOrganizationExperience({ organizationId: "org-1", role: "ORG_OWNER" });
 
     expect(result.primaryVertical).toBe("PTA");
-    expect(result.enabledLabFeatures).toEqual(["ptaVertical"]);
+    expect(result.enabledLabFeatures).toEqual(["meetingIntelligence"]);
     expect(result.permissions).toEqual(["members:read", "members:write"]);
     expect(result.terminology.member).toBe("Parent");
     expect(getEffectivePermissions).toHaveBeenCalledWith("org-1", "ORG_OWNER");
   });
 
-  it("falls back to COMMUNITY when classified PTA but PTA Labs isn't actually enrolled — never a dead-end nav/dashboard", async () => {
+  it("PR #40: primaryVertical === PTA resolves to the PTA experience immediately — no Labs check, no fallback to COMMUNITY", async () => {
     findUniqueOrganization.mockResolvedValueOnce({ id: "org-1", name: "Some Org", primaryVertical: "PTA", status: "active" });
-    findManyLabFeature.mockResolvedValueOnce([]);
+    findManyLabFeature.mockResolvedValueOnce([]); // no Labs features enabled at all — irrelevant to PTA access now
     getEffectivePermissions.mockResolvedValueOnce([]);
     getOrganizationEntitlements.mockResolvedValueOnce({});
-    getOrganizationLabAccess.mockResolvedValueOnce({ available: false });
 
     const result = await resolveOrganizationExperience({ organizationId: "org-1", role: "ORG_OWNER" });
 
-    expect(result.primaryVertical).toBe("COMMUNITY");
-    expect(result.landingPage).toBe("/dashboard");
-    expect(result.navigation.some((item) => item.href.startsWith("/labs/pta"))).toBe(false);
+    expect(result.primaryVertical).toBe("PTA");
+    expect(result.landingPage).toBe("/labs/pta/dashboard");
+    expect(result.navigation.some((item) => item.href.startsWith("/labs/pta"))).toBe(true);
   });
 
   it("throws when the organization doesn't exist rather than returning a partial/undefined experience", async () => {
@@ -87,7 +79,14 @@ describe("resolveOrganizationExperience", () => {
 
     const result = await resolveOrganizationExperience({ organizationId: "org-2", role: "MEMBER" });
     expect(result.primaryVertical).toBe("COMMUNITY");
-    // COMMUNITY never calls the PTA Labs check at all.
-    expect(getOrganizationLabAccess).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveEffectiveVertical (PR #40)", () => {
+  it("returns the raw primaryVertical unchanged for every vertical, including PTA — no reconciliation, no fallback", async () => {
+    expect(await resolveEffectiveVertical("org-1", "PTA")).toBe("PTA");
+    expect(await resolveEffectiveVertical("org-1", "COMMUNITY")).toBe("COMMUNITY");
+    expect(await resolveEffectiveVertical("org-1", "UNION")).toBe("UNION");
+    expect(await resolveEffectiveVertical("org-1", "HOA")).toBe("HOA");
   });
 });

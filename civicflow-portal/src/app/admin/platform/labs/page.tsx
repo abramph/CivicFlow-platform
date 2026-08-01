@@ -71,8 +71,8 @@ export default async function PlatformLabsPage({
         </div>
       </SectionCard>
 
-      <SectionCard title="Set organization enrollment" description="Write actions require SUPER_ADMIN platform access, an explicit confirmation, and are always audit-logged.">
-        <LabEnrollmentNewForm featureKeys={features.map((f) => f.key)} />
+      <SectionCard title="Set organization enrollment" description="Write actions require SUPER_ADMIN platform access, an explicit confirmation, and are always audit-logged. Retired features (e.g. ptaVertical — see the registry table above) are not offered here; they can no longer be newly enabled for any organization.">
+        <LabEnrollmentNewForm featureKeys={features.filter((f) => f.lifecycle !== "RETIRED").map((f) => f.key)} />
       </SectionCard>
 
       <SectionCard title="Organization enrollments" description={`${enrollments.pagination.totalCount} enrollment record(s).`}>

@@ -34,13 +34,18 @@ describe.skipIf(!RUN_INTEGRATION)("Parent dues self-service — real multi-org i
     const user = await prisma.user.create({ data: { email: `pta-parent-dues-test-${Date.now()}@example.test`, passwordHash: "test-hash-not-real" } });
     userId = user.id;
 
-    const orgA = await prisma.organization.create({ data: { slug: `pta-parent-dues-a-${Date.now()}`, name: "Parent Dues Test Org A", plan: "elite" } });
-    const orgB = await prisma.organization.create({ data: { slug: `pta-parent-dues-b-${Date.now()}`, name: "Parent Dues Test Org B", plan: "elite" } });
+    // primaryVertical: "PTA" is the sole access gate as of PR #40. The
+    // legacy organizationLabFeature rows below are deliberately still
+    // created (with a stale/irrelevant status) to prove access no longer
+    // depends on them in any way — not even a leftover ENABLED row changes
+    // anything, and a leftover DISABLED row must not block access either.
+    const orgA = await prisma.organization.create({ data: { slug: `pta-parent-dues-a-${Date.now()}`, name: "Parent Dues Test Org A", plan: "elite", primaryVertical: "PTA" } });
+    const orgB = await prisma.organization.create({ data: { slug: `pta-parent-dues-b-${Date.now()}`, name: "Parent Dues Test Org B", plan: "elite", primaryVertical: "PTA" } });
     orgAId = orgA.id;
     orgBId = orgB.id;
 
-    await prisma.organizationLabFeature.create({ data: { organizationId: orgAId, featureKey: "ptaVertical", status: "ENABLED", enrollmentSource: "seed" } });
-    await prisma.organizationLabFeature.create({ data: { organizationId: orgBId, featureKey: "ptaVertical", status: "ENABLED", enrollmentSource: "seed" } });
+    await prisma.organizationLabFeature.create({ data: { organizationId: orgAId, featureKey: "ptaVertical", status: "DISABLED", enrollmentSource: "seed" } });
+    await prisma.organizationLabFeature.create({ data: { organizationId: orgBId, featureKey: "ptaVertical", status: "DISABLED", enrollmentSource: "seed" } });
     await prisma.organizationMembership.create({ data: { organizationId: orgAId, userId, role: "MEMBER", status: "active", joinedAt: new Date() } });
     await prisma.organizationMembership.create({ data: { organizationId: orgBId, userId, role: "MEMBER", status: "active", joinedAt: new Date() } });
 
