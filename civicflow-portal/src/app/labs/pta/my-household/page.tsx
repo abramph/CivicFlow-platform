@@ -38,6 +38,16 @@ export default async function PtaMyHouseholdPage() {
 
   const household = await getPtaHousehold(organizationId, adult.householdId);
 
+  if (household.status !== "ACTIVE") {
+    return (
+      <main className="space-y-6">
+        <PtaLabsBadge />
+        <PageHeader title="My Household" />
+        <EmptyState title="Household not active" description="Your household's PTA membership is not currently active — contact your PTA officer." />
+      </main>
+    );
+  }
+
   return (
     <main className="space-y-6">
       <PtaLabsBadge />
