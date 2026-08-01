@@ -1,5 +1,10 @@
 # Parent Membership and Dues Self-Service
 
+> **Superseded by PR #40 (2026-07-29):** the "Passes the PTA Labs gate"
+> line below is no longer accurate — access is now gated solely by
+> `Organization.primaryVertical === "PTA"` via `requirePtaHouseholdSelfAccess()`
+> in `src/lib/labs/pta/guard.ts`. See `docs/pta-access-architecture.md`.
+
 Builds on the Unestra for PTA MVP (see `docs/pta-labs-mvp.md`). This feature gives a parent linked to an active PTA household a self-service view of their own membership and dues — closing the single highest-value gap identified in that MVP's hardening review.
 
 ## Dependency

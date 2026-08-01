@@ -2,7 +2,6 @@ import type { OrganizationVertical, OrgStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getEffectivePermissions } from "@/lib/role-permissions";
 import { getOrganizationEntitlements, type OrganizationEntitlements } from "@/lib/plan-gate";
-import { getOrganizationLabAccess } from "@/lib/labs/access";
 import {
   getVerticalTerminology,
   getQuickActions,
@@ -15,27 +14,21 @@ import { getNavigationProfile, getLandingRoute, type NavItem } from "@/lib/verti
 import { roleRank, type Permission, type Role } from "@/lib/rbac";
 
 /**
- * The vertical to actually build UI from, as distinct from the raw stored
- * classification. `Organization.primaryVertical` and PTA Labs enrollment are
- * deliberately separate concepts (see schema.prisma) — but PTA Labs
- * enrollment today has no self-service path at all (Platform Admin only,
- * `enrollmentSource: "operations_center"` in every real row). So an org that
- * is classified PTA but not yet enrolled would otherwise get PTA navigation
- * and a PTA dashboard redirect pointing at pages that all say "not available
- * for this organization" — a dead end. Falling back to COMMUNITY here until
- * enrollment catches up means nothing is ever broken; the moment Platform
- * Admin enables PTA Labs, the same org seamlessly gets the full PTA
- * experience with no further action. Platform Admin's own organization
- * pages read the raw stored column directly (getOrganizationDetail/
- * listOrganizations) and are unaffected by this fallback.
+ * `Organization.primaryVertical` alone is authoritative for the product
+ * experience — as of PR #40 (PTA/PTO graduated from a Labs-gated pilot to a
+ * first-class vertical; see docs/pta-access-architecture.md), there is no
+ * reconciliation against Labs enrollment. This function is kept (rather
+ * than inlined at every call site) purely so existing callers — which were
+ * all written expecting an async reconciliation step — don't need to
+ * change, and as the one place a future genuine reconciliation need would
+ * go. `primaryVertical = PTA` now means the PTA experience immediately,
+ * with no separate enrollment step and no silent fallback to COMMUNITY.
  */
 export async function resolveEffectiveVertical(
-  organizationId: string,
+  _organizationId: string,
   primaryVertical: OrganizationVertical
 ): Promise<OrganizationVertical> {
-  if (primaryVertical !== "PTA") return primaryVertical;
-  const access = await getOrganizationLabAccess(organizationId, "ptaVertical");
-  return access.available ? "PTA" : "COMMUNITY";
+  return primaryVertical;
 }
 
 export class OrganizationNotFoundError extends Error {
@@ -48,11 +41,11 @@ export class OrganizationNotFoundError extends Error {
 export interface OrganizationExperience {
   organizationId: string;
   organizationName: string;
-  /** The EFFECTIVE product-experience classification — the raw stored
-   * Organization.primaryVertical, reconciled with prerequisite Lab
-   * enrollment via resolveEffectiveVertical (see its doc comment). Never
-   * derived from anything the client sends; always read fresh from the
-   * database by the server-resolved organizationId. */
+  /** The product-experience classification — the raw stored
+   * Organization.primaryVertical (as of PR #40, authoritative on its own;
+   * see resolveEffectiveVertical's doc comment). Never derived from
+   * anything the client sends; always read fresh from the database by the
+   * server-resolved organizationId. */
   primaryVertical: OrganizationVertical;
   status: OrgStatus;
   role: Role;

@@ -130,13 +130,14 @@ export const PERMISSIONS = {
   MEETING_INTELLIGENCE_APPROVE: "meetingIntelligence:approve",
   MEETING_INTELLIGENCE_DELETE:  "meetingIntelligence:delete",
 
-  // Unestra for PTA (Labs, "ptaVertical" — see docs/pta-labs-mvp.md). Gated
-  // additionally by requireOrganizationLabFeature() — holding one of these
-  // permissions is necessary but never sufficient by itself. Kept granular
-  // (directory vs. households vs. students vs. dues, etc.) so an org can map
-  // PTA officer titles (President, Treasurer, ...) onto different bundles via
-  // the existing OrgRolePermissionSet override system rather than needing new
-  // Role enum values.
+  // Unestra for PTA — a first-class vertical (see docs/pta-access-architecture.md).
+  // Gated additionally by requirePtaAccess()'s primaryVertical === "PTA"
+  // check — holding one of these permissions is necessary but never
+  // sufficient by itself. Kept granular (directory vs. households vs.
+  // students vs. dues, etc.) so an org can map PTA officer titles
+  // (President, Treasurer, ...) onto different bundles via the existing
+  // OrgRolePermissionSet override system rather than needing new Role enum
+  // values.
   PTA_DIRECTORY_READ:     "pta:directory:read",
   PTA_HOUSEHOLDS_MANAGE:  "pta:households:manage",
   PTA_STUDENTS_MANAGE:    "pta:students:manage",

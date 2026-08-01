@@ -5,8 +5,8 @@
  *   cd civicflow-portal
  *   npx tsx prisma/seed-pta-demo.ts
  *
- * Creates one fictional organization enrolled in the `ptaVertical` Labs
- * feature, with officers, households, students, grades/classrooms/teachers,
+ * Creates one fictional organization with primaryVertical set to PTA (the
+ * sole access gate as of PR #40), with officers, households, students, grades/classrooms/teachers,
  * a membership dues cycle, two events with RSVPs, volunteer opportunities,
  * one fundraising campaign, a committee structure, an announcement, and one
  * approved sample meeting-minutes document.
@@ -62,26 +62,23 @@ async function main() {
   console.log("Seeding fictional Pine Grove School PTA demo data...\n");
 
   // ── Organization ───────────────────────────────────────────────────────────
+  // primaryVertical: "PTA" is the sole access gate as of PR #40 (PTA
+  // graduated from a Labs-gated pilot to a first-class vertical) — no
+  // separate Labs enrollment is created or required.
   const org = await prisma.organization.upsert({
     where: { slug: "pine-grove-school-pta" },
-    update: {},
+    update: { primaryVertical: "PTA" },
     create: {
       slug: "pine-grove-school-pta",
       name: "Pine Grove School PTA",
       organizationType: "PTA",
-      plan: "elite", // satisfies ptaVertical's requiresEntitlement without touching the APH-only billingExempt flag
+      primaryVertical: "PTA",
+      plan: "elite",
       email: "hello@pinegrovepta.example",
       website: "https://pinegrovepta.example",
     },
   });
   console.log(`Organization: ${org.name} (${org.id})`);
-
-  // ── Labs enrollment (local/test only — never run against production) ──────
-  await prisma.organizationLabFeature.upsert({
-    where: { organizationId_featureKey: { organizationId: org.id, featureKey: "ptaVertical" } },
-    update: { status: "ENABLED" },
-    create: { organizationId: org.id, featureKey: "ptaVertical", status: "ENABLED", enrollmentSource: "seed" },
-  });
 
   // ── PTA profile ──────────────────────────────────────────────────────────
   await prisma.ptaProfile.upsert({
@@ -828,13 +825,8 @@ async function main() {
   // Multi-org parent scenario — the same PTA president is also a parent at a second, smaller fictional PTA.
   const riverside = await prisma.organization.upsert({
     where: { slug: "riverside-elementary-pta" },
-    update: {},
-    create: { slug: "riverside-elementary-pta", name: "Riverside Elementary PTA", organizationType: "PTA", plan: "elite" },
-  });
-  await prisma.organizationLabFeature.upsert({
-    where: { organizationId_featureKey: { organizationId: riverside.id, featureKey: "ptaVertical" } },
-    update: { status: "ENABLED" },
-    create: { organizationId: riverside.id, featureKey: "ptaVertical", status: "ENABLED", enrollmentSource: "seed" },
+    update: { primaryVertical: "PTA" },
+    create: { slug: "riverside-elementary-pta", name: "Riverside Elementary PTA", organizationType: "PTA", primaryVertical: "PTA", plan: "elite" },
   });
   await prisma.ptaProfile.upsert({
     where: { organizationId: riverside.id },
@@ -876,9 +868,10 @@ async function main() {
   console.log("\nPine Grove School PTA demo seed complete.");
 
   // ── Second fictional organization: a NON-PTA org, for cross-vertical
-  // isolation testing (impersonation, org switching, Labs enrollment) ────────
-  // Deliberately NOT enrolled in ptaVertical — an impersonated session
-  // dropped into this organization must never show any PTA data or nav.
+  // isolation testing (impersonation, org switching) ─────────────────────────
+  // Deliberately left at the default primaryVertical (COMMUNITY) — an
+  // impersonated session dropped into this organization must never show any
+  // PTA data or nav.
   const riverdale = await prisma.organization.upsert({
     where: { slug: "riverdale-community-association" },
     update: {},

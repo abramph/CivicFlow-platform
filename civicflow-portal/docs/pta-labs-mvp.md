@@ -1,5 +1,14 @@
 # Unestra for PTA — Labs MVP
 
+> **Superseded by PR #40 (2026-07-29):** PTA/PTO graduated from this
+> Labs-gated pilot into a first-class Unestra vertical. `ptaVertical` is now
+> `lifecycle: "RETIRED"` in the registry — it grants no access, is hidden
+> from new Labs enrollment, and existing enrollment rows are historical/
+> inert only. `Organization.primaryVertical === "PTA"` is now the sole
+> access gate. See `docs/pta-access-architecture.md` and
+> `docs/labs-feature-lifecycle.md` for the current architecture. This
+> document is kept as a historical record of the original MVP build.
+
 ## Hardening-review status (2026-07-22)
 
 This MVP went through an independent hardening review after initial implementation: a fresh adversarial code-review pass plus a hands-on smoke test executed directly against a real disposable Postgres instance (not just mocked unit tests). **Two real, critical defects were found and fixed**, and one significant usability gap (most officer-facing management functions had no HTTP route at all) was closed. See "Hardening-review findings" below for the full account, including what was found, what was fixed, and what remains an intentionally accepted limitation.

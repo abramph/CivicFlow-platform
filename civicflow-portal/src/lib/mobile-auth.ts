@@ -18,9 +18,23 @@
 import { SignJWT, jwtVerify } from "jose";
 import { getServerEnv } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
-import { requireOrganizationLabFeature } from "@/lib/labs/access";
 import { getEffectivePermissions } from "@/lib/role-permissions";
 import type { Permission, Role } from "@/lib/rbac";
+
+/**
+ * PTA/PTO is a first-class vertical (PR #40) — mobile access, like web, is
+ * gated on Organization.primaryVertical alone, never a separate Labs
+ * enrollment (see docs/pta-access-architecture.md).
+ */
+async function requirePtaVerticalForMobile(organizationId: string): Promise<void> {
+  const organization = await prisma.organization.findUnique({
+    where: { id: organizationId },
+    select: { primaryVertical: true, status: true },
+  });
+  if (!organization || organization.primaryVertical !== "PTA" || organization.status !== "active") {
+    throw new MobileForbiddenError("PTA is not available for this organization");
+  }
+}
 
 const ACCESS_TOKEN_TTL_SECONDS = 15 * 60; // 15 minutes
 const REFRESH_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
@@ -254,9 +268,7 @@ export async function requireMobilePtaHouseholdAccess(
 ): Promise<MobilePtaHouseholdAccess> {
   const session = await requireMobileAuth(request);
 
-  await requireOrganizationLabFeature(organizationId, "ptaVertical").catch(() => {
-    throw new MobileForbiddenError("PTA is not available for this organization");
-  });
+  await requirePtaVerticalForMobile(organizationId);
 
   const adult = await prisma.ptaHouseholdAdult.findFirst({
     where: { organizationId, userId: session.userId },
@@ -341,9 +353,7 @@ export async function requireMobileStaffPermission(
   });
   if (!membership) throw new MobileForbiddenError("No active staff membership for this organization");
 
-  await requireOrganizationLabFeature(organizationId, "ptaVertical").catch(() => {
-    throw new MobileForbiddenError("PTA is not available for this organization");
-  });
+  await requirePtaVerticalForMobile(organizationId);
 
   const effective = await getEffectivePermissions(organizationId, membership.role as Role);
   if (!effective.includes(permission)) {

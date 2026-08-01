@@ -348,11 +348,8 @@ export interface PrimaryVerticalChangePreview {
   proposedVertical: OrganizationVertical;
   /** Data that stays intact but goes dormant (hidden from navigation) if the
    * org is moving away from PTA — never deleted, restorable by switching
-   * back or re-enrolling. Empty unless currentVertical is PTA. */
+   * back. Empty unless currentVertical is PTA. */
   dormantOnChange: { label: string; count: number }[];
-  /** True when the PTA Labs feature is enrolled but the org is not (or is no
-   * longer) classified PTA — a state worth flagging, not blocking. */
-  ptaLabsEnrollmentMismatch: boolean;
 }
 
 /**
@@ -382,20 +379,11 @@ export async function previewPrimaryVerticalChange(
     if (volunteerHours > 0) dormantOnChange.push({ label: "Volunteer hour entries", count: volunteerHours });
   }
 
-  const ptaLabFeature =
-    proposedVertical === "PTA"
-      ? await prisma.organizationLabFeature.findUnique({
-          where: { organizationId_featureKey: { organizationId, featureKey: "ptaVertical" } },
-          select: { status: true },
-        })
-      : null;
-
   return {
     organizationId,
     currentVertical: org.primaryVertical,
     proposedVertical,
     dormantOnChange,
-    ptaLabsEnrollmentMismatch: proposedVertical === "PTA" && ptaLabFeature?.status !== "ENABLED",
   };
 }
 
