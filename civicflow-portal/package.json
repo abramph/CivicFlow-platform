@@ -15,6 +15,7 @@
     "db:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:pta-demo": "tsx prisma/seed-pta-demo.ts",
+    "db:seed:hoa-demo": "tsx prisma/seed-hoa-demo.ts",
     "db:studio": "prisma studio",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

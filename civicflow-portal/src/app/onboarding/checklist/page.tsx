@@ -17,16 +17,30 @@ interface Step {
  * The one-time guided-onboarding checklist for a brand-new Community, Union,
  * or HOA organization (PTA keeps its own richer checklist at
  * /labs/pta/onboarding — see getOnboardingRoute). Every step links to a
- * real, already-working page; nothing here is a new feature or a new data
- * model — Union's and HOA's steps are guided tours through existing generic
- * capabilities (dues, payment imports, users & roles, communications).
+ * real, already-working page. Community's and Union's steps are guided
+ * tours through existing generic capabilities (dues, payment imports,
+ * users & roles, communications) with zero new schema; HOA's steps (PR #43)
+ * additionally cover the real Property/PropertyResident registry — see
+ * docs/hoa-domain-model.md.
  */
 export default async function OnboardingChecklistPage() {
   const { organizationId, session } = await requireOrganization();
   const vertical: OrganizationVertical = session.primaryVertical ?? "COMMUNITY";
   const terminology = getVerticalTerminology(vertical);
 
-  const [organization, memberCount, eventCount, campaignCount, duesCategoryCount, checkoffImportCount, staffCount] =
+  const [
+    organization,
+    memberCount,
+    eventCount,
+    campaignCount,
+    duesCategoryCount,
+    checkoffImportCount,
+    staffCount,
+    propertyCount,
+    propertyResidentCount,
+    meetingCount,
+    governingDocumentCount,
+  ] =
     await Promise.all([
       prisma.organization.findUnique({
         where: { id: organizationId },
@@ -38,6 +52,11 @@ export default async function OnboardingChecklistPage() {
       prisma.category.count({ where: { organizationId, type: "DUES" } }),
       prisma.paymentImportBatch.count({ where: { organizationId, sourceType: "PAYROLL_CHECKOFF" } }),
       prisma.organizationMembership.count({ where: { organizationId, role: { not: "ORG_OWNER" } } }),
+      // PR #43 -- HOA Property/Resident foundation.
+      prisma.property.count({ where: { organizationId } }),
+      prisma.propertyResident.count({ where: { organizationId } }),
+      prisma.meeting.count({ where: { organizationId } }),
+      prisma.attachment.count({ where: { organizationId, entityType: "ORGANIZATION" } }),
     ]);
 
   const profileComplete = Boolean(
@@ -64,9 +83,18 @@ export default async function OnboardingChecklistPage() {
       { title: "Add officers", description: "Assign officer/staff access under Users & Roles.", href: "/settings/users", linkLabel: "Go to Users & Roles", done: staffCount > 0 },
       { title: "Set up communications", description: "Send your first announcement to members.", href: "/communications/campaigns", linkLabel: "Go to Communications", done: campaignCount > 0 },
     ],
+    // PR #43: Property/Resident foundation -- steps reflect the real
+    // Property/PropertyResident registry (docs/hoa-domain-model.md), not
+    // the earlier "properties tracked as members" placeholder.
     HOA: [
-      { title: "Add board information", description: "Assign board member access under Users & Roles.", href: "/settings/users", linkLabel: "Go to Users & Roles", done: staffCount > 0 },
-      { title: "Invite residents", description: "Add your first residents to the roster.", href: "/members/new", linkLabel: "Add a Resident", done: memberCount > 0 },
+      { title: "Complete your association profile", description: "Add contact details and address.", href: "/settings/organization", linkLabel: "Go to Profile", done: profileComplete },
+      { title: "Add your first property", description: "Record a lot, unit, townhome, or common property.", href: "/hoa/properties/new", linkLabel: "Add a Property", done: propertyCount > 0 },
+      { title: "Add or import residents", description: "Bring in your owner/resident roster.", href: "/members/new", linkLabel: "Add a Resident", done: memberCount > 0 },
+      { title: "Link an owner or resident to a property", description: "Connect a member to the property they own or live in.", href: "/hoa/properties", linkLabel: "Go to Properties", done: propertyResidentCount > 0 },
+      { title: "Invite board members", description: "Assign board member access under Users & Roles.", href: "/settings/users", linkLabel: "Go to Users & Roles", done: staffCount > 0 },
+      { title: "Schedule your first board meeting", description: "Set a date, agenda, and location.", href: "/meetings/new", linkLabel: "Schedule Meeting", done: meetingCount > 0 },
+      { title: "Send your first announcement", description: "Reach residents by email.", href: "/communications/campaigns", linkLabel: "Go to Communications", done: campaignCount > 0 },
+      { title: "Upload governing documents", description: "Add your CC&Rs, bylaws, or budget for residents to reference.", href: "/settings/organization", linkLabel: "Go to Documents", done: governingDocumentCount > 0 },
     ],
   };
 
@@ -80,16 +108,6 @@ export default async function OnboardingChecklistPage() {
         description={`${completedCount} of ${steps.length} steps complete. This is instructional — every link goes to a real, working page.`}
         actions={[{ href: "/dashboard", label: "Skip to Dashboard" }]}
       />
-
-      {vertical === "HOA" ? (
-        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          <p>
-            <strong>Property count</strong> — HOA properties are tracked as members for now (one member per unit/property).
-            A dedicated property registry is not yet built.
-          </p>
-          <p className="mt-2 font-medium">Additional HOA capabilities will appear as they are enabled.</p>
-        </div>
-      ) : null}
 
       <SectionCard title="Steps">
         <ol className="space-y-3">

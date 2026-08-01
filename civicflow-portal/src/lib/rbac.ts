@@ -160,6 +160,20 @@ export const PERMISSIONS = {
   PTA_MINUTES_REVIEW:     "pta:minutes:review",
   PTA_MINUTES_APPROVE:    "pta:minutes:approve",
   PTA_ANALYTICS_READ:     "pta:analytics:read",
+
+  // Unestra for HOA — Property/Resident foundation (PR #43, see
+  // docs/hoa-domain-model.md and docs/hoa-navigation-proposal.md). Gated
+  // additionally by requireHoaCapability()'s primaryVertical === "HOA"
+  // check — holding one of these permissions is necessary but never
+  // sufficient by itself. Read/write split (not PTA's read/manage
+  // convention) deliberately matches the base Community permission
+  // naming (MEMBERS_READ/WRITE, DUES_READ/WRITE, ...) above, since HOA
+  // reuses far more of the generic surface than PTA did — see
+  // docs/hoa-navigation-proposal.md's "key architectural recommendation."
+  HOA_PROPERTIES_READ:  "hoa:properties:read",
+  HOA_PROPERTIES_WRITE: "hoa:properties:write",
+  HOA_RESIDENTS_READ:   "hoa:residents:read",
+  HOA_RESIDENTS_WRITE:  "hoa:residents:write",
 } as const;
 
 // Parent/household-adult self-service (view own household, RSVP, pay own
@@ -240,6 +254,10 @@ const ORG_OWNER_PERMISSIONS: Permission[] = [
   PERMISSIONS.PTA_MINUTES_REVIEW,
   PERMISSIONS.PTA_MINUTES_APPROVE,
   PERMISSIONS.PTA_ANALYTICS_READ,
+  PERMISSIONS.HOA_PROPERTIES_READ,
+  PERMISSIONS.HOA_PROPERTIES_WRITE,
+  PERMISSIONS.HOA_RESIDENTS_READ,
+  PERMISSIONS.HOA_RESIDENTS_WRITE,
 ];
 
 const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
@@ -304,6 +322,10 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.PTA_MINUTES_REVIEW,
     PERMISSIONS.PTA_MINUTES_APPROVE,
     PERMISSIONS.PTA_ANALYTICS_READ,
+    PERMISSIONS.HOA_PROPERTIES_READ,
+    PERMISSIONS.HOA_PROPERTIES_WRITE,
+    PERMISSIONS.HOA_RESIDENTS_READ,
+    PERMISSIONS.HOA_RESIDENTS_WRITE,
   ],
 
   // Maps naturally onto "Treasurer" via OrgRolePermissionSet if an org wants
@@ -335,6 +357,11 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.PTA_DUES_MANAGE,
     PERMISSIONS.PTA_FUNDRAISING_MANAGE,
     PERMISSIONS.PTA_ANALYTICS_READ,
+    // Treasurer needs to see which property/owner an assessment charge
+    // belongs to, but property/resident record-keeping itself is a board
+    // administrative function, not a financial one -- read-only.
+    PERMISSIONS.HOA_PROPERTIES_READ,
+    PERMISSIONS.HOA_RESIDENTS_READ,
   ],
 
   // Maps naturally onto "Membership Chair" / "Volunteer Coordinator" /
@@ -370,6 +397,10 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.PTA_ANNOUNCEMENTS_PUBLISH,
     PERMISSIONS.PTA_DOCUMENTS_MANAGE,
     PERMISSIONS.PTA_MINUTES_REVIEW,
+    PERMISSIONS.HOA_PROPERTIES_READ,
+    PERMISSIONS.HOA_PROPERTIES_WRITE,
+    PERMISSIONS.HOA_RESIDENTS_READ,
+    PERMISSIONS.HOA_RESIDENTS_WRITE,
   ],
 
   // Maps onto "General Member" (an officer viewing without editing rights) —
@@ -391,6 +422,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.AUDIT_LOGS_READ,
     PERMISSIONS.PTA_DIRECTORY_READ,
     PERMISSIONS.PTA_ANALYTICS_READ,
+    PERMISSIONS.HOA_PROPERTIES_READ,
+    PERMISSIONS.HOA_RESIDENTS_READ,
   ],
 
   // Members never get staff permissions — a MEMBER role must never see other

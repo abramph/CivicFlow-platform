@@ -3,6 +3,7 @@ import { requireMobileAuth } from "@/lib/mobile-auth";
 import { getEffectivePermissions } from "@/lib/role-permissions";
 import { resolveEffectiveVertical } from "@/lib/organization-experience";
 import { getVerticalTerminology, getQuickActions } from "@/lib/vertical-terminology";
+import { getVerticalCapabilities } from "@/lib/vertical-capabilities";
 import { prisma } from "@/lib/prisma";
 import { PERMISSIONS, type Role } from "@/lib/rbac";
 import type { OrganizationVertical } from "@prisma/client";
@@ -45,6 +46,17 @@ interface OrgCapability {
   supportedModules: string[];
   /** Tab name (not a web path) the app should land on after selecting this org. */
   landingPage: string;
+  /** PR #43 -- additive per-vertical feature flags (see
+   * src/lib/vertical-capabilities.ts). Officer-only property/resident DATA
+   * is never exposed through this general-purpose endpoint, only the
+   * boolean "does this org have this feature" signal — a future mobile
+   * release consuming actual property records would go through a
+   * separately-guarded endpoint, not this one. Old mobile builds that
+   * don't know this field exists simply ignore it. */
+  capabilities: {
+    properties: boolean;
+    propertyResidents: boolean;
+  };
 }
 
 /** `vertical` must already be the effective vertical (see
@@ -55,12 +67,17 @@ function buildCapability(vertical: OrganizationVertical, hasPtaAccess: boolean) 
   const terminology = getVerticalTerminology(vertical);
   const supportedModules = ["dashboard", "inbox", "announcements", "dues", "events", "profile"];
   if (hasPtaAccess) supportedModules.push("volunteers");
+  const verticalCapabilities = getVerticalCapabilities(vertical);
   return {
     primaryVertical: vertical,
     terminology: { productLabel: terminology.productLabel, member: terminology.member, dashboardTitle: terminology.dashboardTitle },
     quickActions: getQuickActions(vertical),
     supportedModules,
     landingPage: "dashboard",
+    capabilities: {
+      properties: verticalCapabilities.properties,
+      propertyResidents: verticalCapabilities.propertyResidents,
+    },
   };
 }
 
