@@ -3,9 +3,11 @@ import { requirePermission } from "@/lib/auth-guards";
 import { prisma } from "@/lib/prisma";
 import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { formatCurrency } from "@/lib/formatting";
+import { getVerticalTerminology } from "@/lib/vertical-terminology";
 
 export default async function DuesPage() {
-  const { organizationId } = await requirePermission("dues:read");
+  const { organizationId, session } = await requirePermission("dues:read");
+  const terminology = getVerticalTerminology(session.primaryVertical ?? "COMMUNITY");
 
   const [accountCount, chargeSummary, paymentSummary, duesCategories, membershipCategories] =
     await Promise.all([
@@ -34,11 +36,11 @@ export default async function DuesPage() {
   return (
     <main className="space-y-6">
       <PageHeader
-        title="Dues"
-        description="Membership billing overview with account setup, charge tracking, payment application, and category-linked dues plans."
+        title={terminology.duesLabel}
+        description={`Membership billing overview with account setup, charge tracking, payment application, and category-linked ${terminology.duesLabel.toLowerCase()} plans.`}
         actions={[
-          { href: "/dues/payments/new", label: "Record Dues Payment", tone: "primary" },
-          { href: "/dues/generate", label: "Generate Dues Charges" },
+          { href: "/dues/payments/new", label: `Record ${terminology.duesLabel} Payment`, tone: "primary" },
+          { href: "/dues/generate", label: `Generate ${terminology.duesLabel} Charges` },
           { href: "/dashboard", label: "Back to Dashboard" },
         ]}
       />

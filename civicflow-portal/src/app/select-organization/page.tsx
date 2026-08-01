@@ -27,7 +27,7 @@ export default async function SelectOrganizationPage() {
             Contact your organization to be added as a member or staff user, or create a new organization of your own.
           </p>
           <Link
-            href="/signup"
+            href="/onboarding/organization"
             className="mt-5 block w-full rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
           >
             Create a new organization

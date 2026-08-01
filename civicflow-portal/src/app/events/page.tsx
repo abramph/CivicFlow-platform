@@ -4,9 +4,10 @@ import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { prisma } from "@/lib/prisma";
 import { formatCurrency, formatDateTime, formatText } from "@/lib/formatting";
 import { EVENT_STATUS_LABELS, isActiveEventStatus, normalizeEventStatus } from "@/lib/event-status";
+import { getEmptyStateCopy } from "@/lib/vertical-terminology";
 
 export default async function EventsPage() {
-  const { organizationId } = await requirePermission("events:read");
+  const { organizationId, session } = await requirePermission("events:read");
 
   const events = await prisma.event.findMany({
     where: { organizationId },
@@ -87,7 +88,7 @@ export default async function EventsPage() {
               {events.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-4 py-6 text-center text-slate-600">
-                    No events have been created yet.
+                    {getEmptyStateCopy(session.primaryVertical ?? "COMMUNITY", "events")}
                   </td>
                 </tr>
               ) : (

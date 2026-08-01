@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getNavigationProfile, getLandingRoute } from "@/lib/vertical-navigation";
+import { getNavigationProfile, getLandingRoute, getOnboardingRoute } from "@/lib/vertical-navigation";
 
 describe("getNavigationProfile", () => {
   it("gives PTA its own fully distinct nav — no Community-only labels leak through", () => {
@@ -63,5 +63,17 @@ describe("getLandingRoute", () => {
     expect(getLandingRoute("COMMUNITY")).toBe("/dashboard");
     expect(getLandingRoute("UNION")).toBe("/dashboard");
     expect(getLandingRoute("HOA")).toBe("/dashboard");
+  });
+});
+
+describe("getOnboardingRoute", () => {
+  it("sends a brand-new PTA organization to its own rich Labs checklist", () => {
+    expect(getOnboardingRoute("PTA")).toBe("/labs/pta/onboarding");
+  });
+
+  it("sends Community, Union, and HOA to the shared generic onboarding checklist", () => {
+    expect(getOnboardingRoute("COMMUNITY")).toBe("/onboarding/checklist");
+    expect(getOnboardingRoute("UNION")).toBe("/onboarding/checklist");
+    expect(getOnboardingRoute("HOA")).toBe("/onboarding/checklist");
   });
 });

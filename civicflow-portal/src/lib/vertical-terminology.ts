@@ -76,7 +76,16 @@ export function getVerticalTerminology(vertical: OrganizationVertical): Vertical
 export interface VerticalCardCopy {
   vertical: OrganizationVertical;
   title: string;
+  /** Lucide icon name (e.g. "Building2") — kept as a string so this stays a
+   * pure data module with no React/component dependency; the consuming
+   * client component maps it to an actual icon. */
+  icon: string;
   description: string;
+  /** Concrete examples of who picks this vertical. */
+  examples: string[];
+  /** One-line preview of this vertical's vocabulary, so a founder can see
+   * what their members/dues will be called before committing to a vertical. */
+  terminologyPreview: string;
   highlights: string[];
 }
 
@@ -86,28 +95,38 @@ export const VERTICAL_SELECTION_CARDS: VerticalCardCopy[] = [
   {
     vertical: "COMMUNITY",
     title: "Community Organization",
-    description:
-      "For nonprofits, civic groups, cultural associations, clubs, alumni groups, and community-based organizations.",
+    icon: "Building2",
+    description: "Civic associations, nonprofits, churches, clubs, and cultural organizations.",
+    examples: ["Civic associations", "Nonprofits", "Churches", "Clubs", "Cultural organizations", "Alumni groups"],
+    terminologyPreview: "Members pay Dues & Contributions.",
     highlights: ["Members", "Communications", "Events", "Committees", "Dues and contributions", "Meetings"],
   },
   {
     vertical: "PTA",
     title: "PTA / PTO",
-    description:
-      "For parent-teacher associations, parent-teacher organizations, school family groups, and education-based volunteer organizations.",
+    icon: "GraduationCap",
+    description: "Parent organizations supporting schools, families, volunteers, and fundraising.",
+    examples: ["Parent-teacher associations", "Parent-teacher organizations", "School family groups", "Booster clubs"],
+    terminologyPreview: "Parents belong to Households; pay Membership Dues.",
     highlights: ["Households", "Parents and students", "Grades and classrooms", "Membership dues", "Events", "Volunteer coordination"],
   },
   {
     vertical: "UNION",
     title: "Union",
-    description: "For labor unions, locals, chapters, bargaining units, and worker membership organizations.",
-    highlights: ["Members and officers", "Dues", "Meetings", "Communications", "Contract documents", "Events"],
+    icon: "Handshake",
+    description: "Labor organizations managing membership, dues, payroll checkoff, and communication.",
+    examples: ["Labor unions", "Locals", "Chapters", "Bargaining units", "Worker membership organizations"],
+    terminologyPreview: "Union Members pay Union Dues (including payroll checkoff).",
+    highlights: ["Members and officers", "Dues", "Payroll checkoff", "Meetings", "Communications", "Contract documents"],
   },
   {
     vertical: "HOA",
     title: "HOA",
-    description: "For homeowners associations, condominium communities, neighborhood associations, and residential boards.",
-    highlights: ["Residents or members", "Board meetings", "Announcements", "Events", "Documents", "Payments or assessments where supported"],
+    icon: "Home",
+    description: "Homeowner associations managing residents, assessments, board governance, and properties.",
+    examples: ["Homeowners associations", "Condominium communities", "Neighborhood associations", "Residential boards"],
+    terminologyPreview: "Residents pay Assessments; a Board governs.",
+    highlights: ["Residents", "Board meetings", "Announcements", "Events", "Documents", "Assessments"],
   },
 ];
 

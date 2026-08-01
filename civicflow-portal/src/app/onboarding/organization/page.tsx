@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/authOptions";
-import { OrganizationOnboardingForm } from "@/components/forms/OrganizationOnboardingForm";
+import { OrganizationSetupChoice } from "@/components/forms/OrganizationSetupChoice";
 
 export default async function OnboardingOrganizationPage() {
   const session = await getServerSession(authOptions);
@@ -27,7 +27,7 @@ export default async function OnboardingOrganizationPage() {
         </div>
 
         <div className="rounded-2xl border border-slate-300 bg-white p-6 shadow-sm">
-          <OrganizationOnboardingForm />
+          <OrganizationSetupChoice />
         </div>
       </div>
     </main>

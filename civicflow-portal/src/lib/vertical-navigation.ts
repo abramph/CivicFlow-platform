@@ -114,3 +114,15 @@ export function getNavigationProfile(vertical: OrganizationVertical): NavItem[] 
 export function getLandingRoute(vertical: OrganizationVertical): string {
   return vertical === "PTA" ? "/labs/pta/dashboard" : "/dashboard";
 }
+
+/**
+ * Where a brand-new organization lands immediately after creation — a
+ * one-time guided onboarding checklist, distinct from getLandingRoute()
+ * above (which is where every subsequent login/switch lands once onboarding
+ * is behind them). PTA keeps its own existing Labs checklist; Community,
+ * Union, and HOA share one generic checklist page that renders different
+ * steps per vertical (see /onboarding/checklist).
+ */
+export function getOnboardingRoute(vertical: OrganizationVertical): string {
+  return vertical === "PTA" ? "/labs/pta/onboarding" : "/onboarding/checklist";
+}

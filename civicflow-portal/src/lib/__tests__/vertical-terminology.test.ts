@@ -82,4 +82,12 @@ describe("VERTICAL_SELECTION_CARDS", () => {
     expect(unionText).not.toMatch(/grievance|arbitration/i);
     expect(hoaText).not.toMatch(/violation|maintenance ticket|architectural review/i);
   });
+
+  it("every card has an icon, examples, and a terminology preview (PR #39)", () => {
+    for (const card of VERTICAL_SELECTION_CARDS) {
+      expect(card.icon).toBeTruthy();
+      expect(card.examples.length).toBeGreaterThan(0);
+      expect(card.terminologyPreview).toBeTruthy();
+    }
+  });
 });
