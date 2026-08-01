@@ -1,5 +1,5 @@
 import { requireOrganization } from "@/lib/auth-guards";
-import { getOrganizationLabAccess } from "@/lib/labs/access";
+import { checkPtaVerticalAvailable } from "@/lib/labs/pta/guard";
 import { prisma } from "@/lib/prisma";
 import { listPtaVolunteerOpportunities, getPtaVolunteerHourTotalsForHousehold, listPtaVolunteerCommitments } from "@/lib/labs/pta/volunteers";
 import { getPtaProfile } from "@/lib/labs/pta/profile";
@@ -26,7 +26,7 @@ function minutesToHours(minutes: number): string {
 
 export default async function PtaVolunteersPage() {
   const { organizationId, session, can } = await requireOrganization();
-  const access = await getOrganizationLabAccess(organizationId, "ptaVertical");
+  const access = await checkPtaVerticalAvailable(organizationId);
 
   if (!access.available) {
     return (

@@ -6,7 +6,7 @@ const findFirstOrgMember = vi.fn();
 const findUniqueUser = vi.fn();
 const countMembership = vi.fn();
 const countPtaHouseholdAdult = vi.fn();
-const requireOrgLabFeature = vi.fn();
+const findUniqueOrganization = vi.fn();
 const getEffectivePermissionsMock = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
@@ -21,11 +21,8 @@ vi.mock("@/lib/prisma", () => ({
     },
     orgMember: { findFirst: (...args: unknown[]) => findFirstOrgMember(...args) },
     user: { findUnique: (...args: unknown[]) => findUniqueUser(...args) },
+    organization: { findUnique: (...args: unknown[]) => findUniqueOrganization(...args) },
   },
-}));
-
-vi.mock("@/lib/labs/access", () => ({
-  requireOrganizationLabFeature: (...args: unknown[]) => requireOrgLabFeature(...args),
 }));
 
 vi.mock("@/lib/role-permissions", () => ({
@@ -47,7 +44,7 @@ beforeEach(() => {
   findUniqueUser.mockReset();
   countMembership.mockReset();
   countPtaHouseholdAdult.mockReset();
-  requireOrgLabFeature.mockReset();
+  findUniqueOrganization.mockReset();
   getEffectivePermissionsMock.mockReset();
 });
 
@@ -84,9 +81,9 @@ describe("completeMobileLogin — PTA household adults must be able to obtain a 
 });
 
 describe("requireMobilePtaHouseholdAccess — parent-side mobile PTA guard", () => {
-  it("resolves the caller's own household adult when PTA is enrolled and the household is active", async () => {
+  it("resolves the caller's own household adult when the organization is PTA-vertical and the household is active", async () => {
     findUniqueUser.mockResolvedValueOnce({ id: "user-1", email: "parent@example.com", mobileTokenVersion: 0 });
-    requireOrgLabFeature.mockResolvedValueOnce(undefined);
+    findUniqueOrganization.mockResolvedValueOnce({ primaryVertical: "PTA", status: "active" });
     findFirstHouseholdAdult.mockResolvedValueOnce({ id: "adult-1", household: { id: "household-1", status: "ACTIVE" } });
 
     const token = await signAccessToken("user-1", 0);
@@ -98,9 +95,18 @@ describe("requireMobilePtaHouseholdAccess — parent-side mobile PTA guard", () 
     );
   });
 
-  it("denies access when the organization is not enrolled in the PTA vertical", async () => {
+  it("denies access when the organization's primaryVertical is not PTA (PR #40 — no Labs enrollment involved)", async () => {
     findUniqueUser.mockResolvedValueOnce({ id: "user-1", email: "parent@example.com", mobileTokenVersion: 0 });
-    requireOrgLabFeature.mockRejectedValueOnce(new Error("not enrolled"));
+    findUniqueOrganization.mockResolvedValueOnce({ primaryVertical: "COMMUNITY", status: "active" });
+
+    const token = await signAccessToken("user-1", 0);
+    await expect(requireMobilePtaHouseholdAccess(requestWithToken(token), "org-a")).rejects.toThrow(/not available/);
+    expect(findFirstHouseholdAdult).not.toHaveBeenCalled();
+  });
+
+  it("denies access when the organization is PTA-vertical but inactive (suspended/cancelled)", async () => {
+    findUniqueUser.mockResolvedValueOnce({ id: "user-1", email: "parent@example.com", mobileTokenVersion: 0 });
+    findUniqueOrganization.mockResolvedValueOnce({ primaryVertical: "PTA", status: "suspended" });
 
     const token = await signAccessToken("user-1", 0);
     await expect(requireMobilePtaHouseholdAccess(requestWithToken(token), "org-a")).rejects.toThrow(/not available/);
@@ -109,7 +115,7 @@ describe("requireMobilePtaHouseholdAccess — parent-side mobile PTA guard", () 
 
   it("denies a caller with no linked PtaHouseholdAdult in this organization — even if they belong to a PTA household elsewhere", async () => {
     findUniqueUser.mockResolvedValueOnce({ id: "user-1", email: "parent@example.com", mobileTokenVersion: 0 });
-    requireOrgLabFeature.mockResolvedValueOnce(undefined);
+    findUniqueOrganization.mockResolvedValueOnce({ primaryVertical: "PTA", status: "active" });
     findFirstHouseholdAdult.mockResolvedValueOnce(null);
 
     const token = await signAccessToken("user-1", 0);
@@ -118,7 +124,7 @@ describe("requireMobilePtaHouseholdAccess — parent-side mobile PTA guard", () 
 
   it("denies a caller whose household has been deactivated", async () => {
     findUniqueUser.mockResolvedValueOnce({ id: "user-1", email: "parent@example.com", mobileTokenVersion: 0 });
-    requireOrgLabFeature.mockResolvedValueOnce(undefined);
+    findUniqueOrganization.mockResolvedValueOnce({ primaryVertical: "PTA", status: "active" });
     findFirstHouseholdAdult.mockResolvedValueOnce({ id: "adult-1", household: { id: "household-1", status: "INACTIVE" } });
 
     const token = await signAccessToken("user-1", 0);
@@ -130,7 +136,7 @@ describe("requireMobileStaffPermission — officer-side mobile PTA guard", () =>
   it("grants access when the caller's role in this org has the requested permission", async () => {
     findUniqueUser.mockResolvedValueOnce({ id: "officer-1", email: "coordinator@example.com", mobileTokenVersion: 0 });
     findFirstMembership.mockResolvedValueOnce({ id: "membership-1", organizationId: "org-a", userId: "officer-1", role: "STAFF" });
-    requireOrgLabFeature.mockResolvedValueOnce(undefined);
+    findUniqueOrganization.mockResolvedValueOnce({ primaryVertical: "PTA", status: "active" });
     getEffectivePermissionsMock.mockResolvedValueOnce(["pta:volunteers:checkin"]);
 
     const token = await signAccessToken("officer-1", 0);
@@ -150,13 +156,13 @@ describe("requireMobileStaffPermission — officer-side mobile PTA guard", () =>
     await expect(requireMobileStaffPermission(requestWithToken(token), "org-a", "pta:volunteers:checkin" as never)).rejects.toThrow(
       /No active staff membership/
     );
-    expect(requireOrgLabFeature).not.toHaveBeenCalled();
+    expect(findUniqueOrganization).not.toHaveBeenCalled();
   });
 
   it("denies a staff member who holds a different permission than the one required", async () => {
     findUniqueUser.mockResolvedValueOnce({ id: "officer-1", email: "coordinator@example.com", mobileTokenVersion: 0 });
     findFirstMembership.mockResolvedValueOnce({ id: "membership-1", organizationId: "org-a", userId: "officer-1", role: "STAFF" });
-    requireOrgLabFeature.mockResolvedValueOnce(undefined);
+    findUniqueOrganization.mockResolvedValueOnce({ primaryVertical: "PTA", status: "active" });
     getEffectivePermissionsMock.mockResolvedValueOnce(["pta:volunteers:manage"]); // does not include checkin
 
     const token = await signAccessToken("officer-1", 0);
@@ -165,10 +171,10 @@ describe("requireMobileStaffPermission — officer-side mobile PTA guard", () =>
     ).rejects.toThrow(/Permission denied/);
   });
 
-  it("denies access when the organization is not enrolled in the PTA vertical, even for a real officer", async () => {
+  it("denies access when the organization's primaryVertical is not PTA, even for a real officer (PR #40 — no Labs enrollment involved)", async () => {
     findUniqueUser.mockResolvedValueOnce({ id: "officer-1", email: "coordinator@example.com", mobileTokenVersion: 0 });
     findFirstMembership.mockResolvedValueOnce({ id: "membership-1", organizationId: "org-a", userId: "officer-1", role: "ORG_OWNER" });
-    requireOrgLabFeature.mockRejectedValueOnce(new Error("not enrolled"));
+    findUniqueOrganization.mockResolvedValueOnce({ primaryVertical: "COMMUNITY", status: "active" });
 
     const token = await signAccessToken("officer-1", 0);
     await expect(

@@ -15,7 +15,6 @@ interface Preview {
   currentVertical: Vertical;
   proposedVertical: Vertical;
   dormantOnChange: { label: string; count: number }[];
-  ptaLabsEnrollmentMismatch: boolean;
 }
 
 /**
@@ -136,11 +135,8 @@ export function PrimaryVerticalManager({
               </ul>
             </div>
           ) : null}
-          {preview.ptaLabsEnrollmentMismatch ? (
-            <p>
-              Note: PTA Labs enrollment is not currently active for this organization — PTA-specific features will
-              stay hidden until it&apos;s separately enrolled.
-            </p>
+          {preview.proposedVertical === "PTA" ? (
+            <p>PTA/PTO is a first-class vertical — this organization will get the full PTA experience immediately, with no separate Labs enrollment step required.</p>
           ) : null}
 
           <label className="block space-y-1 text-xs font-medium text-amber-900">

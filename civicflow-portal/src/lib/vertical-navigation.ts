@@ -104,12 +104,12 @@ export function getNavigationProfile(vertical: OrganizationVertical): NavItem[] 
 
 /**
  * The single authoritative "where should this vertical land after
- * login/switch/signup" computation. `vertical` must already be the
- * EFFECTIVE vertical (see resolveEffectiveVertical in
- * organization-experience.ts), not necessarily the raw stored one — a PTA
- * org without active Labs enrollment must land on the generic dashboard,
- * not a "not available" page. Client and server call sites both import this
- * rather than each re-deriving the same PTA-vs-everything-else branch.
+ * login/switch/signup" computation. As of PR #40, the effective vertical
+ * (see resolveEffectiveVertical in organization-experience.ts) is always
+ * identical to the raw stored primaryVertical — there is no longer a case
+ * where a PTA org lands anywhere but its own PTA dashboard. Client and
+ * server call sites both import this rather than each re-deriving the same
+ * PTA-vs-everything-else branch.
  */
 export function getLandingRoute(vertical: OrganizationVertical): string {
   return vertical === "PTA" ? "/labs/pta/dashboard" : "/dashboard";

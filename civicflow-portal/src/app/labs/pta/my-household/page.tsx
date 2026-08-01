@@ -1,5 +1,5 @@
 import { requireOrganization } from "@/lib/auth-guards";
-import { getOrganizationLabAccess } from "@/lib/labs/access";
+import { checkPtaVerticalAvailable } from "@/lib/labs/pta/guard";
 import { prisma } from "@/lib/prisma";
 import { getPtaHousehold } from "@/lib/labs/pta/households";
 import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
@@ -15,7 +15,7 @@ import { PtaLabsBadge } from "@/components/labs/pta/PtaLabsBadge";
  */
 export default async function PtaMyHouseholdPage() {
   const { organizationId, session } = await requireOrganization();
-  const access = await getOrganizationLabAccess(organizationId, "ptaVertical");
+  const access = await checkPtaVerticalAvailable(organizationId);
 
   if (!access.available) {
     return (
@@ -37,6 +37,16 @@ export default async function PtaMyHouseholdPage() {
   }
 
   const household = await getPtaHousehold(organizationId, adult.householdId);
+
+  if (household.status !== "ACTIVE") {
+    return (
+      <main className="space-y-6">
+        <PtaLabsBadge />
+        <PageHeader title="My Household" />
+        <EmptyState title="Household not active" description="Your household's PTA membership is not currently active — contact your PTA officer." />
+      </main>
+    );
+  }
 
   return (
     <main className="space-y-6">

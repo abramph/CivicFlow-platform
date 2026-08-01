@@ -181,21 +181,28 @@ describe("entitlement requirement (requiresEntitlement features)", () => {
 });
 
 describe("listOrganizationLabAccess — organization-facing snapshot", () => {
-  it("excludes internal-only features entirely for an ordinary (non-billing-exempt) organization, but still lists a non-internal-only feature (unavailable, for the right reason)", async () => {
+  it("excludes internal-only features entirely for an ordinary (non-billing-exempt) organization", async () => {
     findUniqueOrganization.mockResolvedValue({ billingExempt: false, status: "active", plan: "essential", trialEndsAt: null });
     const { listOrganizationLabAccess } = await import("../access");
     const results = await listOrganizationLabAccess("org-1");
     // Every internal-only feature (meetingIntelligence, aiAnnouncements, etc.)
     // is excluded entirely — an ordinary org never even sees them listed.
     expect(results.every((r) => r.featureKey !== "meetingIntelligence")).toBe(true);
-    // ptaVertical is the one registered feature that is NOT internal-only
-    // (see registry.ts's doc comment — it's a genuine future-customer
-    // vertical, not an APH-only tool), so it IS listed even for a
-    // non-billing-exempt org — just correctly marked unavailable, since this
-    // org's "essential" plan doesn't satisfy ptaVertical's requiresEntitlement.
-    const pta = results.find((r) => r.featureKey === "ptaVertical");
-    expect(pta).toBeDefined();
-    expect(pta?.available).toBe(false);
+  });
+
+  it("excludes ptaVertical entirely — retired as of PR #40 (PTA/PTO graduated to a first-class vertical; primaryVertical, not Labs, is now authoritative)", async () => {
+    findUniqueOrganization.mockResolvedValue({ billingExempt: false, status: "active", plan: "elite", trialEndsAt: null });
+    const { listOrganizationLabAccess } = await import("../access");
+    const results = await listOrganizationLabAccess("org-1");
+    expect(results.some((r) => r.featureKey === "ptaVertical")).toBe(false);
+  });
+
+  it("denies a direct getOrganizationLabAccess('ptaVertical') lookup with LAB_FEATURE_RETIRED, never LAB_FEATURE_NOT_ENROLLED", async () => {
+    findUniqueOrganization.mockResolvedValue({ billingExempt: false, status: "active" });
+    const { getOrganizationLabAccess } = await import("../access");
+    const result = await getOrganizationLabAccess("org-1", "ptaVertical");
+    expect(result.available).toBe(false);
+    expect(result.denialReason).toBe("LAB_FEATURE_RETIRED");
   });
 
   it("includes internal-only features for a billing-exempt organization", async () => {

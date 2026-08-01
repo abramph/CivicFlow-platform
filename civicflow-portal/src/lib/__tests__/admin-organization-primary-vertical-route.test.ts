@@ -73,7 +73,6 @@ describe("GET /api/admin/organizations/[organizationId]/primary-vertical", () =>
       currentVertical: "PTA",
       proposedVertical: "COMMUNITY",
       dormantOnChange: [{ label: "Households", count: 5 }],
-      ptaLabsEnrollmentMismatch: false,
     });
 
     const response = await GET(getReq("?to=COMMUNITY"), ctx("org-1"));

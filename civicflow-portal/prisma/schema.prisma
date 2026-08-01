@@ -2301,9 +2301,11 @@ model PaymentReport {
   @@index([category])
 }
 
-// ─── Unestra for PTA (Labs feature "ptaVertical") ────────────────────────────
+// ─── Unestra for PTA (first-class vertical — primaryVertical = PTA; the
+// old "ptaVertical" Labs feature is retired, see labs/registry.ts and
+// docs/pta-access-architecture.md) ────────────────────────────────────────
 //
-// A product-validation vertical, not a student information system. Deliberately
+// Not a student information system. Deliberately
 // reuses existing platform capabilities rather than duplicating them:
 //   - Dues: a household's "billing identity" is a normal OrgMember row
 //     (PtaHousehold.orgMemberId) — dues run entirely through the existing
@@ -2339,9 +2341,9 @@ enum PtaMembershipModel {
   FAMILY
 }
 
-/// One row per organization enrolled in the ptaVertical Labs feature —
-/// organization-level PTA configuration. Never created automatically by
-/// enrollment; an officer configures it explicitly after enrollment.
+/// One row per PTA-vertical organization — organization-level PTA
+/// configuration. Never created automatically; an officer configures it
+/// explicitly.
 model PtaProfile {
   id                     String             @id @default(cuid())
   organizationId         String             @unique

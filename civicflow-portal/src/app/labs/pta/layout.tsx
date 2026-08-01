@@ -1,7 +1,5 @@
-import Link from "next/link";
 import type { ReactNode } from "react";
 import { requireOrganization } from "@/lib/auth-guards";
-import { getOrganizationLabAccess } from "@/lib/labs/access";
 import { prisma } from "@/lib/prisma";
 import { PtaTabNav, type PtaTab } from "@/components/labs/pta/PtaTabNav";
 
@@ -19,12 +17,15 @@ import { PtaTabNav, type PtaTab } from "@/components/labs/pta/PtaTabNav";
  */
 export default async function PtaLayout({ children }: { children: ReactNode }) {
   const { organizationId, session, can } = await requireOrganization();
-  const access = await getOrganizationLabAccess(organizationId, "ptaVertical");
+  const organization = await prisma.organization.findUnique({
+    where: { id: organizationId },
+    select: { primaryVertical: true, status: true },
+  });
 
-  if (!access.available) {
+  if (!organization || organization.primaryVertical !== "PTA" || organization.status !== "active") {
     // Individual pages already render their own "not available" messaging
-    // via their own getOrganizationLabAccess check — don't duplicate that
-    // here, just skip the tab bar entirely.
+    // via their own PTA vertical check — don't duplicate that here, just
+    // skip the tab bar entirely.
     return <>{children}</>;
   }
 
@@ -58,11 +59,6 @@ export default async function PtaLayout({ children }: { children: ReactNode }) {
     <div className="space-y-6">
       <PtaTabNav officerTabs={officerTabs} parentTabs={parentTabs} />
       {children}
-      <p className="text-xs text-slate-500">
-        <Link href="/settings/labs" className="hover:underline">
-          Unestra Labs settings
-        </Link>
-      </p>
     </div>
   );
 }

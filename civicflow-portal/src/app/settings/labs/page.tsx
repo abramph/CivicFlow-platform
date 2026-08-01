@@ -18,11 +18,12 @@ const STATUS_LABEL: Record<string, string> = {
  * actually reach it — this map is the fix, kept here (rather than on the
  * registry) since not every Labs feature has a customer-facing entry point
  * yet (e.g. meetingIntelligence is operated from the internal Operations
- * Center, not a tenant-facing page).
+ * Center, not a tenant-facing page). PTA/PTO is no longer listed here — as
+ * of PR #40 it's a first-class vertical, not a Labs feature, and
+ * listOrganizationLabAccess() already excludes retired features from
+ * `access` entirely, so this map would never be consulted for it anyway.
  */
-const FEATURE_ENTRY_HREF: Record<string, string> = {
-  ptaVertical: "/labs/pta/dashboard",
-};
+const FEATURE_ENTRY_HREF: Record<string, string> = {};
 
 export default async function OrganizationLabsPage() {
   const { organizationId } = await requirePermission("labs:read");

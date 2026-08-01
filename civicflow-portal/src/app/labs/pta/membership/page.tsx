@@ -1,5 +1,5 @@
 import { requireOrganization } from "@/lib/auth-guards";
-import { getOrganizationLabAccess } from "@/lib/labs/access";
+import { checkPtaVerticalAvailable } from "@/lib/labs/pta/guard";
 import { prisma } from "@/lib/prisma";
 import { getPtaParentDuesSummary } from "@/lib/labs/pta/parent-dues";
 import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
@@ -78,7 +78,7 @@ function ChargeCard({ charge, title }: { charge: PtaParentDuesChargeSummary; tit
 
 export default async function PtaMembershipPage() {
   const { organizationId, session } = await requireOrganization();
-  const access = await getOrganizationLabAccess(organizationId, "ptaVertical");
+  const access = await checkPtaVerticalAvailable(organizationId);
 
   if (!access.available) {
     return (
