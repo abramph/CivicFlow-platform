@@ -57,6 +57,13 @@ describe.skipIf(!RUN_INTEGRATION)("HOA Property/PropertyResident — real tenant
   });
 
   afterAll(async () => {
+    // Property/PropertyResident.organizationId are onDelete: Restrict (by
+    // design -- see the schema-drift warning on PropertyResident) so
+    // deleting the organization directly would fail with a foreign-key
+    // violation and (with the .catch(() => {}) below) silently leave
+    // orphaned test data behind on every run. Delete the child rows first.
+    await prisma?.propertyResident.deleteMany({ where: { organizationId: { in: [orgAId, orgBId] } } }).catch(() => {});
+    await prisma?.property.deleteMany({ where: { organizationId: { in: [orgAId, orgBId] } } }).catch(() => {});
     await prisma?.organization.delete({ where: { id: orgAId } }).catch(() => {});
     await prisma?.organization.delete({ where: { id: orgBId } }).catch(() => {});
     await prisma?.user.delete({ where: { id: actorUserId } }).catch(() => {});

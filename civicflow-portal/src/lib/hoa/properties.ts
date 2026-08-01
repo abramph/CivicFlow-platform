@@ -4,6 +4,27 @@ import { createAuditEvent } from "@/lib/audit";
 import { HoaError } from "./errors";
 
 /**
+ * Translates a lost race against one of PropertyResident's two partial
+ * unique indexes (see the schema-drift warning on that model) into the
+ * precise HoaError for what was actually violated -- distinguished by
+ * Prisma's own P2002 `meta.target`, empirically confirmed to be
+ * `["propertyId", "orgMemberId"]` for the same-relationship index vs.
+ * `["propertyId"]` alone for the primary-contact index. Rethrows anything
+ * that isn't this specific P2002 unchanged.
+ */
+function toHoaConcurrencyError(error: unknown): never {
+  if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+    const target = error.meta?.target;
+    const columns = Array.isArray(target) ? target : typeof target === "string" ? [target] : [];
+    if (columns.includes("orgMemberId")) {
+      throw new HoaError("HOA_DUPLICATE_ACTIVE_RELATIONSHIP", "This member already has an active relationship to this property.");
+    }
+    throw new HoaError("HOA_PRIMARY_CONTACT_CONFLICT", "Another resident was just set as the primary contact for this property. Please try again.");
+  }
+  throw error;
+}
+
+/**
  * HOA Property/Resident service layer (PR #43 foundation only — see
  * docs/hoa-domain-model.md). Every function takes organizationId as an
  * explicit required parameter and scopes every Prisma query by it (tenant
@@ -366,13 +387,11 @@ export async function assignPropertyResident(input: AssignPropertyResidentInput)
 
     return resident;
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      // Lost a race against a concurrent assignment of the same
-      // (property, member) pair, or a concurrent primary-contact set --
-      // the database constraint is the actual source of truth here.
-      throw new HoaError("HOA_DUPLICATE_ACTIVE_RELATIONSHIP", "This member already has an active relationship to this property.");
-    }
-    throw error;
+    // Lost a race against a concurrent assignment of the same (property,
+    // member) pair, or a concurrent primary-contact set -- the database
+    // constraint is the actual source of truth here; see
+    // toHoaConcurrencyError for how the two are told apart.
+    toHoaConcurrencyError(error);
   }
 }
 
@@ -393,6 +412,15 @@ export async function updatePropertyResident(organizationId: string, residentId:
     throw new HoaError("HOA_RELATIONSHIP_ALREADY_ENDED", "This relationship has already ended and cannot be edited. Create a new one instead.");
   }
 
+  // ownershipPercentage is only meaningful for OWNER/CO_OWNER (see the
+  // schema doc comment) -- if this update moves the relationship away from
+  // both, clear any stale percentage rather than leaving a TENANT/RESIDENT
+  // row with a nonsensical ownership share on it. Only applies when the
+  // caller didn't already specify a percentage explicitly in this same call.
+  const effectiveRelationshipType = input.relationshipType ?? existing.relationshipType;
+  const isOwnershipType = effectiveRelationshipType === "OWNER" || effectiveRelationshipType === "CO_OWNER";
+  const shouldClearOwnershipPercentage = !isOwnershipType && input.ownershipPercentage === undefined;
+
   try {
     const resident = await prisma.$transaction(async (tx) => {
       if (input.isPrimaryContact) {
@@ -407,6 +435,7 @@ export async function updatePropertyResident(organizationId: string, residentId:
           ...(input.relationshipType !== undefined ? { relationshipType: input.relationshipType } : {}),
           ...(input.isPrimaryContact !== undefined ? { isPrimaryContact: input.isPrimaryContact } : {}),
           ...(input.ownershipPercentage !== undefined ? { ownershipPercentage: input.ownershipPercentage } : {}),
+          ...(shouldClearOwnershipPercentage ? { ownershipPercentage: null } : {}),
         },
       });
     });
@@ -422,10 +451,12 @@ export async function updatePropertyResident(organizationId: string, residentId:
 
     return resident;
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      throw new HoaError("HOA_DUPLICATE_ACTIVE_RELATIONSHIP", "Another active primary contact already exists for this property.");
-    }
-    throw error;
+    // This function never changes propertyId/orgMemberId, so in practice
+    // only the primary-contact index can be hit here -- routed through the
+    // same shared translator as assignPropertyResident anyway, rather than
+    // relying on that assumption staying true if this function ever grows
+    // a relationship-transfer feature.
+    toHoaConcurrencyError(error);
   }
 }
 

@@ -18,6 +18,11 @@ export const HOA_ERROR_CODES = [
   /** Attempted to create a second ACTIVE relationship for the same
    * (property, member) pair. */
   "HOA_DUPLICATE_ACTIVE_RELATIONSHIP",
+  /** Lost a race for the one-ACTIVE-primary-contact-per-property slot —
+   * distinct from HOA_DUPLICATE_ACTIVE_RELATIONSHIP so the error message
+   * accurately says "someone just became primary contact" rather than the
+   * misleading "you already have a relationship here." */
+  "HOA_PRIMARY_CONTACT_CONFLICT",
   /** Attempted to assign a member from a different organization to a
    * property, or a property id that belongs to a different organization. */
   "HOA_CROSS_TENANT_DENIED",
@@ -38,6 +43,7 @@ const STATUS_FOR_CODE: Record<HoaErrorCode, number> = {
   HOA_MEMBER_NOT_FOUND: 404,
   HOA_VALIDATION_ERROR: 400,
   HOA_DUPLICATE_ACTIVE_RELATIONSHIP: 409,
+  HOA_PRIMARY_CONTACT_CONFLICT: 409,
   HOA_CROSS_TENANT_DENIED: 403,
   HOA_PROPERTY_ARCHIVED: 409,
   HOA_RELATIONSHIP_ALREADY_ENDED: 409,

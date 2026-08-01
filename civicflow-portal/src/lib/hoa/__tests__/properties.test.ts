@@ -162,17 +162,38 @@ describe("assignPropertyResident", () => {
     expect(createPropertyResident).not.toHaveBeenCalled();
   });
 
-  it("translates a P2002 unique-constraint violation (lost a real concurrency race) into HOA_DUPLICATE_ACTIVE_RELATIONSHIP", async () => {
+  it("translates a P2002 on the (property, member) unique index (lost a real concurrency race) into HOA_DUPLICATE_ACTIVE_RELATIONSHIP", async () => {
     findFirstProperty.mockResolvedValueOnce({ id: "prop-1", status: "ACTIVE" });
     findFirstOrgMember.mockResolvedValueOnce({ id: "member-1" });
     findFirstPropertyResident.mockResolvedValueOnce(null); // pre-check passes...
     createPropertyResident.mockRejectedValueOnce(
-      new Prisma.PrismaClientKnownRequestError("Unique constraint failed", { code: "P2002", clientVersion: "test" })
+      new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+        code: "P2002",
+        clientVersion: "test",
+        meta: { target: ["propertyId", "orgMemberId"] },
+      })
     );
     const { assignPropertyResident } = await import("../properties");
     await expect(
       assignPropertyResident({ organizationId: "org-1", propertyId: "prop-1", orgMemberId: "member-1", relationshipType: "TENANT", ...actor })
     ).rejects.toMatchObject({ code: "HOA_DUPLICATE_ACTIVE_RELATIONSHIP" });
+  });
+
+  it("translates a P2002 on the one-primary-contact-per-property unique index (lost a real concurrency race) into HOA_PRIMARY_CONTACT_CONFLICT", async () => {
+    findFirstProperty.mockResolvedValueOnce({ id: "prop-1", status: "ACTIVE" });
+    findFirstOrgMember.mockResolvedValueOnce({ id: "member-1" });
+    findFirstPropertyResident.mockResolvedValueOnce(null); // pre-check passes...
+    createPropertyResident.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+        code: "P2002",
+        clientVersion: "test",
+        meta: { target: ["propertyId"] },
+      })
+    );
+    const { assignPropertyResident } = await import("../properties");
+    await expect(
+      assignPropertyResident({ organizationId: "org-1", propertyId: "prop-1", orgMemberId: "member-1", relationshipType: "TENANT", isPrimaryContact: true, ...actor })
+    ).rejects.toMatchObject({ code: "HOA_PRIMARY_CONTACT_CONFLICT" });
   });
 
   it("unsets any existing primary contact before creating a new one flagged isPrimaryContact", async () => {
@@ -215,6 +236,53 @@ describe("updatePropertyResident", () => {
     await expect(update("org-1", "resident-1", { relationshipType: "OWNER", ...actor })).rejects.toMatchObject({
       code: "HOA_RELATIONSHIP_ALREADY_ENDED",
     });
+  });
+
+  it("clears a stale ownershipPercentage when relationshipType moves away from OWNER/CO_OWNER", async () => {
+    findFirstPropertyResident.mockResolvedValueOnce({
+      id: "resident-1",
+      status: "ACTIVE",
+      propertyId: "prop-1",
+      relationshipType: "OWNER",
+      ownershipPercentage: 50,
+    });
+    updatePropertyResident.mockResolvedValueOnce({ id: "resident-1" });
+    const { updatePropertyResident: update } = await import("../properties");
+    await update("org-1", "resident-1", { relationshipType: "TENANT", ...actor });
+    expect(updatePropertyResident).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ relationshipType: "TENANT", ownershipPercentage: null }) })
+    );
+  });
+
+  it("does not clear ownershipPercentage when the caller explicitly sets a new one in the same call", async () => {
+    findFirstPropertyResident.mockResolvedValueOnce({
+      id: "resident-1",
+      status: "ACTIVE",
+      propertyId: "prop-1",
+      relationshipType: "OWNER",
+      ownershipPercentage: 50,
+    });
+    updatePropertyResident.mockResolvedValueOnce({ id: "resident-1" });
+    const { updatePropertyResident: update } = await import("../properties");
+    await update("org-1", "resident-1", { relationshipType: "TENANT", ownershipPercentage: 25, ...actor });
+    expect(updatePropertyResident).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ ownershipPercentage: 25 }) })
+    );
+  });
+
+  it("does not clear ownershipPercentage for an existing OWNER when relationshipType is not part of the update", async () => {
+    findFirstPropertyResident.mockResolvedValueOnce({
+      id: "resident-1",
+      status: "ACTIVE",
+      propertyId: "prop-1",
+      relationshipType: "OWNER",
+      ownershipPercentage: 100,
+    });
+    updatePropertyResident.mockResolvedValueOnce({ id: "resident-1" });
+    const { updatePropertyResident: update } = await import("../properties");
+    await update("org-1", "resident-1", { isPrimaryContact: true, ...actor });
+    const dataArg = updatePropertyResident.mock.calls[0][0].data;
+    expect(dataArg).not.toHaveProperty("ownershipPercentage");
   });
 });
 

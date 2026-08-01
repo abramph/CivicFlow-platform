@@ -58,6 +58,7 @@ export default async function HoaPropertyDetailPage({ params }: { params: Promis
   const endedResidents = property.residents.filter((r) => r.status === "ENDED");
 
   const canManageProperty = can(PERMISSIONS.HOA_PROPERTIES_WRITE);
+  const canReadResidents = can(PERMISSIONS.HOA_RESIDENTS_READ);
   const canManageResidents = can(PERMISSIONS.HOA_RESIDENTS_WRITE);
 
   const members = canManageResidents
@@ -112,43 +113,45 @@ export default async function HoaPropertyDetailPage({ params }: { params: Promis
         ) : null}
       </SectionCard>
 
-      <SectionCard title="Current owners and residents" description={`${activeResidents.length} active relationship(s).`}>
-        {activeResidents.length === 0 ? (
-          <EmptyState title="No residents or owners are linked to this property." description={canManageResidents ? "Link an existing member below." : undefined} />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="mb-4 min-w-full text-sm">
-              <thead className="bg-slate-50 text-left text-slate-700">
-                <tr>
-                  <th className="px-4 py-3">Member</th>
-                  <th className="px-4 py-3">Relationship</th>
-                  <th className="px-4 py-3">Primary contact</th>
-                  <th className="px-4 py-3">Move-in date</th>
-                  {canManageResidents ? <th className="px-4 py-3">Actions</th> : null}
-                </tr>
-              </thead>
-              <tbody>
-                {activeResidents.map((r) => (
-                  <tr key={r.id} className="border-t border-slate-100">
-                    <td className="px-4 py-3 font-semibold text-slate-900">{memberName(r.orgMember)}</td>
-                    <td className="px-4 py-3 text-slate-700">{RELATIONSHIP_LABELS[r.relationshipType] ?? r.relationshipType}</td>
-                    <td className="px-4 py-3 text-slate-700">{r.isPrimaryContact ? "Yes" : ""}</td>
-                    <td className="px-4 py-3 text-slate-700">{formatDate(r.moveInDate)}</td>
-                    {canManageResidents ? (
-                      <td className="px-4 py-3">
-                        <EndResidentRelationshipButton propertyId={property.id} residentId={r.id} memberName={memberName(r.orgMember)} />
-                      </td>
-                    ) : null}
+      {canReadResidents ? (
+        <SectionCard title="Current owners and residents" description={`${activeResidents.length} active relationship(s).`}>
+          {activeResidents.length === 0 ? (
+            <EmptyState title="No residents or owners are linked to this property." description={canManageResidents ? "Link an existing member below." : undefined} />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="mb-4 min-w-full text-sm">
+                <thead className="bg-slate-50 text-left text-slate-700">
+                  <tr>
+                    <th className="px-4 py-3">Member</th>
+                    <th className="px-4 py-3">Relationship</th>
+                    <th className="px-4 py-3">Primary contact</th>
+                    <th className="px-4 py-3">Move-in date</th>
+                    {canManageResidents ? <th className="px-4 py-3">Actions</th> : null}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-        {canManageResidents ? <AssignResidentForm propertyId={property.id} members={members} /> : null}
-      </SectionCard>
+                </thead>
+                <tbody>
+                  {activeResidents.map((r) => (
+                    <tr key={r.id} className="border-t border-slate-100">
+                      <td className="px-4 py-3 font-semibold text-slate-900">{memberName(r.orgMember)}</td>
+                      <td className="px-4 py-3 text-slate-700">{RELATIONSHIP_LABELS[r.relationshipType] ?? r.relationshipType}</td>
+                      <td className="px-4 py-3 text-slate-700">{r.isPrimaryContact ? "Yes" : ""}</td>
+                      <td className="px-4 py-3 text-slate-700">{formatDate(r.moveInDate)}</td>
+                      {canManageResidents ? (
+                        <td className="px-4 py-3">
+                          <EndResidentRelationshipButton propertyId={property.id} residentId={r.id} memberName={memberName(r.orgMember)} />
+                        </td>
+                      ) : null}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {canManageResidents ? <AssignResidentForm propertyId={property.id} members={members} /> : null}
+        </SectionCard>
+      ) : null}
 
-      {endedResidents.length > 0 ? (
+      {canReadResidents && endedResidents.length > 0 ? (
         <SectionCard title="Relationship history" description="Prior owners, tenants, and residents — preserved, never deleted.">
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
