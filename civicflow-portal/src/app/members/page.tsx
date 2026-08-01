@@ -13,13 +13,15 @@ import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { BulkInviteToAppButton } from "@/components/forms/BulkInviteToAppButton";
 import { formatDate, formatEnumLabel, formatPersonName, formatText } from "@/lib/formatting";
 import { getOrganizationEntitlements } from "@/lib/plan-gate";
+import { getVerticalTerminology, getEmptyStateCopy } from "@/lib/vertical-terminology";
 
 export default async function MembersPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { organizationId, can } = await requirePermission("members:read");
+  const { organizationId, can, session } = await requirePermission("members:read");
+  const terminology = getVerticalTerminology(session.primaryVertical ?? "COMMUNITY");
   const canExport = can("reports:export");
   const canInviteBulk = can("members:write");
   const resolvedSearchParams = await searchParams;
@@ -77,16 +79,16 @@ export default async function MembersPage({
   return (
     <main className="space-y-6">
       <PageHeader
-        title="Members"
-        description="Desktop-style member directory with organization-scoped search, location filters, category filters, and quick access to each member profile."
+        title={terminology.memberPlural}
+        description={`Desktop-style ${terminology.memberPlural.toLowerCase()} directory with organization-scoped search, location filters, category filters, and quick access to each ${terminology.member.toLowerCase()} profile.`}
         actions={[
-          { href: "/members/new", label: "New Member", tone: "primary" },
+          { href: "/members/new", label: `New ${terminology.member}`, tone: "primary" },
           { href: "/dashboard", label: "Back to Dashboard" },
         ]}
       />
 
       <div className="grid gap-4 md:grid-cols-4">
-        <StatCard label="Filtered Members" value={members.length} />
+        <StatCard label={`Filtered ${terminology.memberPlural}`} value={members.length} />
         <StatCard label="All Members" value={totalMembers} />
         <StatCard label="Active Members" value={activeMembers} />
         <StatCard label="Membership Categories" value={membershipCategories.length} />
@@ -328,7 +330,9 @@ export default async function MembersPage({
               {members.length === 0 ? (
                 <tr>
                   <td className="px-4 py-6 text-center text-slate-600" colSpan={6}>
-                    No members matched the current filters.
+                    {isFiltered
+                      ? `No ${terminology.memberPlural.toLowerCase()} matched the current filters.`
+                      : getEmptyStateCopy(session.primaryVertical ?? "COMMUNITY", "members")}
                   </td>
                 </tr>
               ) : (

@@ -2,6 +2,8 @@
 
 import { Fragment, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Building2, GraduationCap, Handshake, Home, type LucideIcon } from "lucide-react";
+import type { OrganizationVertical } from "@prisma/client";
 import {
   classNames,
   fieldClassName,
@@ -9,6 +11,9 @@ import {
   helperTextClassName,
 } from "@/components/forms/formStyles";
 import { VERTICAL_SELECTION_CARDS } from "@/lib/vertical-terminology";
+import { getOnboardingRoute } from "@/lib/vertical-navigation";
+
+const VERTICAL_ICONS: Record<string, LucideIcon> = { Building2, GraduationCap, Handshake, Home };
 
 const PAYMENT_METHOD_OPTIONS = [
   { method: "CASH", label: "Cash" },
@@ -223,10 +228,7 @@ export function OrganizationOnboardingForm() {
         return;
       }
 
-      // PTA/PTO gets its own rich setup checklist (Unestra Labs); every other
-      // vertical lands on the generic dashboard, which already shows a
-      // "finish setup" banner for a brand-new organization.
-      router.push(payload?.data?.primaryVertical === "PTA" ? "/labs/pta/onboarding" : "/dashboard");
+      router.push(getOnboardingRoute((payload?.data?.primaryVertical as OrganizationVertical) ?? "COMMUNITY"));
       router.refresh();
     } catch {
       setServerError("Network error. Please try again.");
@@ -250,7 +252,7 @@ export function OrganizationOnboardingForm() {
                     ? "bg-emerald-700 text-white"
                     : step === s.id
                       ? "bg-emerald-700 text-white ring-4 ring-emerald-100"
-                      : "bg-slate-100 text-slate-400 ring-1 ring-slate-200"
+                      : "bg-slate-100 text-slate-600 ring-1 ring-slate-200"
                 )}
               >
                 {step > s.id ? "✓" : s.id}
@@ -258,7 +260,7 @@ export function OrganizationOnboardingForm() {
               <span
                 className={classNames(
                   "whitespace-nowrap text-xs font-medium",
-                  step >= s.id ? "text-emerald-700" : "text-slate-400"
+                  step >= s.id ? "text-emerald-700" : "text-slate-600"
                 )}
               >
                 {s.label}
@@ -290,37 +292,45 @@ export function OrganizationOnboardingForm() {
               What type of organization are you setting up? <span className="text-red-600">*</span>
             </legend>
             <div className="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-required="true">
-              {VERTICAL_SELECTION_CARDS.map((card) => (
-                <label
-                  key={card.vertical}
-                  className={classNames(
-                    "flex cursor-pointer flex-col gap-2 rounded-xl border px-4 py-3 text-sm transition-colors",
-                    form.primaryVertical === card.vertical
-                      ? "border-emerald-400 bg-emerald-50"
-                      : "border-slate-200 bg-white hover:border-slate-300"
-                  )}
-                >
-                  <span className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      name="primaryVertical"
-                      value={card.vertical}
-                      checked={form.primaryVertical === card.vertical}
-                      onChange={() => setField("primaryVertical", card.vertical)}
-                      className="h-4 w-4 border-slate-300 text-emerald-700 focus:ring-emerald-600"
-                    />
-                    <span className="font-semibold text-slate-950">{card.title}</span>
-                  </span>
-                  <span className="text-slate-600">{card.description}</span>
-                  <span className="flex flex-wrap gap-1.5">
-                    {card.highlights.map((h) => (
-                      <span key={h} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
-                        {h}
-                      </span>
-                    ))}
-                  </span>
-                </label>
-              ))}
+              {VERTICAL_SELECTION_CARDS.map((card) => {
+                const Icon = VERTICAL_ICONS[card.icon];
+                return (
+                  <label
+                    key={card.vertical}
+                    className={classNames(
+                      "flex cursor-pointer flex-col gap-2 rounded-xl border px-4 py-3 text-sm transition-colors",
+                      form.primaryVertical === card.vertical
+                        ? "border-emerald-400 bg-emerald-50"
+                        : "border-slate-200 bg-white hover:border-slate-300"
+                    )}
+                  >
+                    <span className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="primaryVertical"
+                        value={card.vertical}
+                        checked={form.primaryVertical === card.vertical}
+                        onChange={() => setField("primaryVertical", card.vertical)}
+                        className="h-4 w-4 border-slate-300 text-emerald-700 focus:ring-emerald-600"
+                      />
+                      {Icon ? <Icon aria-hidden="true" className="h-5 w-5 text-emerald-700" /> : null}
+                      <span className="font-semibold text-slate-950">{card.title}</span>
+                    </span>
+                    <span className="text-slate-600">{card.description}</span>
+                    <span className="text-xs text-slate-500">
+                      <span className="font-medium">Examples:</span> {card.examples.join(", ")}
+                    </span>
+                    <span className="text-xs italic text-slate-500">{card.terminologyPreview}</span>
+                    <span className="flex flex-wrap gap-1.5">
+                      {card.highlights.map((h) => (
+                        <span key={h} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                          {h}
+                        </span>
+                      ))}
+                    </span>
+                  </label>
+                );
+              })}
             </div>
             {fieldErrors.primaryVertical && (
               <p className="text-sm font-medium text-red-700">{fieldErrors.primaryVertical}</p>
