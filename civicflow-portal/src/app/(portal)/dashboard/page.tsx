@@ -14,7 +14,7 @@ import { getLandingRoute } from "@/lib/vertical-navigation";
 import type { OrganizationVertical } from "@prisma/client";
 import {
   Users, Calendar, DollarSign, TrendingDown, AlertCircle, UserCheck,
-  Target, Receipt, ChevronRight, Mail, Shield, FileText,
+  Target, Receipt, ChevronRight, Mail, Shield, FileText, Home,
 } from "lucide-react";
 
 /** Community shows the full widget set (unchanged, existing behavior). Union
@@ -28,6 +28,8 @@ function dashboardWidgets(vertical: OrganizationVertical) {
     fundraising: showFundraisingAndGovernance,
     governance: showFundraisingAndGovernance,
     paymentMethodBreakdown: showFundraisingAndGovernance,
+    // PR #43 -- HOA Property/Resident foundation widgets.
+    hoaProperties: vertical === "HOA",
   };
 }
 
@@ -289,6 +291,29 @@ export default async function DashboardPage() {
     }),
   ]);
 
+  // PR #43 -- HOA Property/Resident stats, queried only for HOA orgs (these
+  // tables are empty/irrelevant for every other vertical, so there's no
+  // reason to pay the query cost on every dashboard load). Real counts
+  // only -- no fake/placeholder metrics.
+  const hoaPropertyStats = vertical === "HOA"
+    ? await (async () => {
+        const [activeProperties, propertiesWithNoContact, activeResidents, recentProperties] = await Promise.all([
+          prisma.property.count({ where: { organizationId: orgId, status: "ACTIVE" } }),
+          prisma.property.count({
+            where: { organizationId: orgId, status: "ACTIVE", residents: { none: { status: "ACTIVE" } } },
+          }),
+          prisma.propertyResident.count({ where: { organizationId: orgId, status: "ACTIVE" } }),
+          prisma.property.findMany({
+            where: { organizationId: orgId },
+            orderBy: { createdAt: "desc" },
+            take: 5,
+            select: { id: true, addressLine1: true, unitLabel: true, displayName: true, propertyType: true, createdAt: true },
+          }),
+        ]);
+        return { activeProperties, propertiesWithNoContact, activeResidents, recentProperties };
+      })()
+    : null;
+
   // Derived values
   const totalDuesCents    = Math.round(Number(duesTotal._sum.amount || 0) * 100);
   const totalContribCents = Math.round(Number(contributions._sum.amount || 0) * 100);
@@ -404,6 +429,45 @@ export default async function DashboardPage() {
             <p className="text-sm font-medium text-blue-600 mt-1">Pending</p>
           </div>
         </div>
+      </div>
+      )}
+
+      {/* HOA Property/Resident summary (PR #43) */}
+      {widgets.hoaProperties && hoaPropertyStats && (
+      <div className="rounded-xl border-2 border-slate-200 bg-white p-6 shadow-sm">
+        <h3 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
+          <Home className="h-5 w-5 text-emerald-600" />
+          Properties
+        </h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <Link href="/hoa/properties" className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-center hover:bg-emerald-100">
+            <p className="text-3xl font-bold text-emerald-700">{hoaPropertyStats.activeProperties}</p>
+            <p className="text-sm font-medium text-emerald-600 mt-1">Active properties</p>
+          </Link>
+          <Link href="/hoa/properties?noActiveResident=true" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-center hover:bg-amber-100">
+            <p className="text-3xl font-bold text-amber-700">{hoaPropertyStats.propertiesWithNoContact}</p>
+            <p className="text-sm font-medium text-amber-600 mt-1">No active owner/contact</p>
+          </Link>
+          <div className="rounded-lg border border-sky-200 bg-sky-50 p-4 text-center">
+            <p className="text-3xl font-bold text-sky-700">{hoaPropertyStats.activeResidents}</p>
+            <p className="text-sm font-medium text-sky-600 mt-1">Active residents</p>
+          </div>
+        </div>
+        {hoaPropertyStats.recentProperties.length > 0 ? (
+          <div className="mt-4">
+            <p className="text-sm font-semibold text-slate-700 mb-2">Recently added</p>
+            <ul className="divide-y divide-slate-100">
+              {hoaPropertyStats.recentProperties.map((p) => (
+                <li key={p.id} className="py-2 text-sm">
+                  <Link href={`/hoa/properties/${p.id}`} className="font-medium text-emerald-700 hover:underline">
+                    {p.displayName || (p.unitLabel ? `${p.addressLine1}, ${p.unitLabel}` : p.addressLine1)}
+                  </Link>
+                  <span className="ml-2 text-slate-500">{toDisplayDate(p.createdAt)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
       </div>
       )}
 

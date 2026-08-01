@@ -12,6 +12,7 @@ import {
 } from "@/lib/vertical-terminology";
 import { getNavigationProfile, getLandingRoute, type NavItem } from "@/lib/vertical-navigation";
 import { roleRank, type Permission, type Role } from "@/lib/rbac";
+import { getVerticalCapabilities, type CapabilityFlag } from "@/lib/vertical-capabilities";
 
 /**
  * `Organization.primaryVertical` alone is authoritative for the product
@@ -59,6 +60,10 @@ export interface OrganizationExperience {
    * in schema.prisma). */
   enabledLabFeatures: string[];
   terminology: VerticalTerminology;
+  /** Central per-vertical feature-area flags (PR #43) — e.g. `properties`
+   * for HOA. See src/lib/vertical-capabilities.ts. Pages/routes should read
+   * this rather than checking `primaryVertical === "HOA"` directly. */
+  capabilities: Record<CapabilityFlag, boolean>;
   /** Already filtered by `permissions` above — a consuming page/component
    * never needs to re-apply permission logic to decide what to render. */
   navigation: NavItem[];
@@ -120,6 +125,7 @@ export async function resolveOrganizationExperience(params: {
     entitlements,
     enabledLabFeatures: labFeatures.map((f) => f.featureKey),
     terminology: getVerticalTerminology(effectiveVertical),
+    capabilities: getVerticalCapabilities(effectiveVertical),
     navigation,
     quickActions: getQuickActions(effectiveVertical),
     helpTopics: getHelpTopics(effectiveVertical),

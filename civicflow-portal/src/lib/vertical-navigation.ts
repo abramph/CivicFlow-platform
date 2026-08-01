@@ -40,6 +40,14 @@ function sharedNavigation(vertical: "COMMUNITY" | "UNION" | "HOA"): NavItem[] {
     { href: "/dashboard", label: dashboardLabel },
     { href: "/inbox", label: "Inbox", permission: "messages:read" },
     { href: "/members", label: t.memberPlural },
+    // HOA-only (PR #43) -- deliberately NOT added for COMMUNITY/UNION even
+    // though their roles also technically hold hoa:properties:read (role
+    // permissions aren't vertical-scoped -- see rbac.ts). The real access
+    // gate is requireHoaCapability() at the route/guard layer, which
+    // already denies non-HOA organizations regardless of this nav item;
+    // this conditional exists purely so a Community/Union org never sees a
+    // dead-end nav link to a page that immediately says "not available."
+    ...(vertical === "HOA" ? [{ href: "/hoa/properties", label: "Properties", permission: "hoa:properties:read" as const }] : []),
     { href: "/contributions", label: "Contributions" },
     { href: "/dues", label: duesLabel },
     { href: "/dues/reminders", label: "Dues Campaigns" },

@@ -519,6 +519,9 @@ model Organization {
   ptaEventRsvps               PtaEventRsvp[]
   ptaHouseholdAdults          PtaHouseholdAdult[]
 
+  hoaProperties        Property[]
+  hoaPropertyResidents PropertyResident[]
+
   @@index([slug])
   @@index([status])
 }
@@ -887,6 +890,8 @@ model OrgMember {
   paymentReports          PaymentReport[]
   smsMessages             SmsMessage[]
   ptaHouseholdBilling     PtaHousehold?
+  hoaPropertiesBilled     Property[]               @relation("PropertyBillingMember")
+  hoaPropertyResidencies  PropertyResident[]       @relation("PropertyResidentMember")
 
   @@unique([organizationId, userId])
   @@unique([organizationId, memberNumber])
@@ -2887,4 +2892,151 @@ model PtaEventRsvp {
   @@unique([eventId, householdId])
   @@index([organizationId])
   @@index([eventId])
+}
+
+// ─── HOA vertical (PR #43) ────────────────────────────────────────────────
+// Property/PropertyResident foundation only — see docs/hoa-domain-model.md
+// for the full design and docs/hoa-mvp-recommendation.md for what's
+// deliberately deferred (Violation, ArchitecturalRequest, MaintenanceRequest,
+// Amenity/AmenityReservation are documented there but NOT modeled here).
+
+enum PropertyType {
+  SINGLE_FAMILY
+  CONDO_UNIT
+  TOWNHOME
+  VACANT_LOT
+  COMMON_PROPERTY
+  OTHER
+}
+
+enum PropertyStatus {
+  ACTIVE
+  INACTIVE
+}
+
+/// The billable/governed unit an HOA association tracks — a single-family
+/// lot, a townhome, a condo unit, a still-vacant lot, or an
+/// association-owned common property (clubhouse, retention pond). Property
+/// and Unit are deliberately flattened into one entity rather than a
+/// hierarchy — see docs/hoa-domain-model.md's "Property vs. Unit" section.
+/// organizationId is onDelete: Restrict (not Cascade) -- matching
+/// MeetingMinutes' precedent for governance-critical records that must
+/// never be silently destroyed by a cascading delete.
+model Property {
+  id              String         @id @default(cuid())
+  organizationId  String
+  addressLine1    String
+  addressLine2    String?
+  city            String?
+  state           String?
+  zipCode         String?
+  country         String?
+  /// e.g. "Unit 4B" or "Lot 12" -- distinct from addressLine2, which is a
+  /// raw postal-address line; this is the association's own identifier.
+  unitLabel       String?
+  /// Optional grouping for a condo building/phase -- deliberately a plain
+  /// string, not a parent Building model (see domain-model doc).
+  buildingLabel   String?
+  propertyType    PropertyType   @default(SINGLE_FAMILY)
+  /// Useful for a COMMON_PROPERTY row that doesn't read naturally as a
+  /// street address (e.g. "Clubhouse").
+  displayName     String?
+  /// Who receives assessment charges for this property via the existing
+  /// DuesAccount/DuesCharge pipeline (see docs/hoa-domain-model.md's
+  /// billing clarification -- co-ownership never splits this). Null is
+  /// valid and expected: a vacant lot with no owner on file yet, or a
+  /// COMMON_PROPERTY the association itself is responsible for.
+  billingMemberId String?
+  status          PropertyStatus @default(ACTIVE)
+  /// Board/property-manager-only -- must never be surfaced on any
+  /// resident-facing or mobile view, matching OrgMember.notes' existing
+  /// visibility boundary.
+  notes           String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  archivedAt      DateTime?
+
+  organization  Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  billingMember OrgMember?         @relation("PropertyBillingMember", fields: [billingMemberId], references: [id], onDelete: SetNull)
+  residents     PropertyResident[]
+
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([organizationId, propertyType])
+  @@index([billingMemberId])
+}
+
+enum PropertyResidentType {
+  OWNER
+  CO_OWNER
+  RESIDENT
+  TENANT
+  NON_RESIDENT_OWNER
+  OTHER
+}
+
+enum PropertyResidentStatus {
+  ACTIVE
+  ENDED
+}
+
+/// The relationship between a Property and the OrgMember(s) connected to
+/// it -- who owns it, who lives there. Every HOA resident/owner/tenant is
+/// a full OrgMember (deliberately not a lighter parallel person record --
+/// see docs/hoa-domain-model.md for why this differs from PTA's
+/// household-adult pattern). status is explicit (ACTIVE/ENDED), never
+/// inferred from moveOutDate being set, matching every other lifecycle
+/// enum in this schema. organizationId and propertyId are onDelete:
+/// Restrict -- occupancy/ownership history must never be silently
+/// destroyed by a cascading delete; orgMemberId is also Restrict for the
+/// same reason.
+///
+/// !! SCHEMA-DRIFT WARNING !! Two partial unique indexes exist on this
+/// table, added by hand-editing migration
+/// 20260801122342_add_hoa_property_foundation/migration.sql, because
+/// Prisma's schema DSL has no partial/filtered-unique-index syntax (no
+/// previewFeature enables it as of this Prisma version):
+///   - PropertyResident_property_member_one_active: at most one ACTIVE
+///     relationship per (propertyId, orgMemberId).
+///   - PropertyResident_property_one_primary_contact: at most one ACTIVE
+///     isPrimaryContact=true row per propertyId.
+/// These give real database-level concurrency safety (a race between two
+/// simultaneous requests fails with a catchable unique-constraint
+/// violation, not a check-then-insert window) -- see the concurrency test
+/// suite. Because they have no `@@index`/`@@unique` representation here,
+/// `prisma migrate dev` cannot see them when diffing against schema.prisma
+/// and may propose DROPping them as "extra" the next time this model
+/// changes. **Any future migration touching PropertyResident must
+/// manually re-add both CREATE UNIQUE INDEX ... WHERE ... statements** if
+/// Prisma generates a migration that drops them -- verify by grepping the
+/// newly generated migration.sql for these index names before applying.
+/// The service layer (src/lib/hoa/properties.ts) also pre-checks both
+/// conditions before writing, purely to return a friendlier HoaError
+/// instead of a raw Postgres constraint-violation message -- that
+/// application-layer check is a UX nicety, not the actual safety
+/// guarantee, which lives in the database.
+model PropertyResident {
+  id                  String                 @id @default(cuid())
+  organizationId      String
+  propertyId          String
+  orgMemberId         String
+  relationshipType    PropertyResidentType
+  status              PropertyResidentStatus @default(ACTIVE)
+  isPrimaryContact    Boolean                @default(false)
+  /// Only meaningful for OWNER/CO_OWNER; never required.
+  ownershipPercentage Decimal?               @db.Decimal(5, 2)
+  moveInDate          DateTime?
+  moveOutDate         DateTime?
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  property     Property     @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  orgMember    OrgMember    @relation("PropertyResidentMember", fields: [orgMemberId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId])
+  @@index([propertyId])
+  @@index([propertyId, status])
+  @@index([orgMemberId])
+  @@index([organizationId, status])
 }

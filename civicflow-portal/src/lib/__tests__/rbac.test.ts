@@ -64,6 +64,38 @@ describe("rbac: meetings:minutes:review / meetings:minutes:approve", () => {
   });
 });
 
+describe("rbac: hoa:properties:*/hoa:residents:* (PR #43 foundation)", () => {
+  it("grants ORG_OWNER, ORG_ADMIN, and STAFF full read/write on both properties and residents", () => {
+    for (const role of ["ORG_OWNER", "ORG_ADMIN", "STAFF"] as const) {
+      expect(canDo(role, "hoa:properties:read")).toBe(true);
+      expect(canDo(role, "hoa:properties:write")).toBe(true);
+      expect(canDo(role, "hoa:residents:read")).toBe(true);
+      expect(canDo(role, "hoa:residents:write")).toBe(true);
+    }
+  });
+
+  it("grants FINANCE (Treasurer) read-only on both -- record-keeping is a board function, not a financial one", () => {
+    expect(canDo("FINANCE", "hoa:properties:read")).toBe(true);
+    expect(canDo("FINANCE", "hoa:properties:write")).toBe(false);
+    expect(canDo("FINANCE", "hoa:residents:read")).toBe(true);
+    expect(canDo("FINANCE", "hoa:residents:write")).toBe(false);
+  });
+
+  it("grants READ_ONLY visibility without authority on both", () => {
+    expect(canDo("READ_ONLY", "hoa:properties:read")).toBe(true);
+    expect(canDo("READ_ONLY", "hoa:properties:write")).toBe(false);
+    expect(canDo("READ_ONLY", "hoa:residents:read")).toBe(true);
+    expect(canDo("READ_ONLY", "hoa:residents:write")).toBe(false);
+  });
+
+  it("grants MEMBER none of them -- resident self-service is scoped by relationship, not RBAC permission", () => {
+    expect(canDo("MEMBER", "hoa:properties:read")).toBe(false);
+    expect(canDo("MEMBER", "hoa:properties:write")).toBe(false);
+    expect(canDo("MEMBER", "hoa:residents:read")).toBe(false);
+    expect(canDo("MEMBER", "hoa:residents:write")).toBe(false);
+  });
+});
+
 describe("rbac: meetingIntelligence:* (internal APH pilot)", () => {
   const permissions = [
     "meetingIntelligence:read",
