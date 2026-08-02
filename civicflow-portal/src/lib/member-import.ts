@@ -14,6 +14,28 @@ export function pickStr(row: Record<string, string>, key: string): string {
   return String(row[key] ?? "").trim();
 }
 
+/**
+ * `mapping` (as built by the Import Data UI's column-mapping step and sent
+ * to the API) is keyed `{csvHeader: canonicalField}` — see
+ * src/app/import/page.tsx's onChange handler (`next[header] = field.key`)
+ * and its "mapped" summary lookup (`Object.entries(mapping).find(([, v]) =>
+ * v === field.key)`), which both confirm this direction. Reading a row by
+ * canonical field therefore requires the REVERSE lookup (field → header),
+ * not `mapping[field]` directly — indexing by field only "worked" in tests
+ * whose fixtures happened to use the canonical name as the row key already,
+ * masking that real column remapping (a CSV header that doesn't literally
+ * match the canonical field name) silently read nothing. Build this once per
+ * import run, outside the per-row loop, since `mapping` doesn't change row
+ * to row.
+ */
+export function buildFieldGetter(mapping: Record<string, string>): (row: Record<string, string>, field: string) => string {
+  const reverseMapping: Record<string, string> = {};
+  for (const [header, field] of Object.entries(mapping)) {
+    reverseMapping[field] = header;
+  }
+  return (row, field) => pickStr(row, reverseMapping[field] ?? field);
+}
+
 export function parseDate(val: string): Date | null {
   if (!val) return null;
   const d = new Date(val);
@@ -46,10 +68,11 @@ export async function importMembers(
 
   const memberLimit = preview ? null : await checkMemberLimit(organizationId);
   let newMemberCount = memberLimit?.current ?? 0;
+  const getField = buildFieldGetter(mapping);
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
-    const get = (field: string) => pickStr(row, mapping[field] ?? field);
+    const get = (field: string) => getField(row, field);
 
     const firstName = get("firstName");
     const lastName = get("lastName");

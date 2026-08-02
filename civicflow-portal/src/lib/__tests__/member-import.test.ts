@@ -93,4 +93,21 @@ describe("importMembers — member-limit enforcement", () => {
     expect(results[0].status).toBe("error");
     expect(results[0].message).toMatch(/blank/);
   });
+
+  it("reads a row correctly when the CSV header doesn't literally match the canonical field name (real column mapping)", async () => {
+    // mapping is {csvHeader: canonicalField}, as built by the Import Data
+    // UI's column-mapping step — a row keyed by the raw header only, with a
+    // mapping telling the importer which header means "firstName" etc.
+    checkMemberLimit.mockResolvedValueOnce({ allowed: true, current: 0, limit: 50 });
+    const { importMembers } = await import("../member-import");
+    const rows = [{ "Given Name": "Jamie", "Family Name": "Rivera", "Email Address": "jamie@example.com" }];
+    const mapping = { "Given Name": "firstName", "Family Name": "lastName", "Email Address": "email" };
+
+    const results = await importMembers(rows, mapping, "org-1", false);
+
+    expect(results[0].status).toBe("ok");
+    expect(orgMemberCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ firstName: "Jamie", lastName: "Rivera", email: "jamie@example.com" }) })
+    );
+  });
 });

@@ -92,20 +92,29 @@ export interface DesktopExpenditure {
   payment_method?: string | null;
 }
 
+/**
+ * Every entity array is optional — runMigrationImport reads each one behind
+ * a `?? []` guard, so a caller (or a test fixture) may omit any subset of
+ * them. `version`/`schema`/`exportedAt` are likewise only meaningful for the
+ * JSON-file upload path (which stamps them itself — see
+ * src/app/api/migration/upload/route.ts); a caller invoking
+ * runMigrationImport() directly with partial data has no reason to fabricate
+ * them.
+ */
 export interface DesktopExport {
-  version: number;
-  schema: string;
-  exportedAt: string;
+  version?: number;
+  schema?: string;
+  exportedAt?: string;
   organizationName?: string | null;
-  members: DesktopMember[];
-  categories: DesktopCategory[];
-  events: DesktopEvent[];
-  campaigns: DesktopCampaign[];
-  meetings: DesktopMeeting[];
-  attendance: DesktopAttendance[];
-  transactions: DesktopTransaction[];
+  members?: DesktopMember[];
+  categories?: DesktopCategory[];
+  events?: DesktopEvent[];
+  campaigns?: DesktopCampaign[];
+  meetings?: DesktopMeeting[];
+  attendance?: DesktopAttendance[];
+  transactions?: DesktopTransaction[];
   financialTransactions?: DesktopFinancialTransaction[];
-  expenditures: DesktopExpenditure[];
+  expenditures?: DesktopExpenditure[];
 }
 
 // ---- Result ----

@@ -30,35 +30,35 @@ function buildExportFromSqlite(buffer: Buffer): DesktopExport {
     writeFileSync(tmp, buffer);
     const db = new Database(tmp, { readonly: true });
 
-    const members = readTable<DesktopExport["members"][number]>(
+    const members = readTable<NonNullable<DesktopExport["members"]>[number]>(
       db, "members",
       "SELECT id, first_name, last_name, email, phone, address, status, join_date, city, state, zip, dob, category_id FROM members"
     );
-    const categories = readTable<DesktopExport["categories"][number]>(
+    const categories = readTable<NonNullable<DesktopExport["categories"]>[number]>(
       db, "categories",
       "SELECT id, name, monthly_dues_cents FROM categories"
     );
-    const events = readTable<DesktopExport["events"][number]>(
+    const events = readTable<NonNullable<DesktopExport["events"]>[number]>(
       db, "events",
       "SELECT id, name, date, location, notes FROM events"
     );
-    const campaigns = readTable<DesktopExport["campaigns"][number]>(
+    const campaigns = readTable<NonNullable<DesktopExport["campaigns"]>[number]>(
       db, "campaigns",
       "SELECT id, name, start_date, end_date, goal_amount_cents, notes FROM campaigns"
     );
-    const meetings = readTable<DesktopExport["meetings"][number]>(
+    const meetings = readTable<NonNullable<DesktopExport["meetings"]>[number]>(
       db, "meetings",
       "SELECT id, title, meeting_date FROM meetings"
     );
-    const attendance = readTable<DesktopExport["attendance"][number]>(
+    const attendance = readTable<NonNullable<DesktopExport["attendance"]>[number]>(
       db, "attendance",
       "SELECT member_id, meeting_id, attended FROM attendance"
     );
-    const transactions = readTable<DesktopExport["transactions"][number]>(
+    const transactions = readTable<NonNullable<DesktopExport["transactions"]>[number]>(
       db, "transactions",
       "SELECT id, type, amount_cents, occurred_on, member_id, campaign_id, event_id, note, contributor_name, is_deleted FROM transactions"
     );
-    const expenditures = readTable<DesktopExport["expenditures"][number]>(
+    const expenditures = readTable<NonNullable<DesktopExport["expenditures"]>[number]>(
       db, "expenditures",
       "SELECT id, date, amount, category, description, payment_method FROM expenditures"
     );
@@ -95,7 +95,7 @@ function buildExportFromSqlite(buffer: Buffer): DesktopExport {
 
 // ── CSV / Excel → DesktopExport (members + contributions) ────────────────────
 
-const MEMBER_ALIASES: Record<string, keyof DesktopExport["members"][number]> = {
+const MEMBER_ALIASES: Record<string, keyof NonNullable<DesktopExport["members"]>[number]> = {
   "first name": "first_name", "first_name": "first_name", "firstname": "first_name",
   "last name": "last_name", "last_name": "last_name", "lastname": "last_name",
   "email": "email", "email address": "email",
