@@ -79,6 +79,21 @@ describe("setPtaCommitteeCoChair", () => {
     expect(updateCommittee).toHaveBeenCalledWith({ where: { id: "committee-1" }, data: { coChairAdultId: "adult-2" } });
   });
 
+  it("documents (rather than silently allows) that the same adult can be set as both chair and co-chair -- no cross-field validation exists", async () => {
+    // This is an intentional finding surfaced during review, not an assumed
+    // behavior: setPtaCommitteeChair/setPtaCommitteeCoChair never check each
+    // other's current value. Whether a single person should be allowed to
+    // hold both titles on the same committee is a product policy question,
+    // not a security one -- this test exists so the behavior is visible and
+    // deliberate rather than an untested gap.
+    findFirstCommittee.mockResolvedValueOnce({ id: "committee-1", organizationId: "org-a", chairAdultId: "adult-1" });
+    findFirstAdult.mockResolvedValueOnce({ id: "adult-1", organizationId: "org-a" });
+    updateCommittee.mockResolvedValueOnce({ id: "committee-1", chairAdultId: "adult-1", coChairAdultId: "adult-1" });
+    const { setPtaCommitteeCoChair } = await import("../committees");
+    await setPtaCommitteeCoChair("org-a", "committee-1", "adult-1", "u1");
+    expect(updateCommittee).toHaveBeenCalledWith({ where: { id: "committee-1" }, data: { coChairAdultId: "adult-1" } });
+  });
+
   it("clears the co-chair when passed null, without validating against the adult table", async () => {
     findFirstCommittee.mockResolvedValueOnce({ id: "committee-1", organizationId: "org-a" });
     updateCommittee.mockResolvedValueOnce({ id: "committee-1", coChairAdultId: null });
