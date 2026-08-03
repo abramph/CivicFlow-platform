@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { getPtaPageGate } from "@/lib/labs/pta/guard";
 import { getPtaVolunteerOpportunity } from "@/lib/labs/pta/volunteers";
+import { prisma } from "@/lib/prisma";
 import { PageHeader, SectionCard } from "@/components/app/PageChrome";
 import { Breadcrumbs, StatusPill, EmptyState } from "@/components/admin/OperationsUI";
 import { PtaLabsBadge } from "@/components/labs/pta/PtaLabsBadge";
@@ -43,7 +45,10 @@ export default async function PtaVolunteerOpportunityDetailPage({ params }: { pa
     );
   }
 
-  const opportunity = await getPtaVolunteerOpportunity(organizationId, opportunityId);
+  const [opportunity, events] = await Promise.all([
+    getPtaVolunteerOpportunity(organizationId, opportunityId),
+    prisma.event.findMany({ where: { organizationId }, select: { id: true, title: true, startAt: true }, orderBy: { startAt: "desc" }, take: 100 }),
+  ]);
   const canCheckIn = can("pta:volunteers:checkin");
 
   return (
@@ -60,6 +65,12 @@ export default async function PtaVolunteerOpportunityDetailPage({ params }: { pa
         <div className="mb-3 flex flex-wrap items-center gap-3">
           <StatusPill status={OPPORTUNITY_STATUS_TONE[opportunity.status] ?? "unknown"} label={opportunity.status} />
           {opportunity.committee ? <span className="text-sm text-slate-600">Committee: {opportunity.committee.name}</span> : null}
+          {opportunity.event ? (
+            <span className="text-sm text-slate-600">
+              Event: <Link href={`/events/${opportunity.event.id}`} className="text-emerald-700 hover:underline">{opportunity.event.title}</Link>
+              {opportunity.event.startAt ? ` (${formatDateTime(opportunity.event.startAt)})` : ""}
+            </span>
+          ) : null}
           {opportunity.signupDeadline ? <span className="text-sm text-slate-600">Signup deadline: {formatDateTime(opportunity.signupDeadline)}</span> : null}
           {opportunity.cancellationDeadline ? <span className="text-sm text-slate-600">Cancellation deadline: {formatDateTime(opportunity.cancellationDeadline)}</span> : null}
         </div>
@@ -69,10 +80,12 @@ export default async function PtaVolunteerOpportunityDetailPage({ params }: { pa
           <EditOpportunityForm
             opportunityId={opportunity.id}
             initialTitle={opportunity.title}
+            initialEventId={opportunity.event?.id ?? null}
             initialDescription={opportunity.description}
             initialInstructions={opportunity.instructions}
             initialCancellationDeadline={opportunity.cancellationDeadline?.toISOString() ?? null}
             initialSignupDeadline={opportunity.signupDeadline?.toISOString() ?? null}
+            events={events}
           />
           <DuplicateOpportunityButton opportunityId={opportunity.id} />
         </div>

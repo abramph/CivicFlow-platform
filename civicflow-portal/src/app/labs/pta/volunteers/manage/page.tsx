@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { getPtaPageGate } from "@/lib/labs/pta/guard";
 import { getPtaProfile } from "@/lib/labs/pta/profile";
+import { prisma } from "@/lib/prisma";
+import { formatDateTime } from "@/lib/formatting";
 import {
   listPtaVolunteerOpportunities,
   listPendingPtaVolunteerHourEntries,
@@ -37,11 +39,17 @@ export default async function PtaManageVolunteersPage() {
   const schoolYear = profile?.currentSchoolYear ?? null;
   const canApproveHours = can("pta:volunteer-hours:approve");
 
-  const [opportunities, pendingApprovals, understaffed, requirement] = await Promise.all([
+  const [opportunities, pendingApprovals, understaffed, requirement, events] = await Promise.all([
     listPtaVolunteerOpportunities(organizationId, schoolYear ? { schoolYear } : {}),
     canApproveHours ? listPendingPtaVolunteerHourEntries(organizationId, schoolYear ? { schoolYear } : {}) : Promise.resolve([]),
     listPtaUnderstaffedSlots(organizationId),
     schoolYear ? getPtaVolunteerRequirement(organizationId, schoolYear) : Promise.resolve(null),
+    prisma.event.findMany({
+      where: { organizationId },
+      select: { id: true, title: true, startAt: true },
+      orderBy: { startAt: "desc" },
+      take: 100,
+    }),
   ]);
 
   const openCount = opportunities.filter((o) => o.status === "OPEN").length;
@@ -94,7 +102,7 @@ export default async function PtaManageVolunteersPage() {
       ) : null}
 
       <SectionCard title="Post an opportunity">
-        <CreateOpportunityForm />
+        <CreateOpportunityForm events={events} />
       </SectionCard>
 
       <SectionCard title="All opportunities" description={`${opportunities.length} opportunity(ies)${schoolYear ? ` for ${schoolYear}` : ""}.`}>
@@ -114,6 +122,7 @@ export default async function PtaManageVolunteersPage() {
                     <p className="text-sm text-slate-600">
                       {opp.slots.length} shift(s) · {confirmed}/{capacity} filled
                       {opp.committee ? ` · ${opp.committee.name}` : ""}
+                      {opp.event ? ` · ${opp.event.title}${opp.event.startAt ? ` (${formatDateTime(opp.event.startAt)})` : ""}` : ""}
                     </p>
                   </div>
                   <StatusPill status={OPPORTUNITY_STATUS_TONE[opp.status] ?? "unknown"} label={opp.status} />

@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { formatDateTime } from "@/lib/formatting";
+import type { SelectableEvent } from "./CreateOpportunityForm";
 
 function toLocalInputValue(iso: string | null): string {
   if (!iso) return "";
@@ -11,21 +13,26 @@ function toLocalInputValue(iso: string | null): string {
 export function EditOpportunityForm({
   opportunityId,
   initialTitle,
+  initialEventId,
   initialDescription,
   initialInstructions,
   initialCancellationDeadline,
   initialSignupDeadline,
+  events = [],
 }: {
   opportunityId: string;
   initialTitle: string;
+  initialEventId: string | null;
   initialDescription: string | null;
   initialInstructions: string | null;
   initialCancellationDeadline: string | null;
   initialSignupDeadline: string | null;
+  events?: SelectableEvent[];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState(initialTitle);
+  const [eventId, setEventId] = useState(initialEventId ?? "");
   const [description, setDescription] = useState(initialDescription ?? "");
   const [instructions, setInstructions] = useState(initialInstructions ?? "");
   const [signupDeadline, setSignupDeadline] = useState(toLocalInputValue(initialSignupDeadline));
@@ -42,6 +49,7 @@ export function EditOpportunityForm({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title,
+          eventId: eventId || null,
           description: description || null,
           instructions: instructions || null,
           signupDeadline: signupDeadline ? new Date(signupDeadline).toISOString() : null,
@@ -74,6 +82,19 @@ export function EditOpportunityForm({
         <span>Title</span>
         <input value={title} onChange={(e) => setTitle(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
       </label>
+      {events.length > 0 ? (
+        <label className="block space-y-1 text-sm font-medium text-slate-900">
+          <span>Linked event (optional)</span>
+          <select value={eventId} onChange={(e) => setEventId(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+            <option value="">No linked event</option>
+            {events.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.title}{e.startAt ? ` — ${formatDateTime(e.startAt)}` : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       <label className="block space-y-1 text-sm font-medium text-slate-900">
         <span>Description</span>
         <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />

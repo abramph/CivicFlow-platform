@@ -108,7 +108,12 @@ export default async function PtaVolunteersPage() {
         <EmptyState title="No open volunteer opportunities right now" />
       ) : (
         opportunities.map((opp) => (
-          <SectionCard key={opp.id} title={opp.title} description={opp.description ?? undefined}>
+          <SectionCard
+            key={opp.id}
+            title={opp.title}
+            description={opp.event ? `${opp.event.title}${opp.event.startAt ? ` — ${formatDateTime(opp.event.startAt)}` : ""}` : (opp.description ?? undefined)}
+          >
+            {opp.event && opp.description ? <p className="mb-3 text-sm text-slate-700">{opp.description}</p> : null}
             {opp.supplyRequest ? <p className="mb-3 text-sm text-slate-700">Requested supplies: {opp.supplyRequest}</p> : null}
             <div className="space-y-2">
               {opp.slots.map((slot) => {

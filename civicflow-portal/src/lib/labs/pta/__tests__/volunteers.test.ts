@@ -11,6 +11,8 @@ const updateSignup = vi.fn();
 const findFirstOpportunity = vi.fn();
 const findFirstEvent = vi.fn();
 const createOpportunity = vi.fn();
+const updateOpportunity = vi.fn();
+const findManyOpportunity = vi.fn();
 
 // claimPtaVolunteerSlot/cancelPtaVolunteerSignup wrap their writes in
 // prisma.$transaction(async (tx) => ...) — the mocked $transaction just
@@ -34,7 +36,12 @@ vi.mock("@/lib/prisma", () => ({
       findFirst: (...a: unknown[]) => findFirstSignup(...a),
       update: (...a: unknown[]) => updateSignup(...a),
     },
-    ptaVolunteerOpportunity: { findFirst: (...a: unknown[]) => findFirstOpportunity(...a), create: (...a: unknown[]) => createOpportunity(...a) },
+    ptaVolunteerOpportunity: {
+      findFirst: (...a: unknown[]) => findFirstOpportunity(...a),
+      findMany: (...a: unknown[]) => findManyOpportunity(...a),
+      create: (...a: unknown[]) => createOpportunity(...a),
+      update: (...a: unknown[]) => updateOpportunity(...a),
+    },
     event: { findFirst: (...a: unknown[]) => findFirstEvent(...a) },
   },
 }));
@@ -124,6 +131,62 @@ describe("tenant isolation — cross-organization volunteer access denied", () =
     const { createPtaVolunteerOpportunity } = await import("../volunteers");
     await expect(createPtaVolunteerOpportunity({ organizationId: "org-b", title: "Steal event", eventId: "event-belonging-to-org-a", actorUserId: "u1" })).rejects.toMatchObject({ code: "PTA_EVENT_NOT_FOUND" });
     expect(createOpportunity).not.toHaveBeenCalled();
+  });
+
+  it("updatePtaVolunteerOpportunity cannot attach to another organization's event", async () => {
+    findFirstOpportunity.mockResolvedValueOnce({ id: "opp-1", organizationId: "org-b", status: "DRAFT" });
+    findFirstEvent.mockResolvedValueOnce(null);
+    const { updatePtaVolunteerOpportunity } = await import("../volunteers");
+    await expect(
+      updatePtaVolunteerOpportunity("org-b", "opp-1", { eventId: "event-belonging-to-org-a" }, "u1")
+    ).rejects.toMatchObject({ code: "PTA_EVENT_NOT_FOUND" });
+    expect(updateOpportunity).not.toHaveBeenCalled();
+  });
+});
+
+describe("createPtaVolunteerOpportunity / updatePtaVolunteerOpportunity — event linking", () => {
+  it("links a valid same-organization event on create", async () => {
+    findFirstEvent.mockResolvedValueOnce({ id: "event-1", organizationId: "org-a" });
+    createOpportunity.mockResolvedValueOnce({ id: "opp-1" });
+    const { createPtaVolunteerOpportunity } = await import("../volunteers");
+    await createPtaVolunteerOpportunity({ organizationId: "org-a", title: "Book Fair setup", eventId: "event-1", actorUserId: "u1" });
+    expect(createOpportunity).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ eventId: "event-1" }) }));
+  });
+
+  it("links a valid same-organization event on update", async () => {
+    findFirstOpportunity.mockResolvedValueOnce({ id: "opp-1", organizationId: "org-a", status: "DRAFT" });
+    findFirstEvent.mockResolvedValueOnce({ id: "event-1", organizationId: "org-a" });
+    updateOpportunity.mockResolvedValueOnce({ id: "opp-1", eventId: "event-1" });
+    const { updatePtaVolunteerOpportunity } = await import("../volunteers");
+    await updatePtaVolunteerOpportunity("org-a", "opp-1", { eventId: "event-1" }, "u1");
+    expect(updateOpportunity).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ eventId: "event-1" }) }));
+  });
+
+  it("unlinks an event on update by passing eventId: null, without re-validating against the event table", async () => {
+    findFirstOpportunity.mockResolvedValueOnce({ id: "opp-1", organizationId: "org-a", status: "DRAFT" });
+    updateOpportunity.mockResolvedValueOnce({ id: "opp-1", eventId: null });
+    const { updatePtaVolunteerOpportunity } = await import("../volunteers");
+    await updatePtaVolunteerOpportunity("org-a", "opp-1", { eventId: null }, "u1");
+    expect(findFirstEvent).not.toHaveBeenCalled();
+    expect(updateOpportunity).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ eventId: null }) }));
+  });
+
+  it("listPtaVolunteerOpportunities requests the linked event so the UI can display it", async () => {
+    findManyOpportunity.mockResolvedValueOnce([]);
+    const { listPtaVolunteerOpportunities } = await import("../volunteers");
+    await listPtaVolunteerOpportunities("org-a");
+    expect(findManyOpportunity).toHaveBeenCalledWith(
+      expect.objectContaining({ include: expect.objectContaining({ event: { select: { id: true, title: true, startAt: true } } }) })
+    );
+  });
+
+  it("getPtaVolunteerOpportunity requests the linked event so the UI can display it", async () => {
+    findFirstOpportunity.mockResolvedValueOnce({ id: "opp-1", organizationId: "org-a" });
+    const { getPtaVolunteerOpportunity } = await import("../volunteers");
+    await getPtaVolunteerOpportunity("org-a", "opp-1");
+    expect(findFirstOpportunity).toHaveBeenCalledWith(
+      expect.objectContaining({ include: expect.objectContaining({ event: { select: { id: true, title: true, startAt: true } } }) })
+    );
   });
 });
 
