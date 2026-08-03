@@ -2,13 +2,13 @@
 
 ## What's backed up today
 
-- **Database**: `civicflowprod`, a DigitalOcean Managed PostgreSQL cluster (region `nyc3`, cluster
-  ID `02f47c72-4bdb-4b6f-9105-a92502246128`). DO Managed Databases take automated daily backups
-  with point-in-time recovery (WAL streaming) for the retention window included in the plan tier —
-  **verify the exact retention window and confirm backups are enabled in the DO control panel**
-  (Databases → `civicflowprod` → Backups); this was not independently confirmed via `doctl` in this
-  audit (the `doctl databases backups list` subcommand errored in this environment — check directly
-  in the web console instead).
+- **Database**: `civicflowprod`, a DigitalOcean Managed PostgreSQL cluster (region `nyc3`, tier
+  `db-s-1vcpu-1gb`). Confirmed via `doctl databases backups list` that automated daily backups are
+  real and active: BackupHour 1:33 UTC, roughly a 7-day rolling retention (8 daily backups on hand,
+  spanning 2026-07-27 through 2026-08-03 as of the last check). Re-run `doctl databases backups list
+  <cluster-id>` periodically to confirm this hasn't silently lapsed — this resolves the earlier
+  uncertainty in this document (an initial `doctl` check errored in a different environment; a later
+  check from a working environment confirmed backups are in fact enabled and current).
 - **File storage**: attachments, receipts, and import files live in a DigitalOcean Spaces bucket
   (`DO_SPACES_BUCKET`). Spaces does **not** version or back up objects by default — deleting or
   overwriting an object is permanent unless bucket versioning is explicitly enabled. **Action item**:

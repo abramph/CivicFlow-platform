@@ -12,7 +12,7 @@ import { checkPtaVerticalAvailable } from "@/lib/labs/pta/guard";
  */
 export async function GET() {
   return withApiErrorHandling(async () => {
-    const { organizationId } = await requireOrganization();
+    const { organizationId } = await requireOrganization("throw");
     const access = await checkPtaVerticalAvailable(organizationId);
     return Response.json({ ok: true, data: { available: access.available } });
   });

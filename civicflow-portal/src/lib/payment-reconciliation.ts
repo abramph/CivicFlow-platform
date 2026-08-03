@@ -2,6 +2,7 @@ import type { PaymentImportSourceType, Prisma } from "@prisma/client";
 import { createAuditEvent } from "@/lib/audit";
 import { createMemberTimelineEvent } from "@/lib/member-timeline";
 import { prisma } from "@/lib/prisma";
+import { isValidEmail } from "@/lib/email";
 
 const methodBySource: Partial<Record<PaymentImportSourceType, string>> = {
   ZELLE: "ZELLE",
@@ -71,7 +72,12 @@ export async function matchPaymentImportItem(organizationId: string, input: {
   payerName?: string | null;
   memo?: string | null;
 }) {
-  const payerEmail = clean(input.payerEmail).toLowerCase();
+  // Malformed input here never matches a real member anyway (every real
+  // OrgMember.email is itself well-formed), but validating explicitly avoids
+  // running a lookup query keyed on obvious garbage and keeps this file
+  // consistent with every other importer's use of the same shared check.
+  const payerEmailRaw = clean(input.payerEmail).toLowerCase();
+  const payerEmail = isValidEmail(payerEmailRaw) ? payerEmailRaw : "";
   if (payerEmail) {
     const member = await prisma.orgMember.findFirst({
       where: { organizationId, email: { equals: payerEmail, mode: "insensitive" } },

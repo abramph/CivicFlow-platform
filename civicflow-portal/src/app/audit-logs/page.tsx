@@ -54,7 +54,14 @@ export default async function AuditLogsPage() {
                     <td className="px-4 py-3 text-slate-900">{row.action}</td>
                     <td className="px-4 py-3 text-slate-900">{row.resource}</td>
                     <td className="px-4 py-3 text-slate-900">{formatText(row.resourceId, "—")}</td>
-                    <td className="px-4 py-3 text-slate-900">{formatText(row.actorEmail, "system")}</td>
+                    <td className="px-4 py-3 text-slate-900">
+                      {formatText(row.actorEmail, "system")}
+                      {row.impersonatedByEmail ? (
+                        <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800">
+                          via impersonation by {row.impersonatedByEmail}
+                        </span>
+                      ) : null}
+                    </td>
                   </tr>
                 ))
               )}

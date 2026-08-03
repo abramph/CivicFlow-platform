@@ -12,7 +12,11 @@ import { cookies } from "next/headers";
 const bodySchema = z.object({
   organizationId: z.string().min(1),
   targetUserId: z.string().min(1),
-  reason: z.string().max(500).nullable().optional(),
+  // Required, not optional: impersonation must always carry an auditable
+  // support reason (readiness-audit Phase 13 requirement) -- a blank reason
+  // makes an admin's action in the audit log indistinguishable from routine
+  // support access with no way to justify it after the fact.
+  reason: z.string().trim().min(1, "A reason is required to start an impersonation session."),
 });
 
 /**

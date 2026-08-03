@@ -188,7 +188,7 @@ export async function POST(request: Request) {
   return withApiErrorHandling(async () => {
     const contentLength = Number(request.headers.get("content-length") ?? 0);
     if (contentLength > MAX_BYTES) {
-      return Response.json({ error: "File too large (max 10 MB)" }, { status: 413 });
+      return Response.json({ error: "File too large (max 50 MB)" }, { status: 413 });
     }
 
     const form = await request.formData();

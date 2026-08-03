@@ -2,16 +2,12 @@ import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import * as XLSX from "xlsx";
 import type { ReportData, ReportRow, ReportType } from "@/lib/reports/report-builder";
 import { formatCurrency, formatDate } from "@/lib/formatting";
+import { csvCell, sanitizeFormulaCell } from "@/lib/csv-safety";
 
 export type ReportExportFormat = "csv" | "xlsx" | "pdf";
 
 function cell(value: unknown) {
   return String(value ?? "");
-}
-
-function csvEscape(value: unknown) {
-  const text = cell(value);
-  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
 function fileDate() {
@@ -30,16 +26,16 @@ export function reportContentType(format: ReportExportFormat) {
 
 export function exportReportCsv(report: ReportData) {
   const lines: string[] = [];
-  lines.push(csvEscape(report.title));
-  lines.push(`Generated,${csvEscape(formatDate(report.metadata.generatedAt))}`);
+  lines.push(csvCell(report.title));
+  lines.push(`Generated,${csvCell(formatDate(report.metadata.generatedAt))}`);
   if (report.metadata.startDate || report.metadata.endDate) {
-    lines.push(`Date range,${csvEscape(formatDate(report.metadata.startDate))} - ${csvEscape(formatDate(report.metadata.endDate))}`);
+    lines.push(`Date range,${csvCell(formatDate(report.metadata.startDate))} - ${csvCell(formatDate(report.metadata.endDate))}`);
   }
-  for (const item of report.summary) lines.push(`${csvEscape(item.label)},${csvEscape(item.value)}`);
+  for (const item of report.summary) lines.push(`${csvCell(item.label)},${csvCell(item.value)}`);
   lines.push("");
-  lines.push(report.columns.map(csvEscape).join(","));
+  lines.push(report.columns.map(csvCell).join(","));
   for (const row of report.rows) {
-    lines.push(report.columns.map((column) => csvEscape(row[column])).join(","));
+    lines.push(report.columns.map((column) => csvCell(row[column])).join(","));
   }
   return Buffer.from(lines.join("\r\n"), "utf8");
 }
@@ -51,10 +47,10 @@ export function exportReportXlsx(report: ReportData) {
     ["Generated", formatDate(report.metadata.generatedAt)],
     ["Date range", `${formatDate(report.metadata.startDate)} - ${formatDate(report.metadata.endDate)}`],
     [],
-    ...report.summary.map((item) => [item.label, item.value]),
+    ...report.summary.map((item) => [sanitizeFormulaCell(item.label), sanitizeFormulaCell(item.value)]),
     [],
     report.columns,
-    ...report.rows.map((row) => report.columns.map((column) => cell(row[column]))),
+    ...report.rows.map((row) => report.columns.map((column) => sanitizeFormulaCell(row[column]))),
   ];
   const worksheet = XLSX.utils.aoa_to_sheet(summaryRows);
   worksheet["!cols"] = report.columns.map((column) => ({ wch: Math.max(14, column.length + 4) }));

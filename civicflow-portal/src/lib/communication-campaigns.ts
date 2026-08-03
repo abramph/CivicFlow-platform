@@ -109,7 +109,14 @@ async function processRecipient(
     // reason by channel so "Sent" + an error doesn't read as a
     // contradiction, and so a failure on one channel isn't silently
     // dropped when the other also fails.
-    if (emailEnabled(ctx.campaign.channel) && recipient.email) {
+    // sendEmail() has no notion of a recipient's own preferences (it's also
+    // used for transactional mail that must always go out), so — mirroring
+    // sendMemberSms()'s own commsSmsEnabled check just below — the opt-out
+    // check for bulk campaigns has to live here, at the campaign call site,
+    // rather than inside the mailer itself.
+    if (emailEnabled(ctx.campaign.channel) && recipient.email && recipient.member && !recipient.member.commsEmailEnabled) {
+      errorMessage = ctx.isMultiChannel ? "Email: Member opted out of email notifications" : "Member opted out of email notifications";
+    } else if (emailEnabled(ctx.campaign.channel) && recipient.email) {
       const result = await sendEmail({ to: recipient.email, subject: ctx.campaign.subject, text: ctx.messageBody });
       deliveryStatus = result.sent ? "SENT" : "SKIPPED";
       if (result.skipped) {

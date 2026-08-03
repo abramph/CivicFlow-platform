@@ -16,18 +16,13 @@ import {
 } from "@/lib/member-filters";
 import { prisma } from "@/lib/prisma";
 import { formatCurrency } from "@/lib/formatting";
+import { csvCell, sanitizeFormulaCell } from "@/lib/csv-safety";
 
 const EXPORT_LIMIT = 5000;
 const formats = new Set(["csv", "xlsx", "pdf", "print"]);
 
 function isoDate(value: Date | null | undefined) {
   return value ? value.toISOString().slice(0, 10) : "";
-}
-
-function csvEscape(value: unknown) {
-  const text = String(value ?? "");
-  if (/[",\n\r]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
-  return text;
 }
 
 function exportDateStamp() {
@@ -38,26 +33,33 @@ function memberName(member: MemberExportRow) {
   return [member.preferredName || member.firstName, member.lastName].filter(Boolean).join(" ");
 }
 
+/**
+ * Every user-editable free-text field (name, address, gender, etc.) is run
+ * through sanitizeFormulaCell() here — before either the CSV or XLSX path
+ * consumes these rows — since XLSX.utils.json_to_sheet() writes values
+ * as-is and Excel treats a leading =/+/-/@ as a formula regardless of
+ * whether the file arrived as .csv or .xlsx.
+ */
 function buildRows(members: MemberExportRow[]) {
   return members.map((member) => ({
     "Member ID": member.id,
-    "First Name": member.firstName,
-    "Last Name": member.lastName,
-    "Preferred Name": member.preferredName ?? "",
+    "First Name": sanitizeFormulaCell(member.firstName),
+    "Last Name": sanitizeFormulaCell(member.lastName),
+    "Preferred Name": sanitizeFormulaCell(member.preferredName ?? ""),
     Status: member.membershipStatus,
-    Category: member.membershipCategory?.name ?? "",
+    Category: sanitizeFormulaCell(member.membershipCategory?.name ?? ""),
     DOB: isoDate(member.dateOfBirth),
     Age: calculateAge(member.dateOfBirth),
-    Gender: member.gender ?? "",
-    Email: member.email ?? "",
-    Phone: member.phone ?? "",
-    "Address Line 1": member.addressLine1 ?? "",
-    "Address Line 2": member.addressLine2 ?? "",
-    City: member.city ?? "",
-    State: member.state ?? "",
-    ZIP: member.zipCode ?? "",
-    County: member.county ?? "",
-    Country: member.country ?? "",
+    Gender: sanitizeFormulaCell(member.gender ?? ""),
+    Email: sanitizeFormulaCell(member.email ?? ""),
+    Phone: sanitizeFormulaCell(member.phone ?? ""),
+    "Address Line 1": sanitizeFormulaCell(member.addressLine1 ?? ""),
+    "Address Line 2": sanitizeFormulaCell(member.addressLine2 ?? ""),
+    City: sanitizeFormulaCell(member.city ?? ""),
+    State: sanitizeFormulaCell(member.state ?? ""),
+    ZIP: sanitizeFormulaCell(member.zipCode ?? ""),
+    County: sanitizeFormulaCell(member.county ?? ""),
+    Country: sanitizeFormulaCell(member.country ?? ""),
     "Join Date": isoDate(member.joinDate),
     Delinquent: member.isDelinquent ? "Yes" : "No",
     "Outstanding Dues": formatCurrency(calculateMemberOutstandingDues(member)),
@@ -90,7 +92,7 @@ function buildCsv(rows: Array<Record<string, unknown>>) {
     "Outstanding Dues": "",
     "Created At": "",
   });
-  return [headers.join(","), ...rows.map((row) => headers.map((header) => csvEscape(row[header])).join(","))].join("\r\n");
+  return [headers.join(","), ...rows.map((row) => headers.map((header) => csvCell(row[header])).join(","))].join("\r\n");
 }
 
 function buildXlsx(rows: Array<Record<string, unknown>>) {

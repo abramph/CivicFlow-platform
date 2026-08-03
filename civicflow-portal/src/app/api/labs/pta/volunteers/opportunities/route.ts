@@ -7,7 +7,7 @@ import { parseJsonBody, z } from "@/lib/validation";
 /** Any organization member (including a plain parent, MEMBER role) can browse open opportunities — read access here is intentionally NOT gated by pta:volunteers:manage, only by the PTA vertical check + an active session. */
 export async function GET() {
   return withApiErrorHandling(async () => {
-    const { organizationId } = await requireOrganization();
+    const { organizationId } = await requireOrganization("throw");
     await requirePtaVertical(organizationId);
     const opportunities = await listPtaVolunteerOpportunities(organizationId);
     return Response.json({ ok: true, data: opportunities });

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const orgMemberFindFirst = vi.fn();
+const orgMemberFindMany = vi.fn().mockResolvedValue([]);
 const paymentImportItemFindFirst = vi.fn();
 const paymentImportItemUpdate = vi.fn();
 const duesChargeFindFirst = vi.fn();
@@ -10,7 +11,10 @@ const contributionCreate = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    orgMember: { findFirst: (...args: unknown[]) => orgMemberFindFirst(...args) },
+    orgMember: {
+      findFirst: (...args: unknown[]) => orgMemberFindFirst(...args),
+      findMany: (...args: unknown[]) => orgMemberFindMany(...args),
+    },
     paymentImportItem: {
       findFirst: (...args: unknown[]) => paymentImportItemFindFirst(...args),
       update: (...args: unknown[]) => paymentImportItemUpdate(...args),
@@ -57,6 +61,15 @@ describe("payment-reconciliation — PAYROLL_CHECKOFF (Union thin-vertical finan
       expect(data.amount).toBe(45);
       expect(data.externalTransactionId).toBe("CHECKOFF-2026-07-P1-001");
       expect(data.matchedMemberId).toBe("member-1");
+    });
+
+    it("never uses a malformed payer email to match a member, but still preserves the raw text for human review", async () => {
+      const row = { "Payer Email": "not-an-email", Amount: "$45.00", "Transaction ID": "CHECKOFF-2026-07-P1-002" };
+      const data = await buildPaymentImportItemData("org-1", "PAYROLL_CHECKOFF", row);
+
+      expect(orgMemberFindFirst).not.toHaveBeenCalled();
+      expect(data.matchedMemberId).toBeNull();
+      expect(data.payerEmail).toBe("not-an-email");
     });
   });
 

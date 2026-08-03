@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { checkMemberLimit } from "@/lib/plan-gate";
+import { parseImportEmail } from "@/lib/email";
 
 /**
  * Bulk member-import logic shared by the CSV/Excel/SQLite importer
@@ -87,8 +88,13 @@ export async function importMembers(
       continue;
     }
 
+    const { email, error: emailError } = parseImportEmail(get("email"));
+    if (emailError) {
+      results.push({ row: i + 2, status: "error", message: emailError });
+      continue;
+    }
+
     try {
-      const email = get("email") || null;
       const existing = email
         ? await prisma.orgMember.findFirst({ where: { organizationId, email } })
         : null;

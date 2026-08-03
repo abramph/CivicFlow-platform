@@ -21,14 +21,20 @@ export function ImpersonateUserPanel({ organizationId, candidates }: { organizat
     return candidates.filter((c) => (c.displayName ?? "").toLowerCase().includes(q) || c.email.toLowerCase().includes(q) || c.role.toLowerCase().includes(q));
   }, [candidates, query]);
 
+  const trimmedReason = reason.trim();
+
   async function impersonate(targetUserId: string) {
+    if (!trimmedReason) {
+      setError("A reason is required to start an impersonation session.");
+      return;
+    }
     setPendingUserId(targetUserId);
     setError(null);
     try {
       const res = await fetch("/api/admin/impersonate/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ organizationId, targetUserId, reason: reason.trim() || null }),
+        body: JSON.stringify({ organizationId, targetUserId, reason: trimmedReason }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok) {
@@ -61,8 +67,9 @@ export function ImpersonateUserPanel({ organizationId, candidates }: { organizat
         <input
           value={reason}
           onChange={(e) => setReason(e.target.value)}
-          placeholder="Reason (optional, e.g. demo for prospect)"
-          aria-label="Reason for impersonating (optional)"
+          placeholder="Reason (required, e.g. 'member requested help with dues import')"
+          aria-label="Reason for impersonating (required)"
+          required
           className="w-72 rounded-lg border border-slate-300 px-3 py-2 text-sm"
         />
       </div>
@@ -86,7 +93,7 @@ export function ImpersonateUserPanel({ organizationId, candidates }: { organizat
                 <td className="px-3 py-2 text-right">
                   <button
                     type="button"
-                    disabled={pendingUserId === c.userId}
+                    disabled={pendingUserId === c.userId || !trimmedReason}
                     onClick={() => impersonate(c.userId)}
                     className="rounded-lg bg-amber-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-800 disabled:opacity-60"
                   >

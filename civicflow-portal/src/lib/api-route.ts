@@ -1,5 +1,5 @@
 import * as Sentry from "@sentry/nextjs";
-import { ForbiddenError, withForbiddenHandler } from "@/lib/auth-guards";
+import { ForbiddenError, UnauthenticatedError, OrganizationRequiredError, withForbiddenHandler } from "@/lib/auth-guards";
 import { MobileAuthError, MobileForbiddenError } from "@/lib/mobile-auth";
 import { ValidationError, jsonError } from "@/lib/validation";
 import { PlanFeatureError, PlanLimitError } from "@/lib/plan-gate";
@@ -20,6 +20,9 @@ export async function withApiErrorHandling(
         return jsonError(error.message, error.status, error.details);
       }
       if (error instanceof ForbiddenError) {
+        return jsonError(error.message, error.status);
+      }
+      if (error instanceof UnauthenticatedError || error instanceof OrganizationRequiredError) {
         return jsonError(error.message, error.status);
       }
       if (error instanceof PlanFeatureError) {

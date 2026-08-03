@@ -94,6 +94,21 @@ describe("importMembers — member-limit enforcement", () => {
     expect(results[0].message).toMatch(/blank/);
   });
 
+  it("rejects a row with a malformed email instead of silently storing it, and never creates the member", async () => {
+    checkMemberLimit.mockResolvedValueOnce({ allowed: true, current: 0, limit: 50 });
+    const { importMembers } = await import("../member-import");
+    const results = await importMembers(
+      [{ firstName: "Jane", lastName: "Doe", email: "not-an-email" }],
+      {},
+      "org-1",
+      false
+    );
+
+    expect(results[0].status).toBe("error");
+    expect(results[0].message).toMatch(/Invalid email/);
+    expect(orgMemberCreate).not.toHaveBeenCalled();
+  });
+
   it("reads a row correctly when the CSV header doesn't literally match the canonical field name (real column mapping)", async () => {
     // mapping is {csvHeader: canonicalField}, as built by the Import Data
     // UI's column-mapping step — a row keyed by the raw header only, with a

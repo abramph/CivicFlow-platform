@@ -111,7 +111,17 @@ async function handle(req: NextRequest): Promise<Response> {
     return NextResponse.next();
   }
 
-  const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
+  // next-auth's getToken() has a known issue (GHSA-xmf8-cvqr-rfgj) where a
+  // malformed Authorization header can throw instead of returning null. This
+  // middleware runs on nearly every request, so an uncaught throw here would
+  // fail closed for the whole app rather than just one route -- treat it the
+  // same as "no session" (redirect/deny) rather than letting it propagate.
+  let token: Awaited<ReturnType<typeof getToken>> = null;
+  try {
+    token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
+  } catch {
+    token = null;
+  }
 
   // Only ever preserved for this one allow-listed destination — a general
   // "redirect anywhere after login" mechanism would widen the open-redirect

@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import type { AttendanceStatus, MembershipStatus } from "@prisma/client";
 import { checkMemberLimit } from "@/lib/plan-gate";
+import { parseImportEmail } from "@/lib/email";
 
 // ---- Desktop export shape ----
 
@@ -124,6 +125,8 @@ export interface ImportCounts {
   members: number;
   /** Desktop members not imported because the organization's plan member limit was reached mid-import — see runMigrationImport's member loop. Upgrade the plan and re-run the import to bring in the rest (re-imports are safe/idempotent, deduped by email). */
   membersSkippedDueToLimit: number;
+  /** Desktop members whose exported email was malformed — the member is still imported, but without an email (never a "corrected" guess at the address), and counted here so the gap is visible instead of silently swallowed. */
+  membersWithInvalidEmail: number;
   events: number;
   campaigns: number;
   meetings: number;
@@ -165,6 +168,7 @@ export async function runMigrationImport(
     categories: 0,
     members: 0,
     membersSkippedDueToLimit: 0,
+    membersWithInvalidEmail: 0,
     events: 0,
     campaigns: 0,
     meetings: 0,
@@ -222,7 +226,8 @@ export async function runMigrationImport(
   for (const m of data.members ?? []) {
     if (!m.first_name && !m.last_name) continue;
 
-    const email = m.email?.trim().toLowerCase() || null;
+    const { email, error: emailError } = parseImportEmail(m.email);
+    if (emailError) counts.membersWithInvalidEmail++;
     const existing = email
       ? await prisma.orgMember.findFirst({
           where: { organizationId, email },
