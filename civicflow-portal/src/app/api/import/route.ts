@@ -1,7 +1,11 @@
 import { withApiErrorHandling } from "@/lib/api-route";
 import { requirePermission } from "@/lib/auth-guards";
 import { prisma } from "@/lib/prisma";
-import { importMembers, pickStr, parseDate } from "@/lib/member-import";
+import { importMembers, buildFieldGetter, parseDate } from "@/lib/member-import";
+import { importPtaHouseholds, importHoaProperties } from "@/lib/vertical-import";
+import { requirePtaAccess } from "@/lib/labs/pta/guard";
+import { requireHoaPropertyWrite, requireHoaResidentWrite } from "@/lib/hoa/guard";
+import { PERMISSIONS } from "@/lib/rbac";
 import * as XLSX from "xlsx";
 import Database from "better-sqlite3";
 import { writeFileSync, unlinkSync } from "fs";
@@ -90,10 +94,11 @@ async function importContributions(
   preview: boolean
 ) {
   const results: { row: number; status: "ok" | "error"; message?: string }[] = [];
+  const getField = buildFieldGetter(mapping);
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
-    const get = (field: string) => pickStr(row, mapping[field] ?? field);
+    const get = (field: string) => getField(row, field);
 
     const amount = parseMoney(get("amount"));
     const date = parseDate(get("contributionDate"));
@@ -152,10 +157,35 @@ async function importContributions(
 
 // ── route ─────────────────────────────────────────────────────────────────────
 
+const IMPORT_TYPES = ["members", "contributions", "pta-households", "hoa-properties"] as const;
+type ImportTypeValue = (typeof IMPORT_TYPES)[number];
+
+/**
+ * Permission gating is branched by import type rather than a single fixed
+ * permission, since "members:write" isn't the right gate for PTA households
+ * or HOA properties — those go through requirePtaAccess/requireHoaProperty*
+ * (which also check the organization's actual vertical, not just an RBAC
+ * permission string) so a Community-vertical org whose STAFF role happens to
+ * technically hold pta:households:manage can't use this to create PTA data.
+ */
+async function requireImportPermission(
+  importType: ImportTypeValue
+): Promise<{ organizationId: string; actorUserId: string; actorEmail: string | null }> {
+  if (importType === "pta-households") {
+    const { organizationId, session } = await requirePtaAccess(PERMISSIONS.PTA_HOUSEHOLDS_MANAGE);
+    return { organizationId, actorUserId: session.userId, actorEmail: session.userEmail ?? null };
+  }
+  if (importType === "hoa-properties") {
+    const { organizationId, session } = await requireHoaPropertyWrite();
+    await requireHoaResidentWrite();
+    return { organizationId, actorUserId: session.userId, actorEmail: session.userEmail ?? null };
+  }
+  const { organizationId, session } = await requirePermission("members:write", "throw");
+  return { organizationId, actorUserId: session.userId, actorEmail: session.userEmail ?? null };
+}
+
 export async function POST(request: Request) {
   return withApiErrorHandling(async () => {
-    const { organizationId } = await requirePermission("members:write", "throw");
-
     const contentLength = Number(request.headers.get("content-length") ?? 0);
     if (contentLength > MAX_BYTES) {
       return Response.json({ error: "File too large (max 10 MB)" }, { status: 413 });
@@ -163,11 +193,17 @@ export async function POST(request: Request) {
 
     const form = await request.formData();
     const file = form.get("file") as File | null;
-    const importType = String(form.get("type") ?? "");
+    const importTypeRaw = String(form.get("type") ?? "");
     const mappingRaw = String(form.get("mapping") ?? "{}");
     const preview = form.get("preview") === "1";
     const table = form.get("table") ? String(form.get("table")) : undefined;
     const listTables = form.get("listTables") === "1";
+
+    if (!IMPORT_TYPES.includes(importTypeRaw as ImportTypeValue)) {
+      return Response.json({ error: "Invalid import type" }, { status: 400 });
+    }
+    const importType = importTypeRaw as ImportTypeValue;
+    const { organizationId, actorUserId, actorEmail } = await requireImportPermission(importType);
 
     if (!file) return Response.json({ error: "No file uploaded" }, { status: 400 });
 
@@ -179,10 +215,6 @@ export async function POST(request: Request) {
     if (isSqlite && listTables) {
       const tables = getDbTables(buffer);
       return Response.json({ ok: true, tables });
-    }
-
-    if (!["members", "contributions"].includes(importType)) {
-      return Response.json({ error: "Invalid import type" }, { status: 400 });
     }
 
     let rows: Record<string, string>[];
@@ -217,8 +249,12 @@ export async function POST(request: Request) {
     let results;
     if (importType === "members") {
       results = await importMembers(rows, mapping, organizationId, false);
-    } else {
+    } else if (importType === "contributions") {
       results = await importContributions(rows, mapping, organizationId, false);
+    } else if (importType === "pta-households") {
+      results = await importPtaHouseholds(rows, mapping, organizationId, actorUserId, actorEmail, false);
+    } else {
+      results = await importHoaProperties(rows, mapping, organizationId, actorUserId, actorEmail, false);
     }
 
     const imported = results.filter((r) => r.status === "ok").length;
