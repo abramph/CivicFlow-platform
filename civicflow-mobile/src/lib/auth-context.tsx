@@ -18,6 +18,32 @@ export interface MobileOrganizationPtaAccess {
   canApproveHours: boolean;
 }
 
+/**
+ * Mirrors the `capability` object /api/mobile/organizations has sent on
+ * every row since PR #43 (src/app/api/mobile/organizations/route.ts's
+ * OrgCapability) — this client-side type previously discarded all of it
+ * except `pta`, so an HOA/Union org looked identical to a plain Community
+ * one in the org switcher despite the server already computing per-vertical
+ * terminology/capabilities specifically for mobile to use. Optional because
+ * a defensively-mocked or older cached response may omit it; every consumer
+ * must handle that case rather than assume it's always present.
+ */
+export interface MobileOrganizationCapability {
+  primaryVertical: string;
+  terminology: {
+    productLabel: string;
+    member: string;
+    dashboardTitle: string;
+  };
+  quickActions: { href: string; label: string }[];
+  supportedModules: string[];
+  landingPage: string;
+  capabilities: {
+    properties: boolean;
+    propertyResidents: boolean;
+  };
+}
+
 export interface MobileOrganization {
   organizationId: string;
   organizationName: string;
@@ -30,6 +56,7 @@ export interface MobileOrganization {
   isDelinquent: boolean;
   /** Null when this org has no PTA relevance for the caller at all (a regular member-only org). */
   pta: MobileOrganizationPtaAccess | null;
+  capability?: MobileOrganizationCapability;
 }
 
 interface TokenPair {

@@ -137,6 +137,7 @@ function MfaSetupFlow({ onDone }: { onDone: () => void }) {
               inputMode="numeric"
               autoComplete="one-time-code"
               placeholder="000 000"
+              aria-label="Confirmation code from your authenticator app"
               value={confirmCode}
               onChange={(e) => setConfirmCode(e.target.value)}
               maxLength={7}
@@ -246,6 +247,7 @@ function PhoneBackupSection({ initialMaskedPhone }: { initialMaskedPhone: string
               <input
                 type="tel"
                 placeholder="+15551234567"
+                aria-label="Phone number for SMS backup code"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-emerald-500 focus:outline-none"
@@ -264,6 +266,7 @@ function PhoneBackupSection({ initialMaskedPhone }: { initialMaskedPhone: string
                 type="text"
                 inputMode="numeric"
                 placeholder="000000"
+                aria-label="SMS verification code"
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
                 maxLength={6}
@@ -345,6 +348,7 @@ function DisableMfaForm({ onDone }: { onDone: () => void }) {
         <input
           type="password"
           placeholder="Enter your password"
+          aria-label="Password to confirm disabling MFA"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           className="flex-1 rounded-lg border border-red-300 px-3 py-2 text-sm text-slate-900 focus:border-red-500 focus:outline-none"

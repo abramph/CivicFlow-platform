@@ -247,6 +247,32 @@ describe("sendCommunicationCampaign", () => {
     expect(result.failed).toBeGreaterThanOrEqual(1);
   });
 
+  it("skips email for a recipient who opted out via commsEmailEnabled, without ever calling sendEmail", async () => {
+    findFirstCampaign.mockResolvedValueOnce(makeCampaign());
+    findManyRecipient.mockResolvedValueOnce([
+      makeRecipient("r1", { member: { commsEmailEnabled: false } }),
+    ]);
+    countRecipient.mockResolvedValueOnce(0).mockResolvedValueOnce(0).mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+
+    const result = await sendCommunicationCampaign({ organizationId: "org-a", campaignId: "campaign-1" });
+
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(result.skipped).toBe(1);
+    expect(updateRecipient).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ errorMessage: "Member opted out of email notifications" }) })
+    );
+  });
+
+  it("still sends email to a recipient with no linked member record (manual/non-member recipient)", async () => {
+    findFirstCampaign.mockResolvedValueOnce(makeCampaign());
+    findManyRecipient.mockResolvedValueOnce([makeRecipient("r1", { member: null })]);
+    countRecipient.mockResolvedValueOnce(0).mockResolvedValueOnce(1).mockResolvedValueOnce(0).mockResolvedValueOnce(0);
+
+    await sendCommunicationCampaign({ organizationId: "org-a", campaignId: "campaign-1" });
+
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+  });
+
   it("blocks an EMAIL-channel send and marks the campaign FAILED (not retried) when the org has since been downgraded off emailCampaigns", async () => {
     findFirstCampaign.mockResolvedValueOnce(makeCampaign({ status: "READY" }));
     findUniqueOrganization.mockResolvedValueOnce({

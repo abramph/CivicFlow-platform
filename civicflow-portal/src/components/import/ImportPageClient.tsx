@@ -279,7 +279,16 @@ export function ImportPageClient({ capabilities }: { capabilities: Record<Capabi
               onDrop={handleDrop}
               onDragOver={(e) => e.preventDefault()}
               onClick={() => fileRef.current?.click()}
-              className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 px-6 py-16 text-center hover:border-emerald-400 hover:bg-emerald-50 transition-colors"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  fileRef.current?.click();
+                }
+              }}
+              role="button"
+              tabIndex={0}
+              aria-label="Drop your file here or press Enter to browse for a file"
+              className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 px-6 py-16 text-center hover:border-emerald-400 hover:bg-emerald-50 transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500"
             >
               <div className="text-4xl mb-3">📂</div>
               <p className="font-semibold text-slate-700">Drop your file here or click to browse</p>

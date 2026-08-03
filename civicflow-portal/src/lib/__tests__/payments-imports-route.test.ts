@@ -71,6 +71,16 @@ describe("POST /api/payments/imports — PAYROLL_CHECKOFF source", () => {
     expect(batchCreate).not.toHaveBeenCalled();
   });
 
+  it("rejects a csvText payload over the 50 MB cap without ever creating a batch (readiness-audit finding: this was previously unbounded)", async () => {
+    requirePermission.mockResolvedValueOnce(authed);
+    const oversized = "a".repeat(50 * 1024 * 1024 + 1);
+
+    const response = await POST(postRequest({ sourceType: "PAYROLL_CHECKOFF", csvText: oversized }));
+
+    expect(response.status).toBe(400);
+    expect(batchCreate).not.toHaveBeenCalled();
+  });
+
   it("accepts PAYROLL_CHECKOFF as a valid sourceType and creates the batch scoped to the caller's organization only", async () => {
     requirePermission.mockResolvedValueOnce(authed);
     batchCreate.mockResolvedValueOnce({ id: "batch-1" });

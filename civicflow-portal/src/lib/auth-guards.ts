@@ -72,9 +72,19 @@ export async function requireAuth(): Promise<AuthedSession> {
 /**
  * Requires an authenticated session AND an active organization membership.
  * organizationId and role are always taken from the server session.
- * Redirects to /login if not authenticated, /onboarding/organization if no org.
+ *
+ * @param onFail "redirect" (default, for Server Components/pages) — redirects
+ *               to /login if not authenticated, /onboarding/organization if no
+ *               active org. "throw" (for Route Handlers) — throws
+ *               UnauthenticatedError (401) / OrganizationRequiredError (409)
+ *               instead, so withApiErrorHandling can return clean JSON rather
+ *               than an unhandled 500 from a redirect() called outside a page
+ *               (see GitHub issue #41 — this was the root cause: an active
+ *               organization/membership becoming invalid mid-session used to
+ *               surface as an uncaught 500 from any API route calling this
+ *               without a safe mode).
  */
-export async function requireOrganization(): Promise<{
+export async function requireOrganization(onFail: "redirect" | "throw" = "redirect"): Promise<{
   session: OrgSession;
   organizationId: string;
   role: Role;
@@ -83,10 +93,12 @@ export async function requireOrganization(): Promise<{
   const session = await getServerSession(authOptions);
 
   if (!session?.userId) {
+    if (onFail === "throw") throw new UnauthenticatedError();
     redirect("/login");
   }
 
   if (!session.organizationId || !session.role) {
+    if (onFail === "throw") throw new OrganizationRequiredError();
     redirect("/onboarding/organization");
   }
 
@@ -114,7 +126,7 @@ export async function requirePermission(
   permission: Permission,
   onForbidden: "redirect" | "throw" = "redirect"
 ): Promise<{ session: OrgSession; organizationId: string; role: Role; can: PermissionChecker }> {
-  const { session, organizationId, role, can } = await requireOrganization();
+  const { session, organizationId, role, can } = await requireOrganization(onForbidden);
 
   if (!can(permission)) {
     if (onForbidden === "throw") {
@@ -136,7 +148,7 @@ export async function requireRole(
   minimumRole: Role,
   onForbidden: "redirect" | "throw" = "redirect"
 ): Promise<{ session: OrgSession; organizationId: string; role: Role; can: PermissionChecker }> {
-  const { session, organizationId, role, can } = await requireOrganization();
+  const { session, organizationId, role, can } = await requireOrganization(onForbidden);
 
   if (!roleAtLeast(role, minimumRole)) {
     if (onForbidden === "throw") {
@@ -215,6 +227,24 @@ export class ForbiddenError extends Error {
   constructor(message = "Forbidden") {
     super(message);
     this.name = "ForbiddenError";
+  }
+}
+
+/** No valid session at all. Thrown only when a guard is called with onFail/onForbidden: "throw" — the redirect() default is used everywhere else. */
+export class UnauthenticatedError extends Error {
+  readonly status = 401;
+  constructor(message = "Authentication required") {
+    super(message);
+    this.name = "UnauthenticatedError";
+  }
+}
+
+/** Authenticated, but the session has no active organization/membership — e.g. the last active membership was just removed, or the active organization became inactive, mid-session. 409 (not 403): the client's own state is stale/conflicting with the server's, not a permission denial. */
+export class OrganizationRequiredError extends Error {
+  readonly status = 409;
+  constructor(message = "No active organization for this session. Please select an organization.") {
+    super(message);
+    this.name = "OrganizationRequiredError";
   }
 }
 

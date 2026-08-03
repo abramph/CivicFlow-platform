@@ -35,7 +35,14 @@ export default function OrgSwitcherScreen() {
             accessibilityLabel={`${item.organizationName}${item.isDelinquent ? ', dues past due' : ''}`}
             accessibilityState={{ selected: item.organizationId === selectedOrganizationId }}
           >
-            <ThemedText type="smallBold">{item.organizationName}</ThemedText>
+            <ThemedView style={styles.nameRow}>
+              <ThemedText type="smallBold">{item.organizationName}</ThemedText>
+              {item.capability ? (
+                <ThemedText type="small" themeColor="textSecondary" style={styles.verticalTag}>
+                  {item.capability.terminology.productLabel}
+                </ThemedText>
+              ) : null}
+            </ThemedView>
             <ThemedText type="small" themeColor="textSecondary">
               {item.firstName} {item.lastName}
               {item.isDelinquent ? ' · Dues past due' : ''}
@@ -79,6 +86,14 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: Spacing.three,
     gap: 4,
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+  },
+  verticalTag: {
+    textTransform: 'uppercase',
   },
   rowSelected: {
     borderColor: '#047857',

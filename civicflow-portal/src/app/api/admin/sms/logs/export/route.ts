@@ -4,15 +4,10 @@ import { withApiErrorHandling } from "@/lib/api-route";
 import { createAuditEvent } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 import { maskPhone } from "@/lib/sms-otp";
+import { csvCell, sanitizeFormulaCell } from "@/lib/csv-safety";
 
 const EXPORT_LIMIT = 5000;
 const FORMATS = new Set(["csv", "xlsx"]);
-
-function csvEscape(value: unknown) {
-  const text = String(value ?? "");
-  if (/[",\n\r]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
-  return text;
-}
 
 function exportDateStamp() {
   return new Date().toISOString().slice(0, 10).replace(/-/g, "");
@@ -66,8 +61,8 @@ export async function GET(request: Request) {
 
     const rows = messages.map((message) => ({
       Date: message.createdAt.toISOString(),
-      Organization: message.organization.name,
-      Member: message.member ? `${message.member.firstName} ${message.member.lastName}` : "",
+      Organization: sanitizeFormulaCell(message.organization.name),
+      Member: sanitizeFormulaCell(message.member ? `${message.member.firstName} ${message.member.lastName}` : ""),
       Phone: maskPhone(message.phone),
       "Message Type": message.campaignId ? "Campaign" : "Direct",
       Status: message.status,
@@ -113,7 +108,7 @@ export async function GET(request: Request) {
         Cost: "",
       }
     );
-    const csv = [headers.join(","), ...rows.map((row) => headers.map((h) => csvEscape((row as Record<string, unknown>)[h])).join(","))].join(
+    const csv = [headers.join(","), ...rows.map((row) => headers.map((h) => csvCell((row as Record<string, unknown>)[h])).join(","))].join(
       "\r\n"
     );
     return new Response(csv, {

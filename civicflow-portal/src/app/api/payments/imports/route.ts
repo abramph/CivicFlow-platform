@@ -9,10 +9,17 @@ import { parseJsonBody, z } from "@/lib/validation";
 
 const sourceTypes = ["ZELLE", "CASH_APP", "VENMO", "PAYPAL", "STRIPE", "BANK", "MANUAL_CSV", "PAYROLL_CHECKOFF", "OTHER"] as const;
 
+// Every other import path in the app (generic CSV, migration upload) enforces
+// a file-size cap; this one previously had none at all -- csvText arrives as
+// plain JSON body text rather than a multipart file upload, but an unbounded
+// string is still an unbounded-memory/DoS risk. 50 MB of text mirrors the
+// generic import route's own file-size limit (src/app/api/import/route.ts).
+const MAX_CSV_TEXT_LENGTH = 50 * 1024 * 1024;
+
 const createImportSchema = z.object({
   sourceType: z.enum(sourceTypes),
   fileName: z.union([z.string().max(255), z.literal(""), z.null()]).optional(),
-  csvText: z.string().min(1),
+  csvText: z.string().min(1).max(MAX_CSV_TEXT_LENGTH, "CSV text is too large (max 50 MB)"),
   notes: z.union([z.string().max(2000), z.literal(""), z.null()]).optional(),
 });
 

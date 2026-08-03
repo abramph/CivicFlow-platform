@@ -205,7 +205,7 @@ export function MemberPortalShell({ children }: { children: ReactNode }) {
         <SmsOptInBanner organizationId={organizationId} memberId={memberId} />
       ) : null}
 
-      {children}
+      <main id="main-content">{children}</main>
     </div>
   );
 }

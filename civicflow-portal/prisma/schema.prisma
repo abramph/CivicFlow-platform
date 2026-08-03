@@ -735,6 +735,14 @@ model AuditEvent {
   after          Json?
   ipAddress      String?
   userAgent      String?
+  /// Set when actorId/actorEmail above are the IMPERSONATED user, not the
+  /// person who actually performed the action — the real Platform Admin's
+  /// own id/email, denormalized like actorEmail rather than a relation, so
+  /// the audit trail doesn't silently attribute admin-driven actions to the
+  /// member being impersonated. Populated automatically by createAuditEvent()
+  /// from the active impersonation cookie; never set directly by callers.
+  impersonatedByUserId String?
+  impersonatedByEmail  String?
   createdAt      DateTime @default(now())
 
   organization Organization? @relation(fields: [organizationId], references: [id])

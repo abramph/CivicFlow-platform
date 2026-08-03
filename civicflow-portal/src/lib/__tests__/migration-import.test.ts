@@ -95,4 +95,25 @@ describe("runMigrationImport — member-limit enforcement", () => {
     expect(counts.members).toBe(0);
     expect(counts.membersSkippedDueToLimit).toBe(0);
   });
+
+  it("imports a member with a malformed email without the email (never silently storing or guessing a fix), and counts it", async () => {
+    checkMemberLimit.mockResolvedValueOnce({ allowed: true, current: 0, limit: 50 });
+    const { runMigrationImport } = await import("../migration-import");
+    const members = [{ id: 1, first_name: "Jane", last_name: "Doe", email: "not-an-email" }];
+    const counts = await runMigrationImport("org-1", { members });
+
+    expect(counts.membersWithInvalidEmail).toBe(1);
+    expect(orgMemberCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ email: null }) })
+    );
+  });
+
+  it("does not count a blank desktop email as invalid", async () => {
+    checkMemberLimit.mockResolvedValueOnce({ allowed: true, current: 0, limit: 50 });
+    const { runMigrationImport } = await import("../migration-import");
+    const members = [{ id: 1, first_name: "Jane", last_name: "Doe", email: null }];
+    const counts = await runMigrationImport("org-1", { members });
+
+    expect(counts.membersWithInvalidEmail).toBe(0);
+  });
 });

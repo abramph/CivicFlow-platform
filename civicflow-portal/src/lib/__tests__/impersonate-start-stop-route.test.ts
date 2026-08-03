@@ -51,7 +51,11 @@ describe("POST /api/admin/impersonate/start", () => {
     findFirstMembership.mockResolvedValueOnce(null);
 
     const res = await startImpersonation(
-      jsonRequest("https://portal.test/api/admin/impersonate/start", { organizationId: "org-a", targetUserId: "target-1" })
+      jsonRequest("https://portal.test/api/admin/impersonate/start", {
+        organizationId: "org-a",
+        targetUserId: "target-1",
+        reason: "checking a support ticket",
+      })
     );
     const data = await res.json();
 
@@ -59,6 +63,31 @@ describe("POST /api/admin/impersonate/start", () => {
     expect(data.ok).toBe(false);
     expect(cookieStore.has(IMPERSONATION_COOKIE)).toBe(false);
     expect(createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("rejects starting a session without a reason — impersonation must always carry an auditable support reason", async () => {
+    const res = await startImpersonation(
+      jsonRequest("https://portal.test/api/admin/impersonate/start", { organizationId: "org-a", targetUserId: "target-1" })
+    );
+    const data = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(data.ok).toBe(false);
+    expect(findFirstMembership).not.toHaveBeenCalled();
+    expect(cookieStore.has(IMPERSONATION_COOKIE)).toBe(false);
+  });
+
+  it("rejects starting a session with a blank/whitespace-only reason", async () => {
+    const res = await startImpersonation(
+      jsonRequest("https://portal.test/api/admin/impersonate/start", {
+        organizationId: "org-a",
+        targetUserId: "target-1",
+        reason: "   ",
+      })
+    );
+
+    expect(res.status).toBe(400);
+    expect(findFirstMembership).not.toHaveBeenCalled();
   });
 
   it("sets both cookies, preserving the admin's prior active org, and writes a started audit event", async () => {

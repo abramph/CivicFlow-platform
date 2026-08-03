@@ -2,20 +2,7 @@ import { requirePermission } from "@/lib/auth-guards";
 import { withApiErrorHandling } from "@/lib/api-route";
 import { createAuditEvent } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
-
-/** Neutralizes spreadsheet formula injection (a leading =, +, -, @, tab, or
- * CR makes Excel/Sheets treat the cell as a formula) by prefixing a literal
- * apostrophe, then applies standard CSV quoting on top. Scoped to this
- * export only — not a change to the shared exporters.ts used elsewhere. */
-function csvCell(value: unknown): string {
-  let text = value === null || value === undefined ? "" : String(value);
-  if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
-  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-}
-
-function csvRow(values: unknown[]): string {
-  return values.map(csvCell).join(",");
-}
+import { csvRow } from "@/lib/csv-safety";
 
 /**
  * Same permission as the roster (attendance:read) — an export is just the

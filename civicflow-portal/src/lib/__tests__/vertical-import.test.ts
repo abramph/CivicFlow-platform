@@ -189,6 +189,18 @@ describe("importPtaHouseholds", () => {
     expect(ptaHouseholdFindFirst).not.toHaveBeenCalled();
     expect(createPtaHousehold).not.toHaveBeenCalled();
   });
+
+  it("rejects a row with a malformed contact email instead of silently storing it, without touching the database", async () => {
+    const { importPtaHouseholds } = await import("../vertical-import");
+    const rows = [{ householdName: "The Smiths", schoolYear: "2026-2027", contactName: "Jordan Smith", contactEmail: "not-an-email" }];
+
+    const results = await importPtaHouseholds(rows, {}, "org-1", actor.actorUserId, actor.actorEmail, false);
+
+    expect(results[0].status).toBe("error");
+    expect(results[0].message).toMatch(/Invalid email/);
+    expect(ptaHouseholdFindFirst).not.toHaveBeenCalled();
+    expect(createPtaHousehold).not.toHaveBeenCalled();
+  });
 });
 
 describe("importHoaProperties", () => {
@@ -349,5 +361,18 @@ describe("importHoaProperties", () => {
     expect(results).toEqual([{ row: 2, status: "ok" }]);
     expect(checkMemberLimit).not.toHaveBeenCalled();
     expect(propertyFindFirst).not.toHaveBeenCalled();
+  });
+
+  it("rejects a row with a malformed owner email instead of silently storing it, without creating the property", async () => {
+    checkMemberLimit.mockResolvedValueOnce({ current: 5, limit: 500 });
+    const { importHoaProperties } = await import("../vertical-import");
+    const rows = [{ addressLine1: "142 Oak Ridge Drive", ownerFirstName: "Taylor", ownerEmail: "not-an-email" }];
+
+    const results = await importHoaProperties(rows, {}, "org-1", actor.actorUserId, actor.actorEmail, false);
+
+    expect(results[0].status).toBe("error");
+    expect(results[0].message).toMatch(/Invalid email/);
+    expect(propertyFindFirst).not.toHaveBeenCalled();
+    expect(createProperty).not.toHaveBeenCalled();
   });
 });

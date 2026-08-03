@@ -248,7 +248,7 @@ export function PortalShell({ children }: { children: ReactNode }) {
             </div>
           </header>
 
-          <main className="flex-1 px-4 py-6 md:px-6">{children}</main>
+          <main id="main-content" className="flex-1 px-4 py-6 md:px-6">{children}</main>
         </div>
       </div>
     </div>

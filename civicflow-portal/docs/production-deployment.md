@@ -102,10 +102,39 @@ See [`sms-setup.md`](./sms-setup.md) for full detail: `SMS_PROVIDER`, `TWILIO_AC
   6e4f35b1-ad49-4c92-b025-97b7d12d7ace --type run`, which is not real-time alerting — someone has
   to go looking. Setting up a real Sentry project (or equivalent) and wiring the DSN in is the
   single highest-leverage monitoring improvement available.
+- **Deep dependency health**: `GET /api/health/deep` (platform-admin-only, deliberately separate
+  from the plain `/api/health` DO's platform health check polls every 30s — see the route's own doc
+  comment) checks live database connectivity, environment-config validity, and whether
+  email/Stripe/object-storage/Sentry are configured at all. This is a pull-based check an admin
+  hits manually or scripts a periodic curl against — it is **not** push-based alerting; nothing
+  today notices on its own if a dependency goes down between checks.
 - **Deployment health**: `doctl apps list-deployments ... --format ID,Phase,Progress,Cause` after
   every push; DO App Platform also exposes basic CPU/memory graphs in its web console.
 - **Database health**: DO Managed Database dashboard shows connection count, CPU, disk usage, and
   slow query insights for the `civicflowprod` cluster.
+
+### What's not real yet, and exactly what wiring it up requires
+
+There is no push-based alerting today — nothing pages anyone when something breaks. Confirmed via
+the DO app spec: no `SLACK_WEBHOOK_URL`, `PAGERDUTY_*`, or equivalent secret exists at all, so there
+is no code to "turn on" — this would be new integration work, not a misconfigured existing one.
+Standing plan for when that's actually justified (do not build this speculatively — see this
+project's own "no speculative infrastructure" rule):
+
+1. **Error alerting (Sentry)**: create a real Sentry project, set `NEXT_PUBLIC_SENTRY_DSN` in the
+   app spec, redeploy. Every `Sentry.captureException` call already in the codebase starts
+   reporting immediately — no code change needed, only the account + secret. Configure Sentry's own
+   alert rules (e.g. "new issue type" or "error rate spike") to notify a real channel (email or a
+   Slack integration configured inside Sentry itself, which needs no app-side code at all).
+2. **Uptime/dependency alerting**: either (a) point an external uptime service (e.g. DO's own
+   "Uptime" product, or a third-party one) at `/api/health` for basic up/down, or (b) add a
+   scheduled job (DO App Platform's own cron-job component, or an external scheduler) that hits
+   `/api/health/deep` periodically and posts to a webhook on failure. (b) requires a
+   `PLATFORM_ADMIN`-scoped service credential for that endpoint plus a real webhook URL (Slack
+   incoming webhook, PagerDuty Events API, etc.) — neither exists today, and creating third-party
+   accounts on the organization's behalf is outside what this audit will do unilaterally.
+3. **Do not** wire a webhook URL that isn't real/tested — a silently-broken alert channel is worse
+   than an documented absence of one, since it creates false confidence.
 
 ## Mobile deployment
 

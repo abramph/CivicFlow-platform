@@ -5,6 +5,7 @@ import { createPtaHousehold, addPtaHouseholdAdult, addPtaStudent } from "@/lib/l
 import { PtaError } from "@/lib/labs/pta/errors";
 import { createProperty, assignPropertyResident } from "@/lib/hoa/properties";
 import { HoaError } from "@/lib/hoa/errors";
+import { parseImportEmail } from "@/lib/email";
 
 /**
  * Vertical-specific CSV/Excel/SQLite bulk-import support, layered onto the
@@ -63,6 +64,12 @@ export async function importPtaHouseholds(
       continue;
     }
 
+    const { email: contactEmail, error: contactEmailError } = parseImportEmail(get("contactEmail"));
+    if (contactEmailError) {
+      results.push({ row: i + 2, status: "error", message: contactEmailError });
+      continue;
+    }
+
     if (preview) {
       results.push({ row: i + 2, status: "ok" });
       continue;
@@ -102,7 +109,7 @@ export async function importPtaHouseholds(
         organizationId,
         householdId: household.id,
         name: contactName,
-        email: get("contactEmail") || null,
+        email: contactEmail,
         phone: get("contactPhone") || null,
         makePrimaryContact: true,
         actorUserId,
@@ -201,6 +208,12 @@ export async function importHoaProperties(
       continue;
     }
 
+    const { email: ownerEmail, error: ownerEmailError } = parseImportEmail(get("ownerEmail"));
+    if (ownerEmailError) {
+      results.push({ row: i + 2, status: "error", message: ownerEmailError });
+      continue;
+    }
+
     if (preview) {
       results.push({ row: i + 2, status: "ok" });
       continue;
@@ -233,7 +246,6 @@ export async function importHoaProperties(
       const ownerFirstName = get("ownerFirstName");
       const ownerLastName = get("ownerLastName");
       if (ownerFirstName || ownerLastName) {
-        const ownerEmail = get("ownerEmail") || null;
         const existingMember = ownerEmail
           ? await prisma.orgMember.findFirst({ where: { organizationId, email: ownerEmail }, select: { id: true } })
           : null;

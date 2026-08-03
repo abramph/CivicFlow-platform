@@ -62,4 +62,34 @@ describe('Organization switching', () => {
 
     expect(mockLogout).toHaveBeenCalled();
   });
+
+  it('shows the vertical label next to an organization that has capability data, and nothing extra for one that does not', async () => {
+    mockUseAuth.mockReturnValue({
+      organizations: [
+        {
+          organizationId: 'org-hoa',
+          organizationName: 'Oak Ridge HOA',
+          firstName: 'Robin',
+          lastName: 'Park',
+          isDelinquent: false,
+          capability: {
+            primaryVertical: 'HOA',
+            terminology: { productLabel: 'HOA', member: 'Resident', dashboardTitle: 'HOA Dashboard' },
+            quickActions: [],
+            supportedModules: ['dashboard'],
+            landingPage: 'dashboard',
+            capabilities: { properties: true, propertyResidents: true },
+          },
+        },
+        ...organizations(),
+      ],
+      selectedOrganizationId: 'org-hoa',
+      selectOrganization: mockSelectOrganization,
+      logout: mockLogout,
+    });
+
+    await render(<OrgSwitcherScreen />);
+
+    await waitFor(() => expect(screen.getByText('HOA')).toBeTruthy());
+  });
 });
