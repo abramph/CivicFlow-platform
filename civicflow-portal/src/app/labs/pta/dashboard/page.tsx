@@ -1,7 +1,11 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { getPtaPageGate } from "@/lib/labs/pta/guard";
 import { getPtaProfile } from "@/lib/labs/pta/profile";
 import { getPtaDashboardMetrics } from "@/lib/labs/pta/dashboard";
+import { prisma } from "@/lib/prisma";
+import { setupBannerDismissCookieName } from "@/lib/dashboard-setup";
+import { DismissSetupBannerButton } from "@/components/app/DismissSetupBannerButton";
 import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { EmptyState } from "@/components/admin/OperationsUI";
 import { PtaLabsBadge } from "@/components/labs/pta/PtaLabsBadge";
@@ -36,6 +40,25 @@ export default async function PtaDashboardPage() {
 
   const metrics = await getPtaDashboardMetrics(organizationId, profile.currentSchoolYear);
 
+  // Parity fix: the generic (portal)/dashboard, /settings/dues, and HOA/Union
+  // dashboards all show an ongoing "Finish organization setup" nag banner
+  // (see src/app/(portal)/dashboard/page.tsx) driven by real DB counts and
+  // dismissible via the same cookie every vertical shares
+  // (setupBannerDismissCookieName / dismiss-setup-banner route) -- PTA had
+  // the one-time /labs/pta/onboarding checklist but no equivalent recurring
+  // nudge once an officer navigates away without finishing setup. Reuses the
+  // exact same householdsCount/duesChargeCount signals the onboarding
+  // checklist already uses, and the same generic dismiss cookie/route (no
+  // new infrastructure).
+  const [householdsCount, duesChargeCount] = await Promise.all([
+    prisma.ptaHousehold.count({ where: { organizationId, schoolYear: profile.currentSchoolYear } }),
+    prisma.duesCharge.count({ where: { organizationId, member: { ptaHouseholdBilling: { isNot: null } } } }),
+  ]);
+  const noHouseholdsYet = householdsCount === 0;
+  const noDuesSetUpYet = duesChargeCount === 0;
+  const setupBannerDismissed = Boolean((await cookies()).get(setupBannerDismissCookieName(organizationId))?.value);
+  const showSetupBanner = !setupBannerDismissed && (noHouseholdsYet || noDuesSetUpYet);
+
   const quickActions: { href: string; label: string; visible: boolean }[] = [
     { href: "/labs/pta/households/new", label: "Add a household", visible: can("pta:households:manage") },
     { href: "/labs/pta/dues", label: "Review dues & payments", visible: can("pta:dues:manage") },
@@ -49,6 +72,24 @@ export default async function PtaDashboardPage() {
     <main className="space-y-6">
       <PtaLabsBadge />
       <PageHeader title={`${profile.schoolOrPtaName} Dashboard`} description={`School year ${profile.currentSchoolYear}. All metrics below are aggregate counts — never a student name.`} />
+
+      {showSetupBanner && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-5 shadow-sm">
+          <div className="flex items-start justify-between gap-4">
+            <h3 className="text-lg font-semibold text-amber-950">Finish PTA setup</h3>
+            <DismissSetupBannerButton />
+          </div>
+          <p className="mt-2 text-sm leading-6 text-amber-900">Some setup areas still need attention before this school year is fully configured.</p>
+          <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-amber-900">
+            {noHouseholdsYet && <li>Add your first household.</li>}
+            {noDuesSetUpYet && <li>Create this year&apos;s dues charges.</li>}
+          </ul>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <Link href="/labs/pta/households/new" className="rounded-lg bg-amber-600 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-700">Add a Household</Link>
+            <Link href="/labs/pta/dues" className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-950 hover:bg-amber-100">Go to Dues</Link>
+          </div>
+        </div>
+      )}
 
       {quickActions.length > 0 ? (
         <SectionCard title="Quick actions">

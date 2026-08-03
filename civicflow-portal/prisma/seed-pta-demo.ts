@@ -18,12 +18,11 @@
  * it never touches any other organization's data.
  */
 
-import { loadEnvConfig } from "@next/env";
 import type { PrismaClient as PrismaClientType } from "@prisma/client";
 import bcrypt from "bcryptjs";
-import { resolvePtaTargetMemberIds } from "../src/lib/labs/pta/communications";
+import { assertNotProduction, loadDemoEnv } from "./seed-demo-guard";
 
-loadEnvConfig(process.cwd());
+loadDemoEnv();
 
 let prisma: PrismaClientType;
 
@@ -56,8 +55,21 @@ async function findOrCreateDuesAccount(organizationId: string, memberId: string)
 }
 
 async function main() {
+  assertNotProduction();
   const { PrismaClient } = await import("@prisma/client");
   prisma = new PrismaClient();
+  // Dynamic, not static -- a static top-level import of this module (which
+  // transitively imports @/lib/prisma -> @prisma/client) previously ran
+  // BEFORE loadDemoEnv() above, because ES module imports are hoisted ahead
+  // of any other top-level code in the importing file regardless of source
+  // order. @prisma/client bundles its own dotenv loader that reads the
+  // plain, no-suffix .env (production, in this repo) and -- since dotenv
+  // never overrides an already-set process.env key -- that silently won it
+  // over loadDemoEnv()'s later, correct .env.development.local load. Moving
+  // this to a dynamic import here, after loadDemoEnv() has already run,
+  // closes that gap the same way the @prisma/client import above already
+  // avoids it.
+  const { resolvePtaTargetMemberIds } = await import("../src/lib/labs/pta/communications");
 
   console.log("Seeding fictional Pine Grove School PTA demo data...\n");
 

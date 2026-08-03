@@ -16,6 +16,8 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:pta-demo": "tsx prisma/seed-pta-demo.ts",
     "db:seed:hoa-demo": "tsx prisma/seed-hoa-demo.ts",
+    "db:seed:union-demo": "tsx prisma/seed-union-demo.ts",
+    "db:seed:all-demos": "tsx prisma/seed-pta-demo.ts && tsx prisma/seed-hoa-demo.ts && tsx prisma/seed-union-demo.ts",
     "db:studio": "prisma studio",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

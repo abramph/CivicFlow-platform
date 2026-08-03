@@ -18,12 +18,12 @@
  * The seed is idempotent: running it twice does not create duplicate records.
  */
 
-import { loadEnvConfig } from "@next/env";
 import type { PrismaClient as PrismaClientType } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { assertNotProduction, loadDemoEnv } from "./seed-demo-guard";
 
 // Align direct tsx seed execution with Next/Prisma local env behavior.
-loadEnvConfig(process.cwd());
+loadDemoEnv();
 
 let prisma: PrismaClientType;
 
@@ -34,6 +34,7 @@ async function hash(plaintext: string): Promise<string> {
 }
 
 async function main() {
+  assertNotProduction();
   const { PrismaClient } = await import("@prisma/client");
   prisma = new PrismaClient();
 
