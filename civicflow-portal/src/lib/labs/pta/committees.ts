@@ -10,11 +10,11 @@ export async function createPtaCommittee(organizationId: string, name: string, d
 }
 
 export async function listPtaCommittees(organizationId: string) {
-  return prisma.ptaCommittee.findMany({ where: { organizationId }, include: { chair: true, members: { include: { householdAdult: true } } }, orderBy: { name: "asc" } });
+  return prisma.ptaCommittee.findMany({ where: { organizationId }, include: { chair: true, coChair: true, members: { include: { householdAdult: true } } }, orderBy: { name: "asc" } });
 }
 
 export async function getPtaCommittee(organizationId: string, committeeId: string) {
-  const committee = await prisma.ptaCommittee.findFirst({ where: { id: committeeId, organizationId }, include: { chair: true, members: { include: { householdAdult: true } } } });
+  const committee = await prisma.ptaCommittee.findFirst({ where: { id: committeeId, organizationId }, include: { chair: true, coChair: true, members: { include: { householdAdult: true } } } });
   if (!committee) throw new PtaError("PTA_COMMITTEE_NOT_FOUND", "Committee not found in this organization.");
   return committee;
 }
@@ -30,6 +30,24 @@ export async function setPtaCommitteeChair(organizationId: string, committeeId: 
 
   const updated = await prisma.ptaCommittee.update({ where: { id: committee.id }, data: { chairAdultId } });
   await createAuditEvent({ organizationId, actorUserId, actorEmail: actorEmail ?? null, action: "pta.committee.chair_set", entityType: "pta_committee", entityId: committee.id, metadata: { chairAdultId } });
+  return updated;
+}
+
+/** Mirrors setPtaCommitteeChair exactly -- a separate function rather than a
+ * shared "set chair-like role" helper, since chair/co-chair are deliberately
+ * two independent fields (a committee can have a co-chair with no chair set,
+ * or vice versa), not a list. */
+export async function setPtaCommitteeCoChair(organizationId: string, committeeId: string, coChairAdultId: string | null, actorUserId: string, actorEmail?: string | null) {
+  const committee = await prisma.ptaCommittee.findFirst({ where: { id: committeeId, organizationId } });
+  if (!committee) throw new PtaError("PTA_COMMITTEE_NOT_FOUND", "Committee not found in this organization.");
+
+  if (coChairAdultId) {
+    const adult = await prisma.ptaHouseholdAdult.findFirst({ where: { id: coChairAdultId, organizationId } });
+    if (!adult) throw new PtaError("PTA_NOT_A_HOUSEHOLD_MEMBER", "Household adult not found in this organization.");
+  }
+
+  const updated = await prisma.ptaCommittee.update({ where: { id: committee.id }, data: { coChairAdultId } });
+  await createAuditEvent({ organizationId, actorUserId, actorEmail: actorEmail ?? null, action: "pta.committee.co_chair_set", entityType: "pta_committee", entityId: committee.id, metadata: { coChairAdultId } });
   return updated;
 }
 

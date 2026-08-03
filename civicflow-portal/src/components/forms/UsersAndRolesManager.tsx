@@ -39,21 +39,27 @@ export function UsersAndRolesManager({
   currentUserId,
   canManage,
   actorRole,
+  prefill,
 }: {
   memberships: MembershipRow[];
   currentUserId: string;
   canManage: boolean;
   actorRole: string;
+  /** Pre-fills the invite form, e.g. when arriving from a "Invite as
+   * officer" link on a committee's chair/co-chair — see
+   * src/app/settings/users/page.tsx's searchParams handling. */
+  prefill?: { displayName?: string; email?: string; role?: string };
 }) {
   const router = useRouter();
   const assignableRoleOptions = roleOptions.filter((option) => ROLE_RANK[option] <= (ROLE_RANK[actorRole] ?? -1));
   const defaultInviteRole = assignableRoleOptions.includes("STAFF")
     ? "STAFF"
     : (assignableRoleOptions[assignableRoleOptions.length - 1] ?? "READ_ONLY");
+  const prefillRole = prefill?.role && assignableRoleOptions.includes(prefill.role as RoleOption) ? (prefill.role as RoleOption) : defaultInviteRole;
   const [inviteForm, setInviteForm] = useState({
-    displayName: "",
-    email: "",
-    role: defaultInviteRole as RoleOption,
+    displayName: prefill?.displayName ?? "",
+    email: prefill?.email ?? "",
+    role: prefillRole as RoleOption,
     temporaryPassword: "",
   });
   const [savingInvite, setSavingInvite] = useState(false);

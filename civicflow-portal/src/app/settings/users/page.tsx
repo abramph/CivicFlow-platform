@@ -3,8 +3,13 @@ import { prisma } from "@/lib/prisma";
 import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { UsersAndRolesManager } from "@/components/forms/UsersAndRolesManager";
 
-export default async function UsersSettingsPage() {
+export default async function UsersSettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ email?: string; displayName?: string; role?: string }>;
+}) {
   const { organizationId, role, session, can } = await requirePermission("users:read");
+  const params = await searchParams;
   const canManage = can("users:manage");
 
   const memberships = await prisma.organizationMembership.findMany({
@@ -58,6 +63,7 @@ export default async function UsersSettingsPage() {
           currentUserId={session.userId}
           canManage={canManage}
           actorRole={role}
+          prefill={{ email: params.email, displayName: params.displayName, role: params.role }}
         />
       </SectionCard>
     </main>
