@@ -19,11 +19,11 @@
  * pipeline and is never invoked against production.
  */
 
-import { loadEnvConfig } from "@next/env";
 import type { PrismaClient as PrismaClientType } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { assertNotProduction, loadDemoEnv } from "./seed-demo-guard";
 
-loadEnvConfig(process.cwd());
+loadDemoEnv();
 
 let prisma: PrismaClientType;
 
@@ -33,6 +33,7 @@ async function hash(plaintext: string): Promise<string> {
 }
 
 async function main() {
+  assertNotProduction();
   const { PrismaClient } = await import("@prisma/client");
   prisma = new PrismaClient();
 
