@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const ptaHouseholdFindFirst = vi.fn();
+const ptaStudentFindFirst = vi.fn();
 const propertyFindFirst = vi.fn();
 const orgMemberFindFirst = vi.fn();
 const orgMemberCreate = vi.fn();
@@ -9,6 +10,7 @@ const propertyResidentFindFirst = vi.fn();
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     ptaHousehold: { findFirst: (...a: unknown[]) => ptaHouseholdFindFirst(...a) },
+    ptaStudent: { findFirst: (...a: unknown[]) => ptaStudentFindFirst(...a) },
     property: { findFirst: (...a: unknown[]) => propertyFindFirst(...a) },
     orgMember: {
       findFirst: (...a: unknown[]) => orgMemberFindFirst(...a),
@@ -44,6 +46,7 @@ const actor = { actorUserId: "user-1", actorEmail: "board@example.org" };
 beforeEach(() => {
   vi.clearAllMocks();
   ptaHouseholdFindFirst.mockResolvedValue(null);
+  ptaStudentFindFirst.mockResolvedValue(null);
   propertyFindFirst.mockResolvedValue(null);
   orgMemberFindFirst.mockResolvedValue(null);
   propertyResidentFindFirst.mockResolvedValue(null);
@@ -74,8 +77,46 @@ describe("importPtaHouseholds", () => {
     expect(addPtaStudent).toHaveBeenNthCalledWith(2, expect.objectContaining({ displayName: "Ben" }));
   });
 
-  it("skips (does not duplicate) a household already matched by name + school year", async () => {
-    ptaHouseholdFindFirst.mockResolvedValueOnce({ id: "existing-household" });
+  it("reads every field correctly when CSV headers are wildly different from canonical field names (real column mapping)", async () => {
+    // Deliberately asymmetric: none of these headers match their canonical
+    // field name at all -- this is the exact class of input the shared
+    // buildFieldGetter() fix (member-import.ts) targets. If the mapping
+    // direction were ever reversed again, every field below would read
+    // blank instead of its real value.
+    const rows = [
+      {
+        "Family Last Name": "The Riveras",
+        "Academic Year": "2026-2027",
+        "Parent Full Name": "Alex Rivera",
+        "Parent Email Address": "alex@example.org",
+        "Parent Cell Phone": "555-0100",
+        "Kids in Household": "Sam; Robin",
+      },
+    ];
+    const mapping = {
+      "Family Last Name": "householdName",
+      "Academic Year": "schoolYear",
+      "Parent Full Name": "contactName",
+      "Parent Email Address": "contactEmail",
+      "Parent Cell Phone": "contactPhone",
+      "Kids in Household": "studentNames",
+    };
+    const { importPtaHouseholds } = await import("../vertical-import");
+
+    const results = await importPtaHouseholds(rows, mapping, "org-1", actor.actorUserId, actor.actorEmail, false);
+
+    expect(results).toEqual([{ row: 2, status: "ok" }]);
+    expect(createPtaHousehold).toHaveBeenCalledWith(expect.objectContaining({ displayName: "The Riveras", schoolYear: "2026-2027" }));
+    expect(addPtaHouseholdAdult).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Alex Rivera", email: "alex@example.org", phone: "555-0100" })
+    );
+    expect(addPtaStudent).toHaveBeenCalledTimes(2);
+    expect(addPtaStudent).toHaveBeenNthCalledWith(1, expect.objectContaining({ displayName: "Sam" }));
+    expect(addPtaStudent).toHaveBeenNthCalledWith(2, expect.objectContaining({ displayName: "Robin" }));
+  });
+
+  it("skips (does not duplicate) a household that already has a primary contact", async () => {
+    ptaHouseholdFindFirst.mockResolvedValueOnce({ id: "existing-household", primaryContactAdultId: "adult-1" });
     const { importPtaHouseholds } = await import("../vertical-import");
     const rows = [{ householdName: "The Smiths", schoolYear: "2026-2027", contactName: "Jordan Smith" }];
 
@@ -84,6 +125,37 @@ describe("importPtaHouseholds", () => {
     expect(results).toEqual([{ row: 2, status: "ok" }]);
     expect(createPtaHousehold).not.toHaveBeenCalled();
     expect(addPtaHouseholdAdult).not.toHaveBeenCalled();
+  });
+
+  it("recovers a household left without a primary contact by a prior partial failure, instead of treating it as permanently done", async () => {
+    // createPtaHousehold succeeded on an earlier run but addPtaHouseholdAdult
+    // never completed (e.g. a transient error) -- these two calls aren't
+    // wrapped in a shared transaction, so this state is reachable in
+    // practice. Re-importing the same row must retry the adult step against
+    // the EXISTING household, not silently report "ok" forever without ever
+    // adding a contact.
+    ptaHouseholdFindFirst.mockResolvedValueOnce({ id: "existing-household", primaryContactAdultId: null });
+    const { importPtaHouseholds } = await import("../vertical-import");
+    const rows = [{ householdName: "The Smiths", schoolYear: "2026-2027", contactName: "Jordan Smith" }];
+
+    const results = await importPtaHouseholds(rows, {}, "org-1", actor.actorUserId, actor.actorEmail, false);
+
+    expect(results).toEqual([{ row: 2, status: "ok" }]);
+    expect(createPtaHousehold).not.toHaveBeenCalled();
+    expect(addPtaHouseholdAdult).toHaveBeenCalledWith(expect.objectContaining({ householdId: "existing-household", makePrimaryContact: true }));
+  });
+
+  it("does not duplicate a student that was already added to a partially-imported household on retry", async () => {
+    ptaHouseholdFindFirst.mockResolvedValueOnce({ id: "existing-household", primaryContactAdultId: null });
+    ptaStudentFindFirst.mockResolvedValueOnce({ id: "existing-student" }); // "Ava" already exists
+    ptaStudentFindFirst.mockResolvedValueOnce(null); // "Ben" does not
+    const { importPtaHouseholds } = await import("../vertical-import");
+    const rows = [{ householdName: "The Smiths", schoolYear: "2026-2027", contactName: "Jordan Smith", studentNames: "Ava; Ben" }];
+
+    await importPtaHouseholds(rows, {}, "org-1", actor.actorUserId, actor.actorEmail, false);
+
+    expect(addPtaStudent).toHaveBeenCalledTimes(1);
+    expect(addPtaStudent).toHaveBeenCalledWith(expect.objectContaining({ displayName: "Ben" }));
   });
 
   it("errors a row missing a required field without touching the database", async () => {
@@ -120,6 +192,38 @@ describe("importPtaHouseholds", () => {
 });
 
 describe("importHoaProperties", () => {
+  it("reads every field correctly when CSV headers are wildly different from canonical field names (real column mapping)", async () => {
+    checkMemberLimit.mockResolvedValueOnce({ current: 5, limit: 500 });
+    const rows = [
+      {
+        "Street Number and Name": "88 Ridge Commons",
+        "Unit/Lot #": "4B",
+        "Owner First": "Dana",
+        "Owner Last": "Whitfield",
+        "Owner Email Address": "dana@example.org",
+        "Relationship to Property": "Non-resident owner",
+      },
+    ];
+    const mapping = {
+      "Street Number and Name": "addressLine1",
+      "Unit/Lot #": "unitLabel",
+      "Owner First": "ownerFirstName",
+      "Owner Last": "ownerLastName",
+      "Owner Email Address": "ownerEmail",
+      "Relationship to Property": "relationshipType",
+    };
+    const { importHoaProperties } = await import("../vertical-import");
+
+    const results = await importHoaProperties(rows, mapping, "org-1", actor.actorUserId, actor.actorEmail, false);
+
+    expect(results).toEqual([{ row: 2, status: "ok" }]);
+    expect(createProperty).toHaveBeenCalledWith(expect.objectContaining({ addressLine1: "88 Ridge Commons", unitLabel: "4B" }));
+    expect(orgMemberCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ firstName: "Dana", lastName: "Whitfield", email: "dana@example.org" }) })
+    );
+    expect(assignPropertyResident).toHaveBeenCalledWith(expect.objectContaining({ relationshipType: "NON_RESIDENT_OWNER" }));
+  });
+
   it("creates a property and links a new owner", async () => {
     checkMemberLimit.mockResolvedValueOnce({ current: 5, limit: 500 });
     const { importHoaProperties } = await import("../vertical-import");

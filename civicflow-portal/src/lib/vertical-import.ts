@@ -69,25 +69,34 @@ export async function importPtaHouseholds(
     }
 
     try {
+      // Only skip re-creating a household if it already has a primary
+      // contact -- createPtaHousehold/addPtaHouseholdAdult/addPtaStudent are
+      // separate, non-transactional calls (they're the same shared
+      // service-layer functions the officer UI uses, which take the module
+      // prisma client directly rather than a passed-in transaction client),
+      // so a failure between them can leave a household with no primary
+      // contact. Checking only "does a household with this name exist"
+      // would treat that partial row as permanently done on re-import --
+      // the row would report "ok" forever without ever getting a contact.
       const existing = await prisma.ptaHousehold.findFirst({
         where: { organizationId, displayName: householdName, schoolYear },
-        select: { id: true },
+        select: { id: true, primaryContactAdultId: true },
       });
-      if (existing) {
-        // Already imported (or created manually) — skip re-creating it and
-        // its adult/students rather than erroring the row.
+      if (existing?.primaryContactAdultId) {
         results.push({ row: i + 2, status: "ok" });
         continue;
       }
 
-      const household = await createPtaHousehold({
-        organizationId,
-        displayName: householdName,
-        schoolYear,
-        notes: get("notes") || null,
-        actorUserId,
-        actorEmail,
-      });
+      const household =
+        existing ??
+        (await createPtaHousehold({
+          organizationId,
+          displayName: householdName,
+          schoolYear,
+          notes: get("notes") || null,
+          actorUserId,
+          actorEmail,
+        }));
 
       await addPtaHouseholdAdult({
         organizationId,
@@ -105,7 +114,14 @@ export async function importPtaHouseholds(
         .map((s) => s.trim())
         .filter(Boolean);
       for (const displayName of studentNames) {
-        await addPtaStudent({ organizationId, householdId: household.id, displayName, actorUserId, actorEmail });
+        // Idempotent per student name -- addPtaStudent itself has no dedup
+        // check (each call always creates a new row), so a retried row
+        // with some students already added from a prior partial failure
+        // would otherwise duplicate them.
+        const existingStudent = await prisma.ptaStudent.findFirst({ where: { householdId: household.id, displayName }, select: { id: true } });
+        if (!existingStudent) {
+          await addPtaStudent({ organizationId, householdId: household.id, displayName, actorUserId, actorEmail });
+        }
       }
 
       results.push({ row: i + 2, status: "ok" });
