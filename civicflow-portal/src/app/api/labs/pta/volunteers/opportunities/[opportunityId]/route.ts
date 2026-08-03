@@ -14,6 +14,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ opp
 
 const bodySchema = z.object({
   title: z.string().min(1).optional(),
+  eventId: z.string().nullable().optional(),
   description: z.string().nullable().optional(),
   instructions: z.string().nullable().optional(),
   coordinatorUserId: z.string().nullable().optional(),

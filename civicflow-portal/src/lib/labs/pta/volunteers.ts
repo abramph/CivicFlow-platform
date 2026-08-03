@@ -87,6 +87,7 @@ export async function createPtaVolunteerOpportunity(input: CreateOpportunityInpu
 
 export interface UpdateOpportunityInput {
   title?: string;
+  eventId?: string | null;
   description?: string | null;
   instructions?: string | null;
   coordinatorUserId?: string | null;
@@ -108,11 +109,16 @@ export async function updatePtaVolunteerOpportunity(
   const existing = await prisma.ptaVolunteerOpportunity.findFirst({ where: { id: opportunityId, organizationId } });
   if (!existing) throw new PtaError("PTA_OPPORTUNITY_NOT_FOUND", "Volunteer opportunity not found in this organization.");
   if (input.title !== undefined && !input.title.trim()) throw new PtaError("PTA_VALIDATION_ERROR", "Opportunity title cannot be blank.");
+  if (input.eventId) {
+    const event = await prisma.event.findFirst({ where: { id: input.eventId, organizationId } });
+    if (!event) throw new PtaError("PTA_EVENT_NOT_FOUND", "Event not found in this organization.");
+  }
 
   const updated = await prisma.ptaVolunteerOpportunity.update({
     where: { id: opportunityId },
     data: {
       ...(input.title !== undefined ? { title: input.title } : {}),
+      ...(input.eventId !== undefined ? { eventId: input.eventId } : {}),
       ...(input.description !== undefined ? { description: input.description } : {}),
       ...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
       ...(input.coordinatorUserId !== undefined ? { coordinatorUserId: input.coordinatorUserId } : {}),
@@ -235,6 +241,7 @@ export async function listPtaVolunteerOpportunities(organizationId: string, filt
     },
     include: {
       committee: { select: { id: true, name: true } },
+      event: { select: { id: true, title: true, startAt: true } },
       slots: {
         orderBy: { sortOrder: "asc" },
         include: {
@@ -252,6 +259,7 @@ export async function getPtaVolunteerOpportunity(organizationId: string, opportu
     where: { id: opportunityId, organizationId },
     include: {
       committee: { select: { id: true, name: true } },
+      event: { select: { id: true, title: true, startAt: true } },
       slots: {
         orderBy: { sortOrder: "asc" },
         include: {

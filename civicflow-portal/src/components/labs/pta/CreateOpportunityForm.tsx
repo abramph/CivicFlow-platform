@@ -2,11 +2,19 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { formatDateTime } from "@/lib/formatting";
 
-export function CreateOpportunityForm() {
+export interface SelectableEvent {
+  id: string;
+  title: string;
+  startAt: Date | string | null;
+}
+
+export function CreateOpportunityForm({ events = [] }: { events?: SelectableEvent[] }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
+  const [eventId, setEventId] = useState("");
   const [description, setDescription] = useState("");
   const [supplyRequest, setSupplyRequest] = useState("");
   const [pending, setPending] = useState(false);
@@ -19,7 +27,12 @@ export function CreateOpportunityForm() {
       const res = await fetch("/api/labs/pta/volunteers/opportunities", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, description: description || null, supplyRequest: supplyRequest || null }),
+        body: JSON.stringify({
+          title,
+          eventId: eventId || null,
+          description: description || null,
+          supplyRequest: supplyRequest || null,
+        }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok) {
@@ -27,6 +40,7 @@ export function CreateOpportunityForm() {
         return;
       }
       setTitle("");
+      setEventId("");
       setDescription("");
       setSupplyRequest("");
       setOpen(false);
@@ -52,6 +66,19 @@ export function CreateOpportunityForm() {
         <span>Title</span>
         <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Book Fair setup" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
       </label>
+      {events.length > 0 ? (
+        <label className="block space-y-1 text-sm font-medium text-slate-900">
+          <span>Link to an event (optional)</span>
+          <select value={eventId} onChange={(e) => setEventId(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+            <option value="">No linked event</option>
+            {events.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.title}{e.startAt ? ` — ${formatDateTime(e.startAt)}` : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       <label className="block space-y-1 text-sm font-medium text-slate-900">
         <span>Description (optional)</span>
         <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />

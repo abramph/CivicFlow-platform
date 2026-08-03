@@ -20,7 +20,7 @@ export default async function EventDetailPage({
   const { organizationId, can } = await requirePermission("events:read");
   const { id } = await params;
 
-  const [event, contributionSummary, contributions, attendance] = await Promise.all([
+  const [event, contributionSummary, contributions, attendance, volunteerOpportunities] = await Promise.all([
     prisma.event.findFirst({
       where: { id, organizationId },
     }),
@@ -43,6 +43,15 @@ export default async function EventDetailPage({
       orderBy: [{ meetingDate: "desc" }, { createdAt: "desc" }],
       include: { member: true },
       take: 20,
+    }),
+    // Only ever non-empty for a PTA-vertical org — volunteer opportunities can
+    // only be linked to an event through the PTA-gated opportunity API (see
+    // requirePtaAccess in that route), so this needs no separate vertical
+    // check here.
+    prisma.ptaVolunteerOpportunity.findMany({
+      where: { organizationId, eventId: id },
+      select: { id: true, title: true, status: true, slots: { select: { capacity: true, signups: { where: { status: { in: ["SIGNED_UP", "WAITLISTED"] } }, select: { id: true } } } } },
+      orderBy: { createdAt: "desc" },
     }),
   ]);
 
@@ -114,6 +123,25 @@ export default async function EventDetailPage({
           </div>
         ) : null}
       </SectionCard>
+
+      {volunteerOpportunities.length > 0 ? (
+        <SectionCard title="Linked Volunteer Opportunities" description="Volunteer opportunities tied to this event.">
+          <ul className="divide-y divide-slate-100">
+            {volunteerOpportunities.map((opp) => {
+              const capacity = opp.slots.reduce((s, slot) => s + slot.capacity, 0);
+              const confirmed = opp.slots.reduce((s, slot) => s + slot.signups.length, 0);
+              return (
+                <li key={opp.id} className="flex items-center justify-between py-2 text-sm">
+                  <Link href={`/labs/pta/volunteers/manage/${opp.id}`} className="font-medium text-emerald-700 hover:underline">
+                    {opp.title}
+                  </Link>
+                  <span className="text-slate-600">{formatEnumLabel(opp.status)} · {confirmed}/{capacity} filled</span>
+                </li>
+              );
+            })}
+          </ul>
+        </SectionCard>
+      ) : null}
 
       <SectionCard title="Event Attachments" description="Store private event documents, flyers, forms, and supporting files.">
         <AttachmentManager entityType="EVENT" entityId={event.id} canWrite={can("events:write")} />
