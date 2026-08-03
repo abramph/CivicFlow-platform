@@ -2450,6 +2450,7 @@ model PtaHouseholdAdult {
   secondaryContactFor  PtaHousehold[]       @relation("PtaHouseholdSecondaryContact")
   volunteerSignups     PtaVolunteerSignup[]
   chairOfCommittees    PtaCommittee[]       @relation("PtaCommitteeChair")
+  coChairOfCommittees  PtaCommittee[]       @relation("PtaCommitteeCoChair")
   committeeMemberships PtaCommitteeMember[]
 
   @@unique([organizationId, userId])
@@ -2839,11 +2840,13 @@ model PtaCommittee {
   name           String
   description    String?
   chairAdultId   String?
+  coChairAdultId String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
   organization           Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   chair                  PtaHouseholdAdult?        @relation("PtaCommitteeChair", fields: [chairAdultId], references: [id], onDelete: SetNull)
+  coChair                PtaHouseholdAdult?        @relation("PtaCommitteeCoChair", fields: [coChairAdultId], references: [id], onDelete: SetNull)
   members                PtaCommitteeMember[]
   volunteerOpportunities PtaVolunteerOpportunity[]
 
