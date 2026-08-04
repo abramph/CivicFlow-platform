@@ -18,9 +18,10 @@ export interface NavItem {
  * real, already-working page — no dead ends. Where the suggested item in the
  * spec has no real backing feature yet (a standalone Documents library
  * outside PTA, a distinct Officers/Board roster separate from Users & Roles,
- * Union grievance/worksite routes, HOA violations/maintenance/architectural-
- * request routes), it is honestly omitted or mapped onto the closest real
- * equivalent rather than pointed at a placeholder — see
+ * Union grievance/worksite routes, HOA maintenance/architectural-request
+ * routes — Violations itself shipped in the HOA Violations MVP, see
+ * docs/hoa-violations-mvp.md), it is honestly omitted or mapped onto the
+ * closest real equivalent rather than pointed at a placeholder — see
  * docs/vertical-experience-layer.md for the full list and reasoning.
  *
  * COMMUNITY/UNION/HOA share the exact same underlying route set (they are,
@@ -48,6 +49,11 @@ function sharedNavigation(vertical: "COMMUNITY" | "UNION" | "HOA"): NavItem[] {
     // this conditional exists purely so a Community/Union org never sees a
     // dead-end nav link to a page that immediately says "not available."
     ...(vertical === "HOA" ? [{ href: "/hoa/properties", label: "Properties", permission: "hoa:properties:read" as const }] : []),
+    // HOA Violations MVP -- same reasoning/gate pattern as Properties just
+    // above (real access control lives in requireHoaViolationRead()'s
+    // "violations" capability check; this conditional only prevents a
+    // dead-end nav link on organizations that could never see the page).
+    ...(vertical === "HOA" ? [{ href: "/hoa/violations", label: "Violations", permission: "hoa:violations:read" as const }] : []),
     { href: "/contributions", label: "Contributions" },
     { href: "/dues", label: duesLabel },
     { href: "/dues/reminders", label: "Dues Campaigns" },

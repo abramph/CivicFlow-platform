@@ -30,6 +30,8 @@ function dashboardWidgets(vertical: OrganizationVertical) {
     paymentMethodBreakdown: showFundraisingAndGovernance,
     // PR #43 -- HOA Property/Resident foundation widgets.
     hoaProperties: vertical === "HOA",
+    // HOA Violations MVP.
+    hoaViolations: vertical === "HOA",
   };
 }
 
@@ -314,6 +316,26 @@ export default async function DashboardPage() {
       })()
     : null;
 
+  // HOA Violations MVP -- same reasoning as hoaPropertyStats above (queried
+  // only for HOA orgs; the Violation table is empty/irrelevant otherwise).
+  const hoaViolationStats = vertical === "HOA"
+    ? await (async () => {
+        const [openCount, overdueCount, recentViolations] = await Promise.all([
+          prisma.violation.count({ where: { organizationId: orgId, status: { in: ["ISSUED", "ACKNOWLEDGED", "IN_REVIEW"] } } }),
+          prisma.violation.count({
+            where: { organizationId: orgId, status: { in: ["ISSUED", "ACKNOWLEDGED", "IN_REVIEW"] }, cureByDate: { lt: new Date() } },
+          }),
+          prisma.violation.findMany({
+            where: { organizationId: orgId, status: { not: "DRAFT" } },
+            orderBy: { createdAt: "desc" },
+            take: 5,
+            select: { id: true, violationType: true, status: true, createdAt: true, property: { select: { addressLine1: true, unitLabel: true, displayName: true } } },
+          }),
+        ]);
+        return { openCount, overdueCount, recentViolations };
+      })()
+    : null;
+
   // Derived values
   const totalDuesCents    = Math.round(Number(duesTotal._sum.amount || 0) * 100);
   const totalContribCents = Math.round(Number(contributions._sum.amount || 0) * 100);
@@ -463,6 +485,43 @@ export default async function DashboardPage() {
                     {p.displayName || (p.unitLabel ? `${p.addressLine1}, ${p.unitLabel}` : p.addressLine1)}
                   </Link>
                   <span className="ml-2 text-slate-500">{toDisplayDate(p.createdAt)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </div>
+      )}
+
+      {/* HOA Violations summary */}
+      {widgets.hoaViolations && hoaViolationStats && (
+      <div className="rounded-xl border-2 border-slate-200 bg-white p-6 shadow-sm">
+        <h3 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
+          <Shield className="h-5 w-5 text-emerald-600" />
+          Violations
+        </h3>
+        <div className="grid grid-cols-2 gap-4">
+          <Link href="/hoa/violations" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-center hover:bg-amber-100">
+            <p className="text-3xl font-bold text-amber-700">{hoaViolationStats.openCount}</p>
+            <p className="text-sm font-medium text-amber-600 mt-1">Open</p>
+          </Link>
+          <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-center">
+            <p className="text-3xl font-bold text-red-700">{hoaViolationStats.overdueCount}</p>
+            <p className="text-sm font-medium text-red-600 mt-1 flex items-center justify-center gap-1"><AlertCircle className="h-3.5 w-3.5" /> Past cure-by date</p>
+          </div>
+        </div>
+        {hoaViolationStats.recentViolations.length > 0 ? (
+          <div className="mt-4">
+            <p className="text-sm font-semibold text-slate-700 mb-2">Recent activity</p>
+            <ul className="divide-y divide-slate-100">
+              {hoaViolationStats.recentViolations.map((v) => (
+                <li key={v.id} className="py-2 text-sm">
+                  <Link href={`/hoa/violations/${v.id}`} className="font-medium text-emerald-700 hover:underline">
+                    {v.violationType}
+                  </Link>
+                  <span className="ml-2 text-slate-500">
+                    {v.property.displayName || (v.property.unitLabel ? `${v.property.addressLine1}, ${v.property.unitLabel}` : v.property.addressLine1)} — {v.status.toLowerCase()}
+                  </span>
                 </li>
               ))}
             </ul>

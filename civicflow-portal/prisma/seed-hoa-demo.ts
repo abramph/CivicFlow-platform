@@ -263,6 +263,123 @@ async function main() {
   void clubhouse;
 
   console.log("PropertyResident relationships created (owner-occupant, non-resident owner, tenant, co-owners, archived history).");
+
+  // ── Violations (HOA Violations MVP) ───────────────────────────────────────
+  // Dynamic import, not static -- a static top-level import here would be
+  // hoisted ahead of loadDemoEnv()/assertNotProduction() above and
+  // transitively trigger @prisma/client's own bundled dotenv loader before
+  // this script's env fix has run, exactly the bug documented at length in
+  // prisma/seed-demo-guard.ts and fixed the same way in seed-pta-demo.ts.
+  const { createViolationDraft, issueViolation, transitionViolationStatus, addViolationComment } = await import(
+    "../src/lib/hoa/violations"
+  );
+  const secretaryId = (await prisma.user.findUnique({ where: { email: "secretary@oakridgehoa.example" } }))!.id;
+
+  // Idempotency guard for the whole violations section: findFirst by the
+  // (organizationId, propertyId, violationType) combination used below
+  // (Violation has no unique constraint on that triple, so this is an
+  // application-level check, same pattern as findOrCreateProperty above)
+  // and skip every scenario if this script has already run once.
+  const alreadySeeded = await prisma.violation.findFirst({
+    where: { organizationId: org.id, propertyId: townhome.id, violationType: "Trash cans left curbside" },
+    select: { id: true },
+  });
+
+  if (!alreadySeeded) {
+    // Scenario 1: still a draft -- an officer working note, nothing sent yet.
+    await createViolationDraft({
+      organizationId: org.id,
+      propertyId: townhome.id,
+      violationType: "Trash cans left curbside",
+      description: "Trash and recycling bins left at the curb three days after collection, observed during the monthly walkthrough.",
+      actorUserId: secretaryId,
+    });
+
+    // Scenario 2: issued, awaiting the resident's cure -- exercises the full
+    // notice-sending path (real ViolationNotice row, real
+    // notifyPropertyResidents call against Morgan Reyes, the owner-occupant).
+    const lawnViolation = await createViolationDraft({
+      organizationId: org.id,
+      propertyId: singleFamily.id,
+      violationType: "Lawn maintenance",
+      description: "Grass exceeds the 6-inch maximum height specified in the CC&Rs, Section 4.2.",
+      actorUserId: secretaryId,
+    });
+    await issueViolation({
+      organizationId: org.id,
+      violationId: lawnViolation.id,
+      cureByDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+      noticeBody: "Please mow your lawn within 14 days to comply with the association's landscaping standards (CC&Rs Section 4.2).",
+      actorUserId: secretaryId,
+    });
+
+    // Scenario 3: in review, with a private board-only comment -- exercises
+    // isPrivate defaulting correctly and the ISSUED -> IN_REVIEW transition.
+    const parkingViolation = await createViolationDraft({
+      organizationId: org.id,
+      propertyId: condo.id,
+      violationType: "Unauthorized parking",
+      description: "A commercial vehicle has been parked in the resident lot overnight for the past week, in violation of the parking policy.",
+      actorUserId: secretaryId,
+    });
+    await issueViolation({
+      organizationId: org.id,
+      violationId: parkingViolation.id,
+      cureByDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      noticeBody: "Please remove the commercial vehicle from the resident parking lot within 7 days.",
+      actorUserId: secretaryId,
+    });
+    await transitionViolationStatus({
+      organizationId: org.id,
+      violationId: parkingViolation.id,
+      toStatus: "IN_REVIEW",
+      actorUserId: secretaryId,
+    });
+    await addViolationComment({
+      organizationId: org.id,
+      violationId: parkingViolation.id,
+      body: "Called the tenant (Jordan Ellis) — says the vehicle belongs to a contractor doing kitchen work, expects it resolved by Friday.",
+      isPrivate: true,
+      actorUserId: secretaryId,
+    });
+
+    // Scenario 4: resolved -- a closed record with resolutionNotes, exercising
+    // the terminal-transition path end to end.
+    const paintViolation = await createViolationDraft({
+      organizationId: org.id,
+      propertyId: singleFamily.id,
+      violationType: "Unapproved exterior paint color",
+      description: "Front door repainted a color not on the association's approved palette.",
+      actorUserId: secretaryId,
+    });
+    await issueViolation({
+      organizationId: org.id,
+      violationId: paintViolation.id,
+      noticeBody: "Please repaint the front door using an approved color from the palette on file with the association.",
+      actorUserId: secretaryId,
+    });
+    // RESOLVED is only reachable from IN_REVIEW (see the state machine in
+    // src/lib/hoa/violations.ts) -- a real bug caught by actually running
+    // this seed script against a live database rather than only unit
+    // testing the state machine in isolation.
+    await transitionViolationStatus({
+      organizationId: org.id,
+      violationId: paintViolation.id,
+      toStatus: "IN_REVIEW",
+      actorUserId: secretaryId,
+    });
+    await transitionViolationStatus({
+      organizationId: org.id,
+      violationId: paintViolation.id,
+      toStatus: "RESOLVED",
+      resolutionNotes: "Owner repainted the door with an approved color; confirmed by site visit on the follow-up walkthrough.",
+      actorUserId: secretaryId,
+    });
+
+    console.log("Violations created (draft, issued, in-review with a private comment, and resolved).");
+  } else {
+    console.log("Violations already seeded — skipping (idempotent re-run).");
+  }
   console.log("\nDone. Login as any board member with password HoaDemo!Change1 (e.g. president@oakridgehoa.example).");
 }
 
