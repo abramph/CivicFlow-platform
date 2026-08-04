@@ -31,6 +31,20 @@ export const HOA_ERROR_CODES = [
   "HOA_PROPERTY_ARCHIVED",
   /** The relationship being modified has already ended. */
   "HOA_RELATIONSHIP_ALREADY_ENDED",
+
+  // Violations MVP
+  /** Organization.primaryVertical is HOA but the "violations" capability
+   * isn't enabled for it. */
+  "HOA_VIOLATIONS_NOT_ENABLED",
+  "HOA_VIOLATION_NOT_FOUND",
+  /** Attempted a status transition the state machine doesn't allow from
+   * the violation's current status (e.g. DRAFT -> RESOLVED directly). */
+  "HOA_VIOLATION_INVALID_TRANSITION",
+  /** The caller is not a resident/owner of the violation's property (or
+   * has no PropertyResident relationship at all) — used only on the
+   * resident self-service read path, never the officer path (which uses
+   * ordinary permission checks instead). */
+  "HOA_VIOLATION_NOT_YOUR_PROPERTY",
 ] as const;
 
 export type HoaErrorCode = (typeof HOA_ERROR_CODES)[number];
@@ -47,6 +61,10 @@ const STATUS_FOR_CODE: Record<HoaErrorCode, number> = {
   HOA_CROSS_TENANT_DENIED: 403,
   HOA_PROPERTY_ARCHIVED: 409,
   HOA_RELATIONSHIP_ALREADY_ENDED: 409,
+  HOA_VIOLATIONS_NOT_ENABLED: 403,
+  HOA_VIOLATION_NOT_FOUND: 404,
+  HOA_VIOLATION_INVALID_TRANSITION: 409,
+  HOA_VIOLATION_NOT_YOUR_PROPERTY: 403,
 };
 
 export class HoaError extends Error {

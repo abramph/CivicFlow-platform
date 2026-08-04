@@ -19,19 +19,25 @@ describe("getNavigationProfile", () => {
     expect(union).toEqual(community);
   });
 
-  it("HOA shares Community's routes plus exactly one addition: /hoa/properties (PR #43 foundation)", () => {
+  it("HOA shares Community's routes plus two additions: /hoa/properties (PR #43) and /hoa/violations (HOA Violations MVP)", () => {
     const community = getNavigationProfile("COMMUNITY").map((n) => n.href).sort();
     const hoa = getNavigationProfile("HOA").map((n) => n.href).sort();
-    expect(hoa).toEqual([...community, "/hoa/properties"].sort());
+    expect(hoa).toEqual([...community, "/hoa/properties", "/hoa/violations"].sort());
 
     const propertiesItem = getNavigationProfile("HOA").find((n) => n.href === "/hoa/properties");
     expect(propertiesItem?.label).toBe("Properties");
     expect(propertiesItem?.permission).toBe("hoa:properties:read");
+
+    const violationsItem = getNavigationProfile("HOA").find((n) => n.href === "/hoa/violations");
+    expect(violationsItem?.label).toBe("Violations");
+    expect(violationsItem?.permission).toBe("hoa:violations:read");
   });
 
-  it("does not add /hoa/properties for Community or Union -- their roles technically hold hoa:properties:read (permissions aren't vertical-scoped) but the nav item must not create a dead-end link for a non-HOA org", () => {
+  it("does not add /hoa/properties or /hoa/violations for Community or Union -- their roles technically hold the hoa:* permissions (permissions aren't vertical-scoped) but the nav item must not create a dead-end link for a non-HOA org", () => {
     expect(getNavigationProfile("COMMUNITY").some((n) => n.href === "/hoa/properties")).toBe(false);
     expect(getNavigationProfile("UNION").some((n) => n.href === "/hoa/properties")).toBe(false);
+    expect(getNavigationProfile("COMMUNITY").some((n) => n.href === "/hoa/violations")).toBe(false);
+    expect(getNavigationProfile("UNION").some((n) => n.href === "/hoa/violations")).toBe(false);
   });
 
   it("relabels the dashboard/dues/users items per vertical without changing the destination route", () => {

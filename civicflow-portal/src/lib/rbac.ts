@@ -174,6 +174,24 @@ export const PERMISSIONS = {
   HOA_PROPERTIES_WRITE: "hoa:properties:write",
   HOA_RESIDENTS_READ:   "hoa:residents:read",
   HOA_RESIDENTS_WRITE:  "hoa:residents:write",
+
+  // Unestra for HOA — Violations MVP. Four separate actions (not just
+  // read/write, unlike Properties/Residents above) because the workflow
+  // itself has distinct authority levels: creating/editing a draft is a
+  // lower bar than deciding to move a violation through officer review, and
+  // resolving/dismissing it (the terminal, compliance-record-closing
+  // action) is higher-authority still than either. Gated additionally by
+  // requireHoaCapability()'s "violations" flag (see
+  // src/lib/vertical-capabilities.ts) — holding one of these is necessary
+  // but never sufficient by itself. A resident's own read access to their
+  // own property's violations does NOT go through this permission set at
+  // all — see requireHoaViolationResidentAccess() in
+  // src/lib/hoa/violations-guard.ts, mirroring the documented pattern
+  // above for parent/household self-service.
+  HOA_VIOLATIONS_READ:    "hoa:violations:read",
+  HOA_VIOLATIONS_WRITE:   "hoa:violations:write",
+  HOA_VIOLATIONS_REVIEW:  "hoa:violations:review",
+  HOA_VIOLATIONS_RESOLVE: "hoa:violations:resolve",
 } as const;
 
 // Parent/household-adult self-service (view own household, RSVP, pay own
@@ -258,6 +276,10 @@ const ORG_OWNER_PERMISSIONS: Permission[] = [
   PERMISSIONS.HOA_PROPERTIES_WRITE,
   PERMISSIONS.HOA_RESIDENTS_READ,
   PERMISSIONS.HOA_RESIDENTS_WRITE,
+  PERMISSIONS.HOA_VIOLATIONS_READ,
+  PERMISSIONS.HOA_VIOLATIONS_WRITE,
+  PERMISSIONS.HOA_VIOLATIONS_REVIEW,
+  PERMISSIONS.HOA_VIOLATIONS_RESOLVE,
 ];
 
 const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
@@ -326,6 +348,10 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.HOA_PROPERTIES_WRITE,
     PERMISSIONS.HOA_RESIDENTS_READ,
     PERMISSIONS.HOA_RESIDENTS_WRITE,
+    PERMISSIONS.HOA_VIOLATIONS_READ,
+    PERMISSIONS.HOA_VIOLATIONS_WRITE,
+    PERMISSIONS.HOA_VIOLATIONS_REVIEW,
+    PERMISSIONS.HOA_VIOLATIONS_RESOLVE,
   ],
 
   // Maps naturally onto "Treasurer" via OrgRolePermissionSet if an org wants
@@ -362,6 +388,11 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     // administrative function, not a financial one -- read-only.
     PERMISSIONS.HOA_PROPERTIES_READ,
     PERMISSIONS.HOA_RESIDENTS_READ,
+    // Deliberately NO HOA_VIOLATIONS_* permission at all: compliance
+    // enforcement is a board/property-manager function, not a financial
+    // one, even though a violation may eventually carry a fine (billed as
+    // an ordinary DuesCharge the Treasurer already sees through the
+    // existing dues permissions above, once fine-creation ships).
   ],
 
   // Maps naturally onto "Membership Chair" / "Volunteer Coordinator" /
@@ -401,6 +432,13 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.HOA_PROPERTIES_WRITE,
     PERMISSIONS.HOA_RESIDENTS_READ,
     PERMISSIONS.HOA_RESIDENTS_WRITE,
+    PERMISSIONS.HOA_VIOLATIONS_READ,
+    PERMISSIONS.HOA_VIOLATIONS_WRITE,
+    PERMISSIONS.HOA_VIOLATIONS_REVIEW,
+    // Deliberately NOT HOA_VIOLATIONS_RESOLVE -- resolving/dismissing is
+    // the terminal, compliance-record-closing action, reserved for
+    // ORG_OWNER/ORG_ADMIN (board-level authority), same reasoning as
+    // MEETINGS_MINUTES_APPROVE being withheld from STAFF just above.
   ],
 
   // Maps onto "General Member" (an officer viewing without editing rights) —
@@ -424,6 +462,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.PTA_ANALYTICS_READ,
     PERMISSIONS.HOA_PROPERTIES_READ,
     PERMISSIONS.HOA_RESIDENTS_READ,
+    PERMISSIONS.HOA_VIOLATIONS_READ,
   ],
 
   // Members never get staff permissions — a MEMBER role must never see other

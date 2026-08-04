@@ -346,6 +346,7 @@ enum AttachmentEntityType {
   EXPENDITURE
   CONTRIBUTION
   PAYMENT_REPORT
+  HOA_VIOLATION
   OTHER
 }
 
@@ -519,8 +520,12 @@ model Organization {
   ptaEventRsvps               PtaEventRsvp[]
   ptaHouseholdAdults          PtaHouseholdAdult[]
 
-  hoaProperties        Property[]
-  hoaPropertyResidents PropertyResident[]
+  hoaProperties             Property[]
+  hoaPropertyResidents      PropertyResident[]
+  hoaViolations             Violation[]
+  hoaViolationNotices       ViolationNotice[]
+  hoaViolationComments      ViolationComment[]
+  hoaViolationStatusHistory ViolationStatusHistory[]
 
   @@index([slug])
   @@index([status])
@@ -724,17 +729,17 @@ model StripeWebhookEvent {
 
 /// Platform-level audit trail.  One row per write operation.
 model AuditEvent {
-  id             String   @id @default(cuid())
-  organizationId String?
-  actorId        String?
-  actorEmail     String?
-  action         String // e.g. "member.create", "dues.update"
-  resource       String // e.g. "member", "campaign"
-  resourceId     String?
-  before         Json?
-  after          Json?
-  ipAddress      String?
-  userAgent      String?
+  id                   String   @id @default(cuid())
+  organizationId       String?
+  actorId              String?
+  actorEmail           String?
+  action               String // e.g. "member.create", "dues.update"
+  resource             String // e.g. "member", "campaign"
+  resourceId           String?
+  before               Json?
+  after                Json?
+  ipAddress            String?
+  userAgent            String?
   /// Set when actorId/actorEmail above are the IMPERSONATED user, not the
   /// person who actually performed the action — the real Platform Admin's
   /// own id/email, denormalized like actorEmail rather than a relation, so
@@ -743,7 +748,7 @@ model AuditEvent {
   /// from the active impersonation cookie; never set directly by callers.
   impersonatedByUserId String?
   impersonatedByEmail  String?
-  createdAt      DateTime @default(now())
+  createdAt            DateTime @default(now())
 
   organization Organization? @relation(fields: [organizationId], references: [id])
   actor        User?         @relation(fields: [actorId], references: [id])
@@ -1392,6 +1397,11 @@ model DuesCharge {
   adjustments        DuesAdjustment[]
   paymentImportItems PaymentImportItem[]
   paymentReports     PaymentReport[]
+  /// Set when this charge IS a violation fine (schema-ready per the
+  /// approved HOA discovery doc's "violation fines are just DuesCharge
+  /// rows" design); the fine-creation flow itself is deferred past this
+  /// MVP -- see docs/hoa-violations-mvp.md.
+  fineForViolation   Violation?
 
   @@unique([organizationId, memberId, duesAccountId, periodStart, periodEnd])
   @@index([organizationId])
@@ -2970,6 +2980,7 @@ model Property {
   organization  Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   billingMember OrgMember?         @relation("PropertyBillingMember", fields: [billingMemberId], references: [id], onDelete: SetNull)
   residents     PropertyResident[]
+  violations    Violation[]
 
   @@index([organizationId])
   @@index([organizationId, status])
@@ -3050,4 +3061,140 @@ model PropertyResident {
   @@index([propertyId, status])
   @@index([orgMemberId])
   @@index([organizationId, status])
+}
+
+/// HOA Violations MVP -- a recorded compliance issue against a Property
+/// and its resolution lifecycle (see docs/hoa-domain-model.md's
+/// `Violation` entity and docs/hoa-violations-mvp.md for this
+/// implementation's specifics). Gated by the "violations" CapabilityFlag
+/// (src/lib/vertical-capabilities.ts), not a raw vertical check.
+///
+/// Status is an explicit state machine (src/lib/hoa/violations.ts is the
+/// only code allowed to write `status`) rather than inferred from which
+/// date fields are set, matching every other lifecycle enum in this
+/// schema (PropertyResident.status, DuesChargeStatus, ...):
+///   DRAFT -> ISSUED -> ACKNOWLEDGED -> IN_REVIEW -> one of CURED /
+///   RESOLVED / DISMISSED. RESOLVED/CURED/DISMISSED are terminal --
+///   correcting a resolved violation creates a new row, mirroring
+///   DuesCharge's correction-creates-new-revision convention, never
+///   reopens history in place.
+///
+/// `resolutionNotes` and every `ViolationComment` with isPrivate: true are
+/// board/property-manager-only and must NEVER be included in any
+/// resident-facing read path (see src/lib/hoa/violations-guard.ts).
+///
+/// onDelete: Restrict on organization/property (not Cascade) deliberately
+/// matches Property/PropertyResident's own convention just above --
+/// compliance history must never be silently destroyed by a cascading
+/// delete.
+model Violation {
+  id              String          @id @default(cuid())
+  organizationId  String
+  propertyId      String
+  violationType   String
+  description     String
+  status          ViolationStatus @default(DRAFT)
+  createdByUserId String?
+  issuedAt        DateTime?
+  cureByDate      DateTime?
+  resolvedAt      DateTime?
+  /// Board/property-manager-only -- same visibility boundary as
+  /// Property.notes; never surfaced on any resident-facing view.
+  resolutionNotes String?
+  /// Nullable, schema-ready link to a fine DuesCharge (see the field
+  /// comment on DuesCharge.fineForViolation) -- fine-creation itself is
+  /// deferred past this MVP.
+  fineChargeId    String?         @unique
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  organization  Organization             @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  property      Property                 @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  fineCharge    DuesCharge?              @relation(fields: [fineChargeId], references: [id], onDelete: SetNull)
+  notices       ViolationNotice[]
+  comments      ViolationComment[]
+  statusHistory ViolationStatusHistory[]
+
+  @@index([organizationId])
+  @@index([organizationId, propertyId])
+  @@index([organizationId, status])
+}
+
+enum ViolationStatus {
+  DRAFT
+  ISSUED
+  ACKNOWLEDGED
+  IN_REVIEW
+  CURED
+  RESOLVED
+  DISMISSED
+}
+
+/// Append-only record of every notice sent for a Violation (initial
+/// notice, follow-up, final notice before escalation). Never updated or
+/// deleted once created -- this is the compliance-notice audit trail
+/// itself, not a mutable draft.
+model ViolationNotice {
+  id             String   @id @default(cuid())
+  organizationId String
+  violationId    String
+  /// Free-text (e.g. "INITIAL", "FOLLOW_UP", "FINAL") -- same reasoning as
+  /// ArchitecturalRequest.category's precedent: kept as a string rather
+  /// than over-enumerating a small, evolving vocabulary early.
+  noticeType     String
+  sentAt         DateTime @default(now())
+  sentByUserId   String?
+  /// Free-text (e.g. "EMAIL", "MAIL", "IN_PERSON").
+  channel        String
+  body           String
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  violation    Violation    @relation(fields: [violationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId])
+  @@index([violationId])
+}
+
+/// Append-only comment thread on a Violation. isPrivate defaults to true
+/// (board-only) -- a comment is only ever resident-visible when a caller
+/// explicitly sets isPrivate: false, never the other way around, so the
+/// safe default is "hidden from the resident" rather than accidentally
+/// exposing an officer's internal note.
+model ViolationComment {
+  id             String   @id @default(cuid())
+  organizationId String
+  violationId    String
+  authorUserId   String?
+  body           String
+  isPrivate      Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  violation    Violation    @relation(fields: [violationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId])
+  @@index([violationId])
+}
+
+/// Append-only state-machine audit trail -- one row per status
+/// transition. Never updated or deleted; this is what lets an officer (or
+/// a future appeal/dispute process) reconstruct exactly when and by whom
+/// a violation moved through its lifecycle, independent of AuditEvent's
+/// own generic log.
+model ViolationStatusHistory {
+  id              String           @id @default(cuid())
+  organizationId  String
+  violationId     String
+  fromStatus      ViolationStatus?
+  toStatus        ViolationStatus
+  changedByUserId String?
+  notes           String?
+  createdAt       DateTime         @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  violation    Violation    @relation(fields: [violationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId])
+  @@index([violationId])
 }
