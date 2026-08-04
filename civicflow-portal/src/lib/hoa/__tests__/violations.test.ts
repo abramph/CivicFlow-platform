@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { Prisma } from "@prisma/client";
 
 const findFirstProperty = vi.fn();
 const findFirstViolation = vi.fn();
@@ -13,6 +14,7 @@ const createViolationComment = vi.fn();
 const createViolationStatusHistory = vi.fn();
 const findManyPropertyResident = vi.fn();
 const findManyMobileDeviceToken = vi.fn();
+const createViolationReminderLog = vi.fn();
 const createAuditEvent = vi.fn().mockResolvedValue(undefined);
 const sendEmail = vi.fn().mockResolvedValue({ sent: true, skipped: false });
 const sendPushToTokens = vi.fn().mockResolvedValue({ sent: 0, failed: 0 });
@@ -54,6 +56,7 @@ vi.mock("@/lib/prisma", () => ({
     violationStatusHistory: { create: (...a: unknown[]) => createViolationStatusHistory(...a) },
     propertyResident: { findMany: (...a: unknown[]) => findManyPropertyResident(...a) },
     mobileDeviceToken: { findMany: (...a: unknown[]) => findManyMobileDeviceToken(...a) },
+    violationReminderLog: { create: (...a: unknown[]) => createViolationReminderLog(...a) },
   },
 }));
 
@@ -67,7 +70,16 @@ beforeEach(() => {
   findManyPropertyResident.mockResolvedValue([]);
   findManyMobileDeviceToken.mockResolvedValue([]);
   updateManyViolation.mockResolvedValue({ count: 1 });
+  createViolationReminderLog.mockResolvedValue({ id: "reminder-log-1" });
 });
+
+function p2002(target: string[]) {
+  return new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+    code: "P2002",
+    clientVersion: "test",
+    meta: { target },
+  });
+}
 
 describe("assertValidTransition / isTerminalStatus", () => {
   it.each([
@@ -370,42 +382,112 @@ describe("toResidentSafeViolation", () => {
 });
 
 describe("sendDeadlineReminders", () => {
-  it("sends a reminder for a violation approaching its cureByDate and records a DEADLINE_REMINDER notice", async () => {
-    findManyViolation.mockResolvedValueOnce([
-      { id: "violation-1", organizationId: "org-1", propertyId: "prop-1", violationType: "Lawn", cureByDate: new Date(Date.now() + 24 * 60 * 60 * 1000) },
-    ]);
-    findManyViolationNotice.mockResolvedValueOnce([]);
-    findManyPropertyResident.mockResolvedValueOnce([]);
+  const DUE_VIOLATION = {
+    id: "violation-1",
+    organizationId: "org-1",
+    propertyId: "prop-1",
+    violationType: "Lawn",
+    cureByDate: new Date(Date.now() + 24 * 60 * 60 * 1000),
+  };
+  const ACTIVE_RESIDENT = {
+    orgMember: { id: "member-1", userId: "user-1", email: "resident@example.org", commsEmailEnabled: true, commsPushEnabled: false },
+  };
+
+  it("claims a reminder-log row per recipient, sends to them, and records one DEADLINE_REMINDER notice", async () => {
+    findManyViolation.mockResolvedValueOnce([DUE_VIOLATION]);
+    findManyPropertyResident.mockResolvedValueOnce([ACTIVE_RESIDENT]);
 
     const { sendDeadlineReminders } = await import("../violations");
     const result = await sendDeadlineReminders();
 
     expect(result.remindersSent).toBe(1);
+    expect(createViolationReminderLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ violationId: "violation-1", orgMemberId: "member-1", reminderType: "DEADLINE_REMINDER" }),
+      })
+    );
+    expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: "resident@example.org" }));
     expect(createViolationNotice).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ noticeType: "DEADLINE_REMINDER" }) })
     );
   });
 
-  it("does not send a second reminder for a violation already reminded today", async () => {
-    findManyViolation.mockResolvedValueOnce([
-      { id: "violation-1", organizationId: "org-1", propertyId: "prop-1", violationType: "Lawn", cureByDate: new Date(Date.now() + 24 * 60 * 60 * 1000) },
-    ]);
-    findManyViolationNotice.mockResolvedValueOnce([{ violationId: "violation-1" }]);
+  it("skips a recipient whose reminder-log claim loses to a unique-constraint conflict, without sending or double-counting", async () => {
+    findManyViolation.mockResolvedValueOnce([DUE_VIOLATION]);
+    findManyPropertyResident.mockResolvedValueOnce([ACTIVE_RESIDENT]);
+    createViolationReminderLog.mockRejectedValueOnce(p2002(["violationId", "orgMemberId", "reminderType", "dueOffsetDays"]));
 
     const { sendDeadlineReminders } = await import("../violations");
     const result = await sendDeadlineReminders();
 
     expect(result.remindersSent).toBe(0);
+    expect(sendEmail).not.toHaveBeenCalled();
     expect(createViolationNotice).not.toHaveBeenCalled();
   });
 
-  it("returns zero without querying notices when nothing is due soon", async () => {
+  it("still notifies the recipients who successfully claim even when another recipient on the same violation loses the race", async () => {
+    const secondResident = {
+      orgMember: { id: "member-2", userId: "user-2", email: "other@example.org", commsEmailEnabled: true, commsPushEnabled: false },
+    };
+    findManyViolation.mockResolvedValueOnce([DUE_VIOLATION]);
+    findManyPropertyResident.mockResolvedValueOnce([ACTIVE_RESIDENT, secondResident]);
+    createViolationReminderLog
+      .mockRejectedValueOnce(p2002(["violationId", "orgMemberId", "reminderType", "dueOffsetDays"]))
+      .mockResolvedValueOnce({ id: "reminder-log-2" });
+
+    const { sendDeadlineReminders } = await import("../violations");
+    const result = await sendDeadlineReminders();
+
+    expect(result.remindersSent).toBe(1);
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+    expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: "other@example.org" }));
+  });
+
+  it("does not fail the reminder run when a claimed recipient's notification delivery throws", async () => {
+    findManyViolation.mockResolvedValueOnce([DUE_VIOLATION]);
+    findManyPropertyResident.mockResolvedValueOnce([ACTIVE_RESIDENT]);
+    sendEmail.mockRejectedValueOnce(new Error("SMTP provider outage"));
+
+    const { sendDeadlineReminders } = await import("../violations");
+    const result = await sendDeadlineReminders();
+
+    // The claim already committed before delivery was attempted, so this
+    // still counts as "reminded" for this offset -- a transient failure
+    // gets a fresh dueOffsetDays (and therefore a fresh chance) tomorrow
+    // rather than being retried in a loop within this run.
+    expect(result.remindersSent).toBe(1);
+    expect(createViolationNotice).toHaveBeenCalled();
+  });
+
+  it("does not claim or notify anyone when a due violation has no ACTIVE residents", async () => {
+    findManyViolation.mockResolvedValueOnce([DUE_VIOLATION]);
+    findManyPropertyResident.mockResolvedValueOnce([]);
+
+    const { sendDeadlineReminders } = await import("../violations");
+    const result = await sendDeadlineReminders();
+
+    expect(result.remindersSent).toBe(0);
+    expect(createViolationReminderLog).not.toHaveBeenCalled();
+    expect(createViolationNotice).not.toHaveBeenCalled();
+  });
+
+  it("returns zero without resolving residents when nothing is due soon", async () => {
     findManyViolation.mockResolvedValueOnce([]);
     const { sendDeadlineReminders } = await import("../violations");
 
     const result = await sendDeadlineReminders();
 
     expect(result.remindersSent).toBe(0);
-    expect(findManyViolationNotice).not.toHaveBeenCalled();
+    expect(findManyPropertyResident).not.toHaveBeenCalled();
+  });
+
+  it("excludes CURED, RESOLVED, and DISMISSED violations from the due-soon query", async () => {
+    findManyViolation.mockResolvedValueOnce([]);
+    const { sendDeadlineReminders } = await import("../violations");
+    await sendDeadlineReminders();
+
+    expect(findManyViolation).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ status: { in: ["ISSUED", "ACKNOWLEDGED", "IN_REVIEW"] } }) })
+    );
   });
 });
