@@ -33,6 +33,7 @@ describe.skipIf(!RUN_INTEGRATION)("HOA sendDeadlineReminders — real concurrenc
   let orgId: string;
   let propertyId: string;
   let memberId: string;
+  let secondMemberId: string;
   let actorUserId: string;
   let violationId: string;
 
@@ -51,13 +52,27 @@ describe.skipIf(!RUN_INTEGRATION)("HOA sendDeadlineReminders — real concurrenc
     const property = await prisma.property.create({ data: { organizationId: orgId, addressLine1: "1 Reminder Race Ct", propertyType: "SINGLE_FAMILY" } });
     propertyId = property.id;
 
+    // Two residents on the same property is deliberate: this is exactly the
+    // shape that exposed a real defect in review (each of two concurrent
+    // runs winning a *different* recipient's own claim, and each then
+    // independently believing it should write the violation-level audit
+    // notice, duplicating it). A single-resident fixture can't reach that
+    // code path at all -- only one run can ever win the only recipient's
+    // claim, so a duplicate-notice bug would be invisible here.
     const member = await prisma.orgMember.create({
       data: { organizationId: orgId, firstName: "Reminder", lastName: "Recipient", email: `reminder-recipient-${Date.now()}@example.test`, commsEmailEnabled: true },
     });
     memberId = member.id;
+    const secondMember = await prisma.orgMember.create({
+      data: { organizationId: orgId, firstName: "Second", lastName: "Recipient", email: `reminder-recipient-2-${Date.now()}@example.test`, commsEmailEnabled: true },
+    });
+    secondMemberId = secondMember.id;
 
     await prisma.propertyResident.create({
       data: { organizationId: orgId, propertyId, orgMemberId: memberId, relationshipType: "OWNER", status: "ACTIVE", isPrimaryContact: true },
+    });
+    await prisma.propertyResident.create({
+      data: { organizationId: orgId, propertyId, orgMemberId: secondMemberId, relationshipType: "CO_OWNER", status: "ACTIVE", isPrimaryContact: false },
     });
 
     const { createViolationDraft, issueViolation } = await import("../violations");
@@ -85,7 +100,7 @@ describe.skipIf(!RUN_INTEGRATION)("HOA sendDeadlineReminders — real concurrenc
     await prisma?.$disconnect();
   });
 
-  it("converges on exactly one reminder claim per recipient when 8 concurrent cron-style invocations race the same due violation", async () => {
+  it("converges on exactly one violation-level notice and one reminder claim per recipient when 8 concurrent cron-style invocations race the same due violation with two residents", async () => {
     const { sendDeadlineReminders } = await import("../violations");
 
     // Simulates overlapping cron runs / multiple app instances all waking
@@ -93,13 +108,14 @@ describe.skipIf(!RUN_INTEGRATION)("HOA sendDeadlineReminders — real concurrenc
     const results = await Promise.allSettled(Array.from({ length: 8 }, () => sendDeadlineReminders()));
 
     const totalRemindersSentAcrossRuns = results.reduce((sum, r) => sum + (r.status === "fulfilled" ? r.value.remindersSent : 0), 0);
-    expect(totalRemindersSentAcrossRuns).toBe(1); // exactly one of the 8 invocations should have won the claim
+    expect(totalRemindersSentAcrossRuns).toBe(1); // exactly one of the 8 invocations should have won the violation-level claim
 
-    const logRows = await prisma.violationReminderLog.findMany({ where: { violationId, orgMemberId: memberId, reminderType: "DEADLINE_REMINDER" } });
-    expect(logRows).toHaveLength(1); // the database itself agrees, not just the returned counts
+    const logRows = await prisma.violationReminderLog.findMany({ where: { violationId, reminderType: "DEADLINE_REMINDER" } });
+    expect(logRows).toHaveLength(2); // one claim row per resident -- both got reminded
+    expect(new Set(logRows.map((r: { orgMemberId: string }) => r.orgMemberId))).toEqual(new Set([memberId, secondMemberId]));
 
     const noticeRows = await prisma.violationNotice.findMany({ where: { violationId, noticeType: "DEADLINE_REMINDER" } });
-    expect(noticeRows).toHaveLength(1); // the audit-trail notice wasn't duplicated either
+    expect(noticeRows).toHaveLength(1); // exactly one audit-trail notice, not one per resident and not one per winning run
   });
 
   it("does not re-claim on a subsequent run for the same day (dueOffsetDays unchanged)", async () => {
@@ -107,7 +123,9 @@ describe.skipIf(!RUN_INTEGRATION)("HOA sendDeadlineReminders — real concurrenc
     const result = await sendDeadlineReminders();
 
     expect(result.remindersSent).toBe(0); // already claimed by the previous test today
-    const logRows = await prisma.violationReminderLog.findMany({ where: { violationId, orgMemberId: memberId, reminderType: "DEADLINE_REMINDER" } });
-    expect(logRows).toHaveLength(1);
+    const logRows = await prisma.violationReminderLog.findMany({ where: { violationId, reminderType: "DEADLINE_REMINDER" } });
+    expect(logRows).toHaveLength(2);
+    const noticeRows = await prisma.violationNotice.findMany({ where: { violationId, noticeType: "DEADLINE_REMINDER" } });
+    expect(noticeRows).toHaveLength(1);
   });
 });

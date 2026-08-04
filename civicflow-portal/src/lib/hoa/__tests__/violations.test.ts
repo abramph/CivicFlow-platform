@@ -420,9 +420,29 @@ describe("sendDeadlineReminders", () => {
     const { sendDeadlineReminders } = await import("../violations");
     const result = await sendDeadlineReminders();
 
+    // The violation-level notice claim still succeeds (this run legitimately
+    // won that), but with the one recipient's own claim lost, nobody was
+    // actually notified, so the run doesn't count as having sent a reminder.
     expect(result.remindersSent).toBe(0);
     expect(sendEmail).not.toHaveBeenCalled();
-    expect(createViolationNotice).not.toHaveBeenCalled();
+  });
+
+  it("skips the entire violation -- no resident resolution, no per-recipient claims -- when the violation-level notice claim itself loses to a concurrent run", async () => {
+    findManyViolation.mockResolvedValueOnce([DUE_VIOLATION]);
+    createViolationNotice.mockRejectedValueOnce(p2002(["violationId", "noticeType", "dueOffsetDays"]));
+
+    const { sendDeadlineReminders } = await import("../violations");
+    const result = await sendDeadlineReminders();
+
+    // This is the fix for the real defect an independent review found: two
+    // concurrent runs that each won a *different* recipient's claim used to
+    // each independently write their own ViolationNotice, duplicating the
+    // resident-visible audit trail. Now only the run that wins this
+    // violation-level claim ever resolves residents or attempts a send.
+    expect(result.remindersSent).toBe(0);
+    expect(findManyPropertyResident).not.toHaveBeenCalled();
+    expect(createViolationReminderLog).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
   });
 
   it("still notifies the recipients who successfully claim even when another recipient on the same violation loses the race", async () => {
@@ -459,7 +479,7 @@ describe("sendDeadlineReminders", () => {
     expect(createViolationNotice).toHaveBeenCalled();
   });
 
-  it("does not claim or notify anyone when a due violation has no ACTIVE residents", async () => {
+  it("does not claim any per-recipient reminder log rows when a due violation has no ACTIVE residents", async () => {
     findManyViolation.mockResolvedValueOnce([DUE_VIOLATION]);
     findManyPropertyResident.mockResolvedValueOnce([]);
 
@@ -468,7 +488,6 @@ describe("sendDeadlineReminders", () => {
 
     expect(result.remindersSent).toBe(0);
     expect(createViolationReminderLog).not.toHaveBeenCalled();
-    expect(createViolationNotice).not.toHaveBeenCalled();
   });
 
   it("returns zero without resolving residents when nothing is due soon", async () => {

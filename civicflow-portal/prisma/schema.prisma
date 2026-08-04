@@ -3149,11 +3149,23 @@ model ViolationNotice {
   /// Free-text (e.g. "EMAIL", "MAIL", "IN_PERSON").
   channel        String
   body           String
+  /// Only meaningful for noticeType "DEADLINE_REMINDER" -- see
+  /// ViolationReminderLog's doc comment for what this represents. Left
+  /// null for every other notice type (INITIAL, etc.), which is safe: a
+  /// standard Postgres UNIQUE constraint treats NULLs as distinct from
+  /// each other, so the @@unique below never applies to non-reminder
+  /// notices. This is the violation-level counterpart to
+  /// ViolationReminderLog's per-recipient claim -- without it, two
+  /// concurrent cron runs that each win a *different* recipient's claim
+  /// would each independently believe they were "the one" and both write
+  /// a resident-visible audit notice for the same reminder cycle.
+  dueOffsetDays  Int?
   createdAt      DateTime @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   violation    Violation    @relation(fields: [violationId], references: [id], onDelete: Restrict)
 
+  @@unique([violationId, noticeType, dueOffsetDays])
   @@index([organizationId])
   @@index([violationId])
 }

@@ -559,6 +559,19 @@ const DEADLINE_REMINDER_TYPE = "DEADLINE_REMINDER";
  * next day's claim is a fresh, distinct key rather than a repeat of
  * today's — a deliberately simple self-healing property rather than a
  * separate retry-queue mechanism.
+ *
+ * The per-recipient claim above is NOT by itself enough to make the
+ * violation-level audit notice idempotent: two overlapping runs that each
+ * win a *different* recipient's claim would, without a further guard,
+ * each independently conclude "I sent a reminder for this violation" and
+ * both write a resident-visible ViolationNotice row. So the very first
+ * thing each run does for a violation is its own compare-and-swap — a
+ * claim on ViolationNotice itself, unique on (violationId, noticeType,
+ * dueOffsetDays) — and only the run that wins it processes any recipients
+ * at all. This means at most one run per (violation, offset) ever gets
+ * past this point, which also makes the per-recipient loop below
+ * effectively non-concurrent for a given violation (the ViolationReminderLog
+ * claim per recipient remains as defense-in-depth, not the sole guard).
  */
 export async function sendDeadlineReminders(reminderWindowDays = 3): Promise<{ remindersSent: number }> {
   const now = new Date();
@@ -579,8 +592,24 @@ export async function sendDeadlineReminders(reminderWindowDays = 3): Promise<{ r
     const dueOffsetDays = Math.floor((violation.cureByDate.getTime() - now.getTime()) / MS_PER_DAY);
     const body = `Your ${violation.violationType} violation must be resolved by ${violation.cureByDate.toLocaleDateString()}.`;
 
+    try {
+      await prisma.violationNotice.create({
+        data: {
+          organizationId: violation.organizationId,
+          violationId: violation.id,
+          noticeType: DEADLINE_REMINDER_TYPE,
+          channel: "EMAIL",
+          body,
+          dueOffsetDays,
+        },
+      });
+    } catch (error) {
+      if (isUniqueConstraintViolation(error)) continue; // another run already owns this violation's reminder for this offset
+      throw error;
+    }
+
     const residents = await resolveActivePropertyResidents(violation.organizationId, violation.propertyId);
-    let claimedForAnyRecipient = false;
+    let sentToAnyRecipient = false;
 
     for (const resident of residents) {
       try {
@@ -598,7 +627,7 @@ export async function sendDeadlineReminders(reminderWindowDays = 3): Promise<{ r
         throw error;
       }
 
-      claimedForAnyRecipient = true;
+      sentToAnyRecipient = true;
       try {
         await notifyOneResident(resident, { title: "Violation deadline approaching", body });
       } catch (error) {
@@ -617,18 +646,7 @@ export async function sendDeadlineReminders(reminderWindowDays = 3): Promise<{ r
       }
     }
 
-    if (claimedForAnyRecipient) {
-      await prisma.violationNotice.create({
-        data: {
-          organizationId: violation.organizationId,
-          violationId: violation.id,
-          noticeType: DEADLINE_REMINDER_TYPE,
-          channel: "EMAIL",
-          body,
-        },
-      });
-      remindersSent++;
-    }
+    if (sentToAnyRecipient) remindersSent++;
   }
 
   return { remindersSent };
