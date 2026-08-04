@@ -1,4 +1,5 @@
-import type { Prisma, Violation, ViolationStatus } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import type { Violation, ViolationStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { createAuditEvent } from "@/lib/audit";
 import { sendEmail } from "@/lib/mail";
@@ -454,11 +455,15 @@ export function toResidentSafeViolation(violation: {
 
 type NotificationKind = "issued" | "deadline_reminder" | "status_changed" | "resolved_dismissed";
 
-async function notifyPropertyResidents(
-  organizationId: string,
-  propertyId: string,
-  notification: { kind: NotificationKind; title: string; body: string; violationId: string }
-): Promise<void> {
+interface ResolvedResident {
+  orgMember: { id: string; userId: string | null; email: string | null; commsEmailEnabled: boolean; commsPushEnabled: boolean };
+  tokens: string[];
+}
+
+/** Shared by notifyPropertyResidents (broadcast) and sendDeadlineReminders
+ * (per-recipient claim-then-send) so both read the exact same ACTIVE-only,
+ * tenant-scoped resident set and device-token lookup. */
+async function resolveActivePropertyResidents(organizationId: string, propertyId: string): Promise<ResolvedResident[]> {
   const residents = await prisma.propertyResident.findMany({
     where: { organizationId, propertyId, status: "ACTIVE" },
     select: {
@@ -479,49 +484,98 @@ async function notifyPropertyResidents(
     tokensByUserId.set(deviceToken.userId, list);
   }
 
-  for (const { orgMember } of residents) {
-    // Mirrors the same commsEmailEnabled/commsPushEnabled opt-out check
-    // bulk communication campaigns respect (src/lib/communication-campaigns.ts)
-    // -- a violation notice is exactly the kind of message a member's own
-    // notification preferences should govern, required-notice status
-    // aside (no requiredNoticesOnly override exists for violations, unlike
-    // push's existing bypass for legally-required notices, since this MVP
-    // has no validated need for one yet).
-    if (orgMember.email && orgMember.commsEmailEnabled) {
-      await sendEmail({ to: orgMember.email, subject: notification.title, text: notification.body });
-    }
-    if (orgMember.userId && orgMember.commsPushEnabled) {
-      const tokens = tokensByUserId.get(orgMember.userId) ?? [];
-      if (tokens.length > 0) {
-        await sendPushToTokens(tokens, {
-          title: notification.title,
-          body: notification.body,
-          // /hoa/violations/[id] is the OFFICER-only detail page (gated by
-          // hoa:violations:read) -- a resident tapping this push must never
-          // land there. There is no resident-facing per-violation detail
-          // page yet, only the list at /m/violations (see
-          // docs/hoa-violations-mvp.md's "deliberately not built" mobile
-          // scope note), so that's the correct, actually-reachable target.
-          deepLink: "/m/violations",
-        });
-      }
-    }
+  return residents.map((r) => ({ orgMember: r.orgMember, tokens: tokensByUserId.get(r.orgMember.userId ?? "") ?? [] }));
+}
+
+/** Sends to exactly one already-resolved resident. Mirrors the same
+ * commsEmailEnabled/commsPushEnabled opt-out check bulk communication
+ * campaigns respect (src/lib/communication-campaigns.ts) -- a violation
+ * notice is exactly the kind of message a member's own notification
+ * preferences should govern, required-notice status aside (no
+ * requiredNoticesOnly override exists for violations, unlike push's
+ * existing bypass for legally-required notices, since this MVP has no
+ * validated need for one yet). */
+async function notifyOneResident(resident: ResolvedResident, notification: { title: string; body: string }): Promise<void> {
+  const { orgMember, tokens } = resident;
+  if (orgMember.email && orgMember.commsEmailEnabled) {
+    await sendEmail({ to: orgMember.email, subject: notification.title, text: notification.body });
+  }
+  if (orgMember.userId && orgMember.commsPushEnabled && tokens.length > 0) {
+    await sendPushToTokens(tokens, {
+      title: notification.title,
+      body: notification.body,
+      // /hoa/violations/[id] is the OFFICER-only detail page (gated by
+      // hoa:violations:read) -- a resident tapping this push must never
+      // land there. There is no resident-facing per-violation detail
+      // page yet, only the list at /m/violations (see
+      // docs/hoa-violations-mvp.md's "deliberately not built" mobile
+      // scope note), so that's the correct, actually-reachable target.
+      deepLink: "/m/violations",
+    });
   }
 }
 
+async function notifyPropertyResidents(
+  organizationId: string,
+  propertyId: string,
+  notification: { kind: NotificationKind; title: string; body: string; violationId: string }
+): Promise<void> {
+  const residents = await resolveActivePropertyResidents(organizationId, propertyId);
+  for (const resident of residents) {
+    await notifyOneResident(resident, notification);
+  }
+}
+
+function isUniqueConstraintViolation(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+}
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const DEADLINE_REMINDER_TYPE = "DEADLINE_REMINDER";
+
 /**
  * Scans for violations approaching their cureByDate and sends a
- * deadline-reminder notification, deduped to at most once per violation
- * per calendar day (checked via the ViolationNotice audit trail itself,
- * not a separate tracking column) — called by a dedicated cron route
+ * deadline-reminder notification to each of the property's ACTIVE
+ * residents — called by a dedicated cron route
  * (src/app/api/cron/hoa-violation-reminders/route.ts), mirroring
  * processPendingReminderLogs's cron-worker pattern.
+ *
+ * Deduplication is per (violation, recipient, dueOffsetDays) via
+ * ViolationReminderLog's unique constraint, NOT the server's local
+ * calendar day. dueOffsetDays = floor((cureByDate - now) / 1 day) is
+ * computed from absolute UTC epoch math, so it's identical no matter what
+ * timezone the cron server runs in and can't be perturbed by a DST
+ * transition. The unique constraint (not a preceding read) is what makes
+ * this safe under real concurrency: two overlapping cron runs, retries, or
+ * multiple app instances racing the same (violation, recipient, offset)
+ * triple will see exactly one insert succeed and one hit P2002, which is
+ * treated as "already sent" rather than an error — the same
+ * compare-and-swap shape as the status-transition fix above, just via a
+ * unique index instead of a conditional updateMany.
+ *
+ * A resident whose relationship starts partway through today, or a
+ * delivery that fails transiently, isn't permanently stuck: dueOffsetDays
+ * decreases by one on each later run (as cureByDate gets closer), so the
+ * next day's claim is a fresh, distinct key rather than a repeat of
+ * today's — a deliberately simple self-healing property rather than a
+ * separate retry-queue mechanism.
+ *
+ * The per-recipient claim above is NOT by itself enough to make the
+ * violation-level audit notice idempotent: two overlapping runs that each
+ * win a *different* recipient's claim would, without a further guard,
+ * each independently conclude "I sent a reminder for this violation" and
+ * both write a resident-visible ViolationNotice row. So the very first
+ * thing each run does for a violation is its own compare-and-swap — a
+ * claim on ViolationNotice itself, unique on (violationId, noticeType,
+ * dueOffsetDays) — and only the run that wins it processes any recipients
+ * at all. This means at most one run per (violation, offset) ever gets
+ * past this point, which also makes the per-recipient loop below
+ * effectively non-concurrent for a given violation (the ViolationReminderLog
+ * claim per recipient remains as defense-in-depth, not the sole guard).
  */
 export async function sendDeadlineReminders(reminderWindowDays = 3): Promise<{ remindersSent: number }> {
   const now = new Date();
-  const windowEnd = new Date(now.getTime() + reminderWindowDays * 24 * 60 * 60 * 1000);
-  const startOfToday = new Date(now);
-  startOfToday.setHours(0, 0, 0, 0);
+  const windowEnd = new Date(now.getTime() + reminderWindowDays * MS_PER_DAY);
 
   const dueSoon = await prisma.violation.findMany({
     where: {
@@ -532,39 +586,67 @@ export async function sendDeadlineReminders(reminderWindowDays = 3): Promise<{ r
   });
   if (dueSoon.length === 0) return { remindersSent: 0 };
 
-  const alreadyRemindedToday = await prisma.violationNotice.findMany({
-    where: {
-      violationId: { in: dueSoon.map((v) => v.id) },
-      noticeType: "DEADLINE_REMINDER",
-      sentAt: { gte: startOfToday },
-    },
-    select: { violationId: true },
-  });
-  const alreadyRemindedIds = new Set(alreadyRemindedToday.map((n) => n.violationId));
-
   let remindersSent = 0;
   for (const violation of dueSoon) {
-    if (alreadyRemindedIds.has(violation.id)) continue;
+    if (!violation.cureByDate) continue;
+    const dueOffsetDays = Math.floor((violation.cureByDate.getTime() - now.getTime()) / MS_PER_DAY);
+    const body = `Your ${violation.violationType} violation must be resolved by ${violation.cureByDate.toLocaleDateString()}.`;
 
-    const body = `Your ${violation.violationType} violation must be resolved by ${violation.cureByDate?.toLocaleDateString()}.`;
-    await prisma.violationNotice.create({
-      data: {
-        organizationId: violation.organizationId,
-        violationId: violation.id,
-        noticeType: "DEADLINE_REMINDER",
-        channel: "EMAIL",
-        body,
-      },
-    });
+    try {
+      await prisma.violationNotice.create({
+        data: {
+          organizationId: violation.organizationId,
+          violationId: violation.id,
+          noticeType: DEADLINE_REMINDER_TYPE,
+          channel: "EMAIL",
+          body,
+          dueOffsetDays,
+        },
+      });
+    } catch (error) {
+      if (isUniqueConstraintViolation(error)) continue; // another run already owns this violation's reminder for this offset
+      throw error;
+    }
 
-    await notifyPropertyResidentsSafely(violation.organizationId, violation.propertyId, {
-      kind: "deadline_reminder",
-      title: "Violation deadline approaching",
-      body,
-      violationId: violation.id,
-    });
+    const residents = await resolveActivePropertyResidents(violation.organizationId, violation.propertyId);
+    let sentToAnyRecipient = false;
 
-    remindersSent++;
+    for (const resident of residents) {
+      try {
+        await prisma.violationReminderLog.create({
+          data: {
+            organizationId: violation.organizationId,
+            violationId: violation.id,
+            orgMemberId: resident.orgMember.id,
+            reminderType: DEADLINE_REMINDER_TYPE,
+            dueOffsetDays,
+          },
+        });
+      } catch (error) {
+        if (isUniqueConstraintViolation(error)) continue; // already reminded this recipient for this offset
+        throw error;
+      }
+
+      sentToAnyRecipient = true;
+      try {
+        await notifyOneResident(resident, { title: "Violation deadline approaching", body });
+      } catch (error) {
+        // The claim row already committed -- see the function doc for why
+        // that's the correct order (a transient failure gets a fresh
+        // chance tomorrow rather than looping forever today).
+        console.error(
+          JSON.stringify({
+            event: "hoa_violation_reminder_notification_failed",
+            organizationId: violation.organizationId,
+            violationId: violation.id,
+            orgMemberId: resident.orgMember.id,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        );
+      }
+    }
+
+    if (sentToAnyRecipient) remindersSent++;
   }
 
   return { remindersSent };

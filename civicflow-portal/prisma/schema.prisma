@@ -905,6 +905,7 @@ model OrgMember {
   ptaHouseholdBilling     PtaHousehold?
   hoaPropertiesBilled     Property[]               @relation("PropertyBillingMember")
   hoaPropertyResidencies  PropertyResident[]       @relation("PropertyResidentMember")
+  violationReminderLogs   ViolationReminderLog[]
 
   @@unique([organizationId, userId])
   @@unique([organizationId, memberNumber])
@@ -3114,6 +3115,7 @@ model Violation {
   notices       ViolationNotice[]
   comments      ViolationComment[]
   statusHistory ViolationStatusHistory[]
+  reminderLog   ViolationReminderLog[]
 
   @@index([organizationId])
   @@index([organizationId, propertyId])
@@ -3147,13 +3149,64 @@ model ViolationNotice {
   /// Free-text (e.g. "EMAIL", "MAIL", "IN_PERSON").
   channel        String
   body           String
+  /// Only meaningful for noticeType "DEADLINE_REMINDER" -- see
+  /// ViolationReminderLog's doc comment for what this represents. Left
+  /// null for every other notice type (INITIAL, etc.), which is safe: a
+  /// standard Postgres UNIQUE constraint treats NULLs as distinct from
+  /// each other, so the @@unique below never applies to non-reminder
+  /// notices. This is the violation-level counterpart to
+  /// ViolationReminderLog's per-recipient claim -- without it, two
+  /// concurrent cron runs that each win a *different* recipient's claim
+  /// would each independently believe they were "the one" and both write
+  /// a resident-visible audit notice for the same reminder cycle.
+  dueOffsetDays  Int?
   createdAt      DateTime @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   violation    Violation    @relation(fields: [violationId], references: [id], onDelete: Restrict)
 
+  @@unique([violationId, noticeType, dueOffsetDays])
   @@index([organizationId])
   @@index([violationId])
+}
+
+/// Per-recipient claim record for deadline-reminder notifications --
+/// distinct from ViolationNotice, which is the violation-level compliance
+/// audit trail. Deliberately not EmailReminderLog: that model has no
+/// violationId, no unique constraint, and models an async QUEUED->SENT
+/// queue-worker lifecycle that doesn't fit this cron's synchronous
+/// claim-then-send pattern -- reusing it would mean bolting HOA-specific
+/// fields onto a PTA-dues-shaped table for a superficial "both are email
+/// reminders" resemblance. This table exists purely to make reminder delivery
+/// idempotent and recipient-safe: dueOffsetDays is computed as
+/// floor((cureByDate - now) / 1 day) using absolute UTC epoch math, never
+/// the server's local calendar day, so a cron running near midnight or a
+/// server timezone/DST change can never cause the same (violation,
+/// recipient, offset) triple to be reminded twice. The unique constraint
+/// below -- not a read-then-write check -- is what actually makes
+/// concurrent/duplicate cron invocations (retries, overlapping schedules,
+/// multiple app instances) safe: a losing insert fails on the constraint
+/// and is treated as "already sent," mirroring the compare-and-swap
+/// pattern used for violation status transitions in violations.ts.
+model ViolationReminderLog {
+  id             String   @id @default(cuid())
+  organizationId String
+  violationId    String
+  orgMemberId    String
+  /// Free-text, matching ViolationNotice.noticeType's own precedent --
+  /// "DEADLINE_REMINDER" today, room for other recipient-scoped reminder
+  /// kinds later without a migration.
+  reminderType   String
+  /// floor((cureByDate - sentAt) / 1 day) at send time. Deterministic and
+  /// timezone-free -- see model doc above.
+  dueOffsetDays  Int
+  sentAt         DateTime @default(now())
+
+  violation Violation @relation(fields: [violationId], references: [id], onDelete: Restrict)
+  orgMember OrgMember @relation(fields: [orgMemberId], references: [id], onDelete: Restrict)
+
+  @@unique([violationId, orgMemberId, reminderType, dueOffsetDays])
+  @@index([organizationId])
 }
 
 /// Append-only comment thread on a Violation. isPrivate defaults to true
