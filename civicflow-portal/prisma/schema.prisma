@@ -347,6 +347,7 @@ enum AttachmentEntityType {
   CONTRIBUTION
   PAYMENT_REPORT
   HOA_VIOLATION
+  HOA_ARCHITECTURAL_REQUEST
   OTHER
 }
 
@@ -526,6 +527,10 @@ model Organization {
   hoaViolationNotices       ViolationNotice[]
   hoaViolationComments      ViolationComment[]
   hoaViolationStatusHistory ViolationStatusHistory[]
+
+  hoaArchitecturalRequests             ArchitecturalRequest[]
+  hoaArchitecturalRequestComments      ArchitecturalRequestComment[]
+  hoaArchitecturalRequestStatusHistory ArchitecturalRequestStatusHistory[]
 
   @@index([slug])
   @@index([status])
@@ -884,28 +889,29 @@ model OrgMember {
   createdAt                        DateTime         @default(now())
   updatedAt                        DateTime         @updatedAt
 
-  organization            Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  user                    User?                    @relation("OrgMemberLogin", fields: [userId], references: [id], onDelete: SetNull)
-  membershipCategory      Category?                @relation("MemberMembershipCategory", fields: [membershipCategoryId], references: [id], onDelete: SetNull)
-  duesAccounts            DuesAccount[]            @relation("DuesAccountMember")
-  duesCharges             DuesCharge[]
-  duesPayments            DuesPayment[]
-  duesAdjustments         DuesAdjustment[]
-  contributions           Contribution[]
-  receipts                ContributionReceipt[]
-  reminderLogs            EmailReminderLog[]
-  communicationLogs       CommunicationLog[]
-  communicationRecipients CommunicationRecipient[]
-  paymentImportItems      PaymentImportItem[]      @relation("PaymentImportItemMatchedMember")
-  attendanceRecords       AttendanceRecord[]
-  timelineEvents          MemberTimelineEvent[]
-  invites                 MemberInvite[]
-  paymentReports          PaymentReport[]
-  smsMessages             SmsMessage[]
-  ptaHouseholdBilling     PtaHousehold?
-  hoaPropertiesBilled     Property[]               @relation("PropertyBillingMember")
-  hoaPropertyResidencies  PropertyResident[]       @relation("PropertyResidentMember")
-  violationReminderLogs   ViolationReminderLog[]
+  organization                   Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user                           User?                    @relation("OrgMemberLogin", fields: [userId], references: [id], onDelete: SetNull)
+  membershipCategory             Category?                @relation("MemberMembershipCategory", fields: [membershipCategoryId], references: [id], onDelete: SetNull)
+  duesAccounts                   DuesAccount[]            @relation("DuesAccountMember")
+  duesCharges                    DuesCharge[]
+  duesPayments                   DuesPayment[]
+  duesAdjustments                DuesAdjustment[]
+  contributions                  Contribution[]
+  receipts                       ContributionReceipt[]
+  reminderLogs                   EmailReminderLog[]
+  communicationLogs              CommunicationLog[]
+  communicationRecipients        CommunicationRecipient[]
+  paymentImportItems             PaymentImportItem[]      @relation("PaymentImportItemMatchedMember")
+  attendanceRecords              AttendanceRecord[]
+  timelineEvents                 MemberTimelineEvent[]
+  invites                        MemberInvite[]
+  paymentReports                 PaymentReport[]
+  smsMessages                    SmsMessage[]
+  ptaHouseholdBilling            PtaHousehold?
+  hoaPropertiesBilled            Property[]               @relation("PropertyBillingMember")
+  hoaPropertyResidencies         PropertyResident[]       @relation("PropertyResidentMember")
+  violationReminderLogs          ViolationReminderLog[]
+  architecturalRequestsSubmitted ArchitecturalRequest[]
 
   @@unique([organizationId, userId])
   @@unique([organizationId, memberNumber])
@@ -2978,10 +2984,11 @@ model Property {
   updatedAt       DateTime       @updatedAt
   archivedAt      DateTime?
 
-  organization  Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  billingMember OrgMember?         @relation("PropertyBillingMember", fields: [billingMemberId], references: [id], onDelete: SetNull)
-  residents     PropertyResident[]
-  violations    Violation[]
+  organization          Organization           @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  billingMember         OrgMember?             @relation("PropertyBillingMember", fields: [billingMemberId], references: [id], onDelete: SetNull)
+  residents             PropertyResident[]
+  violations            Violation[]
+  architecturalRequests ArchitecturalRequest[]
 
   @@index([organizationId])
   @@index([organizationId, status])
@@ -3250,4 +3257,125 @@ model ViolationStatusHistory {
 
   @@index([organizationId])
   @@index([violationId])
+}
+
+// ─── HOA Architectural Requests ────────────────────────────────────────────
+// A resident/owner's submission for board or committee approval of an
+// exterior or property modification, and its review lifecycle. See
+// docs/hoa-domain-model.md's original planning table and
+// docs/hoa-architectural-requests.md for the full design. Mirrors
+// Violation's shape deliberately (main record + append-only status-history
+// + comment thread), since the underlying compliance-review workflow shape
+// is genuinely the same, not because every field is identical.
+
+/// The one decision an architectural request ever gets (approve/deny/
+/// conditionally-approve) is stored directly on the main record rather than
+/// as a separate append-only "decision" child table -- unlike notices on a
+/// Violation, which can recur many times over a violation's life, a
+/// decision happens at most once per submission cycle, so a dedicated
+/// table would be an unused abstraction for a 1:0-or-1 relationship.
+model ArchitecturalRequest {
+  id                     String                     @id @default(cuid())
+  organizationId         String
+  propertyId             String
+  /// The OrgMember who submitted -- see property-eligibility policy in
+  /// requireArchitecturalRequestEligibleRelationship() (owners/co-owners/
+  /// non-resident-owners only by default; residents/tenants cannot
+  /// self-submit in this MVP).
+  submittedByOrgMemberId String
+  /// Human-friendly display number ("AR-1042"), global auto-increment
+  /// rather than a per-org sequence -- Postgres/Prisma has no clean
+  /// per-org sequence primitive without a bespoke trigger, and a global
+  /// counter is a reasonable, much simpler trade-off for a low-volume,
+  /// display-only field.
+  requestNumber          Int                        @default(autoincrement())
+  /// Free-text (e.g. "FENCE", "PAINT", "ROOF", "SHED", "DECK",
+  /// "LANDSCAPING", "SOLAR", "DRIVEWAY", "WINDOWS_DOORS", "OTHER") -- same
+  /// reasoning as ViolationNotice.noticeType's precedent: kept as a string
+  /// rather than over-enumerating a small, evolving vocabulary early.
+  category               String
+  title                  String
+  projectDescription     String
+  proposedStartDate      DateTime?
+  proposedCompletionDate DateTime?
+  status                 ArchitecturalRequestStatus @default(DRAFT)
+  submittedAt            DateTime?
+  decidedAt              DateTime?
+  decidedByUserId        String?
+  /// Only meaningful once a decision has been made; never null before that.
+  /// Resident-visible (the final decision text), distinct from private
+  /// officer notes in ArchitecturalRequestComment.
+  decisionSummary        String?
+  /// Resident-visible; only meaningful when status is
+  /// CONDITIONALLY_APPROVED.
+  conditions             String?
+  /// Set when an APPROVED/CONDITIONALLY_APPROVED request's approval window
+  /// lapses without the work being completed -- schema-ready for the
+  /// EXPIRED transition; no automatic expiry job ships in this MVP (see
+  /// docs/hoa-architectural-requests.md's "deliberately not built" list).
+  expirationDate         DateTime?
+  createdAt              DateTime                   @default(now())
+  updatedAt              DateTime                   @updatedAt
+
+  organization  Organization                        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  property      Property                            @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  submittedBy   OrgMember                           @relation(fields: [submittedByOrgMemberId], references: [id], onDelete: Restrict)
+  comments      ArchitecturalRequestComment[]
+  statusHistory ArchitecturalRequestStatusHistory[]
+
+  @@index([organizationId])
+  @@index([organizationId, propertyId])
+  @@index([organizationId, status])
+}
+
+enum ArchitecturalRequestStatus {
+  DRAFT
+  SUBMITTED
+  IN_REVIEW
+  CHANGES_REQUESTED
+  RESUBMITTED
+  APPROVED
+  CONDITIONALLY_APPROVED
+  DENIED
+  WITHDRAWN
+  EXPIRED
+}
+
+/// Append-only comment thread, identical visibility model to
+/// ViolationComment: isPrivate defaults true (board/committee-only) --
+/// only ever resident-visible when a caller explicitly sets isPrivate:
+/// false, never the reverse.
+model ArchitecturalRequestComment {
+  id             String   @id @default(cuid())
+  organizationId String
+  requestId      String
+  authorUserId   String?
+  body           String
+  isPrivate      Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  request      ArchitecturalRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId])
+  @@index([requestId])
+}
+
+/// Append-only state-machine audit trail -- one row per status transition.
+/// Never updated or deleted; mirrors ViolationStatusHistory.
+model ArchitecturalRequestStatusHistory {
+  id              String                      @id @default(cuid())
+  organizationId  String
+  requestId       String
+  fromStatus      ArchitecturalRequestStatus?
+  toStatus        ArchitecturalRequestStatus
+  changedByUserId String?
+  notes           String?
+  createdAt       DateTime                    @default(now())
+
+  organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  request      ArchitecturalRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId])
+  @@index([requestId])
 }

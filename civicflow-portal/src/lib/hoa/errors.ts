@@ -51,6 +51,27 @@ export const HOA_ERROR_CODES = [
    * transition was never valid at all. The caller should refresh and
    * retry with current state, not treat this as a permanent rejection. */
   "HOA_VIOLATION_STALE_UPDATE",
+
+  // Architectural Requests
+  /** Organization.primaryVertical is HOA but the "architecturalRequests"
+   * capability isn't enabled for it. */
+  "HOA_ARCHITECTURAL_REQUESTS_NOT_ENABLED",
+  "HOA_ARCHITECTURAL_REQUEST_NOT_FOUND",
+  /** Attempted a status transition the state machine doesn't allow from the
+   * request's current status. */
+  "HOA_ARCHITECTURAL_REQUEST_INVALID_TRANSITION",
+  /** The caller is not the submitter of this request (or has no
+   * PropertyResident relationship to it at all) — resident self-service
+   * path only, mirrors HOA_VIOLATION_NOT_YOUR_PROPERTY. */
+  "HOA_ARCHITECTURAL_REQUEST_NOT_YOURS",
+  /** Same race-safety meaning as HOA_VIOLATION_STALE_UPDATE, for
+   * architectural-request status transitions. */
+  "HOA_ARCHITECTURAL_REQUEST_STALE_UPDATE",
+  /** The caller's relationship to the property (RESIDENT/TENANT, or no
+   * relationship at all) is not one of the types allowed to submit an
+   * architectural request (OWNER/CO_OWNER/NON_RESIDENT_OWNER) — see
+   * requireArchitecturalRequestSubmissionEligibility(). */
+  "HOA_ARCHITECTURAL_REQUEST_INELIGIBLE_RELATIONSHIP",
 ] as const;
 
 export type HoaErrorCode = (typeof HOA_ERROR_CODES)[number];
@@ -72,6 +93,12 @@ const STATUS_FOR_CODE: Record<HoaErrorCode, number> = {
   HOA_VIOLATION_INVALID_TRANSITION: 409,
   HOA_VIOLATION_NOT_YOUR_PROPERTY: 403,
   HOA_VIOLATION_STALE_UPDATE: 409,
+  HOA_ARCHITECTURAL_REQUESTS_NOT_ENABLED: 403,
+  HOA_ARCHITECTURAL_REQUEST_NOT_FOUND: 404,
+  HOA_ARCHITECTURAL_REQUEST_INVALID_TRANSITION: 409,
+  HOA_ARCHITECTURAL_REQUEST_NOT_YOURS: 403,
+  HOA_ARCHITECTURAL_REQUEST_STALE_UPDATE: 409,
+  HOA_ARCHITECTURAL_REQUEST_INELIGIBLE_RELATIONSHIP: 403,
 };
 
 export class HoaError extends Error {

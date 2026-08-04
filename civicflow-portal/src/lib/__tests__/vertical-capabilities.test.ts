@@ -8,10 +8,10 @@ describe("vertical-capabilities: HOA (PR #43 foundation)", () => {
     expect(capabilities.propertyResidents).toBe(true);
   });
 
-  it("enables violations (HOA Violations MVP) but not architecturalRequests or maintenanceRequests yet -- those models don't exist until a later PR", () => {
+  it("enables violations and architecturalRequests but not maintenanceRequests yet -- that model doesn't exist until a later PR", () => {
     const capabilities = getVerticalCapabilities("HOA");
     expect(capabilities.violations).toBe(true);
-    expect(capabilities.architecturalRequests).toBe(false);
+    expect(capabilities.architecturalRequests).toBe(true);
     expect(capabilities.maintenanceRequests).toBe(false);
   });
 });

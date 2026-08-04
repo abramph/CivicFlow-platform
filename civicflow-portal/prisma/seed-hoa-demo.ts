@@ -380,6 +380,195 @@ async function main() {
   } else {
     console.log("Violations already seeded — skipping (idempotent re-run).");
   }
+
+  // ── Architectural Requests ─────────────────────────────────────────────────
+  // Same dynamic-import reasoning as the Violations section above.
+  const {
+    createArchitecturalRequestDraft,
+    submitArchitecturalRequest,
+    transitionArchitecturalRequestStatus,
+    resubmitArchitecturalRequest,
+    addArchitecturalRequestComment,
+  } = await import("../src/lib/hoa/architectural-requests");
+
+  const architecturalAlreadySeeded = await prisma.architecturalRequest.findFirst({
+    where: { organizationId: org.id, propertyId: singleFamily.id, title: "Repaint shutters" },
+    select: { id: true },
+  });
+
+  if (!architecturalAlreadySeeded) {
+    // Scenario 1: still a draft -- Morgan (owner-occupant) hasn't submitted yet.
+    await createArchitecturalRequestDraft({
+      organizationId: org.id,
+      propertyId: singleFamily.id,
+      submittedByOrgMemberId: morgan.id,
+      category: "PAINT",
+      title: "Repaint shutters",
+      projectDescription: "Repaint the shutters from white to a dark bronze, keeping the same manufacturer-approved finish.",
+    });
+
+    // Scenario 2: submitted, awaiting the board's initial review.
+    const fenceRequest = await createArchitecturalRequestDraft({
+      organizationId: org.id,
+      propertyId: townhome.id,
+      submittedByOrgMemberId: casey.id,
+      category: "FENCE",
+      title: "Install rear privacy fence",
+      projectDescription: "6-foot cedar privacy fence along the rear property line, matching the association's approved fence style.",
+      proposedStartDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    });
+    await submitArchitecturalRequest({ organizationId: org.id, requestId: fenceRequest.id, submittedByOrgMemberId: casey.id });
+
+    // Scenario 3: in review, then sent back for changes -- exercises the
+    // IN_REVIEW -> CHANGES_REQUESTED transition and a private board note.
+    // Dana is a non-resident owner (eligible to submit even though she
+    // doesn't live at the property herself).
+    const railingRequest = await createArchitecturalRequestDraft({
+      organizationId: org.id,
+      propertyId: condo.id,
+      submittedByOrgMemberId: dana.id,
+      category: "OTHER",
+      title: "Replace balcony railing",
+      projectDescription: "Replace the existing wrought-iron balcony railing with a powder-coated aluminum railing in the same black finish.",
+    });
+    await submitArchitecturalRequest({ organizationId: org.id, requestId: railingRequest.id, submittedByOrgMemberId: dana.id });
+    await transitionArchitecturalRequestStatus({ organizationId: org.id, requestId: railingRequest.id, toStatus: "IN_REVIEW", actorUserId: secretaryId });
+    await transitionArchitecturalRequestStatus({
+      organizationId: org.id,
+      requestId: railingRequest.id,
+      toStatus: "CHANGES_REQUESTED",
+      actorUserId: secretaryId,
+      notes: "Spec sheet for the replacement railing wasn't attached -- ask for the manufacturer cut sheet before re-review.",
+    });
+    await addArchitecturalRequestComment({
+      organizationId: org.id,
+      requestId: railingRequest.id,
+      body: "Please attach the manufacturer's spec sheet for the replacement railing so the committee can confirm the finish matches the building standard.",
+      isPrivate: false,
+      actorUserId: secretaryId,
+    });
+
+    // Scenario 4: resubmitted after changes -- exercises the
+    // CHANGES_REQUESTED -> RESUBMITTED transition (Robin, co-owner).
+    const landscapingRequest = await createArchitecturalRequestDraft({
+      organizationId: org.id,
+      propertyId: townhome.id,
+      submittedByOrgMemberId: robin.id,
+      category: "LANDSCAPING",
+      title: "Front yard xeriscaping",
+      projectDescription: "Replace the front lawn with a drought-tolerant gravel and native-plant landscape design.",
+    });
+    await submitArchitecturalRequest({ organizationId: org.id, requestId: landscapingRequest.id, submittedByOrgMemberId: robin.id });
+    await transitionArchitecturalRequestStatus({ organizationId: org.id, requestId: landscapingRequest.id, toStatus: "IN_REVIEW", actorUserId: secretaryId });
+    await transitionArchitecturalRequestStatus({
+      organizationId: org.id,
+      requestId: landscapingRequest.id,
+      toStatus: "CHANGES_REQUESTED",
+      actorUserId: secretaryId,
+      notes: "Plant list needs to stay within the approved native-species list in the landscaping guidelines.",
+    });
+    await resubmitArchitecturalRequest({
+      organizationId: org.id,
+      requestId: landscapingRequest.id,
+      submittedByOrgMemberId: robin.id,
+      projectDescription: "Replace the front lawn with a drought-tolerant gravel and native-plant landscape design, using only species from the association's approved native-plant list.",
+    });
+
+    // Scenario 5: approved outright.
+    const solarRequest = await createArchitecturalRequestDraft({
+      organizationId: org.id,
+      propertyId: townhome.id,
+      submittedByOrgMemberId: casey.id,
+      category: "SOLAR",
+      title: "Roof solar panel installation",
+      projectDescription: "Install a 20-panel rooftop solar array on the rear-facing roof plane, not visible from the street.",
+    });
+    await submitArchitecturalRequest({ organizationId: org.id, requestId: solarRequest.id, submittedByOrgMemberId: casey.id });
+    await transitionArchitecturalRequestStatus({ organizationId: org.id, requestId: solarRequest.id, toStatus: "IN_REVIEW", actorUserId: secretaryId });
+    await transitionArchitecturalRequestStatus({
+      organizationId: org.id,
+      requestId: solarRequest.id,
+      toStatus: "APPROVED",
+      actorUserId: secretaryId,
+      decisionSummary: "Approved as submitted -- the array is on the rear roof plane and not visible from the street per Section 6.1.",
+    });
+
+    // Scenario 6: conditionally approved -- exercises the resident-visible
+    // `conditions` field.
+    const doorRequest = await createArchitecturalRequestDraft({
+      organizationId: org.id,
+      propertyId: singleFamily.id,
+      submittedByOrgMemberId: morgan.id,
+      category: "WINDOWS_DOORS",
+      title: "Replace front door",
+      projectDescription: "Replace the front door with a fiberglass door in a similar style, color to be selected from the approved palette.",
+    });
+    await submitArchitecturalRequest({ organizationId: org.id, requestId: doorRequest.id, submittedByOrgMemberId: morgan.id });
+    await transitionArchitecturalRequestStatus({ organizationId: org.id, requestId: doorRequest.id, toStatus: "IN_REVIEW", actorUserId: secretaryId });
+    await transitionArchitecturalRequestStatus({
+      organizationId: org.id,
+      requestId: doorRequest.id,
+      toStatus: "CONDITIONALLY_APPROVED",
+      actorUserId: secretaryId,
+      decisionSummary: "Approved, subject to the condition below.",
+      conditions: "Final door color must be selected from the association's approved palette and confirmed with the board before installation.",
+    });
+
+    // Scenario 7: denied.
+    const driveRequest = await createArchitecturalRequestDraft({
+      organizationId: org.id,
+      propertyId: condo.id,
+      submittedByOrgMemberId: dana.id,
+      category: "DRIVEWAY",
+      title: "Widen driveway",
+      projectDescription: "Widen the driveway by 4 feet to accommodate a second vehicle.",
+    });
+    await submitArchitecturalRequest({ organizationId: org.id, requestId: driveRequest.id, submittedByOrgMemberId: dana.id });
+    await transitionArchitecturalRequestStatus({ organizationId: org.id, requestId: driveRequest.id, toStatus: "IN_REVIEW", actorUserId: secretaryId });
+    await transitionArchitecturalRequestStatus({
+      organizationId: org.id,
+      requestId: driveRequest.id,
+      toStatus: "DENIED",
+      actorUserId: secretaryId,
+      decisionSummary: "Denied -- the proposed widening would reduce the required setback below the minimum in Section 5.4.",
+    });
+
+    // Scenario 8: approved, then expired -- exercises the terminal
+    // APPROVED -> EXPIRED transition (the approval window lapsed without
+    // the work being completed; no automatic expiry job runs this in
+    // production yet, see docs/hoa-architectural-requests.md).
+    const shedRequest = await createArchitecturalRequestDraft({
+      organizationId: org.id,
+      propertyId: townhome.id,
+      submittedByOrgMemberId: robin.id,
+      category: "SHED",
+      title: "Backyard storage shed",
+      projectDescription: "10x12 prefabricated storage shed, matching the home's siding color, placed behind the rear fence line.",
+    });
+    await submitArchitecturalRequest({ organizationId: org.id, requestId: shedRequest.id, submittedByOrgMemberId: robin.id });
+    await transitionArchitecturalRequestStatus({ organizationId: org.id, requestId: shedRequest.id, toStatus: "IN_REVIEW", actorUserId: secretaryId });
+    await transitionArchitecturalRequestStatus({
+      organizationId: org.id,
+      requestId: shedRequest.id,
+      toStatus: "APPROVED",
+      actorUserId: secretaryId,
+      decisionSummary: "Approved as submitted.",
+    });
+    await transitionArchitecturalRequestStatus({
+      organizationId: org.id,
+      requestId: shedRequest.id,
+      toStatus: "EXPIRED",
+      actorUserId: secretaryId,
+      notes: "Approval window (12 months) lapsed without the shed being installed; a new request is required to proceed.",
+    });
+
+    console.log(
+      "Architectural requests created (draft, submitted, changes-requested, resubmitted, approved, conditionally approved, denied, and expired)."
+    );
+  } else {
+    console.log("Architectural requests already seeded — skipping (idempotent re-run).");
+  }
+
   console.log("\nDone. Login as any board member with password HoaDemo!Change1 (e.g. president@oakridgehoa.example).");
 }
 

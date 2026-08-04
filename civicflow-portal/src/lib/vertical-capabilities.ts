@@ -42,14 +42,15 @@ const VERTICAL_CAPABILITIES: Record<OrganizationVertical, Partial<Record<Capabil
   HOA: {
     properties: true,
     propertyResidents: true,
-    // Violations MVP (this PR) -- see docs/hoa-violations-mvp.md.
+    // Violations MVP -- see docs/hoa-violations-mvp.md.
     violations: true,
-    // architecturalRequests / maintenanceRequests intentionally NOT
-    // enabled yet -- those models don't exist until a later PR (see
-    // docs/hoa-mvp-recommendation.md's phased MVP plan, and this task's
-    // explicit instruction not to begin them yet). Flipping these on
-    // without the underlying model/routes would advertise a capability
-    // that doesn't work.
+    // Architectural Requests -- see docs/hoa-domain-model.md's original
+    // planning table and this PR's own docs/hoa-architectural-requests.md.
+    architecturalRequests: true,
+    // maintenanceRequests intentionally NOT enabled yet -- that model
+    // doesn't exist until a later PR (this task's explicit instruction not
+    // to begin it yet). Flipping it on without the underlying model/routes
+    // would advertise a capability that doesn't work.
   },
 };
 
