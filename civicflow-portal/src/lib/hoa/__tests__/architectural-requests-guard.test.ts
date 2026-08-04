@@ -117,9 +117,21 @@ describe("requireArchitecturalRequestSubmissionEligibility", () => {
     );
   });
 
+  // These two tests don't just mock findFirstPropertyResident to return
+  // null (which would pass unchanged even if the real relationshipType
+  // filter were deleted entirely -- a false-positive caught in
+  // independent review). Instead the mock implementation genuinely
+  // simulates a real WHERE clause: a fixture row with a RESIDENT/TENANT
+  // relationshipType is "in the database," and the mock only returns it
+  // if the actual `relationshipType: { in: [...] }` filter the guard
+  // code sent would match it -- so these tests fail if that filter is
+  // ever weakened to include RESIDENT/TENANT, not just if it's deleted.
   it("denies a RESIDENT relationship -- not eligible to self-submit in this MVP", async () => {
     requireMemberWebSession.mockResolvedValueOnce({ memberId: "member-1", organizationId: "org-a" });
-    findFirstPropertyResident.mockResolvedValueOnce(null); // the real query already excludes RESIDENT via relationshipType filter
+    const fixtureRow = { id: "resident-rel-1", relationshipType: "RESIDENT" };
+    findFirstPropertyResident.mockImplementationOnce((args: { where: { relationshipType?: { in: string[] } } }) =>
+      args.where.relationshipType?.in.includes(fixtureRow.relationshipType) ? fixtureRow : null
+    );
 
     const { requireArchitecturalRequestSubmissionEligibility } = await import("../architectural-requests-guard");
     await expect(requireArchitecturalRequestSubmissionEligibility("org-a", "prop-1")).rejects.toMatchObject({
@@ -129,12 +141,26 @@ describe("requireArchitecturalRequestSubmissionEligibility", () => {
 
   it("denies a TENANT relationship -- not eligible to self-submit in this MVP", async () => {
     requireMemberWebSession.mockResolvedValueOnce({ memberId: "member-1", organizationId: "org-a" });
-    findFirstPropertyResident.mockResolvedValueOnce(null);
+    const fixtureRow = { id: "resident-rel-1", relationshipType: "TENANT" };
+    findFirstPropertyResident.mockImplementationOnce((args: { where: { relationshipType?: { in: string[] } } }) =>
+      args.where.relationshipType?.in.includes(fixtureRow.relationshipType) ? fixtureRow : null
+    );
 
     const { requireArchitecturalRequestSubmissionEligibility } = await import("../architectural-requests-guard");
     await expect(requireArchitecturalRequestSubmissionEligibility("org-a", "prop-1")).rejects.toMatchObject({
       code: "HOA_ARCHITECTURAL_REQUEST_INELIGIBLE_RELATIONSHIP",
     });
+  });
+
+  it("would grant an OWNER relationship through the exact same simulated filter -- proves the RESIDENT/TENANT denials above are the filter working, not a hardcoded null", async () => {
+    requireMemberWebSession.mockResolvedValueOnce({ memberId: "member-1", organizationId: "org-a" });
+    const fixtureRow = { id: "resident-rel-1", relationshipType: "OWNER" };
+    findFirstPropertyResident.mockImplementationOnce((args: { where: { relationshipType?: { in: string[] } } }) =>
+      args.where.relationshipType?.in.includes(fixtureRow.relationshipType) ? fixtureRow : null
+    );
+
+    const { requireArchitecturalRequestSubmissionEligibility } = await import("../architectural-requests-guard");
+    await expect(requireArchitecturalRequestSubmissionEligibility("org-a", "prop-1")).resolves.toMatchObject({ memberId: "member-1" });
   });
 
   it("denies a caller with no relationship to the property at all", async () => {

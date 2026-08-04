@@ -177,6 +177,32 @@ describe("updateArchitecturalRequestDraft", () => {
       updateArchitecturalRequestDraft({ organizationId: "org-1", requestId: "request-1", submittedByOrgMemberId: "member-1", title: "New title" })
     ).rejects.toMatchObject({ code: "HOA_ARCHITECTURAL_REQUEST_INVALID_TRANSITION" });
   });
+
+  it("edits via a conditional updateMany (compare-and-swap) that repeats status: DRAFT and the submitter in the WHERE clause", async () => {
+    findFirstArchitecturalRequest.mockResolvedValueOnce({ id: "request-1", status: "DRAFT", submittedByOrgMemberId: "member-1" });
+    findUniqueOrThrowArchitecturalRequest.mockResolvedValueOnce({ id: "request-1", status: "DRAFT", title: "New title" });
+
+    const { updateArchitecturalRequestDraft } = await import("../architectural-requests");
+    const result = await updateArchitecturalRequestDraft({ organizationId: "org-1", requestId: "request-1", submittedByOrgMemberId: "member-1", title: "New title" });
+
+    expect(result.title).toBe("New title");
+    expect(updateManyArchitecturalRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "request-1", organizationId: "org-1", submittedByOrgMemberId: "member-1", status: "DRAFT" },
+        data: expect.objectContaining({ title: "New title" }),
+      })
+    );
+  });
+
+  it("rejects a stale-update race (e.g. the request was submitted between the read and the write) with HOA_ARCHITECTURAL_REQUEST_STALE_UPDATE", async () => {
+    findFirstArchitecturalRequest.mockResolvedValueOnce({ id: "request-1", status: "DRAFT", submittedByOrgMemberId: "member-1" });
+    updateManyArchitecturalRequest.mockResolvedValueOnce({ count: 0 });
+
+    const { updateArchitecturalRequestDraft } = await import("../architectural-requests");
+    await expect(
+      updateArchitecturalRequestDraft({ organizationId: "org-1", requestId: "request-1", submittedByOrgMemberId: "member-1", title: "New title" })
+    ).rejects.toMatchObject({ code: "HOA_ARCHITECTURAL_REQUEST_STALE_UPDATE" });
+  });
 });
 
 describe("submitArchitecturalRequest", () => {

@@ -100,8 +100,16 @@ export async function createArchitecturalRequestDraft(input: {
 
 /** Only a DRAFT request can be edited directly -- once submitted,
  * corrections happen through the CHANGES_REQUESTED -> RESUBMITTED cycle
- * (an append-only record of what happened), never a silent field edit,
- * mirroring updateViolationDraft's exact reasoning. */
+ * (an append-only record of what happened), never a silent field edit.
+ *
+ * Unlike updateViolationDraft (a plain update with no compare-and-swap --
+ * a pre-existing gap in already-merged code, not fixed here to keep this
+ * PR's scope to Architectural Requests), this uses the same
+ * updateMany-with-status-in-WHERE guard as every transition function
+ * below: without it, a resident racing their own PATCH against their own
+ * POST .../submit could land a field edit on a row that's no longer
+ * DRAFT, silently changing the text under review with no status-history
+ * entry showing what happened -- found in independent review of this PR. */
 export async function updateArchitecturalRequestDraft(input: {
   organizationId: string;
   requestId: string;
@@ -124,8 +132,8 @@ export async function updateArchitecturalRequestDraft(input: {
     );
   }
 
-  return prisma.architecturalRequest.update({
-    where: { id: input.requestId },
+  const { count } = await prisma.architecturalRequest.updateMany({
+    where: { id: input.requestId, organizationId: input.organizationId, submittedByOrgMemberId: input.submittedByOrgMemberId, status: "DRAFT" },
     data: {
       category: input.category ?? undefined,
       title: input.title ?? undefined,
@@ -134,6 +142,11 @@ export async function updateArchitecturalRequestDraft(input: {
       proposedCompletionDate: input.proposedCompletionDate === undefined ? undefined : input.proposedCompletionDate,
     },
   });
+  if (count === 0) {
+    throw new HoaError("HOA_ARCHITECTURAL_REQUEST_STALE_UPDATE", "This request was just updated. Refresh and try again.");
+  }
+
+  return prisma.architecturalRequest.findUniqueOrThrow({ where: { id: input.requestId } });
 }
 
 // ── Transitions ────────────────────────────────────────────────────────────
