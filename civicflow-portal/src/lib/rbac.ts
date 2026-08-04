@@ -192,6 +192,21 @@ export const PERMISSIONS = {
   HOA_VIOLATIONS_WRITE:   "hoa:violations:write",
   HOA_VIOLATIONS_REVIEW:  "hoa:violations:review",
   HOA_VIOLATIONS_RESOLVE: "hoa:violations:resolve",
+
+  // Architectural Requests -- same four-tier authority shape as Violations
+  // just above, for the same reason: submitting/editing a draft is a lower
+  // bar than moving a request through review, and deciding it (approve/
+  // conditionally-approve/deny, the terminal action) is higher-authority
+  // still. Gated additionally by requireHoaCapability()'s
+  // "architecturalRequests" flag. A resident's own read/write access to
+  // their own submissions does NOT go through this permission set at all
+  // -- see requireArchitecturalRequestResidentAccess() in
+  // src/lib/hoa/architectural-requests-guard.ts, mirroring
+  // requireHoaViolationResidentAccess()'s pattern.
+  HOA_ARCHITECTURAL_REQUESTS_READ:   "hoa:architectural-requests:read",
+  HOA_ARCHITECTURAL_REQUESTS_WRITE:  "hoa:architectural-requests:write",
+  HOA_ARCHITECTURAL_REQUESTS_REVIEW: "hoa:architectural-requests:review",
+  HOA_ARCHITECTURAL_REQUESTS_DECIDE: "hoa:architectural-requests:decide",
 } as const;
 
 // Parent/household-adult self-service (view own household, RSVP, pay own
@@ -280,6 +295,10 @@ const ORG_OWNER_PERMISSIONS: Permission[] = [
   PERMISSIONS.HOA_VIOLATIONS_WRITE,
   PERMISSIONS.HOA_VIOLATIONS_REVIEW,
   PERMISSIONS.HOA_VIOLATIONS_RESOLVE,
+  PERMISSIONS.HOA_ARCHITECTURAL_REQUESTS_READ,
+  PERMISSIONS.HOA_ARCHITECTURAL_REQUESTS_WRITE,
+  PERMISSIONS.HOA_ARCHITECTURAL_REQUESTS_REVIEW,
+  PERMISSIONS.HOA_ARCHITECTURAL_REQUESTS_DECIDE,
 ];
 
 const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
@@ -352,6 +371,10 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.HOA_VIOLATIONS_WRITE,
     PERMISSIONS.HOA_VIOLATIONS_REVIEW,
     PERMISSIONS.HOA_VIOLATIONS_RESOLVE,
+    PERMISSIONS.HOA_ARCHITECTURAL_REQUESTS_READ,
+    PERMISSIONS.HOA_ARCHITECTURAL_REQUESTS_WRITE,
+    PERMISSIONS.HOA_ARCHITECTURAL_REQUESTS_REVIEW,
+    PERMISSIONS.HOA_ARCHITECTURAL_REQUESTS_DECIDE,
   ],
 
   // Maps naturally onto "Treasurer" via OrgRolePermissionSet if an org wants
@@ -388,9 +411,10 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     // administrative function, not a financial one -- read-only.
     PERMISSIONS.HOA_PROPERTIES_READ,
     PERMISSIONS.HOA_RESIDENTS_READ,
-    // Deliberately NO HOA_VIOLATIONS_* permission at all: compliance
-    // enforcement is a board/property-manager function, not a financial
-    // one, even though a violation may eventually carry a fine (billed as
+    // Deliberately NO HOA_VIOLATIONS_* or HOA_ARCHITECTURAL_REQUESTS_*
+    // permission at all: compliance enforcement and design/modification
+    // review are both board/property-manager functions, not financial
+    // ones, even though a violation may eventually carry a fine (billed as
     // an ordinary DuesCharge the Treasurer already sees through the
     // existing dues permissions above, once fine-creation ships).
   ],
@@ -439,6 +463,14 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     // the terminal, compliance-record-closing action, reserved for
     // ORG_OWNER/ORG_ADMIN (board-level authority), same reasoning as
     // MEETINGS_MINUTES_APPROVE being withheld from STAFF just above.
+    PERMISSIONS.HOA_ARCHITECTURAL_REQUESTS_READ,
+    PERMISSIONS.HOA_ARCHITECTURAL_REQUESTS_WRITE,
+    PERMISSIONS.HOA_ARCHITECTURAL_REQUESTS_REVIEW,
+    // Same reasoning, deliberately NOT HOA_ARCHITECTURAL_REQUESTS_DECIDE --
+    // an architectural-committee reviewer (a STAFF-role invitee, per this
+    // task's explicit instruction not to infer permission from committee
+    // chair status) can review and request changes, but the actual
+    // approve/deny/conditionally-approve decision is board-level authority.
   ],
 
   // Maps onto "General Member" (an officer viewing without editing rights) —
@@ -463,6 +495,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.HOA_PROPERTIES_READ,
     PERMISSIONS.HOA_RESIDENTS_READ,
     PERMISSIONS.HOA_VIOLATIONS_READ,
+    PERMISSIONS.HOA_ARCHITECTURAL_REQUESTS_READ,
   ],
 
   // Members never get staff permissions — a MEMBER role must never see other

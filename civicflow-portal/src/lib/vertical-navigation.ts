@@ -22,7 +22,9 @@ export interface NavItem {
  * routes — Violations itself shipped in the HOA Violations MVP, see
  * docs/hoa-violations-mvp.md), it is honestly omitted or mapped onto the
  * closest real equivalent rather than pointed at a placeholder — see
- * docs/vertical-experience-layer.md for the full list and reasoning.
+ * docs/vertical-experience-layer.md for the full list and reasoning. HOA
+ * maintenance-request routes remain in that "not yet built" category;
+ * Architectural Requests shipped and is included below.
  *
  * COMMUNITY/UNION/HOA share the exact same underlying route set (they are,
  * today, the same generic feature set under different branding) — only
@@ -54,6 +56,11 @@ function sharedNavigation(vertical: "COMMUNITY" | "UNION" | "HOA"): NavItem[] {
     // "violations" capability check; this conditional only prevents a
     // dead-end nav link on organizations that could never see the page).
     ...(vertical === "HOA" ? [{ href: "/hoa/violations", label: "Violations", permission: "hoa:violations:read" as const }] : []),
+    // HOA Architectural Requests -- same reasoning/gate pattern as
+    // Violations just above.
+    ...(vertical === "HOA"
+      ? [{ href: "/hoa/architectural-requests", label: "Architectural Requests", permission: "hoa:architectural-requests:read" as const }]
+      : []),
     { href: "/contributions", label: "Contributions" },
     { href: "/dues", label: duesLabel },
     { href: "/dues/reminders", label: "Dues Campaigns" },

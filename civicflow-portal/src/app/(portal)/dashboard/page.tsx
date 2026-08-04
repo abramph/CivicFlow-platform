@@ -32,6 +32,8 @@ function dashboardWidgets(vertical: OrganizationVertical) {
     hoaProperties: vertical === "HOA",
     // HOA Violations MVP.
     hoaViolations: vertical === "HOA",
+    // HOA Architectural Requests.
+    hoaArchitecturalRequests: vertical === "HOA",
   };
 }
 
@@ -336,6 +338,39 @@ export default async function DashboardPage() {
       })()
     : null;
 
+  // HOA Architectural Requests -- same reasoning as hoaViolationStats
+  // above (queried only for HOA orgs). "Approved this period" is a
+  // rolling 30-day window, not a calendar month, matching this file's own
+  // "30D" convention used elsewhere on this dashboard.
+  const hoaArchitecturalRequestStats = vertical === "HOA"
+    ? await (async () => {
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        const [submittedCount, inReviewCount, changesRequestedCount, approvedThisPeriodCount, recentRequests] = await Promise.all([
+          prisma.architecturalRequest.count({ where: { organizationId: orgId, status: "SUBMITTED" } }),
+          prisma.architecturalRequest.count({ where: { organizationId: orgId, status: { in: ["IN_REVIEW", "RESUBMITTED"] } } }),
+          prisma.architecturalRequest.count({ where: { organizationId: orgId, status: "CHANGES_REQUESTED" } }),
+          prisma.architecturalRequest.count({
+            where: { organizationId: orgId, status: { in: ["APPROVED", "CONDITIONALLY_APPROVED"] }, decidedAt: { gte: thirtyDaysAgo } },
+          }),
+          prisma.architecturalRequest.findMany({
+            where: { organizationId: orgId, status: { not: "DRAFT" } },
+            orderBy: { createdAt: "desc" },
+            take: 5,
+            select: {
+              id: true,
+              requestNumber: true,
+              title: true,
+              status: true,
+              createdAt: true,
+              property: { select: { addressLine1: true, unitLabel: true, displayName: true } },
+            },
+          }),
+        ]);
+        return { submittedCount, inReviewCount, changesRequestedCount, approvedThisPeriodCount, recentRequests };
+      })()
+    : null;
+
   // Derived values
   const totalDuesCents    = Math.round(Number(duesTotal._sum.amount || 0) * 100);
   const totalContribCents = Math.round(Number(contributions._sum.amount || 0) * 100);
@@ -521,6 +556,51 @@ export default async function DashboardPage() {
                   </Link>
                   <span className="ml-2 text-slate-500">
                     {v.property.displayName || (v.property.unitLabel ? `${v.property.addressLine1}, ${v.property.unitLabel}` : v.property.addressLine1)} — {v.status.toLowerCase()}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </div>
+      )}
+
+      {/* HOA Architectural Requests summary */}
+      {widgets.hoaArchitecturalRequests && hoaArchitecturalRequestStats && (
+      <div className="rounded-xl border-2 border-slate-200 bg-white p-6 shadow-sm">
+        <h3 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
+          <FileText className="h-5 w-5 text-emerald-600" />
+          Architectural Requests
+        </h3>
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <Link href="/hoa/architectural-requests?status=SUBMITTED" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-center hover:bg-amber-100">
+            <p className="text-3xl font-bold text-amber-700">{hoaArchitecturalRequestStats.submittedCount}</p>
+            <p className="text-sm font-medium text-amber-600 mt-1">Submitted</p>
+          </Link>
+          <Link href="/hoa/architectural-requests?status=IN_REVIEW" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-center hover:bg-amber-100">
+            <p className="text-3xl font-bold text-amber-700">{hoaArchitecturalRequestStats.inReviewCount}</p>
+            <p className="text-sm font-medium text-amber-600 mt-1">In review</p>
+          </Link>
+          <Link href="/hoa/architectural-requests?status=CHANGES_REQUESTED" className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-center hover:bg-slate-100">
+            <p className="text-3xl font-bold text-slate-700">{hoaArchitecturalRequestStats.changesRequestedCount}</p>
+            <p className="text-sm font-medium text-slate-600 mt-1">Changes requested</p>
+          </Link>
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-center">
+            <p className="text-3xl font-bold text-emerald-700">{hoaArchitecturalRequestStats.approvedThisPeriodCount}</p>
+            <p className="text-sm font-medium text-emerald-600 mt-1">Approved (30d)</p>
+          </div>
+        </div>
+        {hoaArchitecturalRequestStats.recentRequests.length > 0 ? (
+          <div className="mt-4">
+            <p className="text-sm font-semibold text-slate-700 mb-2">Recent activity</p>
+            <ul className="divide-y divide-slate-100">
+              {hoaArchitecturalRequestStats.recentRequests.map((r) => (
+                <li key={r.id} className="py-2 text-sm">
+                  <Link href={`/hoa/architectural-requests/${r.id}`} className="font-medium text-emerald-700 hover:underline">
+                    AR-{r.requestNumber} · {r.title}
+                  </Link>
+                  <span className="ml-2 text-slate-500">
+                    {r.property.displayName || (r.property.unitLabel ? `${r.property.addressLine1}, ${r.property.unitLabel}` : r.property.addressLine1)} — {r.status.toLowerCase()}
                   </span>
                 </li>
               ))}

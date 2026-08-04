@@ -15,6 +15,7 @@ export const attachmentEntityTypes = [
   "CONTRIBUTION",
   "PAYMENT_REPORT",
   "HOA_VIOLATION",
+  "HOA_ARCHITECTURAL_REQUEST",
   "OTHER",
 ] as const satisfies readonly AttachmentEntityType[];
 
@@ -33,6 +34,14 @@ const readPermissions: Record<AttachmentEntityType, Permission> = {
   CONTRIBUTION: "contributions:read",
   PAYMENT_REPORT: "dues:read",
   HOA_VIOLATION: "hoa:violations:read",
+  // Officer/staff path only -- gates the shared RBAC-based attachment API.
+  // A resident's own read access to their own submission's resident-visible
+  // attachments does NOT go through this at all; it goes through a
+  // dedicated resident-scoped route (mirroring how Violations' resident
+  // path bypasses attachmentPermission()/RBAC entirely), which additionally
+  // filters by the attachment's `purpose` classification -- see
+  // docs/hoa-architectural-requests.md's attachment-visibility section.
+  HOA_ARCHITECTURAL_REQUEST: "hoa:architectural-requests:read",
   OTHER: "org_settings:read",
 };
 
@@ -49,6 +58,7 @@ const writePermissions: Record<AttachmentEntityType, Permission> = {
   CONTRIBUTION: "contributions:write",
   PAYMENT_REPORT: "dues:write",
   HOA_VIOLATION: "hoa:violations:write",
+  HOA_ARCHITECTURAL_REQUEST: "hoa:architectural-requests:write",
   OTHER: "org_settings:write",
 };
 
@@ -87,6 +97,8 @@ export async function verifyAttachmentEntity(organizationId: string, entityType:
       return Boolean(await prisma.paymentReport.findFirst({ where: { id: entityId, organizationId }, select: { id: true } }));
     case "HOA_VIOLATION":
       return Boolean(await prisma.violation.findFirst({ where: { id: entityId, organizationId }, select: { id: true } }));
+    case "HOA_ARCHITECTURAL_REQUEST":
+      return Boolean(await prisma.architecturalRequest.findFirst({ where: { id: entityId, organizationId }, select: { id: true } }));
     case "OTHER":
       return true;
     default:
