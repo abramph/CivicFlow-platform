@@ -122,7 +122,7 @@ export function ViolationActions({
           <span>Cure-by date</span>
           <input type="date" value={issueCureByDate} onChange={(e) => setIssueCureByDate(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
         </label>
-        {error ? <p className="text-sm text-red-700">{error}</p> : null}
+        {error ? <p role="alert" className="text-sm text-red-700">{error}</p> : null}
         <button
           type="button"
           disabled={pending === "issue" || !noticeBody.trim()}
@@ -154,7 +154,7 @@ export function ViolationActions({
           <textarea value={resolutionNotes} onChange={(e) => setResolutionNotes(e.target.value)} rows={2} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
         </label>
       ) : null}
-      {error ? <p className="text-sm text-red-700">{error}</p> : null}
+      {error ? <p role="alert" className="text-sm text-red-700">{error}</p> : null}
       <div className="flex flex-wrap gap-2">
         {availableSteps.map((s) => (
           <button
@@ -212,7 +212,7 @@ export function ViolationCommentForm({ violationId }: { violationId: string }) {
         <input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} className="rounded border-slate-300" />
         Private (board-only — uncheck to make this visible to the resident)
       </label>
-      {error ? <p className="text-sm text-red-700">{error}</p> : null}
+      {error ? <p role="alert" className="text-sm text-red-700">{error}</p> : null}
       <button
         type="button"
         disabled={pending || !body.trim()}

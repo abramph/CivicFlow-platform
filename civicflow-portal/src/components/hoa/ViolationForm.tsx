@@ -81,7 +81,7 @@ export function ViolationForm({ properties }: { properties: { id: string; label:
         This creates a <strong>draft</strong> — nothing is sent to the resident until you issue it from the violation&apos;s own page.
       </p>
 
-      {error ? <p className="text-sm text-red-700">{error}</p> : null}
+      {error ? <p role="alert" className="text-sm text-red-700">{error}</p> : null}
       <button
         type="button"
         disabled={pending || !propertyId || !violationType.trim() || !description.trim()}

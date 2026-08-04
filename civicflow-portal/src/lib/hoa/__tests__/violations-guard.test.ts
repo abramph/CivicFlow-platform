@@ -10,6 +10,18 @@ vi.mock("@/lib/member-web-session", () => ({
   requireMemberWebSession: (...a: unknown[]) => requireMemberWebSession(...a),
 }));
 
+// Real hasVerticalCapability always returns true for HOA+"violations" in
+// production config today, so there's no way to observe an HOA-org-with-
+// violations-disabled state through the real function. Mocking it here
+// (pass-through for every flag except an explicit override) lets the test
+// below exercise that branch for real, rather than accidentally re-testing
+// "not an HOA org at all" under a misleading title.
+const hasVerticalCapability = vi.fn();
+vi.mock("@/lib/vertical-capabilities", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/vertical-capabilities")>();
+  return { ...actual, hasVerticalCapability: (...a: Parameters<typeof actual.hasVerticalCapability>) => hasVerticalCapability(...a) };
+});
+
 const findUniqueOrganization = vi.fn();
 const findFirstViolation = vi.fn();
 const findFirstPropertyResident = vi.fn();
@@ -25,7 +37,11 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(async () => {
+  vi.clearAllMocks();
+  const actual = await vi.importActual<typeof import("@/lib/vertical-capabilities")>("@/lib/vertical-capabilities");
+  hasVerticalCapability.mockImplementation(actual.hasVerticalCapability);
+});
 
 describe("officer permission gates (requireHoaViolation{Read,Write,Review,Resolve})", () => {
   it("denies when the organization isn't HOA vertical, even with the right permission", async () => {
@@ -36,12 +52,23 @@ describe("officer permission gates (requireHoaViolation{Read,Write,Review,Resolv
     await expect(requireHoaViolationRead()).rejects.toMatchObject({ code: "HOA_ORGANIZATION_NOT_HOA_VERTICAL" });
   });
 
-  it("denies when the org is HOA but the violations capability isn't enabled", async () => {
+  it("denies a non-HOA vertical other than COMMUNITY too (not a COMMUNITY-specific check)", async () => {
     requirePermission.mockResolvedValueOnce({ organizationId: "org-a", session: { userId: "u1" }, role: "STAFF" });
     findUniqueOrganization.mockResolvedValueOnce({ primaryVertical: "PTA", status: "active" });
 
     const { requireHoaViolationRead } = await import("../violations-guard");
     await expect(requireHoaViolationRead()).rejects.toMatchObject({ code: "HOA_ORGANIZATION_NOT_HOA_VERTICAL" });
+  });
+
+  it("denies a genuinely-HOA organization whose 'violations' capability flag is off — distinct from the base HOA-vertical check above", async () => {
+    requirePermission.mockResolvedValueOnce({ organizationId: "org-a", session: { userId: "u1" }, role: "STAFF" });
+    findUniqueOrganization.mockResolvedValueOnce({ primaryVertical: "HOA", status: "active" });
+    // Base gate (requireHoaCapability, checks "properties") passes; only the
+    // violations-specific flag is forced off, isolating this exact branch.
+    hasVerticalCapability.mockImplementation((_vertical: string, flag: string) => flag !== "violations");
+
+    const { requireHoaViolationRead } = await import("../violations-guard");
+    await expect(requireHoaViolationRead()).rejects.toMatchObject({ code: "HOA_VIOLATIONS_NOT_ENABLED" });
   });
 
   it("succeeds for an active HOA organization with the right permission", async () => {

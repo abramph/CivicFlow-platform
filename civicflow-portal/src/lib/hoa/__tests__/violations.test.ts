@@ -4,6 +4,8 @@ const findFirstProperty = vi.fn();
 const findFirstViolation = vi.fn();
 const createViolation = vi.fn();
 const updateViolation = vi.fn();
+const updateManyViolation = vi.fn();
+const findUniqueOrThrowViolation = vi.fn();
 const findManyViolation = vi.fn();
 const createViolationNotice = vi.fn();
 const findManyViolationNotice = vi.fn();
@@ -15,13 +17,33 @@ const createAuditEvent = vi.fn().mockResolvedValue(undefined);
 const sendEmail = vi.fn().mockResolvedValue({ sent: true, skipped: false });
 const sendPushToTokens = vi.fn().mockResolvedValue({ sent: 0, failed: 0 });
 
+// The service layer wraps create/issue/transition in prisma.$transaction —
+// the tx client passed into that callback must support the same calls as
+// the top-level client, routed through the SAME mock functions so a test
+// can assert on them regardless of which path (transactional or not) wrote
+// the data.
+const txClient = {
+  violation: {
+    findFirst: (...a: unknown[]) => findFirstViolation(...a),
+    create: (...a: unknown[]) => createViolation(...a),
+    updateMany: (...a: unknown[]) => updateManyViolation(...a),
+    findUniqueOrThrow: (...a: unknown[]) => findUniqueOrThrowViolation(...a),
+  },
+  violationNotice: { create: (...a: unknown[]) => createViolationNotice(...a) },
+  violationStatusHistory: { create: (...a: unknown[]) => createViolationStatusHistory(...a) },
+};
+const transaction = vi.fn((fn: (tx: typeof txClient) => unknown) => fn(txClient));
+
 vi.mock("@/lib/prisma", () => ({
   prisma: {
+    $transaction: (...a: Parameters<typeof transaction>) => transaction(...a),
     property: { findFirst: (...a: unknown[]) => findFirstProperty(...a) },
     violation: {
       findFirst: (...a: unknown[]) => findFirstViolation(...a),
       create: (...a: unknown[]) => createViolation(...a),
       update: (...a: unknown[]) => updateViolation(...a),
+      updateMany: (...a: unknown[]) => updateManyViolation(...a),
+      findUniqueOrThrow: (...a: unknown[]) => findUniqueOrThrowViolation(...a),
       findMany: (...a: unknown[]) => findManyViolation(...a),
     },
     violationNotice: {
@@ -41,8 +63,10 @@ vi.mock("@/lib/push", () => ({ sendPushToTokens: (...a: unknown[]) => sendPushTo
 
 beforeEach(() => {
   vi.clearAllMocks();
+  transaction.mockImplementation((fn: (tx: typeof txClient) => unknown) => fn(txClient));
   findManyPropertyResident.mockResolvedValue([]);
   findManyMobileDeviceToken.mockResolvedValue([]);
+  updateManyViolation.mockResolvedValue({ count: 1 });
 });
 
 describe("assertValidTransition / isTerminalStatus", () => {
@@ -141,7 +165,7 @@ describe("updateViolationDraft", () => {
 describe("issueViolation", () => {
   it("moves DRAFT -> ISSUED, sends the initial notice, and notifies active residents by email and push", async () => {
     findFirstViolation.mockResolvedValueOnce({ id: "violation-1", status: "DRAFT", propertyId: "prop-1", cureByDate: null });
-    updateViolation.mockResolvedValueOnce({ id: "violation-1", status: "ISSUED" });
+    findUniqueOrThrowViolation.mockResolvedValueOnce({ id: "violation-1", status: "ISSUED", violationType: "Lawn" });
     findManyPropertyResident.mockResolvedValueOnce([
       { orgMember: { id: "member-1", userId: "user-a", email: "resident@example.com", commsEmailEnabled: true, commsPushEnabled: true } },
     ]);
@@ -156,6 +180,9 @@ describe("issueViolation", () => {
     });
 
     expect(result.status).toBe("ISSUED");
+    expect(updateManyViolation).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ id: "violation-1", status: "DRAFT" }), data: expect.objectContaining({ status: "ISSUED" }) })
+    );
     expect(createViolationNotice).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ noticeType: "INITIAL", body: "Please fix your lawn." }) })
     );
@@ -163,12 +190,12 @@ describe("issueViolation", () => {
       expect.objectContaining({ data: expect.objectContaining({ fromStatus: "DRAFT", toStatus: "ISSUED" }) })
     );
     expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: "resident@example.com" }));
-    expect(sendPushToTokens).toHaveBeenCalledWith(["ExponentPushToken[abc]"], expect.objectContaining({ title: "New violation notice" }));
+    expect(sendPushToTokens).toHaveBeenCalledWith(["ExponentPushToken[abc]"], expect.objectContaining({ title: "New violation notice", deepLink: "/m/violations" }));
   });
 
   it("skips email for a resident who opted out via commsEmailEnabled", async () => {
     findFirstViolation.mockResolvedValueOnce({ id: "violation-1", status: "DRAFT", propertyId: "prop-1", cureByDate: null });
-    updateViolation.mockResolvedValueOnce({ id: "violation-1", status: "ISSUED" });
+    findUniqueOrThrowViolation.mockResolvedValueOnce({ id: "violation-1", status: "ISSUED", violationType: "Lawn" });
     findManyPropertyResident.mockResolvedValueOnce([
       { orgMember: { id: "member-1", userId: null, email: "resident@example.com", commsEmailEnabled: false, commsPushEnabled: true } },
     ]);
@@ -186,26 +213,58 @@ describe("issueViolation", () => {
     await expect(
       issueViolation({ organizationId: "org-1", violationId: "violation-1", noticeBody: "x", actorUserId: "officer-1" })
     ).rejects.toMatchObject({ code: "HOA_VIOLATION_INVALID_TRANSITION" });
-    expect(updateViolation).not.toHaveBeenCalled();
+    expect(updateManyViolation).not.toHaveBeenCalled();
+  });
+
+  it("rejects with HOA_VIOLATION_STALE_UPDATE when a concurrent request already changed the status (compare-and-swap lost)", async () => {
+    findFirstViolation.mockResolvedValueOnce({ id: "violation-1", status: "DRAFT", propertyId: "prop-1", cureByDate: null });
+    updateManyViolation.mockResolvedValueOnce({ count: 0 });
+    const { issueViolation } = await import("../violations");
+
+    await expect(
+      issueViolation({ organizationId: "org-1", violationId: "violation-1", noticeBody: "x", actorUserId: "officer-1" })
+    ).rejects.toMatchObject({ code: "HOA_VIOLATION_STALE_UPDATE" });
+    // Lost the race -- must not have gone on to create a duplicate notice or notify anyone.
+    expect(createViolationNotice).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("does not fail the API call when notification delivery throws after the transition already committed", async () => {
+    findFirstViolation.mockResolvedValueOnce({ id: "violation-1", status: "DRAFT", propertyId: "prop-1", cureByDate: null });
+    findUniqueOrThrowViolation.mockResolvedValueOnce({ id: "violation-1", status: "ISSUED", violationType: "Lawn" });
+    findManyPropertyResident.mockResolvedValueOnce([
+      { orgMember: { id: "member-1", userId: null, email: "resident@example.com", commsEmailEnabled: true, commsPushEnabled: false } },
+    ]);
+    sendEmail.mockRejectedValueOnce(new Error("SMTP provider outage"));
+
+    const { issueViolation } = await import("../violations");
+    const result = await issueViolation({ organizationId: "org-1", violationId: "violation-1", noticeBody: "x", actorUserId: "officer-1" });
+
+    // The transition itself succeeded and is returned normally -- a
+    // notification failure must not surface as a thrown error here.
+    expect(result.status).toBe("ISSUED");
   });
 });
 
 describe("transitionViolationStatus", () => {
   it("moves a non-terminal transition without setting resolvedAt/resolutionNotes", async () => {
     findFirstViolation.mockResolvedValueOnce({ id: "violation-1", status: "ISSUED", propertyId: "prop-1", violationType: "Lawn" });
-    updateViolation.mockResolvedValueOnce({ id: "violation-1", status: "IN_REVIEW" });
+    findUniqueOrThrowViolation.mockResolvedValueOnce({ id: "violation-1", status: "IN_REVIEW", violationType: "Lawn" });
     const { transitionViolationStatus } = await import("../violations");
 
     await transitionViolationStatus({ organizationId: "org-1", violationId: "violation-1", toStatus: "IN_REVIEW", actorUserId: "officer-1" });
 
-    expect(updateViolation).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ status: "IN_REVIEW", resolvedAt: undefined, resolutionNotes: undefined }) })
+    expect(updateManyViolation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: "violation-1", status: "ISSUED" }),
+        data: expect.objectContaining({ status: "IN_REVIEW", resolvedAt: undefined, resolutionNotes: undefined }),
+      })
     );
   });
 
   it("stamps resolvedAt and stores resolutionNotes on a terminal transition", async () => {
     findFirstViolation.mockResolvedValueOnce({ id: "violation-1", status: "IN_REVIEW", propertyId: "prop-1", violationType: "Lawn" });
-    updateViolation.mockResolvedValueOnce({ id: "violation-1", status: "RESOLVED" });
+    findUniqueOrThrowViolation.mockResolvedValueOnce({ id: "violation-1", status: "RESOLVED", violationType: "Lawn" });
     const { transitionViolationStatus } = await import("../violations");
 
     await transitionViolationStatus({
@@ -216,7 +275,7 @@ describe("transitionViolationStatus", () => {
       actorUserId: "officer-1",
     });
 
-    expect(updateViolation).toHaveBeenCalledWith(
+    expect(updateManyViolation).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ status: "RESOLVED", resolvedAt: expect.any(Date), resolutionNotes: "Owner mowed the lawn, confirmed by site visit." }),
       })
@@ -230,8 +289,34 @@ describe("transitionViolationStatus", () => {
     await expect(
       transitionViolationStatus({ organizationId: "org-1", violationId: "violation-1", toStatus: "RESOLVED", actorUserId: "officer-1" })
     ).rejects.toMatchObject({ code: "HOA_VIOLATION_INVALID_TRANSITION" });
-    expect(updateViolation).not.toHaveBeenCalled();
+    expect(updateManyViolation).not.toHaveBeenCalled();
     expect(createViolationStatusHistory).not.toHaveBeenCalled();
+  });
+
+  it("rejects with HOA_VIOLATION_STALE_UPDATE when two requests race on the same violation (compare-and-swap lost)", async () => {
+    findFirstViolation.mockResolvedValueOnce({ id: "violation-1", status: "ISSUED", propertyId: "prop-1", violationType: "Lawn" });
+    updateManyViolation.mockResolvedValueOnce({ count: 0 });
+    const { transitionViolationStatus } = await import("../violations");
+
+    await expect(
+      transitionViolationStatus({ organizationId: "org-1", violationId: "violation-1", toStatus: "DISMISSED", actorUserId: "officer-1" })
+    ).rejects.toMatchObject({ code: "HOA_VIOLATION_STALE_UPDATE" });
+    // Lost the race -- must not record a second, now-inconsistent history row.
+    expect(createViolationStatusHistory).not.toHaveBeenCalled();
+  });
+
+  it("uses a conditional updateMany (compare-and-swap), not an unconditional update, so a lost race cannot silently overwrite a concurrent write", async () => {
+    findFirstViolation.mockResolvedValueOnce({ id: "violation-1", status: "ISSUED", propertyId: "prop-1", violationType: "Lawn" });
+    findUniqueOrThrowViolation.mockResolvedValueOnce({ id: "violation-1", status: "ACKNOWLEDGED", violationType: "Lawn" });
+    const { transitionViolationStatus } = await import("../violations");
+
+    await transitionViolationStatus({ organizationId: "org-1", violationId: "violation-1", toStatus: "ACKNOWLEDGED", actorUserId: "officer-1" });
+
+    // The WHERE clause must repeat the expected starting status -- this is
+    // what makes it a compare-and-swap rather than a blind overwrite.
+    expect(updateManyViolation).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "violation-1", organizationId: "org-1", status: "ISSUED" } })
+    );
   });
 });
 

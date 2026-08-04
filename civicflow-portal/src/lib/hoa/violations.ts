@@ -1,9 +1,11 @@
-import type { Violation, ViolationStatus } from "@prisma/client";
+import type { Prisma, Violation, ViolationStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { createAuditEvent } from "@/lib/audit";
 import { sendEmail } from "@/lib/mail";
 import { sendPushToTokens } from "@/lib/push";
 import { HoaError } from "./errors";
+
+type TxClient = Prisma.TransactionClient;
 
 /**
  * HOA Violations MVP — service layer. Every write goes through here, never
@@ -54,26 +56,30 @@ export async function createViolationDraft(input: {
   const property = await prisma.property.findFirst({ where: { id: input.propertyId, organizationId: input.organizationId } });
   if (!property) throw new HoaError("HOA_PROPERTY_NOT_FOUND", "Property not found in this organization.");
 
-  const violation = await prisma.violation.create({
-    data: {
-      organizationId: input.organizationId,
-      propertyId: input.propertyId,
-      violationType: input.violationType,
-      description: input.description,
-      cureByDate: input.cureByDate ?? null,
-      createdByUserId: input.actorUserId,
-      status: "DRAFT",
-    },
-  });
+  const violation = await prisma.$transaction(async (tx) => {
+    const created = await tx.violation.create({
+      data: {
+        organizationId: input.organizationId,
+        propertyId: input.propertyId,
+        violationType: input.violationType,
+        description: input.description,
+        cureByDate: input.cureByDate ?? null,
+        createdByUserId: input.actorUserId,
+        status: "DRAFT",
+      },
+    });
 
-  await prisma.violationStatusHistory.create({
-    data: {
-      organizationId: input.organizationId,
-      violationId: violation.id,
-      fromStatus: null,
-      toStatus: "DRAFT",
-      changedByUserId: input.actorUserId,
-    },
+    await tx.violationStatusHistory.create({
+      data: {
+        organizationId: input.organizationId,
+        violationId: created.id,
+        fromStatus: null,
+        toStatus: "DRAFT",
+        changedByUserId: input.actorUserId,
+      },
+    });
+
+    return created;
   });
 
   await createAuditEvent({
@@ -118,16 +124,42 @@ export async function updateViolationDraft(input: {
 }
 
 // ── Transitions ────────────────────────────────────────────────────────────
+//
+// issueViolation() and transitionViolationStatus() both follow the same
+// two-phase shape, closing a real concurrency gap found in independent
+// review: two simultaneous requests against the same violation (e.g. one
+// officer clicking "Acknowledge" while another clicks "Dismiss", or a
+// double-submitted "Issue" click) previously both read the same starting
+// status, both passed assertValidTransition, and both wrote — silently
+// corrupting state (last write wins) while BOTH transitions landed in
+// violationStatusHistory, diverging the audit trail from reality.
+//
+// Phase 1 (inside a $transaction): re-read the violation, validate the
+// transition, then apply it via a conditional updateMany() whose WHERE
+// clause repeats the expected starting status — a compare-and-swap. If a
+// concurrent request already changed the status, `count` is 0 and this
+// throws HOA_VIOLATION_STALE_UPDATE instead of silently overwriting
+// whatever the other request just committed. The status-history row is
+// written in the same transaction, so the two can never diverge.
+//
+// Phase 2 (after the transaction commits): notify residents. Deliberately
+// OUTSIDE the transaction and wrapped in try/catch — a provider outage
+// must never roll back (there's nothing to roll back for an email) nor
+// surface as a failed API response when the state change itself actually
+// succeeded and was already committed.
 
-async function recordTransition(input: {
-  organizationId: string;
-  violationId: string;
-  fromStatus: ViolationStatus;
-  toStatus: ViolationStatus;
-  actorUserId: string;
-  notes?: string | null;
-}): Promise<void> {
-  await prisma.violationStatusHistory.create({
+async function recordTransitionTx(
+  tx: TxClient,
+  input: {
+    organizationId: string;
+    violationId: string;
+    fromStatus: ViolationStatus;
+    toStatus: ViolationStatus;
+    actorUserId: string;
+    notes?: string | null;
+  }
+): Promise<void> {
+  await tx.violationStatusHistory.create({
     data: {
       organizationId: input.organizationId,
       violationId: input.violationId,
@@ -137,15 +169,29 @@ async function recordTransition(input: {
       notes: input.notes ?? null,
     },
   });
+}
 
-  await createAuditEvent({
-    organizationId: input.organizationId,
-    actorUserId: input.actorUserId,
-    action: "update",
-    entityType: "hoa_violation",
-    entityId: input.violationId,
-    metadata: { fromStatus: input.fromStatus, toStatus: input.toStatus },
-  });
+/** Never throws — a notification-delivery failure is logged and swallowed,
+ * never allowed to make an already-committed state transition look like it
+ * failed, and never allowed to abort a cron batch after one bad recipient. */
+async function notifyPropertyResidentsSafely(
+  organizationId: string,
+  propertyId: string,
+  notification: { kind: NotificationKind; title: string; body: string; violationId: string }
+): Promise<void> {
+  try {
+    await notifyPropertyResidents(organizationId, propertyId, notification);
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: "hoa_violation_notification_failed",
+        organizationId,
+        violationId: notification.violationId,
+        kind: notification.kind,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    );
+  }
 }
 
 /** DRAFT -> ISSUED: the only transition that also sends the resident's
@@ -157,43 +203,65 @@ export async function issueViolation(input: {
   noticeBody: string;
   actorUserId: string;
 }): Promise<Violation> {
-  const violation = await prisma.violation.findFirst({ where: { id: input.violationId, organizationId: input.organizationId } });
-  if (!violation) throw new HoaError("HOA_VIOLATION_NOT_FOUND", "Violation not found.");
-  assertValidTransition(violation.status, "ISSUED");
+  const { updated, propertyId } = await prisma.$transaction(async (tx) => {
+    const violation = await tx.violation.findFirst({ where: { id: input.violationId, organizationId: input.organizationId } });
+    if (!violation) throw new HoaError("HOA_VIOLATION_NOT_FOUND", "Violation not found.");
+    assertValidTransition(violation.status, "ISSUED");
 
-  const updated = await prisma.violation.update({
-    where: { id: violation.id },
-    data: {
-      status: "ISSUED",
-      issuedAt: new Date(),
-      cureByDate: input.cureByDate === undefined ? violation.cureByDate : input.cureByDate,
-    },
-  });
+    const { count } = await tx.violation.updateMany({
+      where: { id: violation.id, organizationId: input.organizationId, status: violation.status },
+      data: {
+        status: "ISSUED",
+        issuedAt: new Date(),
+        cureByDate: input.cureByDate === undefined ? violation.cureByDate : input.cureByDate,
+      },
+    });
+    if (count === 0) {
+      throw new HoaError("HOA_VIOLATION_STALE_UPDATE", "This violation was just updated by someone else. Refresh and try again.");
+    }
 
-  await prisma.violationNotice.create({
-    data: {
+    await tx.violationNotice.create({
+      data: {
+        organizationId: input.organizationId,
+        violationId: violation.id,
+        noticeType: "INITIAL",
+        channel: "EMAIL",
+        body: input.noticeBody,
+        sentByUserId: input.actorUserId,
+      },
+    });
+
+    await recordTransitionTx(tx, {
       organizationId: input.organizationId,
       violationId: violation.id,
-      noticeType: "INITIAL",
-      channel: "EMAIL",
-      body: input.noticeBody,
-      sentByUserId: input.actorUserId,
-    },
+      fromStatus: violation.status,
+      toStatus: "ISSUED",
+      actorUserId: input.actorUserId,
+    });
+
+    const updated = await tx.violation.findUniqueOrThrow({ where: { id: violation.id } });
+    return { updated, propertyId: violation.propertyId };
   });
 
-  await recordTransition({
+  // Best-effort, outside the transaction: an audit-event write failure or a
+  // notification failure must never undo (or misreport) the state change
+  // above, which has already committed. Matches this codebase's existing
+  // convention elsewhere of audit events not being strictly transactional
+  // with their triggering write.
+  await createAuditEvent({
     organizationId: input.organizationId,
-    violationId: violation.id,
-    fromStatus: violation.status,
-    toStatus: "ISSUED",
     actorUserId: input.actorUserId,
+    action: "update",
+    entityType: "hoa_violation",
+    entityId: updated.id,
+    metadata: { fromStatus: "DRAFT", toStatus: "ISSUED" },
   });
 
-  await notifyPropertyResidents(input.organizationId, violation.propertyId, {
+  await notifyPropertyResidentsSafely(input.organizationId, propertyId, {
     kind: "issued",
     title: "New violation notice",
     body: input.noticeBody,
-    violationId: violation.id,
+    violationId: updated.id,
   });
 
   return updated;
@@ -212,34 +280,52 @@ export async function transitionViolationStatus(input: {
   resolutionNotes?: string | null;
   actorUserId: string;
 }): Promise<Violation> {
-  const violation = await prisma.violation.findFirst({ where: { id: input.violationId, organizationId: input.organizationId } });
-  if (!violation) throw new HoaError("HOA_VIOLATION_NOT_FOUND", "Violation not found.");
-  assertValidTransition(violation.status, input.toStatus);
-
   const terminal = isTerminalStatus(input.toStatus);
-  const updated = await prisma.violation.update({
-    where: { id: violation.id },
-    data: {
-      status: input.toStatus,
-      resolvedAt: terminal ? new Date() : undefined,
-      resolutionNotes: terminal && input.resolutionNotes !== undefined ? input.resolutionNotes : undefined,
-    },
+
+  const { updated, propertyId, fromStatus } = await prisma.$transaction(async (tx) => {
+    const violation = await tx.violation.findFirst({ where: { id: input.violationId, organizationId: input.organizationId } });
+    if (!violation) throw new HoaError("HOA_VIOLATION_NOT_FOUND", "Violation not found.");
+    assertValidTransition(violation.status, input.toStatus);
+
+    const { count } = await tx.violation.updateMany({
+      where: { id: violation.id, organizationId: input.organizationId, status: violation.status },
+      data: {
+        status: input.toStatus,
+        resolvedAt: terminal ? new Date() : undefined,
+        resolutionNotes: terminal && input.resolutionNotes !== undefined ? input.resolutionNotes : undefined,
+      },
+    });
+    if (count === 0) {
+      throw new HoaError("HOA_VIOLATION_STALE_UPDATE", "This violation was just updated by someone else. Refresh and try again.");
+    }
+
+    await recordTransitionTx(tx, {
+      organizationId: input.organizationId,
+      violationId: violation.id,
+      fromStatus: violation.status,
+      toStatus: input.toStatus,
+      actorUserId: input.actorUserId,
+      notes: input.notes,
+    });
+
+    const updated = await tx.violation.findUniqueOrThrow({ where: { id: violation.id } });
+    return { updated, propertyId: violation.propertyId, fromStatus: violation.status };
   });
 
-  await recordTransition({
+  await createAuditEvent({
     organizationId: input.organizationId,
-    violationId: violation.id,
-    fromStatus: violation.status,
-    toStatus: input.toStatus,
     actorUserId: input.actorUserId,
-    notes: input.notes,
+    action: "update",
+    entityType: "hoa_violation",
+    entityId: updated.id,
+    metadata: { fromStatus, toStatus: input.toStatus },
   });
 
-  await notifyPropertyResidents(input.organizationId, violation.propertyId, {
+  await notifyPropertyResidentsSafely(input.organizationId, propertyId, {
     kind: terminal ? "resolved_dismissed" : "status_changed",
     title: terminal ? "Violation notice closed" : "Violation status updated",
-    body: `Your ${violation.violationType} violation status changed to "${formatStatusForResident(input.toStatus)}".`,
-    violationId: violation.id,
+    body: `Your ${updated.violationType} violation status changed to "${formatStatusForResident(input.toStatus)}".`,
+    violationId: updated.id,
   });
 
   return updated;
@@ -410,7 +496,13 @@ async function notifyPropertyResidents(
         await sendPushToTokens(tokens, {
           title: notification.title,
           body: notification.body,
-          deepLink: `/hoa/violations/${notification.violationId}`,
+          // /hoa/violations/[id] is the OFFICER-only detail page (gated by
+          // hoa:violations:read) -- a resident tapping this push must never
+          // land there. There is no resident-facing per-violation detail
+          // page yet, only the list at /m/violations (see
+          // docs/hoa-violations-mvp.md's "deliberately not built" mobile
+          // scope note), so that's the correct, actually-reachable target.
+          deepLink: "/m/violations",
         });
       }
     }
@@ -465,7 +557,7 @@ export async function sendDeadlineReminders(reminderWindowDays = 3): Promise<{ r
       },
     });
 
-    await notifyPropertyResidents(violation.organizationId, violation.propertyId, {
+    await notifyPropertyResidentsSafely(violation.organizationId, violation.propertyId, {
       kind: "deadline_reminder",
       title: "Violation deadline approaching",
       body,

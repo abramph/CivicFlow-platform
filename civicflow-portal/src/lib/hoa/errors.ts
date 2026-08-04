@@ -45,6 +45,12 @@ export const HOA_ERROR_CODES = [
    * resident self-service read path, never the officer path (which uses
    * ordinary permission checks instead). */
   "HOA_VIOLATION_NOT_YOUR_PROPERTY",
+  /** The violation's status changed between when the caller read it and
+   * when their write was applied (a concurrent request won the race) —
+   * distinct from HOA_VIOLATION_INVALID_TRANSITION, which means the
+   * transition was never valid at all. The caller should refresh and
+   * retry with current state, not treat this as a permanent rejection. */
+  "HOA_VIOLATION_STALE_UPDATE",
 ] as const;
 
 export type HoaErrorCode = (typeof HOA_ERROR_CODES)[number];
@@ -65,6 +71,7 @@ const STATUS_FOR_CODE: Record<HoaErrorCode, number> = {
   HOA_VIOLATION_NOT_FOUND: 404,
   HOA_VIOLATION_INVALID_TRANSITION: 409,
   HOA_VIOLATION_NOT_YOUR_PROPERTY: 403,
+  HOA_VIOLATION_STALE_UPDATE: 409,
 };
 
 export class HoaError extends Error {

@@ -1,6 +1,7 @@
 import { getHoaViolationsPageGate } from "@/lib/hoa/violations-guard";
 import { listProperties } from "@/lib/hoa/properties";
 import { PERMISSIONS } from "@/lib/rbac";
+import Link from "next/link";
 import { PageHeader, SectionCard } from "@/components/app/PageChrome";
 import { Breadcrumbs } from "@/components/admin/OperationsUI";
 import { ViolationForm } from "@/components/hoa/ViolationForm";
@@ -25,7 +26,7 @@ export default async function NewHoaViolationPage() {
       <SectionCard title="New violation">
         {properties.length === 0 ? (
           <p className="text-sm text-slate-600">
-            No active properties exist yet. <a href="/hoa/properties/new" className="font-semibold text-emerald-700 hover:underline">Add a property</a> first.
+            No active properties exist yet. <Link href="/hoa/properties/new" className="font-semibold text-emerald-700 hover:underline">Add a property</Link> first.
           </p>
         ) : (
           <ViolationForm
