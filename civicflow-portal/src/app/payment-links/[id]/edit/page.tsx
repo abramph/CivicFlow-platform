@@ -12,8 +12,8 @@ export default async function EditPaymentLinkPage({
   const { organizationId } = await requirePermission("contributions:write");
   const { id } = await params;
 
-  const [link, campaigns, events] = await Promise.all([
-    prisma.paymentLink.findFirst({ where: { id, organizationId } }),
+  const [link, campaigns, events, paymentMethods] = await Promise.all([
+    prisma.paymentLink.findFirst({ where: { id, organizationId }, include: { methods: true } }),
     prisma.campaign.findMany({
       where: { organizationId },
       orderBy: { name: "asc" },
@@ -23,6 +23,11 @@ export default async function EditPaymentLinkPage({
       where: { organizationId },
       orderBy: { startAt: "asc" },
       select: { id: true, title: true },
+    }),
+    prisma.paymentMethodConfig.findMany({
+      where: { organizationId, isActive: true },
+      orderBy: { sortOrder: "asc" },
+      select: { id: true, method: true, label: true },
     }),
   ]);
 
@@ -40,6 +45,7 @@ export default async function EditPaymentLinkPage({
           mode="edit"
           campaigns={campaigns}
           events={events}
+          paymentMethods={paymentMethods}
           link={{
             id: link.id,
             title: link.title,
@@ -51,6 +57,7 @@ export default async function EditPaymentLinkPage({
             eventId: link.eventId,
             status: link.status,
             expiresAt: link.expiresAt?.toISOString() ?? null,
+            paymentMethodConfigIds: link.methods.map((m) => m.paymentMethodConfigId),
           }}
         />
       </SectionCard>

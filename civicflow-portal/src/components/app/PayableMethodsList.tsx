@@ -1,37 +1,9 @@
-import type { DuesPaymentMethod, PaymentMethodConfig } from "@prisma/client";
+import type { PaymentMethodConfig } from "@prisma/client";
+import { buildPayLink } from "@/lib/payment-method-links";
 
 /** Only methods staff actually configured with a handle/instructions are actionable. */
 export function filterPayableMethods(methods: PaymentMethodConfig[]) {
   return methods.filter((method) => method.accountIdentifier || method.instructions);
-}
-
-/**
- * Builds a tappable deep link for methods that have a real universal payment
- * URL. Cash, check, Zelle, ACH, and card/OTHER methods have no such link (Zelle
- * in particular only works from inside the sender's own banking app, with no
- * public "pay to this handle" URL) — those stay as plain text with instructions.
- */
-function buildPayLink(method: DuesPaymentMethod, accountIdentifier: string): string | null {
-  const trimmed = accountIdentifier.trim();
-  if (!trimmed) return null;
-  if (/^https?:\/\//i.test(trimmed)) return trimmed;
-
-  switch (method) {
-    case "CASH_APP": {
-      const cashtag = trimmed.replace(/^\$/, "");
-      return cashtag ? `https://cash.app/$${encodeURIComponent(cashtag)}` : null;
-    }
-    case "VENMO": {
-      const username = trimmed.replace(/^@/, "");
-      return username ? `https://venmo.com/u/${encodeURIComponent(username)}` : null;
-    }
-    case "PAYPAL": {
-      const handle = trimmed.replace(/^@/, "");
-      return handle ? `https://paypal.me/${encodeURIComponent(handle)}` : null;
-    }
-    default:
-      return null;
-  }
 }
 
 export function PayableMethodsList({ methods }: { methods: PaymentMethodConfig[] }) {

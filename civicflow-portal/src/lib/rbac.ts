@@ -57,6 +57,13 @@ export const PERMISSIONS = {
   CONTRIBUTIONS_READ:  "contributions:read",
   CONTRIBUTIONS_WRITE: "contributions:write",
 
+  // Reviewing a public payer's self-reported offline payment against a
+  // Payment Link (see docs/flexible-payment-links.md). Distinct from
+  // DUES_WRITE (which gates the member-facing PaymentReport approval) since
+  // a payment-link report isn't necessarily dues-related; granted to the
+  // same roles that already review PaymentReport for consistency.
+  PAYMENT_LINK_REPORTS_REVIEW: "payment_link_reports:review",
+
   // Receipts
   RECEIPTS_READ:  "receipts:read",
   RECEIPTS_WRITE: "receipts:write",
@@ -243,6 +250,7 @@ const ORG_OWNER_PERMISSIONS: Permission[] = [
   PERMISSIONS.DUES_WRITE,
   PERMISSIONS.CONTRIBUTIONS_READ,
   PERMISSIONS.CONTRIBUTIONS_WRITE,
+  PERMISSIONS.PAYMENT_LINK_REPORTS_REVIEW,
   PERMISSIONS.RECEIPTS_READ,
   PERMISSIONS.RECEIPTS_WRITE,
   PERMISSIONS.CAMPAIGNS_READ,
@@ -321,6 +329,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.DUES_WRITE,
     PERMISSIONS.CONTRIBUTIONS_READ,
     PERMISSIONS.CONTRIBUTIONS_WRITE,
+    PERMISSIONS.PAYMENT_LINK_REPORTS_REVIEW,
     PERMISSIONS.RECEIPTS_READ,
     PERMISSIONS.RECEIPTS_WRITE,
     PERMISSIONS.CAMPAIGNS_READ,
@@ -394,6 +403,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.DUES_WRITE,
     PERMISSIONS.CONTRIBUTIONS_READ,
     PERMISSIONS.CONTRIBUTIONS_WRITE,
+    PERMISSIONS.PAYMENT_LINK_REPORTS_REVIEW,
     PERMISSIONS.COMMUNICATIONS_READ,
     PERMISSIONS.ATTENDANCE_READ,
     PERMISSIONS.MEETINGS_READ,

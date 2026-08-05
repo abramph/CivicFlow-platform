@@ -3,7 +3,7 @@ import { withApiErrorHandling } from "@/lib/api-route";
 import { createAuditEvent } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 import { requireRateLimit } from "@/lib/rate-limit";
-import { parseJsonBody, z } from "@/lib/validation";
+import { parseJsonBody, ValidationError, z } from "@/lib/validation";
 import type { PaymentLinkType, PaymentLinkStatus } from "@prisma/client";
 
 const optionalTextField = (maxLength: number) =>
@@ -19,6 +19,7 @@ const updatePaymentLinkSchema = z.object({
   eventId: z.string().trim().min(1).nullable().optional(),
   status: z.enum(["active", "inactive", "archived"]).optional(),
   expiresAt: z.union([z.string().datetime(), z.literal(""), z.null()]).optional(),
+  paymentMethodConfigIds: z.array(z.string().trim().min(1)).min(1, "Select at least one payment method.").optional(),
 });
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -31,6 +32,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       include: {
         campaign: { select: { id: true, name: true } },
         event: { select: { id: true, title: true } },
+        methods: { include: { paymentMethodConfig: { select: { id: true, method: true, label: true } } } },
       },
     });
 
@@ -66,6 +68,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const existing = await prisma.paymentLink.findFirst({ where: { id, organizationId } });
     if (!existing) return Response.json({ ok: false, error: "Payment link not found" }, { status: 404 });
 
+    if (input.paymentMethodConfigIds !== undefined) {
+      const methodConfigs = await prisma.paymentMethodConfig.findMany({
+        where: { id: { in: input.paymentMethodConfigIds }, organizationId, isActive: true },
+      });
+      if (methodConfigs.length !== input.paymentMethodConfigIds.length) {
+        throw new ValidationError("One or more selected payment methods are invalid or inactive.");
+      }
+    }
+
     const updated = await prisma.paymentLink.update({
       where: { id },
       data: {
@@ -80,7 +91,16 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         ...(input.expiresAt !== undefined
           ? { expiresAt: input.expiresAt ? new Date(input.expiresAt) : null }
           : {}),
+        ...(input.paymentMethodConfigIds !== undefined
+          ? {
+              methods: {
+                deleteMany: {},
+                create: input.paymentMethodConfigIds.map((paymentMethodConfigId) => ({ paymentMethodConfigId })),
+              },
+            }
+          : {}),
       },
+      include: { methods: { include: { paymentMethodConfig: { select: { id: true, method: true, label: true } } } } },
     });
 
     await createAuditEvent({

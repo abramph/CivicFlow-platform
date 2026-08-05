@@ -41,6 +41,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
       return Response.json({ ok: false, error: "This payment link has expired" }, { status: 410 });
     }
 
+    const stripeMethod = await prisma.paymentLinkMethod.findFirst({
+      where: {
+        paymentLinkId: link.id,
+        paymentMethodConfig: { method: "STRIPE", isActive: true },
+      },
+    });
+    if (!stripeMethod) {
+      throw new ValidationError("This payment link doesn't offer online card payment.");
+    }
+
     const amountCents = link.amount
       ? Math.round(Number(link.amount) * 100)
       : input.amount

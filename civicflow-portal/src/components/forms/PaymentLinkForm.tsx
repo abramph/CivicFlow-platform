@@ -2,14 +2,24 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import type { DuesPaymentMethod } from "@prisma/client";
+import { getPaymentMethodCategory } from "@/lib/payment-method-links";
 
 type Campaign = { id: string; name: string };
 type Event = { id: string; title: string };
+type PaymentMethod = { id: string; method: DuesPaymentMethod; label: string };
+
+const categoryLabels: Record<ReturnType<typeof getPaymentMethodCategory>, string> = {
+  native: "Online card payment",
+  external: "External redirect",
+  offline: "Offline instructions",
+};
 
 type PaymentLinkFormProps = {
   mode: "create" | "edit";
   campaigns: Campaign[];
   events: Event[];
+  paymentMethods: PaymentMethod[];
   link?: {
     id: string;
     title: string;
@@ -21,13 +31,14 @@ type PaymentLinkFormProps = {
     eventId: string | null;
     status: string;
     expiresAt: string | null;
+    paymentMethodConfigIds?: string[];
   };
 };
 
 const fieldClassName =
   "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 shadow-sm outline-none transition focus:border-emerald-600 focus:ring-2 focus:ring-emerald-200";
 
-export function PaymentLinkForm({ mode, campaigns, events, link }: PaymentLinkFormProps) {
+export function PaymentLinkForm({ mode, campaigns, events, paymentMethods, link }: PaymentLinkFormProps) {
   const router = useRouter();
   const [form, setForm] = useState({
     title: link?.title ?? "",
@@ -40,8 +51,16 @@ export function PaymentLinkForm({ mode, campaigns, events, link }: PaymentLinkFo
     status: link?.status ?? "active",
     expiresAt: link?.expiresAt ? link.expiresAt.slice(0, 10) : "",
   });
+  const [selectedMethodIds, setSelectedMethodIds] = useState<string[]>(
+    link?.paymentMethodConfigIds ??
+      (paymentMethods.find((m) => m.method === "STRIPE") ? [paymentMethods.find((m) => m.method === "STRIPE")!.id] : [])
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  function toggleMethod(id: string) {
+    setSelectedMethodIds((ids) => (ids.includes(id) ? ids.filter((existing) => existing !== id) : [...ids, id]));
+  }
 
   function field(key: keyof typeof form) {
     return (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
@@ -62,6 +81,12 @@ export function PaymentLinkForm({ mode, campaigns, events, link }: PaymentLinkFo
       return;
     }
 
+    if (selectedMethodIds.length === 0) {
+      setSaving(false);
+      setError("Select at least one payment method.");
+      return;
+    }
+
     try {
       const response = await fetch(
         mode === "create" ? "/api/payment-links" : `/api/payment-links/${link?.id}`,
@@ -78,6 +103,7 @@ export function PaymentLinkForm({ mode, campaigns, events, link }: PaymentLinkFo
             eventId: form.eventId || null,
             status: form.status,
             expiresAt: form.expiresAt ? new Date(`${form.expiresAt}T23:59:59`).toISOString() : null,
+            paymentMethodConfigIds: selectedMethodIds,
           }),
         }
       );
@@ -190,6 +216,36 @@ export function PaymentLinkForm({ mode, campaigns, events, link }: PaymentLinkFo
             onChange={field("expiresAt")}
           />
         </label>
+      </div>
+
+      <div className="space-y-2">
+        <p className="text-sm font-medium text-slate-900">
+          Payment methods <span className="text-red-600">*</span>
+        </p>
+        {paymentMethods.length === 0 ? (
+          <p className="text-sm text-slate-600">
+            No active payment methods are configured for your organization yet. Configure at least one under
+            organization settings before creating a link.
+          </p>
+        ) : (
+          <div className="grid gap-2 md:grid-cols-2">
+            {paymentMethods.map((m) => {
+              const checked = selectedMethodIds.includes(m.id);
+              return (
+                <label
+                  key={m.id}
+                  className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
+                    checked ? "border-emerald-600 bg-emerald-50" : "border-slate-200 bg-white"
+                  }`}
+                >
+                  <input type="checkbox" checked={checked} onChange={() => toggleMethod(m.id)} />
+                  <span className="font-medium text-slate-900">{m.label}</span>
+                  <span className="ml-auto text-xs text-slate-500">{categoryLabels[getPaymentMethodCategory(m.method)]}</span>
+                </label>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <label className="space-y-2 text-sm font-medium text-slate-900">

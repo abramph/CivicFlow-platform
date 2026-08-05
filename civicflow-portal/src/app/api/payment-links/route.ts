@@ -18,6 +18,7 @@ const createPaymentLinkSchema = z.object({
   campaignId: z.string().trim().min(1).nullable().optional(),
   eventId: z.string().trim().min(1).nullable().optional(),
   expiresAt: z.union([z.string().datetime(), z.literal(""), z.null()]).optional(),
+  paymentMethodConfigIds: z.array(z.string().trim().min(1)).min(1, "Select at least one payment method."),
 });
 
 function generateSlug(title: string): string {
@@ -41,6 +42,7 @@ export async function GET() {
       include: {
         campaign: { select: { id: true, name: true } },
         event: { select: { id: true, title: true } },
+        methods: { include: { paymentMethodConfig: { select: { method: true, label: true } } } },
       },
     });
 
@@ -84,6 +86,13 @@ export async function POST(request: Request) {
       if (!event) throw new ValidationError("Event not found.");
     }
 
+    const methodConfigs = await prisma.paymentMethodConfig.findMany({
+      where: { id: { in: input.paymentMethodConfigIds }, organizationId, isActive: true },
+    });
+    if (methodConfigs.length !== input.paymentMethodConfigIds.length) {
+      throw new ValidationError("One or more selected payment methods are invalid or inactive.");
+    }
+
     let slug = generateSlug(input.title);
     // Retry once on the unlikely collision
     const existing = await prisma.paymentLink.findUnique({ where: { slug } });
@@ -102,7 +111,11 @@ export async function POST(request: Request) {
         eventId: input.eventId ?? null,
         expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
         createdByUserId: session.userId,
+        methods: {
+          create: methodConfigs.map((config) => ({ paymentMethodConfigId: config.id })),
+        },
       },
+      include: { methods: { include: { paymentMethodConfig: { select: { method: true, label: true } } } } },
     });
 
     await createAuditEvent({
