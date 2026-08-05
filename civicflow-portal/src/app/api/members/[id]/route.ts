@@ -97,12 +97,29 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (
       input.membershipStatus &&
       input.membershipStatus !== existing.membershipStatus &&
-      ["deactivated", "terminated", "suspended"].includes(input.membershipStatus) &&
+      (input.membershipStatus === "terminated" || existing.membershipStatus === "terminated")
+    ) {
+      return Response.json(
+        {
+          ok: false,
+          error:
+            existing.membershipStatus === "terminated"
+              ? "This member is terminated. Use the Reinstate action to restore membership."
+              : "Use the Terminate action to terminate a member's status.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (
+      input.membershipStatus &&
+      input.membershipStatus !== existing.membershipStatus &&
+      ["deactivated", "suspended"].includes(input.membershipStatus) &&
       !normalizeOptionalText(input.statusChangeReason)
     ) {
       return Response.json(
-        { ok: false, error: "Status change reason is required for suspended, deactivated, or terminated members." },
-        { status: 400 }
+        { ok: false, error: "Status change reason is required for suspended or deactivated members." },
+        { status: 400 },
       );
     }
 
@@ -145,10 +162,23 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       ...(input.commsSmsEnabled !== undefined ? { commsSmsEnabled: input.commsSmsEnabled } : {}),
     };
 
-    const updated = await prisma.orgMember.update({
-      where: { id },
+    // Compare-and-swap on the status read above -- without this, a concurrent
+    // dedicated terminate/reinstate call landing between the findFirst above
+    // and this write would get silently overwritten by this route's stale
+    // membershipStatus (MemberEditForm always submits the current value),
+    // clobbering a termination's status back to active while leaving its
+    // OrganizationMembership access-suspension and timeline event in place.
+    const { count } = await prisma.orgMember.updateMany({
+      where: { id: existing.id, organizationId, membershipStatus: existing.membershipStatus },
       data,
     });
+    if (count === 0) {
+      return Response.json(
+        { ok: false, error: "This member changed since you loaded this page. Refresh and try again." },
+        { status: 409 }
+      );
+    }
+    const updated = await prisma.orgMember.findUniqueOrThrow({ where: { id: existing.id } });
 
     await createAuditEvent({
       organizationId,
@@ -177,18 +207,20 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     });
 
     if (existing.membershipStatus !== updated.membershipStatus) {
+      // "terminated" can no longer appear as either side of this transition --
+      // it's only reachable via the dedicated terminate/reinstate actions
+      // (see docs/member-lifecycle-termination.md), which write their own
+      // TERMINATED/REACTIVATED timeline events.
       const eventType =
         updated.membershipStatus === "deactivated"
           ? "DEACTIVATED"
-          : updated.membershipStatus === "terminated"
-            ? "TERMINATED"
-            : updated.membershipStatus === "suspended"
-              ? "SUSPENDED"
-              : updated.membershipStatus === "retired"
-                ? "RETIRED"
-                : existing.membershipStatus !== "active" && updated.membershipStatus === "active"
-                  ? "REACTIVATED"
-                  : "STATUS_CHANGED";
+          : updated.membershipStatus === "suspended"
+            ? "SUSPENDED"
+            : updated.membershipStatus === "retired"
+              ? "RETIRED"
+              : existing.membershipStatus !== "active" && updated.membershipStatus === "active"
+                ? "REACTIVATED"
+                : "STATUS_CHANGED";
       await createMemberTimelineEvent({
         organizationId,
         memberId: updated.id,
