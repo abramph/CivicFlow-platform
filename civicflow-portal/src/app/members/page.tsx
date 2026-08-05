@@ -10,8 +10,9 @@ import {
 } from "@/lib/member-filters";
 import { prisma } from "@/lib/prisma";
 import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
+import { StatusBadge } from "@/components/app/StatusBadge";
 import { BulkInviteToAppButton } from "@/components/forms/BulkInviteToAppButton";
-import { formatDate, formatEnumLabel, formatPersonName, formatText } from "@/lib/formatting";
+import { formatDate, formatPersonName, formatText } from "@/lib/formatting";
 import { getOrganizationEntitlements } from "@/lib/plan-gate";
 import { getVerticalTerminology, getEmptyStateCopy } from "@/lib/vertical-terminology";
 
@@ -32,7 +33,7 @@ export default async function MembersPage({
   const exportPdfHref = `/api/members/export?${buildMemberFilterQuery(resolvedSearchParams, { format: "pdf" })}`;
   const printHref = `/members/print?${buildMemberFilterQuery(resolvedSearchParams)}`;
 
-  const [members, membershipCategories, duesCategories, totalMembers, activeMembers, entitlements] = await Promise.all([
+  const [members, membershipCategories, duesCategories, totalMembers, activeMembers, delinquentMembers, terminatedMembers, entitlements] = await Promise.all([
     prisma.orgMember.findMany({
       where,
       orderBy: buildMemberOrderBy(filters.sort),
@@ -71,6 +72,18 @@ export default async function MembersPage({
         membershipStatus: "active",
       },
     }),
+    prisma.orgMember.count({
+      // Delinquency is only a meaningful, mutually-exclusive-with-Terminated
+      // bucket for active members -- membershipStatus: "active" is required
+      // here, same convention as report-builder.ts's DELINQUENT_MEMBER_ROSTER
+      // and the existing reports page count. isDelinquent is never cleared on
+      // termination (see member-lifecycle.ts), so a terminated member who was
+      // delinquent when terminated would otherwise be double-counted here.
+      where: { organizationId, membershipStatus: "active", isDelinquent: true },
+    }),
+    prisma.orgMember.count({
+      where: { organizationId, membershipStatus: "terminated" },
+    }),
     getOrganizationEntitlements(organizationId),
   ]);
 
@@ -87,10 +100,12 @@ export default async function MembersPage({
         ]}
       />
 
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
         <StatCard label={`Filtered ${terminology.memberPlural}`} value={members.length} />
         <StatCard label="All Members" value={totalMembers} />
         <StatCard label="Active Members" value={activeMembers} />
+        <StatCard label="Delinquent" value={delinquentMembers} />
+        <StatCard label="Terminated" value={terminatedMembers} />
         <StatCard label="Membership Categories" value={membershipCategories.length} />
       </div>
 
@@ -361,7 +376,12 @@ export default async function MembersPage({
                       <p className="text-xs text-slate-700">{formatText(member.phone, "No phone")}</p>
                     </td>
                     <td className="px-4 py-3 text-slate-900">{formatDate(member.joinDate)}</td>
-                    <td className="px-4 py-3 text-slate-900">{formatEnumLabel(member.membershipStatus)}</td>
+                    <td className="px-4 py-3 text-slate-900">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <StatusBadge status={member.membershipStatus} />
+                        {member.membershipStatus === "active" && member.isDelinquent ? <StatusBadge status="delinquent" label="Delinquent" /> : null}
+                      </div>
+                    </td>
                   </tr>
                 ))
               )}

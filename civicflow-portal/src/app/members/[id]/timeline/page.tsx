@@ -1,6 +1,7 @@
 import { requirePermission } from "@/lib/auth-guards";
 import { prisma } from "@/lib/prisma";
 import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
+import { Timeline } from "@/components/app/Timeline";
 import { ManualTimelineEventForm } from "@/components/forms/ManualTimelineEventForm";
 import { formatDateTime, formatEnumLabel, formatPersonName } from "@/lib/formatting";
 
@@ -24,15 +25,15 @@ export default async function MemberTimelinePage({ params }: { params: Promise<{
         <ManualTimelineEventForm memberId={member.id} canWrite={can("members:write")} />
       </SectionCard>
       <SectionCard title="Timeline" description="Most recent member history first.">
-        <div className="space-y-3">
-          {rows.length === 0 ? <p className="text-sm text-slate-600">No timeline events yet.</p> : rows.map((row) => (
-            <div key={row.id} className="rounded-xl border border-slate-200 bg-white p-4">
-              <p className="text-sm font-semibold text-slate-950">{row.title}</p>
-              <p className="mt-1 text-xs text-slate-700">{formatEnumLabel(row.eventType)} · {formatDateTime(row.occurredAt)}</p>
-              {row.description ? <p className="mt-2 whitespace-pre-wrap text-sm text-slate-800">{row.description}</p> : null}
-            </div>
-          ))}
-        </div>
+        <Timeline
+          entries={rows.map((row) => ({
+            id: row.id,
+            title: row.title,
+            description: row.description,
+            occurredAt: row.occurredAt,
+            eventTypeLabel: formatEnumLabel(row.eventType),
+          }))}
+        />
       </SectionCard>
     </main>
   );

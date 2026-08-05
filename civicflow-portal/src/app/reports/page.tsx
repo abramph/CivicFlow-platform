@@ -3,7 +3,7 @@ import { requirePermission } from "@/lib/auth-guards";
 import { prisma } from "@/lib/prisma";
 import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { ReportsManager } from "@/components/forms/ReportsManager";
-import { buildReport, isReportType, MAX_REPORT_ROWS } from "@/lib/reports/report-builder";
+import { buildReport, isReportType, reportTitle, MAX_REPORT_ROWS } from "@/lib/reports/report-builder";
 import { formatDate, formatDateTime } from "@/lib/formatting";
 import { getOrganizationEntitlements } from "@/lib/plan-gate";
 import { getVerticalTerminology } from "@/lib/vertical-terminology";
@@ -15,6 +15,30 @@ const ROSTER_CARDS = [
   { reportType: "DELINQUENT_MEMBER_ROSTER", label: "Delinquent" },
   { reportType: "INACTIVE_MEMBER_ROSTER", label: "Inactive" },
   { reportType: "TERMINATED_MEMBER_ROSTER", label: "Terminated" },
+] as const;
+
+// Groups every other report type into browsable categories -- additive to the
+// existing flat dropdown below (kept as-is for anyone who prefers it), not a
+// replacement. No live counts here (unlike the roster cards above): 18 extra
+// count queries on every page load isn't worth it for numbers most people
+// won't need before clicking through.
+const REPORT_CATEGORIES = [
+  {
+    title: "Financial",
+    reportTypes: ["GENERAL_FINANCIAL", "CONTRIBUTIONS", "CAMPAIGNS", "MONTHLY_DUES_COLLECTION", "DUES_PAYMENT_DETAIL", "OUTSTANDING_DUES", "CAMPAIGN_PAYERS", "EXPENDITURES", "PAYMENT_RECONCILIATION", "DELINQUENT_MEMBERS"],
+  },
+  {
+    title: "Membership & Demographics",
+    reportTypes: ["DUES_CURRENT_MEMBERS", "FULL_YEAR_DUES_PAID", "MEMBER_LOCATION", "MEMBER_DEMOGRAPHICS"],
+  },
+  {
+    title: "Events & Attendance",
+    reportTypes: ["EVENTS", "ATTENDANCE", "MEETING_ATTENDANCE"],
+  },
+  {
+    title: "Communications",
+    reportTypes: ["COMMUNICATIONS"],
+  },
 ] as const;
 
 function getValue(value: string | string[] | undefined) {
@@ -160,6 +184,27 @@ export default async function ReportsPage({
               ) : null}
               <p className="mt-1 text-xs text-emerald-700">View report &rarr;</p>
             </Link>
+          ))}
+        </div>
+      </SectionCard>
+
+      <SectionCard title="Report Categories" description="Browse the full report catalog by category, or use the report type dropdown below directly.">
+        <div className="space-y-5">
+          {REPORT_CATEGORIES.map((category) => (
+            <div key={category.title}>
+              <h3 className="text-sm font-semibold text-slate-900">{category.title}</h3>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {category.reportTypes.map((type) => (
+                  <Link
+                    key={type}
+                    href={`/reports?reportType=${type}`}
+                    className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
+                  >
+                    {reportTitle(type)}
+                  </Link>
+                ))}
+              </div>
+            </div>
           ))}
         </div>
       </SectionCard>
