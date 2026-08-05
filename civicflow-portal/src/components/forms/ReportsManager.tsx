@@ -38,6 +38,10 @@ const reportTypes = [
   ["PAYMENT_RECONCILIATION", "Payment reconciliation"],
   ["MEMBER_LOCATION", "Member demographic/location reports"],
   ["MEMBER_DEMOGRAPHICS", "Member demographics"],
+  ["ACTIVE_MEMBER_ROSTER", "Active member roster"],
+  ["DELINQUENT_MEMBER_ROSTER", "Delinquent member roster"],
+  ["INACTIVE_MEMBER_ROSTER", "Inactive member roster"],
+  ["TERMINATED_MEMBER_ROSTER", "Terminated member roster"],
 ] as const;
 
 const defaultRecipient: ReportRecipientSelectorValue = {
