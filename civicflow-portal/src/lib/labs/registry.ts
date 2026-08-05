@@ -105,6 +105,18 @@ export const LAB_FEATURES = {
     metered: true,
     riskClassification: "medium",
   },
+  supportAssistant: {
+    key: "supportAssistant",
+    name: "Unestra Support Assistant",
+    description:
+      "Documentation-grounded assistant that explains how Unestra works -- it never mutates data, never reads tenant records, and never performs an action (see docs/support-assistant.md). Distinct from policyAssistant below, which is a placeholder for a different, not-yet-built feature that would answer questions over an organization's own private documents.",
+    lifecycle: "INTERNAL",
+    requiresEntitlement: false,
+    requiresEnrollment: true,
+    internalOnly: true,
+    metered: true,
+    riskClassification: "medium",
+  },
   policyAssistant: {
     key: "policyAssistant",
     name: "Policy Assistant",

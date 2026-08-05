@@ -496,6 +496,7 @@ model Organization {
   messages                    Message[]
   labFeatures                 OrganizationLabFeature[]
   labUsageEvents              LabUsageEvent[]
+  supportAssistantFeedback    SupportAssistantFeedback[]
   meetingIntelligenceJobs     MeetingIntelligenceJob[]
   meetingTranscripts          MeetingTranscript[]
   meetingMinutesDrafts        MeetingMinutesDraft[]
@@ -606,6 +607,7 @@ model User {
   meetingIntelligenceFeedbackSubmitted    MeetingIntelligenceFeedback[] @relation("MeetingIntelligenceFeedbackSubmittedBy")
 
   ptaHouseholdAdultProfiles PtaHouseholdAdult[]
+  supportAssistantFeedback  SupportAssistantFeedback[]
 
   @@index([email])
 }
@@ -822,6 +824,31 @@ model LabUsageEvent {
 
   @@index([organizationId, featureKey, recordedAt])
   @@index([featureKey])
+}
+
+/// Support Assistant feedback signal (see docs/support-assistant.md) --
+/// deliberately does NOT store the raw question or answer text, only a
+/// coarse `questionCategory` classification (the knowledge-base category of
+/// the top-matched document, if any) and the helpful/not-helpful signal.
+/// organizationId/userId are nullable because the public (anonymous)
+/// assistant surface has neither.
+model SupportAssistantFeedback {
+  id               String   @id @default(cuid())
+  organizationId   String?
+  userId           String?
+  mode             String // "public" | "authenticated"
+  vertical         String?
+  currentPath      String?
+  questionCategory String
+  helpful          Boolean?
+  escalated        Boolean  @default(false)
+  createdAt        DateTime @default(now())
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  user         User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt])
+  @@index([questionCategory])
 }
 
 // ─── Organization-scoped Data Models ─────────────────────────────────────────

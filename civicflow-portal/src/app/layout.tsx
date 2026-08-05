@@ -4,6 +4,7 @@ import "./globals.css";
 import { Providers } from "@/components/Providers";
 import { PortalShell } from "@/components/app/PortalShell";
 import { ImpersonationBanner } from "@/components/admin/ImpersonationBanner";
+import { SupportAssistantWidget } from "@/components/support-assistant/SupportAssistantWidget";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -39,6 +40,7 @@ export default function RootLayout({
         <Providers>
           <ImpersonationBanner />
           <PortalShell>{children}</PortalShell>
+          <SupportAssistantWidget />
         </Providers>
       </body>
     </html>
