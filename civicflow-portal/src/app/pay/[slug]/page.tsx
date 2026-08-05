@@ -15,10 +15,23 @@ export default async function PublicPayPage({
       organization: { select: { name: true, logoUrl: true } },
       campaign: { select: { name: true } },
       event: { select: { title: true } },
+      methods: {
+        where: { paymentMethodConfig: { isActive: true } },
+        include: { paymentMethodConfig: true },
+        orderBy: { paymentMethodConfig: { sortOrder: "asc" } },
+      },
     },
   });
 
   if (!link || link.status === "archived") notFound();
+
+  const methods = link.methods.map((m) => ({
+    id: m.paymentMethodConfig.id,
+    method: m.paymentMethodConfig.method,
+    label: m.paymentMethodConfig.label,
+    instructions: m.paymentMethodConfig.instructions,
+    accountIdentifier: m.paymentMethodConfig.accountIdentifier,
+  }));
 
   const expired = link.expiresAt && link.expiresAt < new Date();
 
@@ -47,11 +60,12 @@ export default async function PublicPayPage({
             slug={slug}
             fixedAmount={link.amount ? Number(link.amount) : null}
             minAmount={link.minAmount ? Number(link.minAmount) : 1}
+            methods={methods}
           />
         )}
 
         <p className="mt-6 text-center text-xs text-slate-400">
-          Payments processed securely by Stripe
+          {methods.length > 0 ? "Choose how you'd like to pay above." : "This link has no active payment methods configured."}
         </p>
       </div>
     </div>

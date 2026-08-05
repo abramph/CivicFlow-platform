@@ -3,8 +3,15 @@ import { notFound } from "next/navigation";
 import { requirePermission } from "@/lib/auth-guards";
 import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { formatCurrency, formatDate, formatEnumLabel } from "@/lib/formatting";
+import { getPaymentMethodCategory } from "@/lib/payment-method-links";
 import { prisma } from "@/lib/prisma";
 import { getServerEnv } from "@/lib/env";
+
+const categoryLabels: Record<ReturnType<typeof getPaymentMethodCategory>, string> = {
+  native: "Online card payment",
+  external: "External redirect",
+  offline: "Offline instructions",
+};
 
 export default async function PaymentLinkDetailPage({
   params,
@@ -21,6 +28,7 @@ export default async function PaymentLinkDetailPage({
     include: {
       campaign: { select: { id: true, name: true } },
       event: { select: { id: true, title: true } },
+      methods: { include: { paymentMethodConfig: { select: { method: true, label: true, isActive: true } } } },
     },
   });
 
@@ -65,6 +73,24 @@ export default async function PaymentLinkDetailPage({
             This link is {link.status} — payers will see a "not available" message.
           </p>
         )}
+      </SectionCard>
+
+      <SectionCard title="Payment Options" description="Methods payers can choose from on this link.">
+        <div className="flex flex-wrap gap-2">
+          {link.methods.map((m) => (
+            <span
+              key={m.paymentMethodConfigId}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium ${
+                m.paymentMethodConfig.isActive ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-500 line-through"
+              }`}
+            >
+              {m.paymentMethodConfig.label}
+              <span className="text-xs font-normal opacity-75">
+                ({categoryLabels[getPaymentMethodCategory(m.paymentMethodConfig.method)]})
+              </span>
+            </span>
+          ))}
+        </div>
       </SectionCard>
 
       <SectionCard title="Details">

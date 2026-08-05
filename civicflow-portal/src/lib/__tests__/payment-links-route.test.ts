@@ -17,6 +17,7 @@ const findFirstEvent = vi.fn();
 const findUniquePaymentLink = vi.fn();
 const createPaymentLink = vi.fn();
 const findManyPaymentLink = vi.fn();
+const findManyPaymentMethodConfig = vi.fn();
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     campaign: { findFirst: (...args: unknown[]) => findFirstCampaign(...args) },
@@ -25,6 +26,9 @@ vi.mock("@/lib/prisma", () => ({
       findUnique: (...args: unknown[]) => findUniquePaymentLink(...args),
       create: (...args: unknown[]) => createPaymentLink(...args),
       findMany: (...args: unknown[]) => findManyPaymentLink(...args),
+    },
+    paymentMethodConfig: {
+      findMany: (...args: unknown[]) => findManyPaymentMethodConfig(...args),
     },
   },
 }));
@@ -48,6 +52,7 @@ describe("POST /api/payment-links", () => {
     findFirstEvent.mockReset();
     findUniquePaymentLink.mockReset().mockResolvedValue(null);
     createPaymentLink.mockReset();
+    findManyPaymentMethodConfig.mockReset().mockResolvedValue([{ id: "method-stripe", method: "STRIPE", isActive: true }]);
   });
 
   it("rejects a campaignId that doesn't belong to the caller's organization", async () => {
@@ -72,17 +77,39 @@ describe("POST /api/payment-links", () => {
     findUniquePaymentLink.mockResolvedValueOnce({ id: "existing" });
     createPaymentLink.mockResolvedValueOnce({ id: "link-1", title: "Dues", slug: "dues-abc123", linkType: "DUES" });
 
-    const response = await POST(postRequest({ title: "Dues", linkType: "DUES" }));
+    const response = await POST(
+      postRequest({ title: "Dues", linkType: "DUES", paymentMethodConfigIds: ["method-stripe"] })
+    );
 
     expect(response.status).toBe(201);
     expect(findUniquePaymentLink).toHaveBeenCalledTimes(1);
     expect(createPaymentLink).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects a request with no payment methods selected", async () => {
+    const response = await POST(postRequest({ title: "General Fund", paymentMethodConfigIds: [] }));
+
+    expect(response.status).toBe(400);
+    expect(createPaymentLink).not.toHaveBeenCalled();
+  });
+
+  it("rejects payment method ids that aren't active configs owned by the caller's organization", async () => {
+    findManyPaymentMethodConfig.mockReset().mockResolvedValue([]);
+
+    const response = await POST(
+      postRequest({ title: "General Fund", paymentMethodConfigIds: ["method-other-org"] })
+    );
+
+    expect(response.status).toBe(400);
+    expect(createPaymentLink).not.toHaveBeenCalled();
+  });
+
   it("creates a payment link scoped to the caller's organization", async () => {
     createPaymentLink.mockResolvedValueOnce({ id: "link-1", title: "General Fund", slug: "general-fund-abc123", linkType: "GENERAL" });
 
-    const response = await POST(postRequest({ title: "General Fund" }));
+    const response = await POST(
+      postRequest({ title: "General Fund", paymentMethodConfigIds: ["method-stripe"] })
+    );
     const body = await response.json();
 
     expect(response.status).toBe(201);

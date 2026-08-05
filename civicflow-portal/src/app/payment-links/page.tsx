@@ -2,23 +2,36 @@ import Link from "next/link";
 import { requirePermission } from "@/lib/auth-guards";
 import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { formatCurrency, formatDate, formatEnumLabel } from "@/lib/formatting";
+import { getPaymentMethodCategory } from "@/lib/payment-method-links";
 import { prisma } from "@/lib/prisma";
 import { getServerEnv } from "@/lib/env";
 
+const categoryBadgeClass: Record<ReturnType<typeof getPaymentMethodCategory>, string> = {
+  native: "bg-emerald-100 text-emerald-800",
+  external: "bg-blue-100 text-blue-800",
+  offline: "bg-slate-100 text-slate-700",
+};
+
 export default async function PaymentLinksPage() {
-  const { organizationId } = await requirePermission("contributions:read");
+  const { organizationId, can } = await requirePermission("contributions:read");
   const env = getServerEnv();
   const baseUrl = env.NEXTAUTH_URL.replace(/\/$/, "");
 
-  const links = await prisma.paymentLink.findMany({
-    where: { organizationId },
-    orderBy: { createdAt: "desc" },
-    take: 200,
-    include: {
-      campaign: { select: { id: true, name: true } },
-      event: { select: { id: true, title: true } },
-    },
-  });
+  const [links, pendingReportCount] = await Promise.all([
+    prisma.paymentLink.findMany({
+      where: { organizationId },
+      orderBy: { createdAt: "desc" },
+      take: 200,
+      include: {
+        campaign: { select: { id: true, name: true } },
+        event: { select: { id: true, title: true } },
+        methods: { include: { paymentMethodConfig: { select: { method: true, label: true } } } },
+      },
+    }),
+    prisma.paymentLinkOfflineReport.count({ where: { organizationId, status: "pending" } }),
+  ]);
+
+  const canReviewReports = can("payment_link_reports:review");
 
   const active = links.filter((l) => l.status === "active").length;
   const totalUses = links.reduce((sum, l) => sum + l.useCount, 0);
@@ -27,21 +40,25 @@ export default async function PaymentLinksPage() {
     <main className="space-y-6">
       <PageHeader
         title="Payment Links"
-        description="Shareable links that let anyone pay your organization via Stripe without logging in."
+        description="Shareable links that let people pay your organization using one or more methods you offer — online card payment, external redirect, or offline instructions."
         actions={[
           { href: "/payment-links/new", label: "New Payment Link", tone: "primary" },
+          ...(canReviewReports
+            ? [{ href: "/payment-links/reports", label: `Review Reports${pendingReportCount ? ` (${pendingReportCount})` : ""}` }]
+            : []),
           { href: "/contributions", label: "Contributions" },
           { href: "/dashboard", label: "Back to Dashboard" },
         ]}
       />
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-4">
         <StatCard label="Total Links" value={links.length} />
         <StatCard label="Active Links" value={active} />
         <StatCard label="Total Uses" value={totalUses} />
+        <StatCard label="Pending Reports" value={pendingReportCount} />
       </div>
 
-      <SectionCard title="Payment Links" description="Each link generates a public Stripe Checkout page. Copy the URL to share it.">
+      <SectionCard title="Payment Links" description="Share the URL for any link below. Payers choose from the payment options you've enabled for it.">
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="bg-slate-50 text-left text-slate-700">
@@ -49,6 +66,7 @@ export default async function PaymentLinksPage() {
                 <th className="px-4 py-3">Title</th>
                 <th className="px-4 py-3">Type</th>
                 <th className="px-4 py-3">Amount</th>
+                <th className="px-4 py-3">Payment Options</th>
                 <th className="px-4 py-3">Attribution</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Uses</th>
@@ -59,7 +77,7 @@ export default async function PaymentLinksPage() {
             <tbody>
               {links.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-6 text-center text-slate-600">
+                  <td colSpan={9} className="px-4 py-6 text-center text-slate-600">
                     No payment links yet.{" "}
                     <Link href="/payment-links/new" className="font-semibold text-emerald-700 hover:underline">
                       Create your first one.
@@ -83,6 +101,22 @@ export default async function PaymentLinksPage() {
                     <td className="px-4 py-3 text-slate-900">{formatEnumLabel(link.linkType)}</td>
                     <td className="px-4 py-3 text-slate-900">
                       {link.amount ? formatCurrency(link.amount) : "Flexible"}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-wrap gap-1">
+                        {link.methods.length === 0 ? (
+                          <span className="text-xs text-slate-400">None</span>
+                        ) : (
+                          link.methods.map((m) => (
+                            <span
+                              key={m.paymentMethodConfigId}
+                              className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${categoryBadgeClass[getPaymentMethodCategory(m.paymentMethodConfig.method)]}`}
+                            >
+                              {m.paymentMethodConfig.label}
+                            </span>
+                          ))
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-slate-900">
                       {link.campaign?.name ?? link.event?.title ?? "—"}

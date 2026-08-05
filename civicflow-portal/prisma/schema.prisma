@@ -488,6 +488,7 @@ model Organization {
   memberInvites               MemberInvite[]
   mobileDeviceTokens          MobileDeviceToken[]
   paymentReports              PaymentReport[]
+  paymentLinkOfflineReports   PaymentLinkOfflineReport[]
   rolePermissionSets          OrgRolePermissionSet[]
   smsMessages                 SmsMessage[]
   smsSettings                 OrganizationSmsSettings?
@@ -560,32 +561,33 @@ model User {
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
-  memberships                OrganizationMembership[]
-  savedFilters               SavedFilter[]
-  auditEvents                AuditEvent[]
-  verificationTokens         AccountVerificationToken[]
-  mfaChallengeTokens         MfaChallengeToken[]
-  createdContributions       Contribution[]             @relation("ContributionCreatedBy")
-  createdPaymentLinks        PaymentLink[]              @relation("PaymentLinkCreatedBy")
-  communicationLogs          CommunicationLog[]         @relation("CommunicationCreatedBy")
-  communicationCampaigns     CommunicationCampaign[]    @relation("CommunicationCampaignCreatedBy")
-  attendanceRecords          AttendanceRecord[]         @relation("AttendanceRecordedBy")
-  meetings                   Meeting[]                  @relation("MeetingCreatedBy")
-  createdAttendanceSessions  MeetingAttendanceSession[] @relation("AttendanceSessionCreatedBy")
-  openedAttendanceSessions   MeetingAttendanceSession[] @relation("AttendanceSessionOpenedBy")
-  closedAttendanceSessions   MeetingAttendanceSession[] @relation("AttendanceSessionClosedBy")
-  memberTimelineEvents       MemberTimelineEvent[]      @relation("MemberTimelineCreatedBy")
-  reportExports              ReportExport[]             @relation("ReportExportCreatedBy")
-  reminderLogs               EmailReminderLog[]         @relation("ReminderCreatedBy")
-  uploadedAttachments        Attachment[]               @relation("AttachmentUploadedBy")
-  memberProfiles             OrgMember[]                @relation("OrgMemberLogin")
-  sentMemberInvites          MemberInvite[]             @relation("MemberInviteCreatedBy")
-  mobileDeviceTokens         MobileDeviceToken[]
-  reviewedPaymentReports     PaymentReport[]            @relation("PaymentReportReviewedBy")
-  sentSmsMessages            SmsMessage[]               @relation("SmsMessageSentBy")
-  createdConversations       Conversation[]             @relation("ConversationCreatedBy")
-  conversationParticipations ConversationParticipant[]
-  sentMessages               Message[]                  @relation("MessageSender")
+  memberships                       OrganizationMembership[]
+  savedFilters                      SavedFilter[]
+  auditEvents                       AuditEvent[]
+  verificationTokens                AccountVerificationToken[]
+  mfaChallengeTokens                MfaChallengeToken[]
+  createdContributions              Contribution[]             @relation("ContributionCreatedBy")
+  createdPaymentLinks               PaymentLink[]              @relation("PaymentLinkCreatedBy")
+  communicationLogs                 CommunicationLog[]         @relation("CommunicationCreatedBy")
+  communicationCampaigns            CommunicationCampaign[]    @relation("CommunicationCampaignCreatedBy")
+  attendanceRecords                 AttendanceRecord[]         @relation("AttendanceRecordedBy")
+  meetings                          Meeting[]                  @relation("MeetingCreatedBy")
+  createdAttendanceSessions         MeetingAttendanceSession[] @relation("AttendanceSessionCreatedBy")
+  openedAttendanceSessions          MeetingAttendanceSession[] @relation("AttendanceSessionOpenedBy")
+  closedAttendanceSessions          MeetingAttendanceSession[] @relation("AttendanceSessionClosedBy")
+  memberTimelineEvents              MemberTimelineEvent[]      @relation("MemberTimelineCreatedBy")
+  reportExports                     ReportExport[]             @relation("ReportExportCreatedBy")
+  reminderLogs                      EmailReminderLog[]         @relation("ReminderCreatedBy")
+  uploadedAttachments               Attachment[]               @relation("AttachmentUploadedBy")
+  memberProfiles                    OrgMember[]                @relation("OrgMemberLogin")
+  sentMemberInvites                 MemberInvite[]             @relation("MemberInviteCreatedBy")
+  mobileDeviceTokens                MobileDeviceToken[]
+  reviewedPaymentReports            PaymentReport[]            @relation("PaymentReportReviewedBy")
+  reviewedPaymentLinkOfflineReports PaymentLinkOfflineReport[] @relation("PaymentLinkOfflineReportReviewedBy")
+  sentSmsMessages                   SmsMessage[]               @relation("SmsMessageSentBy")
+  createdConversations              Conversation[]             @relation("ConversationCreatedBy")
+  conversationParticipations        ConversationParticipant[]
+  sentMessages                      Message[]                  @relation("MessageSender")
 
   platformAccess        PlatformAccess[] @relation("PlatformAccessUser")
   platformAccessGranted PlatformAccess[] @relation("PlatformAccessGrantedBy")
@@ -1099,8 +1101,10 @@ model PaymentMethodConfig {
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
 
-  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  expenditures Expenditure[]
+  organization       Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  expenditures       Expenditure[]
+  paymentLinkMethods PaymentLinkMethod[]
+  offlineReports     PaymentLinkOfflineReport[]
 
   @@unique([organizationId, method])
   @@index([organizationId])
@@ -1534,13 +1538,14 @@ model Contribution {
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
 
-  organization       Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  member             OrgMember?            @relation(fields: [memberId], references: [id], onDelete: SetNull)
-  campaign           Campaign?             @relation(fields: [campaignId], references: [id], onDelete: SetNull)
-  event              Event?                @relation(fields: [eventId], references: [id], onDelete: SetNull)
-  createdByUser      User?                 @relation("ContributionCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  organization       Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  member             OrgMember?                 @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  campaign           Campaign?                  @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  event              Event?                     @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  createdByUser      User?                      @relation("ContributionCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   receipts           ContributionReceipt[]
   paymentImportItems PaymentImportItem[]
+  fromOfflineReport  PaymentLinkOfflineReport[]
 
   @@index([organizationId])
   @@index([memberId])
@@ -2235,9 +2240,10 @@ model Attachment {
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
 
-  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  uploadedBy     User?           @relation("AttachmentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
-  paymentReports PaymentReport[]
+  organization              Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  uploadedBy                User?                      @relation("AttachmentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+  paymentReports            PaymentReport[]
+  paymentLinkOfflineReports PaymentLinkOfflineReport[]
 
   @@index([organizationId])
   @@index([organizationId, entityType, entityId])
@@ -2246,7 +2252,10 @@ model Attachment {
   @@index([deletedAt])
 }
 
-/// A shareable payment link that lets non-portal users pay via Stripe Checkout.
+/// A shareable public payment page. What payment methods it offers is
+/// configured via PaymentLinkMethod (see docs/flexible-payment-links.md) --
+/// this model itself only describes the request (title, purpose, amount
+/// rules, attribution, expiration), not how payment is collected.
 model PaymentLink {
   id              String            @id @default(cuid())
   organizationId  String
@@ -2265,16 +2274,73 @@ model PaymentLink {
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
-  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  campaign      Campaign?    @relation(fields: [campaignId], references: [id], onDelete: SetNull)
-  event         Event?       @relation(fields: [eventId], references: [id], onDelete: SetNull)
-  createdByUser User?        @relation("PaymentLinkCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  organization   Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  campaign       Campaign?                  @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  event          Event?                     @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  createdByUser  User?                      @relation("PaymentLinkCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  methods        PaymentLinkMethod[]
+  offlineReports PaymentLinkOfflineReport[]
 
   @@index([organizationId])
   @@index([slug])
   @@index([organizationId, status])
   @@index([campaignId])
   @@index([eventId])
+}
+
+/// Which of an organization's already-configured PaymentMethodConfig rows a
+/// specific PaymentLink offers. Deliberately a live reference, not a
+/// snapshot -- see docs/flexible-payment-links.md's "no snapshotting"
+/// rationale. Category (native/external-redirect/offline-instructions) is
+/// derived from PaymentMethodConfig.method, not stored again here.
+model PaymentLinkMethod {
+  id                    String   @id @default(cuid())
+  paymentLinkId         String
+  paymentMethodConfigId String
+  createdAt             DateTime @default(now())
+
+  paymentLink         PaymentLink         @relation(fields: [paymentLinkId], references: [id], onDelete: Cascade)
+  paymentMethodConfig PaymentMethodConfig @relation(fields: [paymentMethodConfigId], references: [id], onDelete: Cascade)
+
+  @@unique([paymentLinkId, paymentMethodConfigId])
+  @@index([paymentMethodConfigId])
+}
+
+/// A public (non-portal) payer's self-reported offline payment against a
+/// PaymentLink, pending officer review -- the anonymous-payer counterpart to
+/// PaymentReport (which requires a memberId and is member-account-shaped).
+/// Approval creates a Contribution, exactly like the Stripe webhook already
+/// does for the online public-link path; see docs/flexible-payment-links.md.
+model PaymentLinkOfflineReport {
+  id                      String              @id @default(cuid())
+  organizationId          String
+  paymentLinkId           String
+  paymentMethodConfigId   String
+  payerName               String
+  payerEmail              String
+  amount                  Decimal             @db.Decimal(12, 2)
+  referenceNumber         String?
+  message                 String?
+  proofAttachmentId       String?
+  status                  PaymentReportStatus @default(pending)
+  reviewedById            String?
+  reviewedAt              DateTime?
+  rejectionReason         String?
+  resultingContributionId String?
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
+
+  organization          Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  paymentLink           PaymentLink         @relation(fields: [paymentLinkId], references: [id], onDelete: Cascade)
+  paymentMethodConfig   PaymentMethodConfig @relation(fields: [paymentMethodConfigId], references: [id], onDelete: Restrict)
+  reviewedBy            User?               @relation("PaymentLinkOfflineReportReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  proofAttachment       Attachment?         @relation(fields: [proofAttachmentId], references: [id], onDelete: SetNull)
+  resultingContribution Contribution?       @relation(fields: [resultingContributionId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([paymentLinkId])
+  @@index([createdAt])
 }
 
 // ─── Mobile member app ────────────────────────────────────────────────────────
