@@ -1,10 +1,21 @@
+import Link from "next/link";
 import { requirePermission } from "@/lib/auth-guards";
 import { prisma } from "@/lib/prisma";
 import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { ReportsManager } from "@/components/forms/ReportsManager";
-import { buildReport, isReportType } from "@/lib/reports/report-builder";
+import { buildReport, isReportType, MAX_REPORT_ROWS } from "@/lib/reports/report-builder";
 import { formatDate, formatDateTime } from "@/lib/formatting";
 import { getOrganizationEntitlements } from "@/lib/plan-gate";
+import { getVerticalTerminology } from "@/lib/vertical-terminology";
+
+const INACTIVE_STATUSES = ["inactive", "deactivated", "suspended", "pending", "retired"] as const;
+
+const ROSTER_CARDS = [
+  { reportType: "ACTIVE_MEMBER_ROSTER", label: "Active" },
+  { reportType: "DELINQUENT_MEMBER_ROSTER", label: "Delinquent" },
+  { reportType: "INACTIVE_MEMBER_ROSTER", label: "Inactive" },
+  { reportType: "TERMINATED_MEMBER_ROSTER", label: "Terminated" },
+] as const;
 
 function getValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
@@ -33,7 +44,8 @@ export default async function ReportsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { organizationId, can } = await requirePermission("reports:read");
+  const { organizationId, can, session } = await requirePermission("reports:read");
+  const terminology = getVerticalTerminology(session.primaryVertical ?? "COMMUNITY");
   const canExport = can("reports:export");
   const canSend = can("reports:export") && can("communications:write");
   const resolvedSearchParams = await searchParams;
@@ -41,7 +53,7 @@ export default async function ReportsPage({
   const startDate = getValue(resolvedSearchParams.startDate);
   const endDate = getValue(resolvedSearchParams.endDate);
 
-  const [rows, members, categories, campaigns, events, meetings, previewReport, entitlements] = await Promise.all([
+  const [rows, members, categories, campaigns, events, meetings, previewReport, entitlements, activeCount, delinquentCount, inactiveCount, terminatedCount] = await Promise.all([
     prisma.reportExport.findMany({
       where: { organizationId },
       orderBy: [{ createdAt: "desc" }],
@@ -93,7 +105,17 @@ export default async function ReportsPage({
         }))
       : Promise.resolve(null),
     getOrganizationEntitlements(organizationId),
+    prisma.orgMember.count({ where: { organizationId, membershipStatus: "active", isDelinquent: false } }),
+    prisma.orgMember.count({ where: { organizationId, membershipStatus: "active", isDelinquent: true } }),
+    prisma.orgMember.count({ where: { organizationId, membershipStatus: { in: [...INACTIVE_STATUSES] } } }),
+    prisma.orgMember.count({ where: { organizationId, membershipStatus: "terminated" } }),
   ]);
+  const rosterCounts: Record<(typeof ROSTER_CARDS)[number]["reportType"], number> = {
+    ACTIVE_MEMBER_ROSTER: activeCount,
+    DELINQUENT_MEMBER_ROSTER: delinquentCount,
+    INACTIVE_MEMBER_ROSTER: inactiveCount,
+    TERMINATED_MEMBER_ROSTER: terminatedCount,
+  };
   const reportAttachments = rows.length
     ? await prisma.attachment.findMany({
         where: {
@@ -120,6 +142,27 @@ export default async function ReportsPage({
         <StatCard label="Queued / Processing" value={rows.filter((row) => ["QUEUED", "PROCESSING"].includes(row.status)).length} />
         <StatCard label="Completed" value={rows.filter((row) => row.status === "COMPLETED").length} />
       </div>
+
+      <SectionCard title={`${terminology.memberPlural} Rosters`} description={`Ready-made ${terminology.memberPlural.toLowerCase()} lists by status, with print/PDF/CSV export below.`}>
+        <div className="grid gap-4 md:grid-cols-4">
+          {ROSTER_CARDS.map((card) => (
+            <Link
+              key={card.reportType}
+              href={`/reports?reportType=${card.reportType}`}
+              className="block rounded-xl border border-slate-200 bg-white p-4 hover:border-emerald-400 hover:bg-emerald-50"
+            >
+              <p className="text-sm font-medium text-slate-600">
+                {card.label} {terminology.memberPlural}
+              </p>
+              <p className="mt-1 text-2xl font-semibold text-slate-950">{rosterCounts[card.reportType]}</p>
+              {rosterCounts[card.reportType] > MAX_REPORT_ROWS ? (
+                <p className="mt-1 text-xs text-amber-700">Report below shows the first {MAX_REPORT_ROWS.toLocaleString()}.</p>
+              ) : null}
+              <p className="mt-1 text-xs text-emerald-700">View report &rarr;</p>
+            </Link>
+          ))}
+        </div>
+      </SectionCard>
 
       <SectionCard title="Generate, Export, or Send" description="Report output is generated from organization-scoped data and preserves the selected filters.">
         <ReportsManager

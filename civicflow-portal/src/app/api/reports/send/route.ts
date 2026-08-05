@@ -20,6 +20,8 @@ const financialReportTypes = new Set<ReportType>([
   "DELINQUENT_MEMBERS",
   "EXPENDITURES",
   "PAYMENT_RECONCILIATION",
+  // Shows Outstanding Dues per member, same as DELINQUENT_MEMBERS above.
+  "DELINQUENT_MEMBER_ROSTER",
 ]);
 const financialRoles = new Set(["SUPER_ADMIN", "ORG_OWNER", "ORG_ADMIN", "FINANCE"]);
 

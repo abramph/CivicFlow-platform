@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { buildMemberWhere, calculateAge, calculateMemberOutstandingDues, memberExportInclude, parseMemberFilters } from "@/lib/member-filters";
 import { formatCurrency, formatDate, formatDateTime, formatEnumLabel, formatPersonName } from "@/lib/formatting";
+import { getVerticalTerminology } from "@/lib/vertical-terminology";
 
 export const reportTypeOptions = [
   { value: "GENERAL_FINANCIAL", label: "General financial report" },
@@ -22,7 +23,25 @@ export const reportTypeOptions = [
   { value: "PAYMENT_RECONCILIATION", label: "Payment reconciliation" },
   { value: "MEMBER_LOCATION", label: "Member demographic/location reports" },
   { value: "MEMBER_DEMOGRAPHICS", label: "Member demographics" },
+  { value: "ACTIVE_MEMBER_ROSTER", label: "Active member roster" },
+  { value: "DELINQUENT_MEMBER_ROSTER", label: "Delinquent member roster" },
+  { value: "INACTIVE_MEMBER_ROSTER", label: "Inactive member roster" },
+  { value: "TERMINATED_MEMBER_ROSTER", label: "Terminated member roster" },
 ] as const;
+
+/** Which `OrgMember.membershipStatus` values fall under each roster bucket.
+ * "Delinquent" isn't a membershipStatus value -- it's active + isDelinquent.
+ * "Inactive" intentionally groups every status that isn't active, delinquent,
+ * or terminated (see docs/member-lifecycle-termination.md's roster-bucket
+ * table) -- a roster consumer cares about that three-way split more than the
+ * five-way one, which stays visible per-row via the Status column. */
+type RosterReportType = "ACTIVE_MEMBER_ROSTER" | "DELINQUENT_MEMBER_ROSTER" | "INACTIVE_MEMBER_ROSTER" | "TERMINATED_MEMBER_ROSTER";
+const ROSTER_LABELS: Record<RosterReportType, string> = {
+  ACTIVE_MEMBER_ROSTER: "Active",
+  DELINQUENT_MEMBER_ROSTER: "Delinquent",
+  INACTIVE_MEMBER_ROSTER: "Inactive",
+  TERMINATED_MEMBER_ROSTER: "Terminated",
+};
 
 export type ReportType = (typeof reportTypeOptions)[number]["value"];
 export type ReportCell = string | number | boolean | null;
@@ -58,7 +77,7 @@ export type BuildReportInput = {
   limit?: number;
 };
 
-const MAX_REPORT_ROWS = 5000;
+export const MAX_REPORT_ROWS = 5000;
 
 export function isReportType(value: string | null | undefined): value is ReportType {
   return reportTypeOptions.some((option) => option.value === value);
@@ -113,10 +132,10 @@ function baseReport(
   columns: string[],
   rows: ReportRow[],
   summary: ReportSummaryItem[],
-  extra?: { pdfColumns?: string[]; chartData?: ReportChartItem[] }
+  extra?: { pdfColumns?: string[]; chartData?: ReportChartItem[]; title?: string }
 ): ReportData {
   return {
-    title: reportTitle(input.reportType),
+    title: extra?.title ?? reportTitle(input.reportType),
     columns,
     ...(extra?.pdfColumns ? { pdfColumns: extra.pdfColumns } : {}),
     rows,
@@ -320,6 +339,79 @@ export async function buildReport(input: BuildReportInput): Promise<ReportData> 
         // Delinquent Members is a "who owes what" report — the PDF only needs
         // Name + Outstanding Dues; CSV/XLSX keep the full contact/demographic set.
         input.reportType === "DELINQUENT_MEMBERS" ? { pdfColumns: ["Name", "Outstanding Dues"] } : undefined
+      );
+    }
+    case "ACTIVE_MEMBER_ROSTER":
+    case "DELINQUENT_MEMBER_ROSTER":
+    case "INACTIVE_MEMBER_ROSTER":
+    case "TERMINATED_MEMBER_ROSTER": {
+      const rosterType = input.reportType;
+      const organization = await prisma.organization.findUniqueOrThrow({ where: { id: organizationId }, select: { primaryVertical: true } });
+      const terminology = getVerticalTerminology(organization.primaryVertical);
+      const searchParams = new URLSearchParams();
+      for (const [key, value] of Object.entries(input.filters ?? {})) {
+        if (typeof value === "string" && value) searchParams.set(key, value);
+      }
+      // The roster's own status bucket always wins over any caller-supplied
+      // membershipStatus/delinquency filter -- spread after buildMemberWhere()
+      // so e.g. a stray ?membershipStatus=terminated on the Active roster URL
+      // can never leak terminated members under an "Active" title, and a
+      // stray ?delinquency=... can't narrow Inactive/Terminated below what
+      // their own roster count card shows (isDelinquent: undefined clears
+      // whatever buildMemberWhere() may have set, same "assign undefined to
+      // omit this filter" idiom used throughout this codebase's Prisma writes).
+      const where: Prisma.OrgMemberWhereInput = {
+        ...buildMemberWhere(organizationId, parseMemberFilters(searchParams)),
+        ...(rosterType === "ACTIVE_MEMBER_ROSTER" ? { membershipStatus: "active", isDelinquent: false } : {}),
+        ...(rosterType === "DELINQUENT_MEMBER_ROSTER" ? { membershipStatus: "active", isDelinquent: true } : {}),
+        ...(rosterType === "INACTIVE_MEMBER_ROSTER" ? { membershipStatus: { in: ["inactive", "deactivated", "suspended", "pending", "retired"] }, isDelinquent: undefined } : {}),
+        ...(rosterType === "TERMINATED_MEMBER_ROSTER" ? { membershipStatus: "terminated", isDelinquent: undefined } : {}),
+      };
+      const rows = await prisma.orgMember.findMany({ where, include: memberExportInclude, orderBy: [{ lastName: "asc" }, { firstName: "asc" }], take });
+      // Reason/effective-date are only meaningful (and only populated) for
+      // Inactive/Terminated -- statusChangeReason is the member-facing reason
+      // text (never the staff-only internal note, which lives only in
+      // MemberTimelineEvent and is never surfaced in any report).
+      const includeStatusDetail = rosterType === "INACTIVE_MEMBER_ROSTER" || rosterType === "TERMINATED_MEMBER_ROSTER";
+      const columns = [
+        "Name",
+        "Status",
+        ...(includeStatusDetail ? ["Status Reason", "Status Changed"] : []),
+        "Category",
+        "Age",
+        "Gender",
+        "Email",
+        "Phone",
+        "City",
+        "State",
+        "ZIP",
+        "County",
+        "Country",
+        "Join Date",
+        ...(rosterType === "DELINQUENT_MEMBER_ROSTER" ? ["Outstanding Dues"] : []),
+      ];
+      return baseReport(
+        input,
+        columns,
+        rows.map((row) => ({
+          Name: fullName(row),
+          Status: formatEnumLabel(row.membershipStatus),
+          ...(includeStatusDetail ? { "Status Reason": row.statusChangeReason ?? "", "Status Changed": formatDate(row.statusChangedAt) } : {}),
+          Category: row.membershipCategory?.name ?? "",
+          Age: calculateAge(row.dateOfBirth),
+          Gender: row.gender ?? "",
+          Email: row.email ?? "",
+          Phone: row.phone ?? "",
+          City: row.city ?? "",
+          State: row.state ?? "",
+          ZIP: row.zipCode ?? "",
+          County: row.county ?? "",
+          Country: row.country ?? "",
+          "Join Date": formatDate(row.joinDate),
+          ...(rosterType === "DELINQUENT_MEMBER_ROSTER" ? { "Outstanding Dues": money(calculateMemberOutstandingDues(row)) } : {}),
+        })),
+        [{ label: terminology.memberPlural, value: rows.length }],
+        { title: `${ROSTER_LABELS[rosterType]} ${terminology.memberPlural} Roster` }
       );
     }
     case "EXPENDITURES": {
