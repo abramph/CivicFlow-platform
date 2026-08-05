@@ -42,6 +42,12 @@ export const PERMISSIONS = {
   MEMBERS_READ:   "members:read",
   MEMBERS_WRITE:  "members:write",
   MEMBERS_DELETE: "members:delete",
+  // Deliberately separate from MEMBERS_WRITE: terminating a member cascades
+  // into suspending their platform login access in this org (see
+  // docs/member-lifecycle-termination.md), a materially larger blast radius
+  // than an ordinary field edit. Mirrors the write/decide separation used
+  // for HOA Violations and Architectural Requests.
+  MEMBERS_TERMINATE: "members:terminate",
 
   // Dues
   DUES_READ:  "dues:read",
@@ -232,6 +238,7 @@ const ORG_OWNER_PERMISSIONS: Permission[] = [
   PERMISSIONS.MEMBERS_READ,
   PERMISSIONS.MEMBERS_WRITE,
   PERMISSIONS.MEMBERS_DELETE,
+  PERMISSIONS.MEMBERS_TERMINATE,
   PERMISSIONS.DUES_READ,
   PERMISSIONS.DUES_WRITE,
   PERMISSIONS.CONTRIBUTIONS_READ,
@@ -309,6 +316,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   ORG_ADMIN: [
     PERMISSIONS.MEMBERS_READ,
     PERMISSIONS.MEMBERS_WRITE,
+    PERMISSIONS.MEMBERS_TERMINATE,
     PERMISSIONS.DUES_READ,
     PERMISSIONS.DUES_WRITE,
     PERMISSIONS.CONTRIBUTIONS_READ,

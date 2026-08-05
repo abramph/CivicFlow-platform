@@ -32,6 +32,24 @@ describe("rbac: READ_ONLY role", () => {
   });
 });
 
+describe("rbac: members:terminate (member termination workflow)", () => {
+  it("is granted to ORG_OWNER, SUPER_ADMIN, and ORG_ADMIN", () => {
+    expect(canDo("ORG_OWNER", "members:terminate")).toBe(true);
+    expect(canDo("SUPER_ADMIN", "members:terminate")).toBe(true);
+    expect(canDo("ORG_ADMIN", "members:terminate")).toBe(true);
+  });
+
+  it("is NOT granted to STAFF -- narrower than members:write, since termination cascades into access removal", () => {
+    expect(canDo("STAFF", "members:write")).toBe(true);
+    expect(canDo("STAFF", "members:terminate")).toBe(false);
+  });
+
+  it("is NOT granted to FINANCE or READ_ONLY", () => {
+    expect(canDo("FINANCE", "members:terminate")).toBe(false);
+    expect(canDo("READ_ONLY", "members:terminate")).toBe(false);
+  });
+});
+
 describe("rbac: labs:read (Unestra Labs, organization-facing)", () => {
   it("is granted to ORG_OWNER and ORG_ADMIN only — not FINANCE, STAFF, READ_ONLY, or MEMBER", () => {
     expect(canDo("ORG_OWNER", "labs:read")).toBe(true);

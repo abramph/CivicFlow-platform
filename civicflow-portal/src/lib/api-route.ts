@@ -7,6 +7,7 @@ import { LabFeatureError } from "@/lib/labs/access";
 import { MeetingIntelligenceError } from "@/lib/labs/meeting-intelligence/errors";
 import { PtaError } from "@/lib/labs/pta/errors";
 import { HoaError } from "@/lib/hoa/errors";
+import { MemberLifecycleError } from "@/lib/member-lifecycle-errors";
 import { MeetingMinutesError, meetingMinutesErrorResponse } from "@/lib/meeting-minutes";
 
 export async function withApiErrorHandling(
@@ -50,6 +51,9 @@ export async function withApiErrorHandling(
         return Response.json({ ok: false, error: error.message, code: error.code }, { status: error.status });
       }
       if (error instanceof HoaError) {
+        return Response.json({ ok: false, error: error.message, code: error.code }, { status: error.status });
+      }
+      if (error instanceof MemberLifecycleError) {
         return Response.json({ ok: false, error: error.message, code: error.code }, { status: error.status });
       }
       if (error instanceof MeetingMinutesError) {

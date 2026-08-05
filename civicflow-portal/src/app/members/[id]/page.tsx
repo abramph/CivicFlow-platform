@@ -6,6 +6,7 @@ import { DuesGenerateForm } from "@/components/forms/DuesGenerateForm";
 import { EvaluateMemberCategoryButton } from "@/components/forms/MembershipRuleActions";
 import { InviteMemberToAppButton } from "@/components/forms/InviteMemberToAppButton";
 import { AttachmentManager } from "@/components/forms/AttachmentManager";
+import { TerminateMemberButton, ReinstateMemberButton } from "@/components/members/MemberLifecycleActions";
 import { paymentMethodLabels as defaultPaymentMethodLabels } from "@/lib/payment-methods";
 import { prisma } from "@/lib/prisma";
 import {
@@ -222,8 +223,15 @@ export default async function MemberProfilePage({
           <StatCard label="Household" value={formatText(member.householdName, "No household assigned")} />
           <StatCard label="Member Record" value={member.id} helper="Internal Unestra member identifier." />
         </div>
-        <div className="mt-4">
+        <div className="mt-4 flex flex-wrap gap-2">
           <EvaluateMemberCategoryButton memberId={member.id} canWrite={can("members:write")} />
+          {can("members:terminate") ? (
+            member.membershipStatus === "terminated" ? (
+              <ReinstateMemberButton memberId={member.id} memberName={formatPersonName(member)} />
+            ) : (
+              <TerminateMemberButton memberId={member.id} memberName={formatPersonName(member)} />
+            )
+          ) : null}
         </div>
         <div className="mt-4 grid gap-4 md:grid-cols-2">
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">

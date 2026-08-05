@@ -233,19 +233,30 @@ export function MemberEditForm({ member, membershipCategories }: MemberEditFormP
 
         <label className="space-y-2 text-sm font-medium text-slate-900">
           <span>Status</span>
-          <select
-            className={classNames(fieldClassName, fieldErrors.membershipStatus && fieldErrorClassName)}
-            value={form.membershipStatus}
-            onChange={(event) => setFieldValue("membershipStatus", event.target.value as MemberStatus)}
-          >
-            <option value="active">Active</option>
-            <option value="pending">Pending</option>
-            <option value="inactive">Inactive</option>
-            <option value="deactivated">Deactivated</option>
-            <option value="retired">Retired</option>
-            <option value="suspended">Suspended</option>
-            <option value="terminated">Terminated</option>
-          </select>
+          {form.membershipStatus === "terminated" ? (
+            <>
+              <select className={fieldClassName} value="terminated" disabled>
+                <option value="terminated">Terminated</option>
+              </select>
+              <p className={helperTextClassName}>Use the Reinstate action on the member profile page to restore membership.</p>
+            </>
+          ) : (
+            <select
+              className={classNames(fieldClassName, fieldErrors.membershipStatus && fieldErrorClassName)}
+              value={form.membershipStatus}
+              onChange={(event) => setFieldValue("membershipStatus", event.target.value as MemberStatus)}
+            >
+              <option value="active">Active</option>
+              <option value="pending">Pending</option>
+              <option value="inactive">Inactive</option>
+              <option value="deactivated">Deactivated</option>
+              <option value="retired">Retired</option>
+              <option value="suspended">Suspended</option>
+            </select>
+          )}
+          {form.membershipStatus !== "terminated" ? (
+            <p className={helperTextClassName}>Use the Terminate action on the member profile page to terminate membership.</p>
+          ) : null}
         </label>
 
         <label className="space-y-2 text-sm font-medium text-slate-900 md:col-span-2">
@@ -254,8 +265,9 @@ export function MemberEditForm({ member, membershipCategories }: MemberEditFormP
             className={classNames(fieldClassName, fieldErrors.statusChangeReason && fieldErrorClassName)}
             value={form.statusChangeReason}
             onChange={(event) => setFieldValue("statusChangeReason", event.target.value)}
+            disabled={form.membershipStatus === "terminated"}
           />
-          <p className={helperTextClassName}>Required for suspended, deactivated, or terminated status changes.</p>
+          <p className={helperTextClassName}>Required for suspended or deactivated status changes.</p>
         </label>
 
         <label className="space-y-2 text-sm font-medium text-slate-900">
