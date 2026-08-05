@@ -76,6 +76,38 @@ describe("POST /api/pay/[slug]/offline-report", () => {
     expect(createPaymentLinkOfflineReportAndNotify).not.toHaveBeenCalled();
   });
 
+  it("rejects a reported amount below the link's configured minimum", async () => {
+    findUniquePaymentLink.mockResolvedValueOnce({
+      id: "link-1",
+      organizationId: "org-a",
+      status: "active",
+      expiresAt: null,
+      amount: null,
+      minAmount: 100,
+    });
+
+    const response = await POST(buildRequest({ ...validBody, amount: 10 }), params());
+
+    expect(response.status).toBe(400);
+    expect(createPaymentLinkOfflineReportAndNotify).not.toHaveBeenCalled();
+  });
+
+  it("rejects a reported amount below a fixed-amount link's amount when no explicit minAmount is set", async () => {
+    findUniquePaymentLink.mockResolvedValueOnce({
+      id: "link-1",
+      organizationId: "org-a",
+      status: "active",
+      expiresAt: null,
+      amount: 75,
+      minAmount: null,
+    });
+
+    const response = await POST(buildRequest({ ...validBody, amount: 50 }), params());
+
+    expect(response.status).toBe(400);
+    expect(createPaymentLinkOfflineReportAndNotify).not.toHaveBeenCalled();
+  });
+
   it("rejects a paymentMethodConfigId that isn't actually attached to this link", async () => {
     findUniquePaymentLink.mockResolvedValueOnce({ id: "link-1", organizationId: "org-a", status: "active", expiresAt: null });
     findFirstPaymentLinkMethod.mockResolvedValueOnce(null);

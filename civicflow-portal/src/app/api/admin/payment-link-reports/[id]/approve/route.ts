@@ -14,9 +14,11 @@ const bodySchema = z.object({
  * Approves a public payer's self-reported offline payment against a Payment
  * Link, creating a Contribution -- always Contribution, never a DuesPayment,
  * since an anonymous payer has no member/dues context to apply against (see
- * docs/flexible-payment-links.md). Uses a compare-and-swap on status rather
- * than the read-then-plain-update pattern the older PaymentReport routes
- * use, to close the same TOCTOU gap found and fixed elsewhere this session.
+ * docs/flexible-payment-links.md). The compare-and-swap claim happens INSIDE
+ * the same transaction as the Contribution creation (rather than claim-then-
+ * create, or create-then-claim) so a lost race against a concurrent
+ * approve/reject rolls back the Contribution too -- no orphaned financial
+ * record can survive a lost race.
  */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   return withApiErrorHandling(async () => {
@@ -43,41 +45,43 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       throw new ValidationError("This payment report has already been reviewed.");
     }
 
-    const contribution = await prisma.contribution.create({
-      data: {
-        organizationId,
-        amount: report.amount,
-        contributionDate: new Date(),
-        paymentMethod: report.paymentMethodConfig.method,
-        source: "MANUAL",
-        contributorName: report.payerName,
-        notes: [
-          `Approved from a public payment-link report ("${report.paymentLink.title}").`,
-          report.referenceNumber ? `Reference: ${report.referenceNumber}.` : null,
-          note || null,
-        ]
-          .filter(Boolean)
-          .join(" "),
-        createdByUserId: session.userId,
-      },
-    });
+    const contribution = await prisma.$transaction(async (tx) => {
+      const { count } = await tx.paymentLinkOfflineReport.updateMany({
+        where: { id: report.id, organizationId, status: "pending" },
+        data: { status: "approved", reviewedById: session.userId, reviewedAt: new Date() },
+      });
+      if (count === 0) {
+        // Lost a race against a concurrent approve/reject -- rolling back
+        // this transaction means no Contribution is ever created for the loser.
+        throw new ValidationError("This payment report was just reviewed by someone else. Refresh and try again.");
+      }
 
-    const { count } = await prisma.paymentLinkOfflineReport.updateMany({
-      where: { id: report.id, organizationId, status: "pending" },
-      data: {
-        status: "approved",
-        reviewedById: session.userId,
-        reviewedAt: new Date(),
-        resultingContributionId: contribution.id,
-      },
+      const created = await tx.contribution.create({
+        data: {
+          organizationId,
+          amount: report.amount,
+          contributionDate: new Date(),
+          paymentMethod: report.paymentMethodConfig.method,
+          source: "MANUAL",
+          contributorName: report.payerName,
+          notes: [
+            `Approved from a public payment-link report ("${report.paymentLink.title}").`,
+            report.referenceNumber ? `Reference: ${report.referenceNumber}.` : null,
+            note || null,
+          ]
+            .filter(Boolean)
+            .join(" "),
+          createdByUserId: session.userId,
+        },
+      });
+
+      await tx.paymentLinkOfflineReport.update({
+        where: { id: report.id },
+        data: { resultingContributionId: created.id },
+      });
+
+      return created;
     });
-    if (count === 0) {
-      // Lost a race against a concurrent approve/reject -- the Contribution
-      // we just created is orphaned but harmless (a real payment did occur;
-      // it's just not linked back to this report). Surface as a conflict
-      // rather than silently double-processing.
-      throw new ValidationError("This payment report was just reviewed by someone else. Refresh and try again.");
-    }
 
     await createAuditEvent({
       organizationId,

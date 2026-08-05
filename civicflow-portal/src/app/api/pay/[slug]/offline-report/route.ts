@@ -41,6 +41,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
       return Response.json({ ok: false, error: "This payment link has expired" }, { status: 410 });
     }
 
+    const minCents = link.minAmount
+      ? Math.round(Number(link.minAmount) * 100)
+      : link.amount
+        ? Math.round(Number(link.amount) * 100)
+        : 100;
+    if (Math.round(input.amount * 100) < minCents) {
+      throw new ValidationError(`Minimum payment is $${(minCents / 100).toFixed(2)}.`);
+    }
+
     // The selected method must genuinely be one this specific link offers
     // (not just any method the org has ever configured), and must be an
     // "offline instructions" category method -- Stripe/external-redirect

@@ -12,18 +12,30 @@ vi.mock("@/lib/auth-guards", async (importOriginal) => {
 
 const findFirstReport = vi.fn();
 const updateManyReport = vi.fn();
+const updateReport = vi.fn();
 const findUniqueOrThrowReport = vi.fn();
 const createContribution = vi.fn();
+const txClient = {
+  paymentLinkOfflineReport: {
+    updateMany: (...args: unknown[]) => updateManyReport(...args),
+    update: (...args: unknown[]) => updateReport(...args),
+  },
+  contribution: {
+    create: (...args: unknown[]) => createContribution(...args),
+  },
+};
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     paymentLinkOfflineReport: {
       findFirst: (...args: unknown[]) => findFirstReport(...args),
       updateMany: (...args: unknown[]) => updateManyReport(...args),
+      update: (...args: unknown[]) => updateReport(...args),
       findUniqueOrThrow: (...args: unknown[]) => findUniqueOrThrowReport(...args),
     },
     contribution: {
       create: (...args: unknown[]) => createContribution(...args),
     },
+    $transaction: (fn: (tx: typeof txClient) => Promise<unknown>) => fn(txClient),
   },
 }));
 
@@ -62,6 +74,7 @@ describe("POST /api/admin/payment-link-reports/[id]/approve", () => {
     });
     findFirstReport.mockReset();
     updateManyReport.mockReset();
+    updateReport.mockReset().mockResolvedValue(undefined);
     findUniqueOrThrowReport.mockReset();
     createContribution.mockReset();
   });
@@ -103,19 +116,25 @@ describe("POST /api/admin/payment-link-reports/[id]/approve", () => {
     expect(updateManyReport).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: "report-1", organizationId: "org-a", status: "pending" },
-        data: expect.objectContaining({ status: "approved", resultingContributionId: "contribution-1" }),
+        data: expect.objectContaining({ status: "approved" }),
+      })
+    );
+    expect(updateReport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "report-1" },
+        data: { resultingContributionId: "contribution-1" },
       })
     );
   });
 
-  it("surfaces a conflict when a concurrent reviewer already claimed the report (compare-and-swap loses the race)", async () => {
+  it("never creates a Contribution when the compare-and-swap loses a race against a concurrent reviewer (no orphaned financial record)", async () => {
     findFirstReport.mockResolvedValueOnce(pendingReport);
-    createContribution.mockResolvedValueOnce({ id: "contribution-1", amount: 50 });
     updateManyReport.mockResolvedValueOnce({ count: 0 });
 
     const response = await approvePOST(buildRequest({}), params());
 
     expect(response.status).toBe(400);
+    expect(createContribution).not.toHaveBeenCalled();
   });
 });
 
