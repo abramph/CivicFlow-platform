@@ -98,6 +98,52 @@ describe("POST /api/imports/[id]/rows/[rowId]/decide", () => {
     expect(response.status).toBe(200);
     expect(createAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "import_row.decided" }));
   });
+
+  it("SECURITY REGRESSION: rejects IMPORT_NEW on an UPDATE_AVAILABLE row even for a caller who only has imports:review, not imports:resolve-duplicates", async () => {
+    // Previously the route only checked whether the submitted decision VALUE
+    // required imports:resolve-duplicates, never whether that decision was
+    // even legal for the row's actual status. That let an imports:review-only
+    // caller submit IMPORT_NEW on a row that had already matched an existing
+    // member (UPDATE_AVAILABLE), and executeBatch() would then create a
+    // brand-new duplicate OrgMember instead of updating the match — fully
+    // bypassing the higher-authority imports:resolve-duplicates gate.
+    findFirstImportBatch.mockResolvedValueOnce({ id: "batch-1", organizationId: "org-a", status: "READY_FOR_REVIEW" });
+    findFirstImportRow.mockResolvedValueOnce({ id: "row-1", status: "UPDATE_AVAILABLE", rowNumber: 2, matchedRecordId: "member-existing" });
+
+    const response = await decidePOST(
+      jsonRequest("https://portal.test/api/imports/batch-1/rows/row-1/decide", { decision: "IMPORT_NEW" }),
+      { params: Promise.resolve({ id: "batch-1", rowId: "row-1" }) }
+    );
+
+    expect(response.status).toBe(400);
+    expect(updateImportRow).not.toHaveBeenCalled();
+  });
+
+  it("SECURITY REGRESSION: rejects UPDATE_EXISTING on a plain NEW row (no existing match to update)", async () => {
+    findFirstImportBatch.mockResolvedValueOnce({ id: "batch-1", organizationId: "org-a", status: "READY_FOR_REVIEW" });
+    findFirstImportRow.mockResolvedValueOnce({ id: "row-1", status: "NEW", rowNumber: 2, matchedRecordId: null });
+
+    const response = await decidePOST(
+      jsonRequest("https://portal.test/api/imports/batch-1/rows/row-1/decide", { decision: "UPDATE_EXISTING" }),
+      { params: Promise.resolve({ id: "batch-1", rowId: "row-1" }) }
+    );
+
+    expect(response.status).toBe(400);
+    expect(updateImportRow).not.toHaveBeenCalled();
+  });
+
+  it("still allows UPDATE_EXISTING on an UPDATE_AVAILABLE row for a caller with imports:resolve-duplicates", async () => {
+    findFirstImportBatch.mockResolvedValueOnce({ id: "batch-1", organizationId: "org-a", status: "READY_FOR_REVIEW" });
+    findFirstImportRow.mockResolvedValueOnce({ id: "row-1", status: "UPDATE_AVAILABLE", rowNumber: 2, matchedRecordId: "member-existing" });
+    updateImportRow.mockResolvedValueOnce({ id: "row-1", decision: "UPDATE_EXISTING" });
+
+    const response = await decidePOST(
+      jsonRequest("https://portal.test/api/imports/batch-1/rows/row-1/decide", { decision: "UPDATE_EXISTING" }),
+      { params: Promise.resolve({ id: "batch-1", rowId: "row-1" }) }
+    );
+
+    expect(response.status).toBe(200);
+  });
 });
 
 describe("POST /api/imports/[id]/start", () => {
