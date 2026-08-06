@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { getEffectiveTwilioCredentials } from "@/lib/sms-credentials";
 import { verifyTwilioWebhookRequest } from "@/lib/twilio-signature";
+import { findMembersByWhatsAppPhone } from "@/lib/whatsapp/phone-matching";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -106,27 +107,4 @@ export async function POST(request: Request) {
 
 function stripWhatsAppPrefix(value: string | undefined): string {
   return (value ?? "").replace(/^whatsapp:/i, "");
-}
-
-function digitsOnly(value: string): string {
-  return value.replace(/\D/g, "");
-}
-
-/**
- * OrgMember.whatsappPhoneNumber is normalized to E.164 at opt-in time (see
- * lib/phone.ts's normalizeToE164, used throughout whatsapp-service.ts), but
- * matches by digits-only anyway — same defensive approach as the SMS
- * webhook's findMembersByPhone, in case a row was ever set by a path that
- * didn't normalize. Returns organizationId alongside id since a shared/
- * reused phone number can match members across different organizations,
- * and each match needs its own org-scoped audit event.
- */
-async function findMembersByWhatsAppPhone(from: string): Promise<{ id: string; organizationId: string }[]> {
-  const fullDigits = digitsOnly(from);
-  const last10Digits = fullDigits.slice(-10);
-  return prisma.$queryRaw<{ id: string; organizationId: string }[]>`
-    SELECT id, "organizationId" FROM "OrgMember"
-    WHERE "whatsappPhoneNumber" IS NOT NULL
-      AND regexp_replace("whatsappPhoneNumber", '\D', '', 'g') IN (${fullDigits}, ${last10Digits})
-  `;
 }
