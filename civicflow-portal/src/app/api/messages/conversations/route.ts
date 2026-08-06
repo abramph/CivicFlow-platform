@@ -43,6 +43,7 @@ export async function GET() {
         return {
           id: conversation.id,
           subject: conversation.subject,
+          channel: conversation.channel,
           lastMessageAt: conversation.lastMessageAt,
           hasUnread,
           otherParticipants: conversation.participants.map((p) => ({

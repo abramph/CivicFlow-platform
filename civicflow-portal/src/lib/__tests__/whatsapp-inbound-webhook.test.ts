@@ -32,6 +32,11 @@ vi.mock("@/lib/prisma", () => ({
 const createAuditEvent = vi.fn().mockResolvedValue(undefined);
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...args: unknown[]) => createAuditEvent(...args) }));
 
+const bridgeInboundWhatsAppMessage = vi.fn().mockResolvedValue({ conversationId: "conversation-1" });
+vi.mock("@/lib/whatsapp/inbox-bridge", () => ({
+  bridgeInboundWhatsAppMessage: (...args: unknown[]) => bridgeInboundWhatsAppMessage(...args),
+}));
+
 import { POST } from "@/app/api/webhooks/twilio/whatsapp/inbound/route";
 
 const AUTH_TOKEN = "test-auth-token";
@@ -67,6 +72,8 @@ describe("Twilio WhatsApp inbound webhook", () => {
     queryRawOrgMember.mockResolvedValue([{ id: "member-1", organizationId: "org-1" }]);
     findFirstPlatformSmsSettings.mockClear();
     createAuditEvent.mockClear();
+    bridgeInboundWhatsAppMessage.mockClear();
+    bridgeInboundWhatsAppMessage.mockResolvedValue({ conversationId: "conversation-1" });
     process.env.SMS_API_KEY = AUTH_TOKEN;
     process.env.TWILIO_ACCOUNT_SID = "ACtest";
   });
@@ -169,13 +176,37 @@ describe("Twilio WhatsApp inbound webhook", () => {
     expect(updateManyOrgMember).not.toHaveBeenCalled();
   });
 
-  it("acknowledges and drops a non-keyword message without creating any Inbox conversation", async () => {
-    const request = makeRequest({ From: "whatsapp:+15551234567", Body: "Thanks, see you there!" });
+  it("bridges a non-keyword message into the Inbox with the original casing preserved", async () => {
+    const request = makeRequest({
+      From: "whatsapp:+15551234567",
+      Body: "Thanks, see you there!",
+      MessageSid: "SM123",
+    });
     const response = await POST(request);
     expect(response.status).toBe(200);
+    expect(bridgeInboundWhatsAppMessage).toHaveBeenCalledWith({
+      from: "+15551234567",
+      body: "Thanks, see you there!",
+      messageSid: "SM123",
+    });
     expect(queryRawOrgMember).not.toHaveBeenCalled();
     expect(updateManyOrgMember).not.toHaveBeenCalled();
     const text = await response.text();
     expect(text).not.toContain("<Message>");
+  });
+
+  it("still acknowledges when the bridge finds no OPTED_IN member for the sender", async () => {
+    bridgeInboundWhatsAppMessage.mockResolvedValueOnce(null);
+    const request = makeRequest({ From: "whatsapp:+15559999999", Body: "Hello?", MessageSid: "SM999" });
+    const response = await POST(request);
+    expect(response.status).toBe(200);
+    expect(bridgeInboundWhatsAppMessage).toHaveBeenCalled();
+  });
+
+  it("does not bridge an empty body", async () => {
+    const request = makeRequest({ From: "whatsapp:+15551234567", Body: "", MessageSid: "SM000" });
+    const response = await POST(request);
+    expect(response.status).toBe(200);
+    expect(bridgeInboundWhatsAppMessage).not.toHaveBeenCalled();
   });
 });

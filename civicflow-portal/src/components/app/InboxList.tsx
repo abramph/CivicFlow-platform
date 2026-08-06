@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 export type InboxConversation = {
   id: string;
   subject: string | null;
+  channel: string | null;
   lastMessageAt: string | null;
   hasUnread: boolean;
   otherParticipants: { userId: string; displayName: string; role: string }[];
@@ -55,6 +56,11 @@ export function InboxList({ initialConversations }: { initialConversations: Inbo
             >
               <div className="min-w-0">
                 <p className={conversation.hasUnread ? "truncate font-semibold text-slate-950" : "truncate font-medium text-slate-800"}>
+                  {conversation.channel === "WHATSAPP" ? (
+                    <span className="mr-1.5 inline-block rounded bg-emerald-100 px-1.5 py-0.5 align-middle text-[10px] font-semibold uppercase tracking-wide text-emerald-800">
+                      WhatsApp
+                    </span>
+                  ) : null}
                   {names}
                 </p>
                 {conversation.subject ? <p className="truncate text-sm text-slate-600">{conversation.subject}</p> : null}

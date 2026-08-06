@@ -36,6 +36,11 @@ vi.mock("@/lib/messaging", () => ({
   notifyNewMessageParticipants: (...args: unknown[]) => notifyNewMessageParticipants(...args),
 }));
 
+const relayReplyOverWhatsApp = vi.fn().mockResolvedValue({ sent: false, windowOpen: false });
+vi.mock("@/lib/whatsapp/inbox-bridge", () => ({
+  relayReplyOverWhatsApp: (...args: unknown[]) => relayReplyOverWhatsApp(...args),
+}));
+
 import { GET as listGET } from "@/app/api/mobile/messages/conversations/route";
 import { GET as detailGET } from "@/app/api/mobile/messages/conversations/[id]/route";
 import { POST as replyPOST } from "@/app/api/mobile/messages/conversations/[id]/messages/route";
@@ -119,6 +124,8 @@ describe("POST /api/mobile/messages/conversations/[id]/messages", () => {
     findFirstConversation.mockReset();
     createMessage.mockReset();
     notifyNewMessageParticipants.mockClear();
+    relayReplyOverWhatsApp.mockReset();
+    relayReplyOverWhatsApp.mockResolvedValue({ sent: false, windowOpen: false });
   });
 
   it("rejects sending to a conversation the member isn't a participant of", async () => {
@@ -156,5 +163,33 @@ describe("POST /api/mobile/messages/conversations/[id]/messages", () => {
     expect(notifyNewMessageParticipants).toHaveBeenCalledWith(
       expect.objectContaining({ conversationId: "conv-1", senderUserId: "member-user-1" })
     );
+  });
+
+  it("relays a staff reply on the shared mobile app into WhatsApp when the thread is WhatsApp-sourced", async () => {
+    requireMobileOrgAccess.mockResolvedValueOnce({
+      session: { userId: "staff-user-1", email: "staff@example.com" },
+      organizationId: "org-a",
+      memberId: null,
+    });
+    const lastInboundAt = new Date("2026-08-06T09:00:00Z");
+    findFirstConversation.mockResolvedValueOnce({ id: "conv-1", channel: "WHATSAPP", lastInboundAt });
+    createMessage.mockResolvedValueOnce({ id: "msg-1", createdAt: new Date("2026-08-06T11:00:00Z") });
+    relayReplyOverWhatsApp.mockResolvedValueOnce({ sent: true, windowOpen: true });
+
+    const response = await replyPOST(
+      jsonRequest("https://portal.test/api/mobile/messages/conversations/conv-1/messages", { organizationId: "org-a", body: "On my way" }),
+      { params: Promise.resolve({ id: "conv-1" }) }
+    );
+    const payload = await response.json();
+
+    expect(relayReplyOverWhatsApp).toHaveBeenCalledWith({
+      conversationId: "conv-1",
+      organizationId: "org-a",
+      senderUserId: "staff-user-1",
+      body: "On my way",
+      channel: "WHATSAPP",
+      lastInboundAt,
+    });
+    expect(payload.data.whatsappSent).toBe(true);
   });
 });

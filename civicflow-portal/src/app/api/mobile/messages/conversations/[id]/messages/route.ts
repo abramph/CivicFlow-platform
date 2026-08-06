@@ -4,6 +4,7 @@ import { notifyNewMessageParticipants } from "@/lib/messaging";
 import { prisma } from "@/lib/prisma";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { parseJsonBody, z } from "@/lib/validation";
+import { relayReplyOverWhatsApp } from "@/lib/whatsapp/inbox-bridge";
 
 const sendMessageSchema = z.object({
   organizationId: z.string().min(1),
@@ -50,6 +51,21 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       body,
     }).catch(() => null);
 
-    return Response.json({ ok: true, data: { id: message.id, createdAt: message.createdAt } }, { status: 201 });
+    const whatsapp = await relayReplyOverWhatsApp({
+      conversationId: id,
+      organizationId: verifiedOrgId,
+      senderUserId: session.userId,
+      body,
+      channel: conversation.channel,
+      lastInboundAt: conversation.lastInboundAt,
+    }).catch(() => ({ sent: false, windowOpen: false }));
+
+    return Response.json(
+      {
+        ok: true,
+        data: { id: message.id, createdAt: message.createdAt, whatsappSent: whatsapp.sent, whatsappWindowOpen: whatsapp.windowOpen },
+      },
+      { status: 201 }
+    );
   });
 }
