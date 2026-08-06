@@ -55,7 +55,13 @@ export default async function ConversationPage({ params }: { params: Promise<{ i
         actions={[{ href: "/inbox", label: "Back to Inbox" }]}
       />
       <SectionCard title="Messages" description="Direct message thread — updates automatically.">
-        <ConversationThread conversationId={conversation.id} currentUserId={session.userId} initialMessages={initialMessages} />
+        <ConversationThread
+          conversationId={conversation.id}
+          currentUserId={session.userId}
+          initialMessages={initialMessages}
+          channel={conversation.channel}
+          lastInboundAt={conversation.lastInboundAt ? conversation.lastInboundAt.toISOString() : null}
+        />
       </SectionCard>
     </main>
   );

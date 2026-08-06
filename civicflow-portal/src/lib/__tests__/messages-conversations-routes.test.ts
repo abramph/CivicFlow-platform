@@ -51,6 +51,11 @@ vi.mock("@/lib/messaging", () => ({
   notifyNewMessageParticipants: (...args: unknown[]) => notifyNewMessageParticipants(...args),
 }));
 
+const relayReplyOverWhatsApp = vi.fn().mockResolvedValue({ sent: false, windowOpen: false });
+vi.mock("@/lib/whatsapp/inbox-bridge", () => ({
+  relayReplyOverWhatsApp: (...args: unknown[]) => relayReplyOverWhatsApp(...args),
+}));
+
 import { GET as listGET, POST as createPOST } from "@/app/api/messages/conversations/route";
 import { GET as detailGET } from "@/app/api/messages/conversations/[id]/route";
 import { POST as replyPOST } from "@/app/api/messages/conversations/[id]/messages/route";
@@ -179,6 +184,8 @@ describe("POST /api/messages/conversations/[id]/messages", () => {
     findFirstConversation.mockReset();
     createMessage.mockReset();
     notifyNewMessageParticipants.mockClear();
+    relayReplyOverWhatsApp.mockReset();
+    relayReplyOverWhatsApp.mockResolvedValue({ sent: false, windowOpen: false });
   });
 
   it("rejects sending to a conversation the caller isn't a participant of", async () => {
@@ -206,5 +213,45 @@ describe("POST /api/messages/conversations/[id]/messages", () => {
     expect(notifyNewMessageParticipants).toHaveBeenCalledWith(
       expect.objectContaining({ conversationId: "conv-1", body: "Reply body" })
     );
+  });
+
+  it("relays a WhatsApp-sourced conversation's channel and lastInboundAt into relayReplyOverWhatsApp", async () => {
+    const lastInboundAt = new Date("2026-08-06T10:00:00Z");
+    findFirstConversation.mockResolvedValueOnce({ id: "conv-1", channel: "WHATSAPP", lastInboundAt });
+    createMessage.mockResolvedValueOnce({ id: "msg-1", createdAt: new Date("2026-08-06T11:00:00Z") });
+    relayReplyOverWhatsApp.mockResolvedValueOnce({ sent: true, windowOpen: true });
+
+    const response = await replyPOST(
+      jsonRequest("https://portal.test/api/messages/conversations/conv-1/messages", { body: "Reply over WhatsApp" }),
+      { params: Promise.resolve({ id: "conv-1" }) }
+    );
+    const payload = await response.json();
+
+    expect(relayReplyOverWhatsApp).toHaveBeenCalledWith({
+      conversationId: "conv-1",
+      organizationId: "org-a",
+      senderUserId: "officer-1",
+      body: "Reply over WhatsApp",
+      channel: "WHATSAPP",
+      lastInboundAt,
+    });
+    expect(payload.data.whatsappSent).toBe(true);
+    expect(payload.data.whatsappWindowOpen).toBe(true);
+  });
+
+  it("still saves the in-app message and returns 201 even if the WhatsApp relay throws", async () => {
+    findFirstConversation.mockResolvedValueOnce({ id: "conv-1", channel: "WHATSAPP", lastInboundAt: new Date() });
+    createMessage.mockResolvedValueOnce({ id: "msg-1", createdAt: new Date("2026-08-06T11:00:00Z") });
+    relayReplyOverWhatsApp.mockRejectedValueOnce(new Error("Twilio unreachable"));
+
+    const response = await replyPOST(
+      jsonRequest("https://portal.test/api/messages/conversations/conv-1/messages", { body: "Reply body" }),
+      { params: Promise.resolve({ id: "conv-1" }) }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(payload.ok).toBe(true);
+    expect(payload.data.whatsappSent).toBe(false);
   });
 });

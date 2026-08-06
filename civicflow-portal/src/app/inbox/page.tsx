@@ -40,6 +40,7 @@ export default async function InboxPage({
       return {
         id: conversation.id,
         subject: conversation.subject,
+        channel: conversation.channel,
         lastMessageAt: conversation.lastMessageAt ? conversation.lastMessageAt.toISOString() : null,
         hasUnread,
         otherParticipants: conversation.participants.map((p) => ({

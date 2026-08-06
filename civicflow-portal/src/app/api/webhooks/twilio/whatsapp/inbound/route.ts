@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { getEffectiveTwilioCredentials } from "@/lib/sms-credentials";
 import { verifyTwilioWebhookRequest } from "@/lib/twilio-signature";
+import { bridgeInboundWhatsAppMessage } from "@/lib/whatsapp/inbox-bridge";
 import { findMembersByWhatsAppPhone } from "@/lib/whatsapp/phone-matching";
 
 export const runtime = "nodejs";
@@ -35,17 +36,16 @@ function twimlResponse() {
  * OrgMember.whatsapp* fields instead of the SMS ones — WhatsApp opt-in/
  * opt-out is a separate consent from SMS, never inferred from it.
  *
- * PR A scope only: any non-keyword inbound message is acknowledged with
- * empty TwiML and dropped — no Inbox conversation is created here. Routing
- * a real inbound message to the Inbox (Conversation/Message) is PR C's job;
- * building that before the outbound foundation (opt-in, templates, webhook
- * security) is proven would violate the program's "don't build Version 2
- * before Version 1 is stable" rule.
+ * Any other inbound content is bridged into the existing in-app Inbox via
+ * bridgeInboundWhatsAppMessage() (src/lib/whatsapp/inbox-bridge.ts) — see
+ * that module's doc comments for sender resolution and idempotency. A
+ * sender with no OPTED_IN match is still acknowledged and dropped, exactly
+ * as before.
  *
  * Sender resolution matches by whatsappPhoneNumber across all organizations
  * (the same platform-wide-scan shortcut the SMS webhook uses via `phone`) —
  * acceptable while every org shares one platform WhatsApp sender; revisit if
- * PR C introduces per-organization senders, since then `To` should
+ * a future PR introduces per-organization senders, since then `To` should
  * disambiguate the organization instead.
  */
 export async function POST(request: Request) {
@@ -64,7 +64,9 @@ export async function POST(request: Request) {
   }
 
   const from = stripWhatsAppPrefix(paramsObject.From);
-  const body = (paramsObject.Body ?? "").trim().toUpperCase();
+  const rawBody = (paramsObject.Body ?? "").trim();
+  const body = rawBody.toUpperCase();
+  const isKeyword = HELP_KEYWORDS.has(body) || STOP_KEYWORDS.has(body) || START_KEYWORDS.has(body);
 
   if (from && HELP_KEYWORDS.has(body)) {
     return messageTwiml(HELP_MESSAGE);
@@ -100,8 +102,14 @@ export async function POST(request: Request) {
     }
   }
 
-  // Any other inbound content (a real reply, an image, etc.) is acknowledged
-  // and dropped in PR A — no Inbox conversation is created. See doc comment.
+  // Any other content (not a compliance keyword) is bridged into the
+  // existing in-app Inbox — see bridgeInboundWhatsAppMessage()'s doc
+  // comment. No media handling (text-only, per the program's stated V1
+  // scope) and no reply if there's no OPTED_IN member to attribute it to.
+  if (from && rawBody && !isKeyword && paramsObject.MessageSid) {
+    await bridgeInboundWhatsAppMessage({ from, body: rawBody, messageSid: paramsObject.MessageSid });
+  }
+
   return twimlResponse();
 }
 

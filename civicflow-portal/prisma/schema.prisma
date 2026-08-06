@@ -2005,6 +2005,15 @@ model Conversation {
   subject         String?
   createdByUserId String?
   lastMessageAt   DateTime?
+  /// Null = an ordinary in-app conversation. "WHATSAPP" for one bridged from
+  /// an inbound Twilio WhatsApp message (src/app/api/webhooks/twilio/whatsapp/inbound) —
+  /// set once at creation, drives the Inbox badge and whether a reply can
+  /// also go out over WhatsApp.
+  channel         String?
+  /// Updated on every inbound WhatsApp message. The 24-hour customer-service
+  /// window is just lastInboundAt + 24h, computed at read/send time — no
+  /// separate window model or expiry column needed.
+  lastInboundAt   DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -2044,6 +2053,15 @@ model Message {
   organizationId String
   senderUserId   String
   body           String
+  /// Null = an ordinary in-app message. "WHATSAPP" for one bridged from an
+  /// inbound Twilio message — mirrors Conversation.channel.
+  channel        String?
+  /// Twilio's MessageSid for a WhatsApp-sourced message — gives idempotency
+  /// for free: a duplicate webhook delivery inserting the same externalId
+  /// hits the unique constraint, caught and treated as already-processed
+  /// (same dedupe strategy SmsMessage/WhatsAppMessage already use via
+  /// providerMessageId). Null for ordinary in-app messages.
+  externalId     String?  @unique
   createdAt      DateTime @default(now())
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)

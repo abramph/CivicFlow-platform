@@ -36,6 +36,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       data: {
         id: conversation.id,
         subject: conversation.subject,
+        channel: conversation.channel,
+        lastInboundAt: conversation.lastInboundAt,
         participants: conversation.participants.map((p) => ({
           userId: p.userId,
           displayName: p.user.displayName ?? p.user.email,
