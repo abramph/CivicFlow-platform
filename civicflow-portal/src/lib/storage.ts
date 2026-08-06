@@ -87,6 +87,27 @@ export async function verifySpacesBucketAccess(): Promise<void> {
   await s3.send(new HeadBucketCommand({ Bucket: env.DO_SPACES_BUCKET }));
 }
 
+/**
+ * Reads an object's full bytes into memory. Every other caller of this
+ * module only ever needs a signed URL (handed to an external vendor, e.g.
+ * meeting-intelligence's transcription provider) — the Resumable Import
+ * Program's worker is the first caller that needs to parse a stored file's
+ * own content itself, so this is a small, additive primitive alongside the
+ * existing upload/delete/sign functions, not a new storage system.
+ */
+export async function getObjectBuffer(key: string): Promise<Buffer> {
+  const env = getServerEnv();
+  const s3 = createS3Client();
+
+  const result = await s3.send(new GetObjectCommand({ Bucket: env.DO_SPACES_BUCKET, Key: key }));
+  const chunks: Uint8Array[] = [];
+  const body = result.Body as AsyncIterable<Uint8Array>;
+  for await (const chunk of body) {
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
 export async function getSignedObjectUrl(key: string, expiresInSeconds = 600) {
   const env = getServerEnv();
   const s3 = createS3Client();
