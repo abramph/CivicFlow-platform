@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { StatCard } from "@/components/app/PageChrome";
 import { StatusBadge } from "@/components/app/StatusBadge";
@@ -19,6 +19,14 @@ export interface ImportBatchSummary {
   planLimitSnapshot: { allowed: number; used: number; pendingAfterUpgrade: number } | null;
 }
 
+export interface FieldComparison {
+  field: string;
+  label: string;
+  currentValue: string | null;
+  incomingValue: string | null;
+  differs: boolean;
+}
+
 export interface ImportRowSummary {
   id: string;
   rowNumber: number;
@@ -26,12 +34,15 @@ export interface ImportRowSummary {
   status: string;
   decision: string | null;
   errorMessage: string | null;
+  matchedRecord: { id: string; firstName: string; lastName: string; email: string | null } | null;
+  fieldComparison: FieldComparison[] | null;
 }
 
 const POLL_INTERVAL_MS = 5_000;
 const POLL_WHILE_STATUSES = new Set(["ANALYZING", "IMPORTING"]);
 
 const DECIDABLE_STATUSES = new Set(["NEW", "EXACT_DUPLICATE", "POSSIBLE_DUPLICATE", "UPDATE_AVAILABLE"]);
+const MATCHABLE_STATUSES = new Set(["EXACT_DUPLICATE", "POSSIBLE_DUPLICATE", "UPDATE_AVAILABLE"]);
 
 export function ImportBatchDetail({
   batchId,
@@ -55,7 +66,9 @@ export function ImportBatchDetail({
   const [rows, setRows] = useState(initialRows);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [decidingRowId, setDecidingRowId] = useState<string | null>(null);
+  const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
+  const [bulkSkipping, setBulkSkipping] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -123,7 +136,26 @@ export function ImportBatchDetail({
     }
   }
 
+  async function skipExactDuplicates() {
+    setBulkSkipping(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/imports/${batchId}/skip-exact-duplicates`, { method: "POST" });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.ok) {
+        setError(payload?.error || "Could not skip exact duplicates.");
+        return;
+      }
+      setRows((current) => current.map((row) => (row.status === "EXACT_DUPLICATE" ? { ...row, decision: "SKIP" } : row)));
+    } catch {
+      setError("Unable to connect. Please try again.");
+    } finally {
+      setBulkSkipping(false);
+    }
+  }
+
   const filteredRows = statusFilter === "all" ? rows : rows.filter((row) => row.status === statusFilter);
+  const hasExactDuplicates = rows.some((row) => row.status === "EXACT_DUPLICATE" && !row.decision);
 
   return (
     <div className="space-y-6">
@@ -137,6 +169,16 @@ export function ImportBatchDetail({
             className="rounded-lg bg-emerald-700 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-60"
           >
             {starting ? "Starting..." : "Start Import"}
+          </button>
+        ) : null}
+        {batch.status === "READY_FOR_REVIEW" && canReview && hasExactDuplicates ? (
+          <button
+            type="button"
+            disabled={bulkSkipping}
+            onClick={skipExactDuplicates}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-60"
+          >
+            {bulkSkipping ? "Skipping..." : "Skip All Exact Duplicates"}
           </button>
         ) : null}
         {batch.status === "PAUSED_PLAN_LIMIT" && canResume ? (
@@ -169,7 +211,8 @@ export function ImportBatchDetail({
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard label="Total rows" value={batch.totalRows} />
         <StatCard label="New" value={batch.newCount} />
-        <StatCard label="Needs review" value={batch.updateCount + batch.duplicateCount} />
+        <StatCard label="Update available" value={batch.updateCount} />
+        <StatCard label="Duplicates" value={batch.duplicateCount} />
         <StatCard label="Invalid" value={batch.invalidCount} />
         <StatCard label="Imported" value={batch.importedCount} />
         <StatCard label="Skipped" value={batch.skippedCount} />
@@ -213,48 +256,96 @@ export function ImportBatchDetail({
               </tr>
             </thead>
             <tbody>
-              {filteredRows.map((row) => (
-                <tr key={row.id} className="border-t border-slate-100">
-                  <td className="px-2 py-2 text-slate-600">{row.rowNumber}</td>
-                  <td className="px-2 py-2 text-slate-900">
-                    {row.normalizedData.firstName} {row.normalizedData.lastName}
-                  </td>
-                  <td className="px-2 py-2 text-slate-700">{row.normalizedData.email ?? "—"}</td>
-                  <td className="px-2 py-2">
-                    <StatusBadge label={row.status.replaceAll("_", " ")} tone={row.status === "INVALID" || row.status === "FAILED" ? "critical" : "neutral"} />
-                    {row.errorMessage ? <p className="mt-1 text-xs text-slate-500">{row.errorMessage}</p> : null}
-                  </td>
-                  <td className="px-2 py-2 text-slate-700">{row.decision ? row.decision.replaceAll("_", " ") : "—"}</td>
-                  {batch.status === "READY_FOR_REVIEW" && DECIDABLE_STATUSES.has(row.status) ? (
-                    <td className="px-2 py-2">
-                      <div className="flex flex-wrap gap-1">
-                        {canReview && row.status === "NEW" ? (
-                          <button type="button" disabled={decidingRowId === row.id} onClick={() => decide(row.id, "IMPORT_NEW")} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-800 hover:bg-slate-50">
-                            Import
+              {filteredRows.map((row) => {
+                const isExpanded = expandedRowId === row.id;
+                const hasMatch = MATCHABLE_STATUSES.has(row.status) && row.matchedRecord && row.fieldComparison;
+                return (
+                  <Fragment key={row.id}>
+                    <tr className="border-t border-slate-100">
+                      <td className="px-2 py-2 text-slate-600">{row.rowNumber}</td>
+                      <td className="px-2 py-2 text-slate-900">
+                        {row.normalizedData.firstName} {row.normalizedData.lastName}
+                      </td>
+                      <td className="px-2 py-2 text-slate-700">{row.normalizedData.email ?? "—"}</td>
+                      <td className="px-2 py-2">
+                        <StatusBadge label={row.status.replaceAll("_", " ")} tone={row.status === "INVALID" || row.status === "FAILED" ? "critical" : "neutral"} />
+                        {row.errorMessage ? <p className="mt-1 text-xs text-slate-500">{row.errorMessage}</p> : null}
+                        {hasMatch ? (
+                          <button
+                            type="button"
+                            onClick={() => setExpandedRowId(isExpanded ? null : row.id)}
+                            className="mt-1 block text-xs font-semibold text-emerald-700 hover:underline"
+                          >
+                            {isExpanded ? "Hide comparison" : "Compare with existing record"}
                           </button>
                         ) : null}
-                        {canReview ? (
-                          <button type="button" disabled={decidingRowId === row.id} onClick={() => decide(row.id, "SKIP")} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-800 hover:bg-slate-50">
-                            Skip
-                          </button>
-                        ) : null}
-                        {canResolveDuplicates && row.status === "UPDATE_AVAILABLE" ? (
-                          <button type="button" disabled={decidingRowId === row.id} onClick={() => decide(row.id, "UPDATE_EXISTING")} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-800 hover:bg-slate-50">
-                            Update existing
-                          </button>
-                        ) : null}
-                        {canResolveDuplicates && row.status !== "NEW" ? (
-                          <button type="button" disabled={decidingRowId === row.id} onClick={() => decide(row.id, "CREATE_ANYWAY")} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-800 hover:bg-slate-50">
-                            Create new anyway
-                          </button>
-                        ) : null}
-                      </div>
-                    </td>
-                  ) : batch.status === "READY_FOR_REVIEW" ? (
-                    <td className="px-2 py-2" />
-                  ) : null}
-                </tr>
-              ))}
+                      </td>
+                      <td className="px-2 py-2 text-slate-700">{row.decision ? row.decision.replaceAll("_", " ") : "—"}</td>
+                      {batch.status === "READY_FOR_REVIEW" && DECIDABLE_STATUSES.has(row.status) ? (
+                        <td className="px-2 py-2">
+                          <div className="flex flex-wrap gap-1">
+                            {canReview && row.status === "NEW" ? (
+                              <button type="button" disabled={decidingRowId === row.id} onClick={() => decide(row.id, "IMPORT_NEW")} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-800 hover:bg-slate-50">
+                                Import
+                              </button>
+                            ) : null}
+                            {canReview ? (
+                              <button type="button" disabled={decidingRowId === row.id} onClick={() => decide(row.id, "SKIP")} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-800 hover:bg-slate-50">
+                                Skip
+                              </button>
+                            ) : null}
+                            {canResolveDuplicates && (row.status === "UPDATE_AVAILABLE" || row.status === "POSSIBLE_DUPLICATE") ? (
+                              <button type="button" disabled={decidingRowId === row.id} onClick={() => decide(row.id, "UPDATE_EXISTING")} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-800 hover:bg-slate-50">
+                                Update existing
+                              </button>
+                            ) : null}
+                            {canResolveDuplicates && row.status !== "NEW" ? (
+                              <button type="button" disabled={decidingRowId === row.id} onClick={() => decide(row.id, "CREATE_ANYWAY")} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-800 hover:bg-slate-50">
+                                Create new anyway
+                              </button>
+                            ) : null}
+                          </div>
+                        </td>
+                      ) : batch.status === "READY_FOR_REVIEW" ? (
+                        <td className="px-2 py-2" />
+                      ) : null}
+                    </tr>
+                    {isExpanded && hasMatch ? (
+                      <tr className="border-t border-slate-100 bg-slate-50">
+                        <td colSpan={6} className="px-4 py-3">
+                          <p className="mb-2 text-xs font-semibold text-slate-600">
+                            Matched existing record: {row.matchedRecord!.firstName} {row.matchedRecord!.lastName}
+                            {row.matchedRecord!.email ? ` (${row.matchedRecord!.email})` : ""}
+                          </p>
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="text-left text-slate-500">
+                                <th className="py-1 pr-3">Field</th>
+                                <th className="py-1 pr-3">Current value</th>
+                                <th className="py-1 pr-3">Imported value</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {row.fieldComparison!.map((field) => (
+                                <tr key={field.field} className={field.differs ? "bg-amber-50" : undefined}>
+                                  <td className="py-1 pr-3 font-medium text-slate-700">{field.label}</td>
+                                  <td className="py-1 pr-3 text-slate-600">{field.currentValue ?? "—"}</td>
+                                  <td className={field.differs ? "py-1 pr-3 font-semibold text-amber-800" : "py-1 pr-3 text-slate-400"}>
+                                    {field.incomingValue ?? (field.differs ? "" : "(unchanged)")}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                          <p className="mt-2 text-xs text-slate-500">
+                            Blank imported values never overwrite existing data — only highlighted fields would change if you choose &quot;Update existing.&quot;
+                          </p>
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
+                );
+              })}
             </tbody>
           </table>
           {filteredRows.length === 0 ? <p className="py-4 text-sm text-slate-600">No rows match this filter.</p> : null}

@@ -5,6 +5,7 @@ import { transitionImportBatch } from "@/lib/imports/batch-state-machine";
 import { getImportSourceFile } from "@/lib/imports/storage";
 import { computeRowFingerprint, normalizeMemberRow, type NormalizedMemberRow } from "@/lib/imports/row-normalization";
 import { buildPlanLimitSnapshot, checkImportCapacity, importKindConsumesCapacity } from "@/lib/imports/capacity";
+import { matchCommunityMemberRow } from "@/lib/imports/duplicate-matching";
 import { ImportError } from "@/lib/imports/errors";
 
 /**
@@ -86,6 +87,7 @@ export async function analyzeBatch(batchId: string, organizationId: string): Pro
 
   let newCount = 0;
   let updateCount = 0;
+  let duplicateCount = 0;
   let invalidCount = 0;
 
   for (let i = 0; i < rows.length; i++) {
@@ -94,8 +96,9 @@ export async function analyzeBatch(batchId: string, organizationId: string): Pro
     const normalized = normalizeMemberRow(raw, mapping);
     const fingerprint = computeRowFingerprint(normalized);
 
-    let status: "NEW" | "UPDATE_AVAILABLE" | "INVALID";
+    let status: "NEW" | "EXACT_DUPLICATE" | "POSSIBLE_DUPLICATE" | "UPDATE_AVAILABLE" | "INVALID";
     let matchedRecordId: string | null = null;
+    let matchConfidence: number | null = null;
     let errorMessage: string | null = null;
 
     if (!normalized.firstName && !normalized.lastName) {
@@ -107,17 +110,13 @@ export async function analyzeBatch(batchId: string, organizationId: string): Pro
       errorMessage = normalized.emailError;
       invalidCount += 1;
     } else {
-      const existing = normalized.email
-        ? await prisma.orgMember.findFirst({ where: { organizationId, email: normalized.email }, select: { id: true } })
-        : null;
-      if (existing) {
-        status = "UPDATE_AVAILABLE";
-        matchedRecordId = existing.id;
-        updateCount += 1;
-      } else {
-        status = "NEW";
-        newCount += 1;
-      }
+      const match = await matchCommunityMemberRow(organizationId, normalized);
+      status = match.status;
+      matchedRecordId = match.matchedRecordId;
+      matchConfidence = match.matchConfidence;
+      if (status === "NEW") newCount += 1;
+      else if (status === "UPDATE_AVAILABLE") updateCount += 1;
+      else duplicateCount += 1; // EXACT_DUPLICATE or POSSIBLE_DUPLICATE
     }
 
     try {
@@ -131,6 +130,7 @@ export async function analyzeBatch(batchId: string, organizationId: string): Pro
           fingerprint,
           status,
           matchedRecordId,
+          matchConfidence,
           errorMessage,
         },
       });
@@ -146,7 +146,7 @@ export async function analyzeBatch(batchId: string, organizationId: string): Pro
     batchId,
     organizationId,
     to: "READY_FOR_REVIEW",
-    extraData: { totalRows: rows.length, newCount, updateCount, invalidCount, claimedAt: null },
+    extraData: { totalRows: rows.length, newCount, updateCount, duplicateCount, invalidCount, claimedAt: null },
   });
 }
 
@@ -185,17 +185,34 @@ export async function applyDefaultDecisions(batchId: string): Promise<void> {
   });
 }
 
+/**
+ * Only includes a field in the update payload when the incoming value is
+ * non-blank — a blank cell in the uploaded file means "no opinion," never
+ * "clear this field." Previously this built a fixed object unconditionally,
+ * so an update row with (say) a blank phone column would overwrite an
+ * existing member's real phone number with null. This is also what makes
+ * the EXACT_DUPLICATE/UPDATE_AVAILABLE distinction in duplicate-matching.ts
+ * correct: a field only ever counts as "differing" (and only ever gets
+ * written here) when the incoming value is both present and actually
+ * different from the current one. Deliberately does not touch
+ * membershipStatus, statusChanged (at/by/reason), isDelinquent,
+ * delinquentSince, lastDuesEvaluationAt, membershipCategoryId, notes, or
+ * userId — none of those
+ * are mapped import fields, and none of this program's rows can ever
+ * populate them, so those stay under the existing member-lifecycle
+ * workflows exclusively.
+ */
 function memberUpdateData(normalized: NormalizedMemberRow): Prisma.OrgMemberUpdateInput {
-  return {
-    firstName: normalized.firstName || "Unknown",
-    lastName: normalized.lastName || "Unknown",
-    phone: normalized.phone,
-    addressLine1: normalized.addressLine1,
-    city: normalized.city,
-    state: normalized.state,
-    zipCode: normalized.zipCode,
-    joinDate: normalized.joinDate,
-  };
+  const data: Prisma.OrgMemberUpdateInput = {};
+  if (normalized.firstName) data.firstName = normalized.firstName;
+  if (normalized.lastName) data.lastName = normalized.lastName;
+  if (normalized.phone) data.phone = normalized.phone;
+  if (normalized.addressLine1) data.addressLine1 = normalized.addressLine1;
+  if (normalized.city) data.city = normalized.city;
+  if (normalized.state) data.state = normalized.state;
+  if (normalized.zipCode) data.zipCode = normalized.zipCode;
+  if (normalized.joinDate) data.joinDate = normalized.joinDate;
+  return data;
 }
 
 function memberCreateData(normalized: NormalizedMemberRow, organizationId: string): Prisma.OrgMemberCreateInput {

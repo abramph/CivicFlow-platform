@@ -2,6 +2,7 @@ import { requirePermission } from "@/lib/auth-guards";
 import { prisma } from "@/lib/prisma";
 import { PageHeader, SectionCard } from "@/components/app/PageChrome";
 import { ImportBatchDetail } from "@/components/import/ImportBatchDetail";
+import { attachFieldComparisons } from "@/lib/imports/duplicate-matching";
 
 export default async function ImportBatchPage({ params }: { params: Promise<{ id: string }> }) {
   const { organizationId, can } = await requirePermission("imports:read");
@@ -22,6 +23,7 @@ export default async function ImportBatchPage({ params }: { params: Promise<{ id
     orderBy: { rowNumber: "asc" },
     take: 200,
   });
+  const rowsWithComparison = await attachFieldComparisons(rows, organizationId);
 
   return (
     <main className="space-y-6">
@@ -46,13 +48,17 @@ export default async function ImportBatchPage({ params }: { params: Promise<{ id
             blockedPlanLimitCount: batch.blockedPlanLimitCount,
             planLimitSnapshot: batch.planLimitSnapshot as { allowed: number; used: number; pendingAfterUpgrade: number } | null,
           }}
-          initialRows={rows.map((row) => ({
+          initialRows={rowsWithComparison.map((row) => ({
             id: row.id,
             rowNumber: row.rowNumber,
             normalizedData: row.normalizedData as { firstName: string; lastName: string; email: string | null },
             status: row.status,
             decision: row.decision,
             errorMessage: row.errorMessage,
+            matchedRecord: row.matchedRecord
+              ? { id: row.matchedRecord.id, firstName: row.matchedRecord.firstName, lastName: row.matchedRecord.lastName, email: row.matchedRecord.email }
+              : null,
+            fieldComparison: row.fieldComparison,
           }))}
           canResume={can("imports:resume")}
           canCancel={can("imports:cancel")}
