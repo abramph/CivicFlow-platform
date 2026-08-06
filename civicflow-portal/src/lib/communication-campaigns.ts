@@ -9,6 +9,9 @@ import { sendPushToTokens } from "@/lib/push";
 import { applySmsTemplateTokens, sendMemberSms } from "@/lib/sms-service";
 import { getSignedObjectUrl } from "@/lib/storage";
 import { getMobileAppWebBaseUrl } from "@/lib/env";
+import { WhatsAppChannel } from "@/lib/communications/channel";
+import { getWhatsAppEntitlement } from "@/lib/whatsapp/entitlement";
+import { isWithinQuietHours } from "@/lib/whatsapp/quiet-hours";
 
 type RecipientFilter = {
   selector?: string;
@@ -28,6 +31,19 @@ function emailEnabled(channel: CommunicationCampaignChannel) {
 
 function smsEnabled(channel: CommunicationCampaignChannel) {
   return channel === "SMS" || channel === "EMAIL_AND_SMS";
+}
+
+/**
+ * whatsappEnabled is an orthogonal additive flag on CommunicationCampaign
+ * (mirrors pushEnabled), not a value of the `channel` enum — so, exactly
+ * like push, it never affects resolveCommunicationRecipients()'s selection:
+ * a WhatsApp-only member (no email/phone) is only reachable when `channel`
+ * itself resolves them (e.g. INTERNAL_LOG_ONLY, which selects everyone).
+ * Fixing that is the same pre-existing limitation push already has; not a
+ * new WhatsApp-specific gap to solve here.
+ */
+function whatsappEnabled(campaign: Pick<CommunicationCampaign, "whatsappEnabled">) {
+  return campaign.whatsappEnabled;
 }
 
 export async function resolveCommunicationRecipients(organizationId: string, filter: RecipientFilter, channel: CommunicationCampaignChannel) {
@@ -99,6 +115,7 @@ async function processRecipient(
     smsBody: string;
     isMultiChannel: boolean;
     tokensByUserId: Map<string, string[]>;
+    whatsappQuietHours: { timezone: string; startHour: number; endHour: number } | null;
   }
 ): Promise<"SENT" | "SKIPPED" | "FAILED"> {
   try {
@@ -170,15 +187,50 @@ async function processRecipient(
       }
     }
 
+    // WhatsApp is additive on top of the primary channel, exactly like push
+    // above — never affects which recipients were resolved in the first
+    // place. `null` (not "SKIPPED") means "left PENDING, try again on a
+    // later batch" — used for the quiet-hours case, since
+    // sendCommunicationCampaign() is always safe to re-call and only ever
+    // picks up still-PENDING rows; the cron worker (/api/cron/campaigns)
+    // resumes it automatically once outside quiet hours.
+    let whatsappDeliveryStatus: "SENT" | "SKIPPED" | "FAILED" | null = null;
+    let whatsappError: string | null = null;
+    let whatsappStillPending = false;
+    if (ctx.campaign.whatsappEnabled && recipient.member?.whatsappPhoneNumber) {
+      const quietHours = ctx.whatsappQuietHours;
+      if (quietHours && isWithinQuietHours(new Date(), quietHours.timezone, quietHours.startHour, quietHours.endHour)) {
+        whatsappStillPending = true;
+      } else {
+        const result = await WhatsAppChannel.send({
+          organizationId: ctx.organizationId,
+          memberId: recipient.memberId,
+          phone: recipient.member.whatsappPhoneNumber,
+          templateKey: ctx.campaign.whatsappTemplateKey ?? undefined,
+          templateVariables: (ctx.campaign.whatsappTemplateVariables as Record<string, string> | null) ?? undefined,
+          campaignId: ctx.campaign.id,
+          sentById: ctx.actorUserId ?? null,
+        });
+        whatsappDeliveryStatus = result.status;
+        if (result.status === "FAILED") whatsappError = result.errorMessage ?? "Delivery failed";
+      }
+    }
+
     await prisma.communicationRecipient.update({
       where: { id: recipient.id },
       data: {
-        deliveryStatus,
+        // A WhatsApp send still pending (quiet hours) must not flip the
+        // overall row to a terminal deliveryStatus either — otherwise this
+        // recipient would never be picked up by a later PENDING-only batch.
+        deliveryStatus: whatsappStillPending ? "PENDING" : deliveryStatus,
         errorMessage,
         sentAt: deliveryStatus === "SENT" ? new Date() : null,
         pushDeliveryStatus: pushDeliveryStatus ?? undefined,
         pushError,
         pushSentAt: pushDeliveryStatus === "SENT" ? new Date() : null,
+        whatsappDeliveryStatus: whatsappStillPending ? undefined : (whatsappDeliveryStatus ?? undefined),
+        whatsappError,
+        whatsappSentAt: whatsappDeliveryStatus === "SENT" ? new Date() : null,
       },
     });
 
@@ -207,6 +259,26 @@ async function processRecipient(
           subject: ctx.campaign.title,
           message: ctx.campaign.body,
           outcome: pushDeliveryStatus === "SENT" ? "Sent" : pushError,
+          communicationDate: new Date(),
+        },
+      });
+    }
+
+    if (whatsappDeliveryStatus) {
+      await prisma.communicationLog.create({
+        data: {
+          organizationId: ctx.organizationId,
+          memberId: recipient.memberId,
+          createdByUserId: ctx.actorUserId ?? null,
+          communicationType: "WHATSAPP",
+          direction: "OUTBOUND",
+          subject: ctx.campaign.title,
+          // Template key, not rendered body text — WhatsApp/Meta render the
+          // actual message from the approved template server-side, so we
+          // never hold a literal copy of what was sent (same reasoning as
+          // WhatsAppMessage.body's nullability in PR A).
+          message: ctx.campaign.whatsappTemplateKey,
+          outcome: whatsappDeliveryStatus === "SENT" ? "Sent" : whatsappError,
           communicationDate: new Date(),
         },
       });
@@ -317,6 +389,26 @@ export async function sendCommunicationCampaign(input: {
     }
   }
 
+  // Same re-check-on-every-call reasoning as the email block above — a
+  // campaign created while entitled but sent (by a resumed batch, or a
+  // later cron tick) after the add-on lapses must not slip through.
+  if (whatsappEnabled(campaign)) {
+    const entitlement = await getWhatsAppEntitlement(input.organizationId);
+    if (!entitlement.allowed) {
+      await prisma.communicationCampaign.update({ where: { id: campaign.id }, data: { status: "FAILED" } });
+      await createAuditEvent({
+        organizationId: input.organizationId,
+        actorUserId: input.actorUserId,
+        actorEmail: input.actorEmail,
+        action: "communication_campaign.blocked",
+        entityType: "communication_campaign",
+        entityId: campaign.id,
+        metadata: { reason: "whatsapp_entitlement_required" },
+      });
+      throw new Error(entitlement.reason ?? "WhatsApp is not enabled for this organization.");
+    }
+  }
+
   const pendingRecipients = await prisma.communicationRecipient.findMany({
     where: { campaignId: campaign.id, deliveryStatus: "PENDING" },
     include: { member: true },
@@ -342,6 +434,24 @@ export async function sendCommunicationCampaign(input: {
     organizationName: organization?.name ?? "your organization",
     link: smsLink,
   });
+
+  let whatsappQuietHours: { timezone: string; startHour: number; endHour: number } | null = null;
+  if (whatsappEnabled(campaign)) {
+    const [whatsappSettings, orgSettings] = await Promise.all([
+      prisma.organizationWhatsAppSettings.findUnique({
+        where: { organizationId: input.organizationId },
+        select: { quietHoursStartHour: true, quietHoursEndHour: true },
+      }),
+      prisma.orgSettings.findUnique({ where: { organizationId: input.organizationId }, select: { timezone: true } }),
+    ]);
+    if (whatsappSettings) {
+      whatsappQuietHours = {
+        timezone: orgSettings?.timezone ?? "America/New_York",
+        startHour: whatsappSettings.quietHoursStartHour,
+        endHour: whatsappSettings.quietHoursEndHour,
+      };
+    }
+  }
 
   const uploadedAttachments = await prisma.attachment.findMany({
     where: {
@@ -395,6 +505,7 @@ export async function sendCommunicationCampaign(input: {
           smsBody,
           isMultiChannel,
           tokensByUserId,
+          whatsappQuietHours,
         })
       )
     );

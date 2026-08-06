@@ -5,6 +5,7 @@ import { CommunicationLogForm } from "@/components/forms/CommunicationLogForm";
 import { CommunicationCampaignForm } from "@/components/forms/CommunicationCampaignForm";
 import { getSmsEntitlement } from "@/lib/sms-entitlement";
 import { getOrganizationEntitlements } from "@/lib/plan-gate";
+import { getWhatsAppEntitlement } from "@/lib/whatsapp/entitlement";
 
 function getValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
@@ -19,7 +20,7 @@ export default async function NewCommunicationPage({
   const resolvedSearchParams = await searchParams;
   const isDuesReminderPreset = getValue(resolvedSearchParams.preset) === "dues_reminder";
 
-  const [members, campaigns, events, categories, smsEntitlement, entitlements] = await Promise.all([
+  const [members, campaigns, events, categories, smsEntitlement, entitlements, whatsappEntitlement, whatsappTemplates] = await Promise.all([
     prisma.orgMember.findMany({
       where: { organizationId },
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
@@ -45,6 +46,12 @@ export default async function NewCommunicationPage({
     }),
     getSmsEntitlement(organizationId),
     getOrganizationEntitlements(organizationId),
+    getWhatsAppEntitlement(organizationId),
+    prisma.whatsAppTemplate.findMany({
+      where: { active: true, approvalStatus: "APPROVED" },
+      orderBy: { key: "asc" },
+      select: { key: true, category: true, variablesSchema: true },
+    }),
   ]);
 
   return (
@@ -63,6 +70,14 @@ export default async function NewCommunicationPage({
           categories={categories.map((category) => ({ id: category.id, label: category.name }))}
           smsEnabled={smsEntitlement.allowed}
           emailCampaignsEnabled={entitlements.features.emailCampaigns}
+          whatsappEnabled={whatsappEntitlement.allowed}
+          whatsappTemplates={whatsappTemplates.map((template) => ({
+            key: template.key,
+            category: template.category,
+            variables: Array.isArray(template.variablesSchema)
+              ? (template.variablesSchema as Array<{ name: string; required: boolean; maxLength?: number }>)
+              : [],
+          }))}
           initial={
             isDuesReminderPreset
               ? {

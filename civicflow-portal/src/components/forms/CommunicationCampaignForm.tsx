@@ -6,11 +6,16 @@ import { fieldClassName } from "@/components/forms/formStyles";
 
 type Option = { id: string; label: string };
 
+type WhatsAppTemplateVariable = { name: string; required: boolean; maxLength?: number };
+type WhatsAppTemplateOption = { key: string; category: string; variables: WhatsAppTemplateVariable[] };
+
 export function CommunicationCampaignForm({
   categories,
   initial,
   smsEnabled,
   emailCampaignsEnabled,
+  whatsappEnabled,
+  whatsappTemplates,
 }: {
   categories: Option[];
   initial?: Partial<{
@@ -23,6 +28,8 @@ export function CommunicationCampaignForm({
   }>;
   smsEnabled: boolean;
   emailCampaignsEnabled: boolean;
+  whatsappEnabled: boolean;
+  whatsappTemplates: WhatsAppTemplateOption[];
 }) {
   const router = useRouter();
   const [form, setForm] = useState({
@@ -42,9 +49,14 @@ export function CommunicationCampaignForm({
     deepLink: initial?.deepLink ?? "",
     scheduledFor: "",
     sendNow: false,
+    whatsappEnabled: false,
+    whatsappTemplateKey: "",
+    whatsappTemplateVariables: {} as Record<string, string>,
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const selectedTemplate = whatsappTemplates.find((template) => template.key === form.whatsappTemplateKey) ?? null;
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -72,6 +84,9 @@ export function CommunicationCampaignForm({
         deepLink: form.deepLink || null,
         scheduledFor: form.sendNow || !form.scheduledFor ? null : new Date(form.scheduledFor).toISOString(),
         sendNow: form.sendNow,
+        whatsappEnabled: form.whatsappEnabled,
+        whatsappTemplateKey: form.whatsappEnabled ? form.whatsappTemplateKey || undefined : undefined,
+        whatsappTemplateVariables: form.whatsappEnabled ? form.whatsappTemplateVariables : undefined,
       }),
     });
     const payload = await response.json().catch(() => null) as { ok?: boolean; error?: string; data?: { id: string } } | null;
@@ -146,6 +161,64 @@ export function CommunicationCampaignForm({
           <span>Schedule for later (optional)</span>
           <input type="datetime-local" className={fieldClassName} value={form.scheduledFor} disabled={form.sendNow} onChange={(event) => setForm((current) => ({ ...current, scheduledFor: event.target.value }))} />
         </label>
+      </div>
+
+      <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <label className="flex items-center gap-3 text-sm font-medium text-slate-900">
+          <input
+            type="checkbox"
+            checked={form.whatsappEnabled}
+            disabled={!whatsappEnabled}
+            onChange={(event) => setForm((current) => ({ ...current, whatsappEnabled: event.target.checked, whatsappTemplateKey: "", whatsappTemplateVariables: {} }))}
+          />
+          Also send as WhatsApp message{!whatsappEnabled ? " (requires add-on)" : ""}
+        </label>
+        {!whatsappEnabled ? (
+          <p className="text-xs text-slate-500">
+            WhatsApp requires the WhatsApp add-on — enable it in <a href="/settings/billing" className="text-emerald-700 hover:underline">Billing Settings</a>.
+          </p>
+        ) : null}
+        {whatsappEnabled && form.whatsappEnabled ? (
+          <div className="space-y-3">
+            <label className="space-y-2 text-sm font-medium text-slate-900">
+              <span>WhatsApp template</span>
+              <select
+                required
+                className={fieldClassName}
+                value={form.whatsappTemplateKey}
+                onChange={(event) => setForm((current) => ({ ...current, whatsappTemplateKey: event.target.value, whatsappTemplateVariables: {} }))}
+              >
+                <option value="">Select a template…</option>
+                {whatsappTemplates.map((template) => (
+                  <option key={template.key} value={template.key}>{template.key}</option>
+                ))}
+              </select>
+            </label>
+            {whatsappTemplates.length === 0 ? (
+              <p className="text-xs text-slate-500">No approved WhatsApp templates yet — templates must be submitted to and approved by WhatsApp before they can be used.</p>
+            ) : null}
+            {selectedTemplate?.variables.map((variable) => (
+              <label key={variable.name} className="space-y-2 text-sm font-medium text-slate-900">
+                <span>{variable.name}{variable.required ? " *" : ""}</span>
+                <input
+                  required={variable.required}
+                  maxLength={variable.maxLength}
+                  className={fieldClassName}
+                  value={form.whatsappTemplateVariables[variable.name] ?? ""}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      whatsappTemplateVariables: { ...current.whatsappTemplateVariables, [variable.name]: event.target.value },
+                    }))
+                  }
+                />
+              </label>
+            ))}
+            <p className="text-xs text-slate-500">
+              WhatsApp messages won&apos;t send during your organization&apos;s configured quiet hours — they&apos;ll queue and resume automatically outside that window.
+            </p>
+          </div>
+        ) : null}
       </div>
 
       <label className="flex items-center gap-3 text-sm font-medium text-slate-900"><input type="checkbox" checked={form.sendNow} onChange={(event) => setForm((current) => ({ ...current, sendNow: event.target.checked }))} />Send now</label>

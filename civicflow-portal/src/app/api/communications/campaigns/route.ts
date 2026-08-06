@@ -8,6 +8,8 @@ import { getSmsEntitlement } from "@/lib/sms-entitlement";
 import { requirePlanFeature } from "@/lib/plan-gate";
 import { prisma } from "@/lib/prisma";
 import { parseJsonBody, ValidationError, z } from "@/lib/validation";
+import { getWhatsAppEntitlement } from "@/lib/whatsapp/entitlement";
+import { getActiveTemplate, validateTemplateVariables } from "@/lib/whatsapp/templates";
 
 const createCampaignSchema = z.object({
   title: z.string().trim().min(1).max(200),
@@ -22,6 +24,9 @@ const createCampaignSchema = z.object({
   deepLink: z.union([z.string().max(200), z.literal(""), z.null()]).optional(),
   scheduledFor: z.union([z.string().datetime(), z.literal(""), z.null()]).optional(),
   sendNow: z.boolean().optional(),
+  whatsappEnabled: z.boolean().optional(),
+  whatsappTemplateKey: z.string().min(1).max(100).optional(),
+  whatsappTemplateVariables: z.record(z.string(), z.string()).optional(),
 });
 
 export async function GET() {
@@ -50,6 +55,26 @@ export async function POST(request: Request) {
       }
     }
 
+    let whatsappTemplateVariables: Record<string, string> | undefined;
+    if (input.whatsappEnabled) {
+      const entitlement = await getWhatsAppEntitlement(organizationId);
+      if (!entitlement.allowed) {
+        throw new ValidationError(entitlement.reason ?? "Your organization does not have the WhatsApp add-on enabled.");
+      }
+      if (!input.whatsappTemplateKey) {
+        throw new ValidationError("Select a WhatsApp template.");
+      }
+      const template = await getActiveTemplate(input.whatsappTemplateKey);
+      if (!template) {
+        throw new ValidationError(`Template "${input.whatsappTemplateKey}" is not active or not approved.`);
+      }
+      const validation = validateTemplateVariables(template, input.whatsappTemplateVariables ?? {});
+      if (!validation.valid) {
+        throw new ValidationError(validation.reason);
+      }
+      whatsappTemplateVariables = validation.variables;
+    }
+
     const recipientFilter = input.recipientFilter ?? { selector: "active_with_email" };
     const recipients = await resolveCommunicationRecipients(organizationId, recipientFilter, input.channel);
 
@@ -73,6 +98,9 @@ export async function POST(request: Request) {
         meetingId: input.meetingId || null,
         pushEnabled: input.pushEnabled ?? false,
         deepLink,
+        whatsappEnabled: input.whatsappEnabled ?? false,
+        whatsappTemplateKey: input.whatsappEnabled ? input.whatsappTemplateKey : null,
+        whatsappTemplateVariables: input.whatsappEnabled ? (whatsappTemplateVariables as Prisma.InputJsonValue) : undefined,
         scheduledFor,
         createdByUserId: session.userId,
         recipients: {
@@ -80,7 +108,7 @@ export async function POST(request: Request) {
         },
       },
     });
-    await createAuditEvent({ organizationId, actorUserId: session.userId, actorEmail: session.userEmail, action: "communication_campaign.create", entityType: "communication_campaign", entityId: campaign.id, metadata: { recipientCount: recipients.length, channel: campaign.channel, pushEnabled: campaign.pushEnabled, scheduledFor: campaign.scheduledFor } });
+    await createAuditEvent({ organizationId, actorUserId: session.userId, actorEmail: session.userEmail, action: "communication_campaign.create", entityType: "communication_campaign", entityId: campaign.id, metadata: { recipientCount: recipients.length, channel: campaign.channel, pushEnabled: campaign.pushEnabled, whatsappEnabled: campaign.whatsappEnabled, whatsappTemplateKey: campaign.whatsappTemplateKey, scheduledFor: campaign.scheduledFor } });
     if (input.sendNow) {
       await sendCommunicationCampaign({ organizationId, campaignId: campaign.id, actorUserId: session.userId, actorEmail: session.userEmail });
     }
