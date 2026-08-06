@@ -117,6 +117,24 @@ enum SmsOptInMethod {
   QR_CODE
 }
 
+/// How a member gave explicit WhatsApp consent — a separate consent from SMS
+/// opt-in (see OrgMember.whatsappOptInStatus doc), never inferred from it.
+enum WhatsAppOptInSource {
+  SELF_SERVICE
+  ADMIN_ASSISTED
+  WHATSAPP_REPLY
+  INVITE_ONBOARDING
+}
+
+/// Explicit tri-state, unlike SMS's boolean smsOptIn — lets a member's
+/// preference page distinguish "never asked" from "asked and declined"
+/// without a second nullable flag.
+enum WhatsAppOptInStatus {
+  NOT_STARTED
+  OPTED_IN
+  OPTED_OUT
+}
+
 enum DuesChargeStatus {
   PENDING
   PARTIAL
@@ -402,6 +420,36 @@ enum SmsMessageStatus {
   RETRYING
 }
 
+/// Mirrors SmsMessageStatus plus the two WhatsApp-specific terminal states
+/// Twilio's WhatsApp status callback can report that SMS never does: READ
+/// (recipient opened it, if their privacy settings allow it) and UNDELIVERED
+/// (accepted by WhatsApp but never reached the device — distinct from FAILED,
+/// which is a provider-side rejection before it ever left Twilio).
+enum WhatsAppMessageStatus {
+  QUEUED
+  SENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+  UNDELIVERED
+}
+
+enum WhatsAppTemplateCategory {
+  UTILITY
+  AUTHENTICATION
+  MARKETING
+}
+
+enum WhatsAppTemplateApprovalStatus {
+  DRAFT
+  PENDING_SUBMISSION
+  SUBMITTED
+  APPROVED
+  REJECTED
+  DISABLED
+}
+
 /// Status of a submission to Twilio's toll-free verification program.
 /// Unestra only displays/refreshes status here — the actual submission
 /// (business profile, use case, opt-in proof) happens in the Twilio Console.
@@ -492,6 +540,8 @@ model Organization {
   rolePermissionSets          OrgRolePermissionSet[]
   smsMessages                 SmsMessage[]
   smsSettings                 OrganizationSmsSettings?
+  whatsappMessages            WhatsAppMessage[]
+  whatsappSettings            OrganizationWhatsAppSettings?
   conversations               Conversation[]
   conversationParticipants    ConversationParticipant[]
   messages                    Message[]
@@ -585,6 +635,7 @@ model User {
   reviewedPaymentReports            PaymentReport[]            @relation("PaymentReportReviewedBy")
   reviewedPaymentLinkOfflineReports PaymentLinkOfflineReport[] @relation("PaymentLinkOfflineReportReviewedBy")
   sentSmsMessages                   SmsMessage[]               @relation("SmsMessageSentBy")
+  sentWhatsAppMessages              WhatsAppMessage[]          @relation("WhatsAppMessageSentBy")
   createdConversations              Conversation[]             @relation("ConversationCreatedBy")
   conversationParticipations        ConversationParticipant[]
   sentMessages                      Message[]                  @relation("MessageSender")
@@ -860,7 +911,7 @@ model SupportAssistantFeedback {
 
 /// Organization member (scoped).
 model OrgMember {
-  id                               String           @id @default(cuid())
+  id                               String               @id @default(cuid())
   organizationId                   String
   userId                           String?
   firstName                        String
@@ -868,11 +919,11 @@ model OrgMember {
   preferredName                    String?
   email                            String?
   phone                            String?
-  membershipStatus                 MembershipStatus @default(active)
+  membershipStatus                 MembershipStatus     @default(active)
   statusChangedAt                  DateTime?
   statusChangedByUserId            String?
   statusChangeReason               String?
-  isDelinquent                     Boolean          @default(false)
+  isDelinquent                     Boolean              @default(false)
   delinquentSince                  DateTime?
   lastDuesEvaluationAt             DateTime?
   joinDate                         DateTime?
@@ -886,37 +937,59 @@ model OrgMember {
   county                           String?
   country                          String?
   membershipCategoryId             String?
-  membershipCategoryManualOverride Boolean          @default(false)
+  membershipCategoryManualOverride Boolean              @default(false)
   householdName                    String?
   emergencyContactName             String?
   emergencyContactPhone            String?
   notes                            String?
-  commsPushEnabled                 Boolean          @default(true)
-  commsEmailEnabled                Boolean          @default(true)
-  commsSmsEnabled                  Boolean          @default(false)
+  commsPushEnabled                 Boolean              @default(true)
+  commsEmailEnabled                Boolean              @default(true)
+  commsSmsEnabled                  Boolean              @default(false)
   /// Set only by a real inbound "STOP" SMS reply — legally distinct from the
   /// member just flipping commsSmsEnabled off in their own preferences.
   /// Non-null hard-blocks SMS sending regardless of commsSmsEnabled; only a
   /// "START"/"UNSTOP" reply clears it.
   smsOptedOutAt                    DateTime?
-  requiredNoticesOnly              Boolean          @default(false)
+  requiredNoticesOnly              Boolean              @default(false)
   /// Explicit, recorded consent to receive SMS (Twilio/TCPA compliance).
   /// This — not commsSmsEnabled — is the hard gate on whether SMS can be
   /// sent at all; commsSmsEnabled is just the day-to-day on/off preference
   /// once consent has been given. Only recordSmsOptIn()/recordSmsOptOut()
   /// (src/lib/sms-consent.ts) should write these fields.
-  smsOptIn                         Boolean          @default(false)
+  smsOptIn                         Boolean              @default(false)
   smsOptInDate                     DateTime?
   smsOptInIP                       String?
   smsOptInMethod                   SmsOptInMethod?
   smsOptOutDate                    DateTime?
   smsConsentVersion                String?
+  /// Day-to-day WhatsApp preference toggle, mirrors commsSmsEnabled — off by
+  /// default, separate from whatsappOptInStatus below (the hard consent
+  /// gate). SMS opt-in and WhatsApp opt-in are deliberately separate: never
+  /// infer one from the other, from having a phone number, or from any other
+  /// channel's consent.
+  whatsappEnabled                  Boolean              @default(false)
+  whatsappPhoneNumber              String?
+  whatsappOptInStatus              WhatsAppOptInStatus  @default(NOT_STARTED)
+  whatsappOptInSource              WhatsAppOptInSource?
+  whatsappOptedInAt                DateTime?
+  /// Set by an explicit STOP-family reply or in-app opt-out — non-null
+  /// hard-blocks WhatsApp sending regardless of whatsappEnabled, same
+  /// relationship smsOptedOutAt has to commsSmsEnabled. Only a WhatsApp
+  /// "START"-family reply or a renewed explicit opt-in clears it; an
+  /// organization administrator can never clear it on a member's behalf.
+  whatsappOptedOutAt               DateTime?
+  whatsappConsentTextVersion       String?
+  /// Last time the member's WhatsApp number/consent was reconfirmed (e.g.
+  /// after a number change) — distinct from whatsappOptedInAt, which is the
+  /// original consent timestamp.
+  whatsappLastConfirmedAt          DateTime?
+  whatsappOptInIP                  String?
   /// Human-friendly member number, optional and unique per org when set
   /// (Postgres unique indexes allow multiple NULLs, so orgs that don't use
   /// member numbers are unaffected).
   memberNumber                     String?
-  createdAt                        DateTime         @default(now())
-  updatedAt                        DateTime         @updatedAt
+  createdAt                        DateTime             @default(now())
+  updatedAt                        DateTime             @updatedAt
 
   organization                   Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   user                           User?                    @relation("OrgMemberLogin", fields: [userId], references: [id], onDelete: SetNull)
@@ -936,6 +1009,7 @@ model OrgMember {
   invites                        MemberInvite[]
   paymentReports                 PaymentReport[]
   smsMessages                    SmsMessage[]
+  whatsappMessages               WhatsAppMessage[]
   ptaHouseholdBilling            PtaHousehold?
   hoaPropertiesBilled            Property[]               @relation("PropertyBillingMember")
   hoaPropertyResidencies         PropertyResident[]       @relation("PropertyResidentMember")
@@ -1338,6 +1412,172 @@ model PlatformSmsSettings {
   updatedAt       DateTime @updatedAt
 }
 
+/// Platform-wide WhatsApp control plane, mirroring PlatformSmsSettings'
+/// singleton pattern (see getPlatformWhatsAppSettings() in
+/// lib/whatsapp/credentials.ts — never query this model directly). Unlike
+/// PlatformSmsSettings, this table holds NO Twilio account credentials —
+/// WhatsApp sends through the same Twilio account already configured for
+/// SMS (see getEffectiveTwilioCredentials() in lib/sms-credentials.ts). Only
+/// the WhatsApp-specific sender identity lives here, since a WhatsApp sender
+/// (a Meta-approved WABA number) is a distinct resource from the SMS
+/// toll-free number/Messaging Service on the same account.
+model PlatformWhatsAppSettings {
+  id String @id @default(cuid())
+
+  platformEnabled     Boolean @default(false)
+  /// While true, sendWhatsAppMessage() only delivers to numbers in
+  /// testPhoneNumbers below — true by default because no real WhatsApp
+  /// Business Account is connected yet; every send targets Twilio's public
+  /// Sandbox until an admin turns this off after WABA approval.
+  sandboxMode         Boolean @default(true)
+  maintenanceMode     Boolean @default(false)
+  outboundPaused      Boolean @default(false)
+  orgMessagingEnabled Boolean @default(false)
+
+  /// AES-256-GCM ciphertext (iv+authTag+ciphertext, base64) — see
+  /// lib/crypto-secrets.ts. Null until an admin configures a sender via the
+  /// (future) WhatsApp Administration UI; sendWhatsAppMessage() falls back
+  /// to the WHATSAPP_SANDBOX_FROM_NUMBER env var until then.
+  fromNumberEncrypted          String?
+  messagingServiceSidEncrypted String?
+
+  /// Sandbox join-code allowlist — while sandboxMode is true,
+  /// sendWhatsAppMessage() only delivers to numbers in this list (each
+  /// recipient must also separately join the Sandbox on Twilio's side by
+  /// texting its join code, which this list does not track).
+  testPhoneNumbers String[] @default([])
+
+  updatedByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+/// Per-organization WhatsApp entitlement/usage, mirroring
+/// OrganizationSmsSettings field-for-field. No row exists for an org until a
+/// platform administrator explicitly activates the add-on (same as SMS) —
+/// see getWhatsAppEntitlement() in lib/whatsapp/entitlement.ts, which denies
+/// by default when no row is found.
+model OrganizationWhatsAppSettings {
+  id                               String    @id @default(cuid())
+  organizationId                   String    @unique
+  whatsappAddOnActive              Boolean   @default(false)
+  whatsappMonthlyLimit             Int       @default(0)
+  whatsappUsedThisPeriod           Int       @default(0)
+  /// Placeholder default, not a pricing decision — see docs/whatsapp-cost-controls.md
+  /// once written. Overage is a soft cap, same policy as SMS.
+  whatsappOverageRateCents         Float     @default(5)
+  whatsappBillingPeriodStart       DateTime?
+  whatsappBillingPeriodEnd         DateTime?
+  stripeWhatsAppSubscriptionItemId String?
+  /// Super-admin kill switch for a single org, independent of
+  /// whatsappAddOnActive — mirrors OrganizationSmsSettings.suspendedAt.
+  suspendedAt                      DateTime?
+  lastUsageThresholdNotified       Int       @default(0)
+  /// Default quiet-hours window (org's local time, via Organization.timezone)
+  /// — no non-urgent WhatsApp delivery outside [quietHoursEndHour,
+  /// quietHoursStartHour). Not yet enforced by any send path in PR A; read by
+  /// the PR B composer/scheduler.
+  quietHoursStartHour              Int       @default(21)
+  quietHoursEndHour                Int       @default(8)
+  /// Gates whether inbound WhatsApp messages route to this org's Inbox —
+  /// stays false through PR A/B; PR C is the only phase that can flip it.
+  inboundEnabled                   Boolean   @default(false)
+  /// True for every org until explicitly promoted past the Stage 3 pilot —
+  /// mirrors the program's staged-rollout requirement (no broad enablement
+  /// without an explicit step).
+  pilotMode                        Boolean   @default(true)
+  pausedAt                         DateTime?
+  pauseReason                      String?
+  createdAt                        DateTime  @default(now())
+  updatedAt                        DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+/// Internal catalog of WhatsApp message templates — never send arbitrary
+/// admin-entered text through the business-initiated path; every send
+/// outside an open customer-service window must resolve to an active,
+/// APPROVED row here. PR A seeds none of the real catalog (see
+/// docs/whatsapp-template-catalog.md once written, added in PR B) beyond
+/// what's needed for the Sandbox validation walkthrough.
+model WhatsAppTemplate {
+  id                 String                         @id @default(cuid())
+  key                String                         @unique
+  twilioContentSid   String?
+  language           String                         @default("en")
+  category           WhatsAppTemplateCategory
+  version            Int                            @default(1)
+  approvalStatus     WhatsAppTemplateApprovalStatus @default(DRAFT)
+  /// [{ name: string, required: boolean, maxLength?: number }] — validated by
+  /// validateTemplateVariables() in lib/whatsapp/templates.ts before every send.
+  variablesSchema    Json
+  /// Which internal workflows may use this template (e.g. "dues_reminder",
+  /// "hoa_violation_status") — prevents a template approved for one vertical
+  /// being repurposed for an unrelated one without a deliberate catalog change.
+  permittedWorkflows String[]                       @default([])
+  active             Boolean                        @default(false)
+  lastSyncedAt       DateTime?
+  createdAt          DateTime                       @default(now())
+  updatedAt          DateTime                       @updatedAt
+}
+
+/// One row per WhatsApp send attempt — doubles as the delivery log, mirroring
+/// SmsMessage, plus the two additional terminal states (READ, UNDELIVERED)
+/// WhatsApp's status callback can report that SMS's never does.
+model WhatsAppMessage {
+  id                String                    @id @default(cuid())
+  organizationId    String
+  memberId          String?
+  phone             String
+  /// Internal WhatsAppTemplate.key at send time — plain string, not a
+  /// relation, so a template can be edited/retired without touching
+  /// historical delivery rows.
+  templateKey       String?
+  category          WhatsAppTemplateCategory?
+  /// Null for a template-based send — Twilio/Meta renders the final text
+  /// from the approved template + variables server-side, so we never hold a
+  /// literal copy of it. Populated only for a freeform/Sandbox send, where
+  /// the caller supplies the literal body directly.
+  body              String?
+  status            WhatsAppMessageStatus     @default(QUEUED)
+  provider          String                    @default("twilio")
+  providerMessageId String?
+  costEstimateCents Int?
+  /// Real Twilio Price from the status webhook, distinct from
+  /// costEstimateCents (flat billing-time estimate) — populated once Twilio
+  /// reports a terminal status, null until then.
+  actualCostCents   Int?
+  /// Twilio's numeric error code (e.g. 63016) from the status callback —
+  /// paired with the sanitized errorMessage below.
+  errorCode         String?
+  errorMessage      String?
+  /// Non-body-leaking extra context (e.g. which webhook event produced a
+  /// given status transition) — never message content or media.
+  metadata          Json?
+  retryCount        Int                       @default(0)
+  nextRetryAt       DateTime?
+  campaignId        String?
+  sentById          String?
+  sentAt            DateTime?
+  deliveredAt       DateTime?
+  readAt            DateTime?
+  failedAt          DateTime?
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+
+  organization Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  member       OrgMember?             @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  campaign     CommunicationCampaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  sentBy       User?                  @relation("WhatsAppMessageSentBy", fields: [sentById], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([campaignId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([memberId])
+  @@index([providerMessageId])
+}
+
 /// Per-organization override of a role's permission set — lets an ORG_OWNER
 /// customize exactly what ORG_ADMIN/FINANCE/STAFF/READ_ONLY can do in their
 /// org (e.g. label FINANCE as "Treasurer" and adjust its access). Presence of
@@ -1691,11 +1931,12 @@ model CommunicationCampaign {
   createdAt         DateTime                     @default(now())
   updatedAt         DateTime                     @updatedAt
 
-  organization Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  meeting      Meeting?                 @relation(fields: [meetingId], references: [id], onDelete: SetNull)
-  createdBy    User?                    @relation("CommunicationCampaignCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  recipients   CommunicationRecipient[]
-  smsMessages  SmsMessage[]
+  organization     Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  meeting          Meeting?                 @relation(fields: [meetingId], references: [id], onDelete: SetNull)
+  createdBy        User?                    @relation("CommunicationCampaignCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  recipients       CommunicationRecipient[]
+  smsMessages      SmsMessage[]
+  whatsappMessages WhatsAppMessage[]
 
   @@index([organizationId])
   @@index([communicationType])
