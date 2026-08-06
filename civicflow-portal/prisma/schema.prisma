@@ -1473,7 +1473,7 @@ model OrganizationWhatsAppSettings {
   /// whatsappAddOnActive — mirrors OrganizationSmsSettings.suspendedAt.
   suspendedAt                      DateTime?
   lastUsageThresholdNotified       Int       @default(0)
-  /// Default quiet-hours window (org's local time, via Organization.timezone)
+  /// Default quiet-hours window (org's local time, via OrgSettings.timezone)
   /// — no non-urgent WhatsApp delivery outside [quietHoursEndHour,
   /// quietHoursStartHour). Not yet enforced by any send path in PR A; read by
   /// the PR B composer/scheduler.
@@ -1912,24 +1912,34 @@ model CommunicationLog {
 }
 
 model CommunicationCampaign {
-  id                String                       @id @default(cuid())
-  organizationId    String
-  title             String
-  communicationType CommunicationCampaignType
-  channel           CommunicationCampaignChannel
-  subject           String
-  body              String
-  status            CommunicationCampaignStatus  @default(DRAFT)
-  recipientFilter   Json?
-  attachmentKeys    Json?
-  meetingId         String?
-  createdByUserId   String?
-  pushEnabled       Boolean                      @default(false)
-  deepLink          String?
-  scheduledFor      DateTime?
-  sentAt            DateTime?
-  createdAt         DateTime                     @default(now())
-  updatedAt         DateTime                     @updatedAt
+  id                        String                       @id @default(cuid())
+  organizationId            String
+  title                     String
+  communicationType         CommunicationCampaignType
+  channel                   CommunicationCampaignChannel
+  subject                   String
+  body                      String
+  status                    CommunicationCampaignStatus  @default(DRAFT)
+  recipientFilter           Json?
+  attachmentKeys            Json?
+  meetingId                 String?
+  createdByUserId           String?
+  pushEnabled               Boolean                      @default(false)
+  deepLink                  String?
+  /// Orthogonal additive flag, mirrors pushEnabled — not folded into the
+  /// `channel` enum, so enabling WhatsApp never requires a channel-enum
+  /// migration. Requires whatsappTemplateKey when true (enforced at the API
+  /// layer, not the DB).
+  whatsappEnabled           Boolean                      @default(false)
+  whatsappTemplateKey       String?
+  /// Resolved variable values chosen at campaign-creation time, already
+  /// validated against the template's variablesSchema via
+  /// validateTemplateVariables() — never arbitrary staff-entered text.
+  whatsappTemplateVariables Json?
+  scheduledFor              DateTime?
+  sentAt                    DateTime?
+  createdAt                 DateTime                     @default(now())
+  updatedAt                 DateTime                     @updatedAt
 
   organization     Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   meeting          Meeting?                 @relation(fields: [meetingId], references: [id], onDelete: SetNull)
@@ -1948,24 +1958,30 @@ model CommunicationCampaign {
 }
 
 model CommunicationRecipient {
-  id                 String                       @id @default(cuid())
-  organizationId     String
-  campaignId         String
-  memberId           String?
-  email              String?
-  phone              String?
-  deliveryStatus     CommunicationDeliveryStatus  @default(PENDING)
-  errorMessage       String?
-  sentAt             DateTime?
-  pushDeliveryStatus CommunicationDeliveryStatus?
-  pushSentAt         DateTime?
-  pushError          String?
+  id                     String                       @id @default(cuid())
+  organizationId         String
+  campaignId             String
+  memberId               String?
+  email                  String?
+  phone                  String?
+  deliveryStatus         CommunicationDeliveryStatus  @default(PENDING)
+  errorMessage           String?
+  sentAt                 DateTime?
+  pushDeliveryStatus     CommunicationDeliveryStatus?
+  pushSentAt             DateTime?
+  pushError              String?
+  /// Mirrors the push* columns above exactly — a second, independent
+  /// delivery outcome per recipient row, since a campaign can send both a
+  /// primary channel and WhatsApp (and push) at once.
+  whatsappDeliveryStatus CommunicationDeliveryStatus?
+  whatsappSentAt         DateTime?
+  whatsappError          String?
   /// When the recipient opened this in the announcements archive / inbox —
   /// distinct from deliveryStatus/sentAt, which are about whether it was
   /// sent, not whether the recipient has seen it.
-  readAt             DateTime?
-  createdAt          DateTime                     @default(now())
-  updatedAt          DateTime                     @updatedAt
+  readAt                 DateTime?
+  createdAt              DateTime                     @default(now())
+  updatedAt              DateTime                     @updatedAt
 
   organization Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   campaign     CommunicationCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
