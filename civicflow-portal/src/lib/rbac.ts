@@ -220,6 +220,21 @@ export const PERMISSIONS = {
   HOA_ARCHITECTURAL_REQUESTS_WRITE:  "hoa:architectural-requests:write",
   HOA_ARCHITECTURAL_REQUESTS_REVIEW: "hoa:architectural-requests:review",
   HOA_ARCHITECTURAL_REQUESTS_DECIDE: "hoa:architectural-requests:decide",
+
+  // Resumable Import Program (PR A) — six tiers rather than the usual
+  // read/write pair because uploading a file, deciding what to do with a
+  // possible duplicate, resuming a plan-limit-paused batch, and canceling
+  // one are meaningfully different authority levels (mirrors HOA
+  // Violations/Architectural Requests' multi-tier shape just above).
+  // Combined with the existing members:write/checkMemberLimit-style guards
+  // at the route layer -- holding one of these is necessary but never
+  // sufficient by itself.
+  IMPORTS_READ:               "imports:read",
+  IMPORTS_CREATE:              "imports:create",
+  IMPORTS_REVIEW:               "imports:review",
+  IMPORTS_RESUME:               "imports:resume",
+  IMPORTS_CANCEL:                "imports:cancel",
+  IMPORTS_RESOLVE_DUPLICATES:    "imports:resolve-duplicates",
 } as const;
 
 // Parent/household-adult self-service (view own household, RSVP, pay own
@@ -314,6 +329,12 @@ const ORG_OWNER_PERMISSIONS: Permission[] = [
   PERMISSIONS.HOA_ARCHITECTURAL_REQUESTS_WRITE,
   PERMISSIONS.HOA_ARCHITECTURAL_REQUESTS_REVIEW,
   PERMISSIONS.HOA_ARCHITECTURAL_REQUESTS_DECIDE,
+  PERMISSIONS.IMPORTS_READ,
+  PERMISSIONS.IMPORTS_CREATE,
+  PERMISSIONS.IMPORTS_REVIEW,
+  PERMISSIONS.IMPORTS_RESUME,
+  PERMISSIONS.IMPORTS_CANCEL,
+  PERMISSIONS.IMPORTS_RESOLVE_DUPLICATES,
 ];
 
 const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
@@ -392,6 +413,12 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.HOA_ARCHITECTURAL_REQUESTS_WRITE,
     PERMISSIONS.HOA_ARCHITECTURAL_REQUESTS_REVIEW,
     PERMISSIONS.HOA_ARCHITECTURAL_REQUESTS_DECIDE,
+    PERMISSIONS.IMPORTS_READ,
+    PERMISSIONS.IMPORTS_CREATE,
+    PERMISSIONS.IMPORTS_REVIEW,
+    PERMISSIONS.IMPORTS_RESUME,
+    PERMISSIONS.IMPORTS_CANCEL,
+    PERMISSIONS.IMPORTS_RESOLVE_DUPLICATES,
   ],
 
   // Maps naturally onto "Treasurer" via OrgRolePermissionSet if an org wants
@@ -489,6 +516,15 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     // task's explicit instruction not to infer permission from committee
     // chair status) can review and request changes, but the actual
     // approve/deny/conditionally-approve decision is board-level authority.
+    PERMISSIONS.IMPORTS_READ,
+    PERMISSIONS.IMPORTS_CREATE,
+    PERMISSIONS.IMPORTS_REVIEW,
+    PERMISSIONS.IMPORTS_RESOLVE_DUPLICATES,
+    // Deliberately NOT IMPORTS_RESUME or IMPORTS_CANCEL -- resuming a
+    // plan-limit-paused batch is tied to the org's subscription/billing
+    // state, and canceling a batch outright is consequential enough to
+    // reserve for ORG_OWNER/ORG_ADMIN, same reasoning as RESOLVE/DECIDE
+    // being withheld above.
   ],
 
   // Maps onto "General Member" (an officer viewing without editing rights) —
@@ -514,6 +550,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.HOA_RESIDENTS_READ,
     PERMISSIONS.HOA_VIOLATIONS_READ,
     PERMISSIONS.HOA_ARCHITECTURAL_REQUESTS_READ,
+    PERMISSIONS.IMPORTS_READ,
   ],
 
   // Members never get staff permissions — a MEMBER role must never see other

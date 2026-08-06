@@ -319,6 +319,72 @@ enum PaymentImportPostedAs {
   OTHER
 }
 
+/// Resumable Import Program (PR A) — which importer produced a given
+/// ImportBatch. PTA_HOUSEHOLDS/HOA_PROPERTIES are added now so PR C (vertical
+/// rollout) doesn't need another migration, but only COMMUNITY_MEMBERS is
+/// actually produced by any code path in PR A. Union Payroll Checkoff is
+/// deliberately NOT here — it stays on the existing PaymentImportBatch/Item
+/// pipeline (see PaymentImportSourceType.PAYROLL_CHECKOFF above), which
+/// already has working financial idempotency; forcing it through this
+/// member/household/property-shaped model would misfit its row shape.
+enum ImportKind {
+  COMMUNITY_MEMBERS
+  PTA_HOUSEHOLDS
+  HOA_PROPERTIES
+}
+
+/// Batch-level lifecycle. PAUSED_PLAN_LIMIT and the resumability it implies
+/// (see ImportBatch.planLimitSnapshot) is the entire point of PR A — every
+/// other status mirrors the generic upload->analyze->review->import->done
+/// shape already proven by MeetingIntelligenceStatus's state machine
+/// (src/lib/labs/meeting-intelligence/state-machine.ts), whose
+/// transitionJob()-as-sole-write-path pattern src/lib/imports/batch-state-machine.ts
+/// mirrors directly.
+enum ImportBatchStatus {
+  UPLOADED
+  ANALYZING
+  READY_FOR_REVIEW
+  IMPORTING
+  PARTIALLY_COMPLETED
+  PAUSED_PLAN_LIMIT
+  COMPLETED
+  FAILED
+  CANCELED
+}
+
+/// Row-level classification. PR A only ever produces NEW, UPDATE_AVAILABLE
+/// (exact email match on Community members — see importMembers() in
+/// src/lib/member-import.ts, whose match rule this reuses), INVALID, and the
+/// terminal outcomes (IMPORTED/SKIPPED/FAILED/BLOCKED_PLAN_LIMIT).
+/// EXACT_DUPLICATE and POSSIBLE_DUPLICATE are reserved for PR B's real
+/// matching-hierarchy work (phone, name+corroborating-field, fuzzy) — the
+/// enum values exist now so PR B doesn't need a schema change to introduce
+/// them.
+enum ImportRowStatus {
+  PENDING
+  NEW
+  EXACT_DUPLICATE
+  POSSIBLE_DUPLICATE
+  UPDATE_AVAILABLE
+  IMPORTED
+  SKIPPED
+  INVALID
+  FAILED
+  BLOCKED_PLAN_LIMIT
+}
+
+/// What an administrator (or a safe default — see docs/import-row-statuses.md)
+/// chose to do with a row. REVIEW_REQUIRED is not a terminal decision; it
+/// means the row is blocked from IMPORTING until a human replaces it with one
+/// of the other four.
+enum ImportRowDecision {
+  IMPORT_NEW
+  SKIP
+  UPDATE_EXISTING
+  CREATE_ANYWAY
+  REVIEW_REQUIRED
+}
+
 enum CommunicationCampaignType {
   ANNOUNCEMENT
   MEETING_MINUTES
@@ -527,6 +593,8 @@ model Organization {
   communicationRecipients     CommunicationRecipient[]
   paymentImportBatches        PaymentImportBatch[]
   paymentImportItems          PaymentImportItem[]
+  importBatches                ImportBatch[]
+  importRows                   ImportRow[]
   attendanceRecords           AttendanceRecord[]
   meetingAttendanceSessions   MeetingAttendanceSession[]
   memberTimelineEvents        MemberTimelineEvent[]
@@ -1195,6 +1263,16 @@ model PaymentImportBatch {
   uploadedAt       DateTime                 @default(now())
   processedAt      DateTime?
   notes            String?
+  /// Resumable Import Program (PR A) — sha256 of the uploaded CSV/text,
+  /// shared with ImportBatch.fileHash so the "this file matches an earlier
+  /// import" prompt (src/lib/imports/file-identity.ts) works uniformly
+  /// across both model families. Nullable/backward-compatible: existing
+  /// rows predate this column and simply never match on hash.
+  fileHash            String?
+  /// Mirrors ImportBatch.retentionExpiresAt — no behavior change to this
+  /// model's existing status machine or Payroll Checkoff's item-level
+  /// idempotency, just the shared retention bookkeeping.
+  retentionExpiresAt  DateTime?
   createdAt        DateTime                 @default(now())
   updatedAt        DateTime                 @updatedAt
 
@@ -1205,6 +1283,7 @@ model PaymentImportBatch {
   @@index([sourceType])
   @@index([status])
   @@index([uploadedAt])
+  @@index([organizationId, sourceType, fileHash])
 }
 
 model PaymentImportItem {
@@ -1252,6 +1331,120 @@ model PaymentImportItem {
   @@index([verificationStatus])
   @@index([postedAs])
   @@index([transactionDate])
+}
+
+/// Resumable Import Program (PR A) — the shared batch model for member-like
+/// imports (Community/PTA/HOA; Union Payroll Checkoff stays on
+/// PaymentImportBatch above — see ImportKind's doc comment for why). Mirrors
+/// MeetingIntelligenceJob's shape: a persisted state machine
+/// (src/lib/imports/batch-state-machine.ts is the sole write path for
+/// `status`) plus atomic worker claiming (`claimedAt`) so a cron tick can
+/// safely pick up exactly one batch at a time across overlapping
+/// invocations. Counters are denormalized (updated atomically as rows
+/// process, not computed via COUNT on every read) since the batch-detail and
+/// history views render them on every request.
+model ImportBatch {
+  id                 String            @id @default(cuid())
+  organizationId     String
+  importKind         ImportKind
+  fileName           String
+  /// sha256 hex of the raw uploaded file — the file-level "this looks like
+  /// an earlier import" duplicate-file check (src/lib/imports/file-identity.ts).
+  fileHash           String
+  fileSizeBytes      Int
+  /// DO Spaces object key (src/lib/imports/storage.ts) — null once the
+  /// retained source file has been deleted past retentionExpiresAt.
+  storageObjectKey   String?
+  /// {csvHeader: canonicalField} — same shape as the existing /api/import
+  /// wizard's mapping (see src/lib/member-import.ts's buildFieldGetter doc
+  /// comment for the exact direction).
+  columnMapping      Json
+  status             ImportBatchStatus @default(UPLOADED)
+  totalRows          Int               @default(0)
+  newCount           Int               @default(0)
+  duplicateCount     Int               @default(0)
+  updateCount        Int               @default(0)
+  invalidCount       Int               @default(0)
+  importedCount      Int               @default(0)
+  skippedCount       Int               @default(0)
+  blockedPlanLimitCount Int            @default(0)
+  /// Atomic worker-claim column — see claimBatchForProcessing() in
+  /// src/lib/imports/engine.ts, same conditional-updateMany-with-staleness-
+  /// reclaim shape as MeetingIntelligenceJob.claimedAt.
+  claimedAt          DateTime?
+  /// Recorded the moment capacity is exhausted mid-batch: { allowed, used,
+  /// pending } at that instant — shown verbatim on the paused-batch UI
+  /// (Phase 8's exact requirement), never trusted at resume time (resumeBatch()
+  /// always rechecks capacity fresh).
+  planLimitSnapshot  Json?
+  uploadedByUserId   String?
+  uploadedAt         DateTime          @default(now())
+  analyzedAt         DateTime?
+  importStartedAt    DateTime?
+  pausedAt           DateTime?
+  completedAt        DateTime?
+  retentionExpiresAt DateTime?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  rows         ImportRow[]
+
+  @@index([organizationId])
+  @@index([status])
+  @@index([organizationId, importKind, fileHash])
+}
+
+/// One row per parsed source-file row. `@@unique([batchId, rowNumber])` is
+/// the stable row-identity constraint (Phase 6) that makes re-analysis
+/// idempotent: analyzeBatch() re-running after an interrupted first pass
+/// re-inserts the same rows, and the duplicate insert hits this constraint
+/// (P2002) rather than creating a second row — caught and treated as
+/// already-processed, the same idiom as src/lib/hoa/violations.ts's
+/// isUniqueConstraintViolation.
+model ImportRow {
+  id                String             @id @default(cuid())
+  batchId           String
+  organizationId    String
+  rowNumber         Int
+  /// The original parsed cell values, keyed by source column header —
+  /// preserved verbatim for the review UI and CSV re-export, never mutated.
+  rawData           Json
+  /// Canonical-field-keyed values after normalization (whitespace, case,
+  /// email/phone/date formatting) — see src/lib/imports/row-normalization.ts.
+  normalizedData    Json
+  /// sha256 of the normalized identifying fields — computeRowFingerprint()
+  /// in row-normalization.ts. Not currently unique-constrained across rows
+  /// (that's PR B's matching-hierarchy job); stored now so PR B doesn't need
+  /// a migration to start using it.
+  fingerprint       String
+  status            ImportRowStatus    @default(PENDING)
+  decision          ImportRowDecision?
+  /// The existing record this row was matched against, if any (e.g. an
+  /// OrgMember.id on an UPDATE_AVAILABLE row). Not a typed relation — the
+  /// target model varies by ImportKind (OrgMember today; PtaHousehold/
+  /// Property once PR C wires those verticals), mirroring how
+  /// PaymentImportItem.matchedMemberId is the only *typed* matched-record
+  /// relation on that model and the rest are similarly loose.
+  matchedRecordId   String?
+  matchConfidence   Int?
+  errorMessage      String?
+  /// The OrgMember (or future PtaHousehold/Property) actually created or
+  /// updated once this row reaches IMPORTED.
+  importedRecordId  String?
+  decidedByUserId   String?
+  decidedAt         DateTime?
+  processedAt       DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  batch        ImportBatch  @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([batchId, rowNumber])
+  @@index([batchId])
+  @@index([organizationId])
+  @@index([status])
 }
 
 /// Organization-level settings (one-to-one with Organization).
