@@ -66,6 +66,15 @@ vi.mock("../capacity", () => ({
   importKindConsumesCapacity: (...args: [string]) => importKindConsumesCapacity(...args),
 }));
 
+// The real matching-tier logic (email/phone/name+corroborating) has its own
+// dedicated test file (duplicate-matching.test.ts) — analyzeBatch's own
+// tests only need to prove it calls matchCommunityMemberRow() and persists
+// whatever it returns, not re-derive the tiers themselves.
+const matchCommunityMemberRow = vi.fn();
+vi.mock("../duplicate-matching", () => ({
+  matchCommunityMemberRow: (...args: unknown[]) => matchCommunityMemberRow(...args),
+}));
+
 vi.mock("xlsx", () => ({
   read: vi.fn(() => ({ SheetNames: ["Sheet1"], Sheets: { Sheet1: {} } })),
   utils: {
@@ -94,11 +103,11 @@ beforeEach(() => {
 });
 
 describe("analyzeBatch", () => {
-  it("classifies a row with no existing email match as NEW", async () => {
+  it("classifies a row with no match as NEW", async () => {
     findFirstImportBatch.mockResolvedValueOnce(makeBatch());
     getImportSourceFile.mockResolvedValueOnce(Buffer.from(""));
     FIXTURE_ROWS = [{ "First Name": "Jane", "Last Name": "Doe", Email: "jane@example.com" }];
-    findFirstOrgMember.mockResolvedValueOnce(null);
+    matchCommunityMemberRow.mockResolvedValueOnce({ status: "NEW", matchedRecordId: null, matchConfidence: null });
 
     const { analyzeBatch } = await import("../engine");
     await analyzeBatch("batch-1", "org-a");
@@ -107,25 +116,50 @@ describe("analyzeBatch", () => {
       expect.objectContaining({ data: expect.objectContaining({ status: "NEW", rowNumber: 2 }) })
     );
     expect(transitionImportBatch).toHaveBeenCalledWith(
-      expect.objectContaining({ to: "READY_FOR_REVIEW", extraData: expect.objectContaining({ newCount: 1, updateCount: 0, invalidCount: 0 }) })
+      expect.objectContaining({
+        to: "READY_FOR_REVIEW",
+        extraData: expect.objectContaining({ newCount: 1, updateCount: 0, duplicateCount: 0, invalidCount: 0 }),
+      })
     );
   });
 
-  it("classifies an exact email match as UPDATE_AVAILABLE, matching the existing member's id", async () => {
+  it("persists whatever matchCommunityMemberRow() classifies a row as, counting UPDATE_AVAILABLE separately from duplicate-tier statuses", async () => {
     findFirstImportBatch.mockResolvedValueOnce(makeBatch());
     getImportSourceFile.mockResolvedValueOnce(Buffer.from(""));
     FIXTURE_ROWS = [{ "First Name": "Jane", "Last Name": "Doe", Email: "jane@example.com" }];
-    findFirstOrgMember.mockResolvedValueOnce({ id: "member-existing" });
+    matchCommunityMemberRow.mockResolvedValueOnce({ status: "UPDATE_AVAILABLE", matchedRecordId: "member-existing", matchConfidence: 100 });
 
     const { analyzeBatch } = await import("../engine");
     await analyzeBatch("batch-1", "org-a");
 
     expect(createImportRow).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ status: "UPDATE_AVAILABLE", matchedRecordId: "member-existing" }) })
+      expect.objectContaining({ data: expect.objectContaining({ status: "UPDATE_AVAILABLE", matchedRecordId: "member-existing", matchConfidence: 100 }) })
+    );
+    expect(transitionImportBatch).toHaveBeenCalledWith(
+      expect.objectContaining({ extraData: expect.objectContaining({ updateCount: 1, duplicateCount: 0 }) })
     );
   });
 
-  it("classifies a row with no name at all as INVALID", async () => {
+  it("counts EXACT_DUPLICATE and POSSIBLE_DUPLICATE rows into duplicateCount, not updateCount", async () => {
+    findFirstImportBatch.mockResolvedValueOnce(makeBatch());
+    getImportSourceFile.mockResolvedValueOnce(Buffer.from(""));
+    FIXTURE_ROWS = [
+      { "First Name": "Jane", "Last Name": "Doe", Email: "jane@example.com" },
+      { "First Name": "Sam", "Last Name": "Rivera", Email: "" },
+    ];
+    matchCommunityMemberRow
+      .mockResolvedValueOnce({ status: "EXACT_DUPLICATE", matchedRecordId: "member-1", matchConfidence: 100 })
+      .mockResolvedValueOnce({ status: "POSSIBLE_DUPLICATE", matchedRecordId: "member-2", matchConfidence: 50 });
+
+    const { analyzeBatch } = await import("../engine");
+    await analyzeBatch("batch-1", "org-a");
+
+    expect(transitionImportBatch).toHaveBeenCalledWith(
+      expect.objectContaining({ extraData: expect.objectContaining({ newCount: 0, updateCount: 0, duplicateCount: 2 }) })
+    );
+  });
+
+  it("classifies a row with no name at all as INVALID without ever calling the matcher", async () => {
     findFirstImportBatch.mockResolvedValueOnce(makeBatch());
     getImportSourceFile.mockResolvedValueOnce(Buffer.from(""));
     FIXTURE_ROWS = [{ "First Name": "", "Last Name": "", Email: "" }];
@@ -136,14 +170,14 @@ describe("analyzeBatch", () => {
     expect(createImportRow).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: "INVALID" }) })
     );
-    expect(findFirstOrgMember).not.toHaveBeenCalled();
+    expect(matchCommunityMemberRow).not.toHaveBeenCalled();
   });
 
   it("treats a duplicate row insert (P2002, e.g. a retried analysis) as already-processed, not an error", async () => {
     findFirstImportBatch.mockResolvedValueOnce(makeBatch());
     getImportSourceFile.mockResolvedValueOnce(Buffer.from(""));
     FIXTURE_ROWS = [{ "First Name": "Jane", "Last Name": "Doe", Email: "jane@example.com" }];
-    findFirstOrgMember.mockResolvedValueOnce(null);
+    matchCommunityMemberRow.mockResolvedValueOnce({ status: "NEW", matchedRecordId: null, matchConfidence: null });
     createImportRow.mockRejectedValueOnce(new FakeP2002Error("duplicate"));
 
     const { analyzeBatch } = await import("../engine");
@@ -222,6 +256,44 @@ describe("executeBatch", () => {
 
     expect(checkImportCapacity).not.toHaveBeenCalled();
     expect(updateOrgMember).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "member-existing" } }));
+  });
+
+  it("SECURITY/DATA-INTEGRITY REGRESSION: never overwrites an existing field with a blank incoming value", async () => {
+    // Previously memberUpdateData() built a fixed object unconditionally --
+    // an UPDATE_EXISTING row with a blank phone/address/etc. column would
+    // silently null out the existing member's real data. Now a field is
+    // only included in the update payload when the incoming value is
+    // actually present.
+    findFirstImportBatch.mockResolvedValueOnce(makeBatch());
+    findManyImportRow.mockResolvedValueOnce([
+      {
+        id: "row-1",
+        decision: "UPDATE_EXISTING",
+        matchedRecordId: "member-existing",
+        normalizedData: {
+          firstName: "Jane",
+          lastName: "Doe",
+          email: "jane@example.com",
+          phone: null,
+          addressLine1: null,
+          city: null,
+          state: null,
+          zipCode: null,
+          joinDate: null,
+        },
+      },
+    ]);
+    updateOrgMember.mockResolvedValueOnce({ id: "member-existing" });
+    countImportRow.mockResolvedValueOnce(0);
+
+    const { executeBatch } = await import("../engine");
+    await executeBatch("batch-1", "org-a");
+
+    const call = updateOrgMember.mock.calls[0][0];
+    expect(call.data).toEqual({ firstName: "Jane", lastName: "Doe" });
+    expect(call.data).not.toHaveProperty("phone");
+    expect(call.data).not.toHaveProperty("addressLine1");
+    expect(call.data).not.toHaveProperty("joinDate");
   });
 
   it("pauses at PAUSED_PLAN_LIMIT the moment capacity is exhausted, blocking remaining eligible rows", async () => {
