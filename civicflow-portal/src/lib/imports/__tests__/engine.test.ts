@@ -371,6 +371,58 @@ describe("executeBatch", () => {
     );
   });
 
+  it("REGRESSION: decrements blockedPlanLimitCount when previously-blocked rows are successfully resumed and completed", async () => {
+    // blockedPlanLimitCount was previously only ever incremented -- a batch
+    // that paused, got resumed after a plan upgrade, and fully completed
+    // still showed a stale nonzero "blocked" count even though nothing was
+    // actually pending anymore.
+    findFirstImportBatch.mockResolvedValueOnce(makeBatch());
+    findManyImportRow.mockResolvedValueOnce([
+      { id: "row-1", decision: "IMPORT_NEW", status: "BLOCKED_PLAN_LIMIT", normalizedData: { firstName: "A", lastName: "One", email: null } },
+      { id: "row-2", decision: "IMPORT_NEW", status: "BLOCKED_PLAN_LIMIT", normalizedData: { firstName: "B", lastName: "Two", email: null } },
+    ]);
+    checkImportCapacity.mockResolvedValue({ allowed: true, used: 10, limit: 500, remainingForThisBatch: 490 });
+    createOrgMember.mockResolvedValue({ id: "member-new" });
+    countImportRow.mockResolvedValueOnce(0); // remainingEligible
+    countImportRow.mockResolvedValueOnce(0); // remainingNeedingReview
+
+    const { executeBatch } = await import("../engine");
+    await executeBatch("batch-1", "org-a");
+
+    expect(transitionImportBatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "COMPLETED",
+        extraData: expect.objectContaining({ blockedPlanLimitCount: { increment: -2 } }),
+      })
+    );
+  });
+
+  it("REGRESSION: nets newly-(re-)blocked rows against resolved-from-blocked rows when capacity runs out again mid-resume", async () => {
+    findFirstImportBatch.mockResolvedValueOnce(makeBatch());
+    findManyImportRow.mockResolvedValueOnce([
+      { id: "row-1", decision: "IMPORT_NEW", status: "BLOCKED_PLAN_LIMIT", normalizedData: { firstName: "A", lastName: "One", email: null } },
+      { id: "row-2", decision: "IMPORT_NEW", status: "BLOCKED_PLAN_LIMIT", normalizedData: { firstName: "B", lastName: "Two", email: null } },
+    ]);
+    checkImportCapacity
+      .mockResolvedValueOnce({ allowed: true, used: 499, limit: 500, remainingForThisBatch: 1 }) // row-1 succeeds
+      .mockResolvedValueOnce({ allowed: false, used: 500, limit: 500, remainingForThisBatch: 0 }); // row-2 blocked again
+    createOrgMember.mockResolvedValueOnce({ id: "member-new" });
+    updateManyImportRow.mockResolvedValueOnce({ count: 0 }); // SKIP resolution
+    updateManyImportRow.mockResolvedValueOnce({ count: 1 }); // BLOCKED_PLAN_LIMIT bulk update (only row-2 left)
+    buildPlanLimitSnapshot.mockResolvedValueOnce({ allowed: 500, used: 500, pendingAfterUpgrade: 1 });
+
+    const { executeBatch } = await import("../engine");
+    await executeBatch("batch-1", "org-a");
+
+    // 1 newly (re-)blocked - 1 resolved from blocked (row-1) = net 0
+    expect(transitionImportBatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "PAUSED_PLAN_LIMIT",
+        extraData: expect.objectContaining({ blockedPlanLimitCount: { increment: 0 } }),
+      })
+    );
+  });
+
   it("resolves SKIP decisions in bulk without ever checking capacity", async () => {
     findFirstImportBatch.mockResolvedValueOnce(makeBatch());
     findManyImportRow.mockResolvedValueOnce([]);

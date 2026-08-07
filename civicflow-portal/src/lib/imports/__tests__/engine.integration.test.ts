@@ -184,6 +184,10 @@ describe.skipIf(!RUN_INTEGRATION)("Resumable Import Program engine — real Post
     const completedBatch = await prisma.importBatch.findUniqueOrThrow({ where: { id: batch.id } });
     expect(completedBatch.status).toBe("COMPLETED");
     expect(completedBatch.importedCount).toBe(5);
+    // REGRESSION: blockedPlanLimitCount was previously only ever
+    // incremented, never decremented -- this exact scenario (pause, resume,
+    // full completion) left it stuck at 3 even though nothing was pending.
+    expect(completedBatch.blockedPlanLimitCount).toBe(0);
 
     const finalImportedRows = await prisma.importRow.count({ where: { batchId: batch.id, status: "IMPORTED" } });
     expect(finalImportedRows).toBe(5);
