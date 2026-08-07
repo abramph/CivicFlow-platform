@@ -142,6 +142,10 @@ beforeEach(() => {
   FIXTURE_ROWS = [];
   transitionImportBatch.mockResolvedValue({});
   updateManyImportBatch.mockResolvedValue({ count: 1 });
+  // Default for executeBatch()'s bulk SKIP resolution (its first
+  // updateMany call) — tests that specifically exercise SKIP counting
+  // override this with mockResolvedValueOnce() before calling executeBatch.
+  updateManyImportRow.mockResolvedValue({ count: 0 });
   findUniqueUser.mockResolvedValue({ email: "staff@example.com" });
   findFirstPtaStudent.mockResolvedValue(null);
   findFirstPropertyResident.mockResolvedValue(null);
@@ -380,6 +384,40 @@ describe("executeBatch", () => {
       data: { status: "SKIPPED", processedAt: expect.any(Date) },
     });
     expect(checkImportCapacity).not.toHaveBeenCalled();
+  });
+
+  it("REGRESSION: increments the batch's skippedCount by the real number of rows just skipped, not by a hardcoded 0", async () => {
+    // The bulk SKIP resolution's updateMany() result was previously
+    // discarded entirely -- skippedCount was hardcoded to increment by 0 in
+    // the PAUSED_PLAN_LIMIT path and never referenced at all in the two
+    // other exit paths, so the "Skipped" stat on the batch-detail UI could
+    // never move off its default even though the row-level SKIPPED status
+    // was written correctly.
+    findFirstImportBatch.mockResolvedValueOnce(makeBatch());
+    updateManyImportRow.mockResolvedValueOnce({ count: 3 }); // 3 rows resolved to SKIPPED this tick
+    findManyImportRow.mockResolvedValueOnce([]);
+    countImportRow.mockResolvedValueOnce(0);
+
+    const { executeBatch } = await import("../engine");
+    await executeBatch("batch-1", "org-a");
+
+    expect(transitionImportBatch).toHaveBeenCalledWith(
+      expect.objectContaining({ extraData: expect.objectContaining({ skippedCount: { increment: 3 } }) })
+    );
+  });
+
+  it("REGRESSION: increments skippedCount correctly even on a multi-tick batch that stays IMPORTING", async () => {
+    findFirstImportBatch.mockResolvedValueOnce(makeBatch());
+    updateManyImportRow.mockResolvedValueOnce({ count: 2 });
+    findManyImportRow.mockResolvedValueOnce([]);
+    countImportRow.mockResolvedValueOnce(1); // remainingEligible > 0 -> stays IMPORTING
+
+    const { executeBatch } = await import("../engine");
+    await executeBatch("batch-1", "org-a");
+
+    expect(updateImportBatch).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ skippedCount: { increment: 2 } }) })
+    );
   });
 
   it("does nothing when the batch claim is lost", async () => {
