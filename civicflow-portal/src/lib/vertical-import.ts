@@ -153,7 +153,7 @@ const PROPERTY_TYPE_ALIASES: Record<string, string> = {
   "other": "OTHER",
 };
 
-function mapPropertyType(raw: string): "SINGLE_FAMILY" | "CONDO_UNIT" | "TOWNHOME" | "VACANT_LOT" | "COMMON_PROPERTY" | "OTHER" {
+export function mapPropertyType(raw: string): "SINGLE_FAMILY" | "CONDO_UNIT" | "TOWNHOME" | "VACANT_LOT" | "COMMON_PROPERTY" | "OTHER" {
   const key = raw.toLowerCase().trim();
   return (PROPERTY_TYPE_ALIASES[key] as never) ?? "SINGLE_FAMILY";
 }
@@ -165,7 +165,7 @@ const RELATIONSHIP_TYPE_ALIASES: Record<string, string> = {
   other: "OTHER",
 };
 
-function mapRelationshipType(raw: string): "OWNER" | "CO_OWNER" | "RESIDENT" | "TENANT" | "NON_RESIDENT_OWNER" | "OTHER" {
+export function mapRelationshipType(raw: string): "OWNER" | "CO_OWNER" | "RESIDENT" | "TENANT" | "NON_RESIDENT_OWNER" | "OTHER" {
   const key = raw.toLowerCase().trim();
   return (RELATIONSHIP_TYPE_ALIASES[key] as never) ?? "OWNER";
 }

@@ -1,6 +1,7 @@
+import type { ImportKind, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { normalizeToE164 } from "@/lib/phone";
-import type { NormalizedMemberRow } from "@/lib/imports/row-normalization";
+import type { NormalizedMemberRow, NormalizedPtaHouseholdRow, NormalizedHoaPropertyRow } from "@/lib/imports/row-normalization";
 
 /**
  * Resumable Import Program (PR B) — the real matching hierarchy for
@@ -10,6 +11,14 @@ import type { NormalizedMemberRow } from "@/lib/imports/row-normalization";
  * signal, and distinguishes a row that's genuinely identical to its match
  * (EXACT_DUPLICATE) from one that has real changes (UPDATE_AVAILABLE).
  * Never matches on name alone, per the spec's explicit rule.
+ *
+ * PR C adds two sibling matchers for PTA households and HOA properties.
+ * Unlike Community, both have a deterministic, DB-backed matching key
+ * (PtaHousehold's own unique constraint; the same address+unit tuple
+ * importHoaProperties() already dedupes on), so neither ever produces
+ * POSSIBLE_DUPLICATE — only NEW/EXACT_DUPLICATE/UPDATE_AVAILABLE. They share
+ * only the blank/equality primitives below with matchCommunityMemberRow(),
+ * not its match logic — the fields and identity keys don't overlap.
  */
 
 export type MatchTier = "EXACT_DUPLICATE" | "UPDATE_AVAILABLE" | "POSSIBLE_DUPLICATE" | "NEW";
@@ -149,6 +158,180 @@ export async function matchCommunityMemberRow(
   return { status: "NEW", matchedRecordId: null, matchConfidence: null };
 }
 
+// ─── PTA households ─────────────────────────────────────────────────────────
+
+export interface PtaHouseholdSnapshot {
+  id: string;
+  displayName: string;
+  schoolYear: string;
+  notes: string | null;
+  primaryContact: { name: string; email: string | null; phone: string | null } | null;
+  studentNames: string[];
+}
+
+const EXISTING_PTA_HOUSEHOLD_SELECT = {
+  id: true,
+  displayName: true,
+  schoolYear: true,
+  notes: true,
+  primaryContactAdultId: true,
+  adults: { select: { id: true, name: true, email: true, phone: true } },
+  students: { select: { displayName: true } },
+} as const;
+
+type RawPtaHouseholdSnapshot = {
+  id: string;
+  displayName: string;
+  schoolYear: string;
+  notes: string | null;
+  primaryContactAdultId: string | null;
+  adults: { id: string; name: string; email: string | null; phone: string | null }[];
+  students: { displayName: string }[];
+};
+
+function toPtaHouseholdSnapshot(raw: RawPtaHouseholdSnapshot): PtaHouseholdSnapshot {
+  const primaryAdult = raw.primaryContactAdultId ? raw.adults.find((adult) => adult.id === raw.primaryContactAdultId) : undefined;
+  return {
+    id: raw.id,
+    displayName: raw.displayName,
+    schoolYear: raw.schoolYear,
+    notes: raw.notes,
+    primaryContact: primaryAdult ? { name: primaryAdult.name, email: primaryAdult.email, phone: primaryAdult.phone } : null,
+    studentNames: raw.students.map((s) => s.displayName),
+  };
+}
+
+/**
+ * Matched for idempotent re-import by the same (organizationId, displayName,
+ * schoolYear) key PtaHousehold is DB-unique-constrained on — the same tuple
+ * importPtaHouseholds() (vertical-import.ts) already dedupes on. A household
+ * missing its primary contact (a partial prior import) is UPDATE_AVAILABLE,
+ * not EXACT_DUPLICATE — mirrors that function's own "only skip if a primary
+ * contact already exists" recovery logic.
+ */
+export async function matchPtaHouseholdRow(
+  organizationId: string,
+  normalized: NormalizedPtaHouseholdRow
+): Promise<DuplicateMatch> {
+  const existing = await prisma.ptaHousehold.findFirst({
+    where: { organizationId, displayName: normalized.householdName, schoolYear: normalized.schoolYear },
+    select: EXISTING_PTA_HOUSEHOLD_SELECT,
+  });
+  if (!existing) {
+    return { status: "NEW", matchedRecordId: null, matchConfidence: null };
+  }
+  return existing.primaryContactAdultId
+    ? { status: "EXACT_DUPLICATE", matchedRecordId: existing.id, matchConfidence: 100 }
+    : { status: "UPDATE_AVAILABLE", matchedRecordId: existing.id, matchConfidence: 100 };
+}
+
+// ─── HOA properties ──────────────────────────────────────────────────────────
+
+export interface PropertySnapshot {
+  id: string;
+  addressLine1: string;
+  addressLine2: string | null;
+  city: string | null;
+  state: string | null;
+  zipCode: string | null;
+  unitLabel: string | null;
+  buildingLabel: string | null;
+  propertyType: string;
+  notes: string | null;
+  owner: { firstName: string; lastName: string; email: string | null } | null;
+}
+
+const EXISTING_PROPERTY_SELECT = {
+  id: true,
+  addressLine1: true,
+  addressLine2: true,
+  city: true,
+  state: true,
+  zipCode: true,
+  unitLabel: true,
+  buildingLabel: true,
+  propertyType: true,
+  notes: true,
+  residents: {
+    where: { status: "ACTIVE" },
+    orderBy: [{ isPrimaryContact: "desc" }, { createdAt: "asc" }],
+    take: 1,
+    select: { orgMember: { select: { firstName: true, lastName: true, email: true } } },
+  },
+} satisfies Prisma.PropertySelect;
+
+type RawPropertySnapshot = {
+  id: string;
+  addressLine1: string;
+  addressLine2: string | null;
+  city: string | null;
+  state: string | null;
+  zipCode: string | null;
+  unitLabel: string | null;
+  buildingLabel: string | null;
+  propertyType: string;
+  notes: string | null;
+  residents: { orgMember: { firstName: string; lastName: string; email: string | null } }[];
+};
+
+function toPropertySnapshot(raw: RawPropertySnapshot): PropertySnapshot {
+  return {
+    id: raw.id,
+    addressLine1: raw.addressLine1,
+    addressLine2: raw.addressLine2,
+    city: raw.city,
+    state: raw.state,
+    zipCode: raw.zipCode,
+    unitLabel: raw.unitLabel,
+    buildingLabel: raw.buildingLabel,
+    propertyType: raw.propertyType,
+    notes: raw.notes,
+    owner: raw.residents[0]?.orgMember ?? null,
+  };
+}
+
+/**
+ * Matched for idempotent re-import by (organizationId, addressLine1,
+ * unitLabel) — Property has no DB unique constraint on address (unlike
+ * PtaHousehold), so this is the exact same application-level exact-string
+ * match importHoaProperties() already performs. A matched property with no
+ * owner fields mapped, or whose intended owner is already linked as an
+ * ACTIVE resident, is EXACT_DUPLICATE; anything else with owner fields
+ * present is UPDATE_AVAILABLE (there's a real owner-linking action to take).
+ */
+export async function matchHoaPropertyRow(
+  organizationId: string,
+  normalized: NormalizedHoaPropertyRow
+): Promise<DuplicateMatch> {
+  const existing = await prisma.property.findFirst({
+    where: { organizationId, addressLine1: normalized.addressLine1, unitLabel: normalized.unitLabel },
+    select: EXISTING_PROPERTY_SELECT,
+  });
+  if (!existing) {
+    return { status: "NEW", matchedRecordId: null, matchConfidence: null };
+  }
+
+  const hasOwnerFields = Boolean(normalized.ownerFirstName || normalized.ownerLastName);
+  if (!hasOwnerFields) {
+    return { status: "EXACT_DUPLICATE", matchedRecordId: existing.id, matchConfidence: 100 };
+  }
+
+  if (normalized.ownerEmail) {
+    // Deliberately not limited to the take:1 "primary contact" snapshot
+    // above (display-only) — any ACTIVE resident with this email counts,
+    // not just the one shown in the comparison table.
+    const alreadyLinked = await prisma.propertyResident.findFirst({
+      where: { organizationId, propertyId: existing.id, status: "ACTIVE", orgMember: { email: normalized.ownerEmail } },
+      select: { id: true },
+    });
+    if (alreadyLinked) {
+      return { status: "EXACT_DUPLICATE", matchedRecordId: existing.id, matchConfidence: 100 };
+    }
+  }
+
+  return { status: "UPDATE_AVAILABLE", matchedRecordId: existing.id, matchConfidence: 100 };
+}
+
 export interface FieldComparison {
   field: string;
   label: string;
@@ -206,6 +389,91 @@ export function computeFieldComparison(
   }));
 }
 
+const PTA_FIELD_LABELS: Record<string, string> = {
+  contactName: "Primary Contact Name",
+  contactEmail: "Primary Contact Email",
+  contactPhone: "Primary Contact Phone",
+  notes: "Notes",
+  newStudents: "New Students to Add",
+};
+
+/**
+ * PTA sibling of computeFieldComparison() — same live-computed, blank-means-
+ * no-opinion rules, but compared against the household's primary contact
+ * adult (a related row, not a same-table field) plus a synthetic "new
+ * students to add" entry rather than a simple field diff, since students are
+ * a list, not a scalar.
+ */
+export function computePtaHouseholdFieldComparison(normalized: NormalizedPtaHouseholdRow, existing: PtaHouseholdSnapshot): FieldComparison[] {
+  const pairs: [string, string | null, string | null][] = [
+    ["contactName", normalized.contactName || null, existing.primaryContact?.name ?? null],
+    ["contactEmail", normalized.contactEmail, existing.primaryContact?.email ?? null],
+    ["contactPhone", normalized.contactPhone, existing.primaryContact?.phone ?? null],
+    ["notes", normalized.notes, existing.notes],
+  ];
+  const comparisons = pairs.map(([field, incomingValue, currentValue]) => ({
+    field,
+    label: PTA_FIELD_LABELS[field] ?? field,
+    currentValue,
+    incomingValue,
+    differs: !isBlank(incomingValue) && !fieldsEqual(incomingValue, currentValue),
+  }));
+
+  const existingStudentNames = new Set(existing.studentNames.map((name) => name.toLowerCase().trim()));
+  const newStudents = normalized.studentNames.filter((name) => !existingStudentNames.has(name.toLowerCase().trim()));
+  comparisons.push({
+    field: "newStudents",
+    label: PTA_FIELD_LABELS.newStudents,
+    currentValue: existing.studentNames.length ? existing.studentNames.join(", ") : null,
+    incomingValue: newStudents.length ? newStudents.join(", ") : null,
+    differs: newStudents.length > 0,
+  });
+
+  return comparisons;
+}
+
+const PROPERTY_FIELD_LABELS: Record<string, string> = {
+  addressLine2: "Address Line 2",
+  city: "City",
+  state: "State",
+  zipCode: "ZIP Code",
+  buildingLabel: "Building",
+  propertyType: "Property Type",
+  notes: "Notes (board-only)",
+  ownerName: "Owner Name",
+  ownerEmail: "Owner Email",
+};
+
+/**
+ * HOA sibling of computeFieldComparison() — the "owner" fields compare
+ * against the property's current primary-contact (or otherwise first)
+ * ACTIVE resident, mirroring the same "related row, not a same-table field"
+ * shape as the PTA primary-contact comparison above.
+ */
+export function computeHoaPropertyFieldComparison(normalized: NormalizedHoaPropertyRow, existing: PropertySnapshot): FieldComparison[] {
+  const incomingOwnerName = [normalized.ownerFirstName, normalized.ownerLastName].filter(Boolean).join(" ") || null;
+  const currentOwnerName = existing.owner ? `${existing.owner.firstName} ${existing.owner.lastName}` : null;
+
+  const pairs: [string, string | null, string | null][] = [
+    ["addressLine2", normalized.addressLine2, existing.addressLine2],
+    ["city", normalized.city, existing.city],
+    ["state", normalized.state, existing.state],
+    ["zipCode", normalized.zipCode, existing.zipCode],
+    ["buildingLabel", normalized.buildingLabel, existing.buildingLabel],
+    ["propertyType", normalized.propertyType, existing.propertyType],
+    ["notes", normalized.notes, existing.notes],
+    ["ownerName", incomingOwnerName, currentOwnerName],
+    ["ownerEmail", normalized.ownerEmail, existing.owner?.email ?? null],
+  ];
+  return pairs.map(([field, incomingValue, currentValue]) => ({
+    field,
+    label: PROPERTY_FIELD_LABELS[field] ?? field,
+    currentValue,
+    incomingValue,
+    differs: !isBlank(incomingValue) && !fieldsEqual(incomingValue, currentValue),
+  }));
+}
+
 export interface RowWithMatchInput {
   matchedRecordId: string | null;
   normalizedData: unknown;
@@ -213,22 +481,56 @@ export interface RowWithMatchInput {
 
 /**
  * Shared by GET /api/imports/[id] and the batch-detail server page — one
- * batched query for every matched member on the page rather than one query
- * per row, then computeFieldComparison() per row from that in-memory map.
+ * batched query for every matched record on the page rather than one query
+ * per row. Kind-aware (PR C): dispatches to the right matched-model query
+ * and comparison function, but always returns the same generic shape —
+ * matchedRecordLabel (a plain display string) and fieldComparison — so the
+ * review UI never needs to know which kind's shape a row's match came from.
  */
 export async function attachFieldComparisons<T extends RowWithMatchInput>(
   rows: T[],
-  organizationId: string
-): Promise<(T & { matchedRecord: ExistingMemberSnapshot | null; fieldComparison: FieldComparison[] | null })[]> {
+  organizationId: string,
+  importKind: ImportKind
+): Promise<(T & { matchedRecordLabel: string | null; fieldComparison: FieldComparison[] | null })[]> {
   const matchedIds = [...new Set(rows.map((row) => row.matchedRecordId).filter((v): v is string => v !== null))];
-  const matchedMembers = matchedIds.length
-    ? await prisma.orgMember.findMany({ where: { id: { in: matchedIds }, organizationId }, select: EXISTING_MEMBER_SELECT })
-    : [];
-  const matchedById = new Map(matchedMembers.map((member) => [member.id, member]));
+  if (!matchedIds.length) {
+    return rows.map((row) => ({ ...row, matchedRecordLabel: null, fieldComparison: null }));
+  }
 
+  if (importKind === "PTA_HOUSEHOLDS") {
+    const households = await prisma.ptaHousehold.findMany({ where: { id: { in: matchedIds }, organizationId }, select: EXISTING_PTA_HOUSEHOLD_SELECT });
+    const byId = new Map(households.map((h) => [h.id, toPtaHouseholdSnapshot(h)]));
+    return rows.map((row) => {
+      const matched = row.matchedRecordId ? (byId.get(row.matchedRecordId) ?? null) : null;
+      return {
+        ...row,
+        matchedRecordLabel: matched ? `${matched.displayName} (${matched.schoolYear})` : null,
+        fieldComparison: matched ? computePtaHouseholdFieldComparison(row.normalizedData as NormalizedPtaHouseholdRow, matched) : null,
+      };
+    });
+  }
+
+  if (importKind === "HOA_PROPERTIES") {
+    const properties = await prisma.property.findMany({ where: { id: { in: matchedIds }, organizationId }, select: EXISTING_PROPERTY_SELECT });
+    const byId = new Map(properties.map((p) => [p.id, toPropertySnapshot(p)]));
+    return rows.map((row) => {
+      const matched = row.matchedRecordId ? (byId.get(row.matchedRecordId) ?? null) : null;
+      return {
+        ...row,
+        matchedRecordLabel: matched ? `${matched.addressLine1}${matched.unitLabel ? ` Unit ${matched.unitLabel}` : ""}` : null,
+        fieldComparison: matched ? computeHoaPropertyFieldComparison(row.normalizedData as NormalizedHoaPropertyRow, matched) : null,
+      };
+    });
+  }
+
+  const matchedMembers = await prisma.orgMember.findMany({ where: { id: { in: matchedIds }, organizationId }, select: EXISTING_MEMBER_SELECT });
+  const matchedById = new Map(matchedMembers.map((member) => [member.id, member]));
   return rows.map((row) => {
     const matched = row.matchedRecordId ? (matchedById.get(row.matchedRecordId) ?? null) : null;
-    const comparison = matched ? computeFieldComparison(row.normalizedData as NormalizedMemberRow, matched) : null;
-    return { ...row, matchedRecord: matched, fieldComparison: comparison };
+    return {
+      ...row,
+      matchedRecordLabel: matched ? `${matched.firstName} ${matched.lastName}${matched.email ? ` (${matched.email})` : ""}` : null,
+      fieldComparison: matched ? computeFieldComparison(row.normalizedData as NormalizedMemberRow, matched) : null,
+    };
   });
 }

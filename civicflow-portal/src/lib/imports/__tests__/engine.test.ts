@@ -23,6 +23,9 @@ const countImportRow = vi.fn();
 const findFirstOrgMember = vi.fn();
 const createOrgMember = vi.fn();
 const updateOrgMember = vi.fn();
+const findFirstPtaStudent = vi.fn();
+const findFirstPropertyResident = vi.fn();
+const findUniqueUser = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -43,6 +46,15 @@ vi.mock("@/lib/prisma", () => ({
       findFirst: (...args: unknown[]) => findFirstOrgMember(...args),
       create: (...args: unknown[]) => createOrgMember(...args),
       update: (...args: unknown[]) => updateOrgMember(...args),
+    },
+    ptaStudent: {
+      findFirst: (...args: unknown[]) => findFirstPtaStudent(...args),
+    },
+    propertyResident: {
+      findFirst: (...args: unknown[]) => findFirstPropertyResident(...args),
+    },
+    user: {
+      findUnique: (...args: unknown[]) => findUniqueUser(...args),
     },
   },
 }));
@@ -66,13 +78,42 @@ vi.mock("../capacity", () => ({
   importKindConsumesCapacity: (...args: [string]) => importKindConsumesCapacity(...args),
 }));
 
-// The real matching-tier logic (email/phone/name+corroborating) has its own
-// dedicated test file (duplicate-matching.test.ts) — analyzeBatch's own
-// tests only need to prove it calls matchCommunityMemberRow() and persists
-// whatever it returns, not re-derive the tiers themselves.
+// The real matching-tier logic (email/phone/name+corroborating, and PTA/HOA's
+// deterministic key matching) has its own dedicated test file
+// (duplicate-matching.test.ts) — analyzeBatch's own tests only need to prove
+// it calls the right matcher per kind and persists whatever it returns.
 const matchCommunityMemberRow = vi.fn();
+const matchPtaHouseholdRow = vi.fn();
+const matchHoaPropertyRow = vi.fn();
 vi.mock("../duplicate-matching", () => ({
   matchCommunityMemberRow: (...args: unknown[]) => matchCommunityMemberRow(...args),
+  matchPtaHouseholdRow: (...args: unknown[]) => matchPtaHouseholdRow(...args),
+  matchHoaPropertyRow: (...args: unknown[]) => matchHoaPropertyRow(...args),
+}));
+
+// Same rationale — createPtaHousehold/addPtaHouseholdAdult/addPtaStudent and
+// createProperty/assignPropertyResident are the shared service layer, tested
+// on their own; executeBatch()'s PTA/HOA tests only need to prove it calls
+// the right ones with the right arguments per decision.
+const createPtaHousehold = vi.fn();
+const addPtaHouseholdAdult = vi.fn();
+const addPtaStudent = vi.fn();
+vi.mock("@/lib/labs/pta/households", () => ({
+  createPtaHousehold: (...args: unknown[]) => createPtaHousehold(...args),
+  addPtaHouseholdAdult: (...args: unknown[]) => addPtaHouseholdAdult(...args),
+  addPtaStudent: (...args: unknown[]) => addPtaStudent(...args),
+}));
+
+const createProperty = vi.fn();
+const assignPropertyResident = vi.fn();
+vi.mock("@/lib/hoa/properties", () => ({
+  createProperty: (...args: unknown[]) => createProperty(...args),
+  assignPropertyResident: (...args: unknown[]) => assignPropertyResident(...args),
+}));
+
+const checkMemberLimit = vi.fn();
+vi.mock("@/lib/plan-gate", () => ({
+  checkMemberLimit: (...args: unknown[]) => checkMemberLimit(...args),
 }));
 
 vi.mock("xlsx", () => ({
@@ -91,6 +132,7 @@ function makeBatch(overrides: Record<string, unknown> = {}) {
     importKind: "COMMUNITY_MEMBERS",
     storageObjectKey: "organizations/org-a/imports/batch-1/source/file.csv",
     columnMapping: { "First Name": "firstName", "Last Name": "lastName", Email: "email" },
+    uploadedByUserId: "user-1",
     ...overrides,
   };
 }
@@ -100,6 +142,9 @@ beforeEach(() => {
   FIXTURE_ROWS = [];
   transitionImportBatch.mockResolvedValue({});
   updateManyImportBatch.mockResolvedValue({ count: 1 });
+  findUniqueUser.mockResolvedValue({ email: "staff@example.com" });
+  findFirstPtaStudent.mockResolvedValue(null);
+  findFirstPropertyResident.mockResolvedValue(null);
 });
 
 describe("analyzeBatch", () => {
@@ -233,7 +278,7 @@ describe("executeBatch", () => {
     expect(createOrgMember).toHaveBeenCalled();
     expect(updateImportRow).toHaveBeenCalledWith({
       where: { id: "row-1" },
-      data: { status: "IMPORTED", importedRecordId: "member-new", processedAt: expect.any(Date) },
+      data: { status: "IMPORTED", importedRecordId: "member-new", errorMessage: null, processedAt: expect.any(Date) },
     });
     expect(transitionImportBatch).toHaveBeenCalledWith(expect.objectContaining({ to: "COMPLETED" }));
   });
@@ -383,5 +428,243 @@ describe("resumeBatch", () => {
     expect(transitionImportBatch).toHaveBeenCalledWith(
       expect.objectContaining({ batchId: "batch-1", to: "IMPORTING", actorUserId: "user-1" })
     );
+  });
+});
+
+// ─── PR C: PTA households ───────────────────────────────────────────────────
+
+describe("analyzeBatch — PTA households (PR C)", () => {
+  it("dispatches to matchPtaHouseholdRow (not matchCommunityMemberRow) and classifies a NEW household", async () => {
+    findFirstImportBatch.mockResolvedValueOnce(
+      makeBatch({ importKind: "PTA_HOUSEHOLDS", columnMapping: { "Household Name": "householdName", "School Year": "schoolYear", "Contact Name": "contactName" } })
+    );
+    getImportSourceFile.mockResolvedValueOnce(Buffer.from(""));
+    FIXTURE_ROWS = [{ "Household Name": "The Doe Family", "School Year": "2026-2027", "Contact Name": "Jane Doe" }];
+    matchPtaHouseholdRow.mockResolvedValueOnce({ status: "NEW", matchedRecordId: null, matchConfidence: null });
+
+    const { analyzeBatch } = await import("../engine");
+    await analyzeBatch("batch-1", "org-a");
+
+    expect(matchPtaHouseholdRow).toHaveBeenCalled();
+    expect(matchCommunityMemberRow).not.toHaveBeenCalled();
+    expect(createImportRow).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "NEW" }) }));
+  });
+
+  it("classifies a household row missing a required field as INVALID without ever calling the matcher", async () => {
+    findFirstImportBatch.mockResolvedValueOnce(makeBatch({ importKind: "PTA_HOUSEHOLDS", columnMapping: { "Household Name": "householdName" } }));
+    getImportSourceFile.mockResolvedValueOnce(Buffer.from(""));
+    FIXTURE_ROWS = [{ "Household Name": "The Doe Family" }]; // missing schoolYear/contactName
+
+    const { analyzeBatch } = await import("../engine");
+    await analyzeBatch("batch-1", "org-a");
+
+    expect(createImportRow).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "INVALID" }) }));
+    expect(matchPtaHouseholdRow).not.toHaveBeenCalled();
+  });
+});
+
+describe("executeBatch — PTA households (PR C)", () => {
+  const householdRow = (overrides: Record<string, unknown> = {}) => ({
+    id: "row-1",
+    decision: "IMPORT_NEW",
+    matchedRecordId: null,
+    normalizedData: {
+      householdName: "The Doe Family",
+      schoolYear: "2026-2027",
+      contactName: "Jane Doe",
+      contactEmail: "jane@example.com",
+      contactPhone: null,
+      studentNames: ["Alex Doe"],
+      notes: null,
+    },
+    ...overrides,
+  });
+
+  it("creates a new household, adds the primary contact adult, and adds students for an IMPORT_NEW row", async () => {
+    findFirstImportBatch.mockResolvedValueOnce(makeBatch({ importKind: "PTA_HOUSEHOLDS" }));
+    findManyImportRow.mockResolvedValueOnce([householdRow()]);
+    createPtaHousehold.mockResolvedValueOnce({ id: "household-new" });
+    countImportRow.mockResolvedValueOnce(0);
+
+    const { executeBatch } = await import("../engine");
+    await executeBatch("batch-1", "org-a");
+
+    expect(createPtaHousehold).toHaveBeenCalledWith(
+      expect.objectContaining({ displayName: "The Doe Family", schoolYear: "2026-2027", actorUserId: "user-1", actorEmail: "staff@example.com" })
+    );
+    expect(addPtaHouseholdAdult).toHaveBeenCalledWith(
+      expect.objectContaining({ householdId: "household-new", name: "Jane Doe", makePrimaryContact: true })
+    );
+    expect(addPtaStudent).toHaveBeenCalledWith(expect.objectContaining({ householdId: "household-new", displayName: "Alex Doe" }));
+    expect(updateImportRow).toHaveBeenCalledWith({
+      where: { id: "row-1" },
+      data: { status: "IMPORTED", importedRecordId: "household-new", errorMessage: null, processedAt: expect.any(Date) },
+    });
+  });
+
+  it("reuses the matched household id for UPDATE_EXISTING instead of recreating it", async () => {
+    findFirstImportBatch.mockResolvedValueOnce(makeBatch({ importKind: "PTA_HOUSEHOLDS" }));
+    findManyImportRow.mockResolvedValueOnce([householdRow({ decision: "UPDATE_EXISTING", matchedRecordId: "household-existing" })]);
+    countImportRow.mockResolvedValueOnce(0);
+
+    const { executeBatch } = await import("../engine");
+    await executeBatch("batch-1", "org-a");
+
+    expect(createPtaHousehold).not.toHaveBeenCalled();
+    expect(addPtaHouseholdAdult).toHaveBeenCalledWith(expect.objectContaining({ householdId: "household-existing" }));
+  });
+
+  it("skips a student name already recorded on the household (idempotent per name, same as importPtaHouseholds())", async () => {
+    findFirstImportBatch.mockResolvedValueOnce(makeBatch({ importKind: "PTA_HOUSEHOLDS" }));
+    findManyImportRow.mockResolvedValueOnce([householdRow({ decision: "UPDATE_EXISTING", matchedRecordId: "household-existing" })]);
+    findFirstPtaStudent.mockResolvedValueOnce({ id: "student-existing" });
+    countImportRow.mockResolvedValueOnce(0);
+
+    const { executeBatch } = await import("../engine");
+    await executeBatch("batch-1", "org-a");
+
+    expect(addPtaStudent).not.toHaveBeenCalled();
+  });
+
+  it("throws IMPORT_MISSING_ACTOR without ever claiming the batch when uploadedByUserId is missing", async () => {
+    findFirstImportBatch.mockResolvedValueOnce(makeBatch({ importKind: "PTA_HOUSEHOLDS", uploadedByUserId: null }));
+
+    const { executeBatch } = await import("../engine");
+    const { ImportError } = await import("../errors");
+    await expect(executeBatch("batch-1", "org-a")).rejects.toBeInstanceOf(ImportError);
+    expect(updateManyImportBatch).not.toHaveBeenCalled(); // claimBatchForProcessing never reached
+  });
+});
+
+// ─── PR C: HOA properties ───────────────────────────────────────────────────
+
+describe("analyzeBatch — HOA properties (PR C)", () => {
+  it("dispatches to matchHoaPropertyRow and classifies a NEW property", async () => {
+    findFirstImportBatch.mockResolvedValueOnce(makeBatch({ importKind: "HOA_PROPERTIES", columnMapping: { "Street Address": "addressLine1" } }));
+    getImportSourceFile.mockResolvedValueOnce(Buffer.from(""));
+    FIXTURE_ROWS = [{ "Street Address": "123 Main St" }];
+    matchHoaPropertyRow.mockResolvedValueOnce({ status: "NEW", matchedRecordId: null, matchConfidence: null });
+
+    const { analyzeBatch } = await import("../engine");
+    await analyzeBatch("batch-1", "org-a");
+
+    expect(matchHoaPropertyRow).toHaveBeenCalled();
+    expect(createImportRow).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "NEW" }) }));
+  });
+
+  it("classifies a property row missing the required street address as INVALID without calling the matcher", async () => {
+    findFirstImportBatch.mockResolvedValueOnce(makeBatch({ importKind: "HOA_PROPERTIES", columnMapping: { "Street Address": "addressLine1" } }));
+    getImportSourceFile.mockResolvedValueOnce(Buffer.from(""));
+    FIXTURE_ROWS = [{ "Street Address": "" }];
+
+    const { analyzeBatch } = await import("../engine");
+    await analyzeBatch("batch-1", "org-a");
+
+    expect(createImportRow).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "INVALID" }) }));
+    expect(matchHoaPropertyRow).not.toHaveBeenCalled();
+  });
+});
+
+describe("executeBatch — HOA properties (PR C)", () => {
+  const propertyRow = (overrides: Record<string, unknown> = {}) => ({
+    id: "row-1",
+    decision: "IMPORT_NEW",
+    matchedRecordId: null,
+    normalizedData: {
+      addressLine1: "123 Main St",
+      addressLine2: null,
+      city: null,
+      state: null,
+      zipCode: null,
+      unitLabel: null,
+      buildingLabel: null,
+      propertyType: null,
+      ownerFirstName: "Sam",
+      ownerLastName: "Owner",
+      ownerEmail: "sam@example.com",
+      ownerEmailError: null,
+      relationshipType: null,
+      notes: null,
+    },
+    ...overrides,
+  });
+
+  it("creates a new property and links a newly-created owner for an IMPORT_NEW row", async () => {
+    findFirstImportBatch.mockResolvedValueOnce(makeBatch({ importKind: "HOA_PROPERTIES" }));
+    findManyImportRow.mockResolvedValueOnce([propertyRow()]);
+    createProperty.mockResolvedValueOnce({ id: "property-new" });
+    findFirstOrgMember.mockResolvedValueOnce(null); // no existing owner member by email
+    checkMemberLimit.mockResolvedValueOnce({ allowed: true, current: 10, limit: 500 });
+    createOrgMember.mockResolvedValueOnce({ id: "owner-new" });
+    countImportRow.mockResolvedValueOnce(0);
+
+    const { executeBatch } = await import("../engine");
+    await executeBatch("batch-1", "org-a");
+
+    expect(createProperty).toHaveBeenCalledWith(expect.objectContaining({ addressLine1: "123 Main St", actorUserId: "user-1" }));
+    expect(createOrgMember).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ firstName: "Sam", lastName: "Owner" }) }));
+    expect(assignPropertyResident).toHaveBeenCalledWith(
+      expect.objectContaining({ propertyId: "property-new", orgMemberId: "owner-new", isPrimaryContact: true })
+    );
+    expect(updateImportRow).toHaveBeenCalledWith({
+      where: { id: "row-1" },
+      data: { status: "IMPORTED", importedRecordId: "property-new", errorMessage: null, processedAt: expect.any(Date) },
+    });
+  });
+
+  it("reuses an existing OrgMember matched by owner email instead of creating a duplicate", async () => {
+    findFirstImportBatch.mockResolvedValueOnce(makeBatch({ importKind: "HOA_PROPERTIES" }));
+    findManyImportRow.mockResolvedValueOnce([propertyRow({ decision: "UPDATE_EXISTING", matchedRecordId: "property-existing" })]);
+    findFirstOrgMember.mockResolvedValueOnce({ id: "owner-existing" });
+    countImportRow.mockResolvedValueOnce(0);
+
+    const { executeBatch } = await import("../engine");
+    await executeBatch("batch-1", "org-a");
+
+    expect(createProperty).not.toHaveBeenCalled();
+    expect(createOrgMember).not.toHaveBeenCalled();
+    expect(checkMemberLimit).not.toHaveBeenCalled();
+    expect(assignPropertyResident).toHaveBeenCalledWith(expect.objectContaining({ propertyId: "property-existing", orgMemberId: "owner-existing" }));
+  });
+
+  it("SECURITY/DATA-INTEGRITY: property row still succeeds (IMPORTED) when the member limit is hit — owner link skipped with a note, never BLOCKED_PLAN_LIMIT or FAILED", async () => {
+    // Mirrors importHoaProperties()'s existing graceful-degradation behavior
+    // exactly (vertical-import.ts) — this is a deliberate, preserved-from-
+    // today behavior, not a regression, per the PR C capacity decision.
+    findFirstImportBatch.mockResolvedValueOnce(makeBatch({ importKind: "HOA_PROPERTIES" }));
+    findManyImportRow.mockResolvedValueOnce([propertyRow()]);
+    createProperty.mockResolvedValueOnce({ id: "property-new" });
+    findFirstOrgMember.mockResolvedValueOnce(null);
+    checkMemberLimit.mockResolvedValueOnce({ allowed: false, current: 500, limit: 500 });
+    countImportRow.mockResolvedValueOnce(0);
+
+    const { executeBatch } = await import("../engine");
+    await executeBatch("batch-1", "org-a");
+
+    expect(createOrgMember).not.toHaveBeenCalled();
+    expect(assignPropertyResident).not.toHaveBeenCalled();
+    expect(updateImportRow).toHaveBeenCalledWith({
+      where: { id: "row-1" },
+      data: {
+        status: "IMPORTED",
+        importedRecordId: "property-new",
+        errorMessage: expect.stringContaining("member limit reached"),
+        processedAt: expect.any(Date),
+      },
+    });
+  });
+
+  it("creates the property with no owner-linking attempt at all when no owner fields are mapped", async () => {
+    findFirstImportBatch.mockResolvedValueOnce(makeBatch({ importKind: "HOA_PROPERTIES" }));
+    findManyImportRow.mockResolvedValueOnce([propertyRow({ normalizedData: { ...propertyRow().normalizedData, ownerFirstName: null, ownerLastName: null } })]);
+    createProperty.mockResolvedValueOnce({ id: "property-new" });
+    countImportRow.mockResolvedValueOnce(0);
+
+    const { executeBatch } = await import("../engine");
+    await executeBatch("batch-1", "org-a");
+
+    expect(findFirstOrgMember).not.toHaveBeenCalled();
+    expect(checkMemberLimit).not.toHaveBeenCalled();
+    expect(assignPropertyResident).not.toHaveBeenCalled();
   });
 });

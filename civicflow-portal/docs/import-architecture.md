@@ -49,3 +49,14 @@ One small, additive change to the base `src/lib/storage.ts`: a `getObjectBuffer(
 - Audit logging: `createAuditEvent()` (`src/lib/audit.ts`), unchanged — impersonation handling is already centralized there.
 
 See also: [import-resume-and-plan-limits.md](./import-resume-and-plan-limits.md), [import-row-statuses.md](./import-row-statuses.md).
+
+## PR C — vertical rollout to PTA households and HOA properties
+
+PR C wires `PTA_HOUSEHOLDS` and `HOA_PROPERTIES` (reserved-only `ImportKind` values since PR A) through the same engine, `src/lib/imports/duplicate-matching.ts`, and `src/lib/imports/row-normalization.ts` Community members already use — no new migration, since `ImportBatch`/`ImportRow` were already kind-agnostic. Two scope decisions, confirmed with the user before implementation:
+
+- **Union Payroll Checkoff stays out of scope.** It has no dedicated schema and runs entirely through `PaymentImportBatch`/`PaymentImportItem` — the financial-row pipeline this program's own model-architecture decision (above) already said isn't a fit for the member-duplicate-review UI. Nothing changed on that pathway.
+- **No new plan-limit dimension for households or properties.** Neither has ever consumed one. The one place HOA imports do touch the member limit — creating an owner `OrgMember` for a property row — is preserved exactly as `importHoaProperties()` (`src/lib/vertical-import.ts`) already handles it: a graceful degradation (the property still imports; only the owner link is skipped, with a note) via a direct `checkMemberLimit()` call inside `executeHoaPropertyRow()`, not the batch-level `PAUSED_PLAN_LIMIT` machinery `importKindConsumesCapacity()` gates.
+
+Both PTA and HOA rows are created/updated exclusively through the same service-layer functions the officer UI and the old `importPtaHouseholds()`/`importHoaProperties()` already call (`createPtaHousehold`/`addPtaHouseholdAdult`/`addPtaStudent`, `createProperty`/`assignPropertyResident`) — never raw Prisma writes — so audit logging and tenant scoping are identical regardless of which path created a record. Matching uses each kind's existing deterministic identity key rather than Community's fuzzy phone/name tiers (`PtaHousehold`'s own `(organizationId, displayName, schoolYear)` unique constraint; the same `(organizationId, addressLine1, unitLabel)` exact-match `importHoaProperties()` already used), so neither kind ever produces `POSSIBLE_DUPLICATE`.
+
+The old `/api/import` (`importPtaHouseholds`/`importHoaProperties`) and `/import` page are left completely untouched — same coexistence pattern PR A already established for Community's old `/api/import` path (still live, unlabeled) alongside the new engine's own "(Beta)" entry point.

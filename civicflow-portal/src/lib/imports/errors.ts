@@ -41,6 +41,11 @@ export const IMPORT_ERROR_CODES = [
   "IMPORT_VALIDATION_ERROR",
   /** Batch or row not found at all (as opposed to found-but-cross-tenant). */
   "IMPORT_NOT_FOUND",
+  /** PTA/HOA execution requires a real uploadedByUserId for service-layer
+   * audit-event attribution — should never happen in practice (the create
+   * route always sets it), but the engine refuses to silently attribute
+   * writes to nobody rather than assume. */
+  "IMPORT_MISSING_ACTOR",
 ] as const;
 
 export type ImportErrorCode = (typeof IMPORT_ERROR_CODES)[number];
@@ -57,6 +62,7 @@ const STATUS_FOR_CODE: Record<ImportErrorCode, number> = {
   IMPORT_SOURCE_FILE_EXPIRED: 410,
   IMPORT_VALIDATION_ERROR: 400,
   IMPORT_NOT_FOUND: 404,
+  IMPORT_MISSING_ACTOR: 500,
 };
 
 export class ImportError extends Error {

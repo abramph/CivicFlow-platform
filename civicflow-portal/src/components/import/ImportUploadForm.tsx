@@ -3,32 +3,26 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
+import type { ImportKind } from "@prisma/client";
 import { fieldClassName } from "@/components/forms/formStyles";
+import { type ImportType, FIELD_DEFS, COMMON_ALIASES } from "@/lib/imports/field-defs";
 
-const FIELD_DEFS: { key: string; label: string; required: boolean }[] = [
-  { key: "firstName", label: "First Name", required: false },
-  { key: "lastName", label: "Last Name", required: false },
-  { key: "email", label: "Email", required: false },
-  { key: "phone", label: "Phone", required: false },
-  { key: "joinDate", label: "Join Date", required: false },
-  { key: "address", label: "Street Address", required: false },
-  { key: "city", label: "City", required: false },
-  { key: "state", label: "State", required: false },
-  { key: "zip", label: "ZIP Code", required: false },
-];
-
-const COMMON_ALIASES: Record<string, string> = {
-  "first name": "firstName", first_name: "firstName", firstname: "firstName",
-  "last name": "lastName", last_name: "lastName", lastname: "lastName",
-  email: "email", "email address": "email", "e-mail": "email",
-  phone: "phone", "phone number": "phone", mobile: "phone",
-  "join date": "joinDate", joined: "joinDate", join_date: "joinDate",
-  address: "address", street: "address", "street address": "address",
-  city: "city", state: "state", zip: "zip", "zip code": "zip", "postal code": "zip",
+/**
+ * Resumable Import Program (PR C) — the same upload/map/submit flow PR A
+ * shipped for Community members (as NewMemberImportForm), now parameterized
+ * by kind so PTA households and HOA properties share it instead of getting
+ * near-duplicate components. Field defs/aliases come from
+ * src/lib/imports/field-defs.ts — the exact same entries the old `/import`
+ * page's ImportPageClient.tsx already uses, not redesigned.
+ */
+const KIND_TO_FIELD_TYPE: Record<ImportKind, ImportType> = {
+  COMMUNITY_MEMBERS: "members",
+  PTA_HOUSEHOLDS: "pta-households",
+  HOA_PROPERTIES: "hoa-properties",
 };
 
-function autoMap(headers: string[]): Record<string, string> {
-  const fields = FIELD_DEFS.map((f) => f.key);
+function autoMap(headers: string[], fieldType: ImportType): Record<string, string> {
+  const fields = FIELD_DEFS[fieldType].map((f) => f.key);
   const result: Record<string, string> = {};
   for (const header of headers) {
     const matched = COMMON_ALIASES[header.toLowerCase().trim()];
@@ -39,10 +33,25 @@ function autoMap(headers: string[]): Record<string, string> {
   return result;
 }
 
+/** Community keeps its original "at least one of first/last name" rule
+ * (both are marked required in FIELD_DEFS, but either alone is acceptable).
+ * PTA/HOA require every field FIELD_DEFS marks required — householdName/
+ * schoolYear/contactName, or addressLine1, respectively. */
+function isMappingComplete(fieldType: ImportType, mapping: Record<string, string>): boolean {
+  const mappedFields = new Set(Object.values(mapping));
+  if (fieldType === "members") {
+    return mappedFields.has("firstName") || mappedFields.has("lastName");
+  }
+  return FIELD_DEFS[fieldType].filter((f) => f.required).every((f) => mappedFields.has(f.key));
+}
+
 type Step = "upload" | "map" | "submitting";
 
-export function NewMemberImportForm() {
+export function ImportUploadForm({ kind }: { kind: ImportKind }) {
   const router = useRouter();
+  const fieldType = KIND_TO_FIELD_TYPE[kind];
+  const fieldDefs = FIELD_DEFS[fieldType];
+
   const [step, setStep] = useState<Step>("upload");
   const [file, setFile] = useState<File | null>(null);
   const [headers, setHeaders] = useState<string[]>([]);
@@ -66,7 +75,7 @@ export function NewMemberImportForm() {
       }
       const fileHeaders = Object.keys(rows[0]);
       setHeaders(fileHeaders);
-      setMapping(autoMap(fileHeaders));
+      setMapping(autoMap(fileHeaders, fieldType));
       setStep("map");
     } catch {
       setError("Could not read that file. Please upload a CSV or Excel file.");
@@ -81,6 +90,7 @@ export function NewMemberImportForm() {
       const form = new FormData();
       form.set("file", file);
       form.set("mapping", JSON.stringify(mapping));
+      form.set("kind", kind);
       if (forceNewAnalysis) form.set("forceNewAnalysis", "1");
 
       const response = await fetch("/api/imports", { method: "POST", body: form });
@@ -161,7 +171,7 @@ export function NewMemberImportForm() {
         </div>
       ) : (
         <>
-          <p className="text-sm text-slate-700">Match each column in your file to a member field.</p>
+          <p className="text-sm text-slate-700">Match each column in your file to a field.</p>
           <div className="space-y-2">
             {headers.map((header) => (
               <div key={header} className="flex items-center gap-3">
@@ -172,7 +182,7 @@ export function NewMemberImportForm() {
                   onChange={(event) => setMapping((current) => ({ ...current, [header]: event.target.value }))}
                 >
                   <option value="">Don&apos;t import</option>
-                  {FIELD_DEFS.map((field) => (
+                  {fieldDefs.map((field) => (
                     <option key={field.key} value={field.key}>
                       {field.label}
                     </option>
@@ -184,7 +194,7 @@ export function NewMemberImportForm() {
           <div className="flex gap-2">
             <button
               type="button"
-              disabled={step === "submitting" || !Object.values(mapping).includes("firstName") && !Object.values(mapping).includes("lastName")}
+              disabled={step === "submitting" || !isMappingComplete(fieldType, mapping)}
               onClick={() => submit(false)}
               className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:bg-slate-400"
             >

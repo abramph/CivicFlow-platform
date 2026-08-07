@@ -1,19 +1,38 @@
 import * as XLSX from "xlsx";
-import { Prisma } from "@prisma/client";
+import { Prisma, type ImportKind } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { transitionImportBatch } from "@/lib/imports/batch-state-machine";
 import { getImportSourceFile } from "@/lib/imports/storage";
-import { computeRowFingerprint, normalizeMemberRow, type NormalizedMemberRow } from "@/lib/imports/row-normalization";
+import {
+  computeRowFingerprint,
+  normalizeMemberRow,
+  type NormalizedMemberRow,
+  computePtaHouseholdFingerprint,
+  normalizePtaHouseholdRow,
+  type NormalizedPtaHouseholdRow,
+  computeHoaPropertyFingerprint,
+  normalizeHoaPropertyRow,
+  type NormalizedHoaPropertyRow,
+} from "@/lib/imports/row-normalization";
 import { buildPlanLimitSnapshot, checkImportCapacity, importKindConsumesCapacity } from "@/lib/imports/capacity";
-import { matchCommunityMemberRow } from "@/lib/imports/duplicate-matching";
+import { matchCommunityMemberRow, matchPtaHouseholdRow, matchHoaPropertyRow } from "@/lib/imports/duplicate-matching";
+import { createPtaHousehold, addPtaHouseholdAdult, addPtaStudent } from "@/lib/labs/pta/households";
+import { createProperty, assignPropertyResident } from "@/lib/hoa/properties";
+import { checkMemberLimit } from "@/lib/plan-gate";
 import { ImportError } from "@/lib/imports/errors";
 
 /**
  * Resumable Import Program (PR A) — the worker/engine core. Reuses the
  * platform's existing cron/worker convention (see
  * src/lib/labs/meeting-intelligence/worker.ts) — no new queue
- * infrastructure. Community members is the only vertical wired in PR A;
- * PTA/HOA/Union follow in PR C once this foundation is proven.
+ * infrastructure. Community members was the only vertical wired in PR A.
+ *
+ * PR C adds PTA households and HOA properties, dispatched by ImportKind in
+ * both analyzeBatch() and executeBatch(). PTA/HOA rows are created/updated
+ * exclusively through the same service-layer functions the officer UI and
+ * the old importPtaHouseholds()/importHoaProperties() (vertical-import.ts)
+ * already use — never raw Prisma writes — so validation, audit logging, and
+ * tenant scoping stay identical regardless of which path created a record.
  */
 
 const ANALYZE_BATCH_LIMIT = 10;
@@ -69,6 +88,73 @@ function parseSpreadsheet(buffer: Buffer): Record<string, string>[] {
  * constraint (P2002), caught and skipped rather than erroring — same idiom
  * as src/lib/hoa/violations.ts's isUniqueConstraintViolation.
  */
+type AnalyzedRowStatus = "NEW" | "EXACT_DUPLICATE" | "POSSIBLE_DUPLICATE" | "UPDATE_AVAILABLE" | "INVALID";
+type AnalyzedNormalizedData = NormalizedMemberRow | NormalizedPtaHouseholdRow | NormalizedHoaPropertyRow;
+
+interface AnalyzedRow {
+  normalized: AnalyzedNormalizedData;
+  status: AnalyzedRowStatus;
+  matchedRecordId: string | null;
+  matchConfidence: number | null;
+  errorMessage: string | null;
+}
+
+async function analyzeCommunityMemberRow(raw: Record<string, string>, mapping: Record<string, string>, organizationId: string): Promise<AnalyzedRow> {
+  const normalized = normalizeMemberRow(raw, mapping);
+  if (!normalized.firstName && !normalized.lastName) {
+    return { normalized, status: "INVALID", matchedRecordId: null, matchConfidence: null, errorMessage: "First name and last name are both blank" };
+  }
+  if (normalized.emailError) {
+    return { normalized, status: "INVALID", matchedRecordId: null, matchConfidence: null, errorMessage: normalized.emailError };
+  }
+  const match = await matchCommunityMemberRow(organizationId, normalized);
+  return { normalized, status: match.status, matchedRecordId: match.matchedRecordId, matchConfidence: match.matchConfidence, errorMessage: null };
+}
+
+/** Same required-field checks as importPtaHouseholds() (vertical-import.ts). */
+async function analyzePtaHouseholdRow(raw: Record<string, string>, mapping: Record<string, string>, organizationId: string): Promise<AnalyzedRow> {
+  const normalized = normalizePtaHouseholdRow(raw, mapping);
+  if (!normalized.householdName) {
+    return { normalized, status: "INVALID", matchedRecordId: null, matchConfidence: null, errorMessage: "Household name is required" };
+  }
+  if (!normalized.schoolYear) {
+    return { normalized, status: "INVALID", matchedRecordId: null, matchConfidence: null, errorMessage: "School year is required" };
+  }
+  if (!normalized.contactName) {
+    return { normalized, status: "INVALID", matchedRecordId: null, matchConfidence: null, errorMessage: "Primary contact name is required" };
+  }
+  if (normalized.contactEmailError) {
+    return { normalized, status: "INVALID", matchedRecordId: null, matchConfidence: null, errorMessage: normalized.contactEmailError };
+  }
+  const match = await matchPtaHouseholdRow(organizationId, normalized);
+  return { normalized, status: match.status, matchedRecordId: match.matchedRecordId, matchConfidence: match.matchConfidence, errorMessage: null };
+}
+
+/** Same required-field check as importHoaProperties() (vertical-import.ts). */
+async function analyzeHoaPropertyRow(raw: Record<string, string>, mapping: Record<string, string>, organizationId: string): Promise<AnalyzedRow> {
+  const normalized = normalizeHoaPropertyRow(raw, mapping);
+  if (!normalized.addressLine1) {
+    return { normalized, status: "INVALID", matchedRecordId: null, matchConfidence: null, errorMessage: "Street address is required" };
+  }
+  if (normalized.ownerEmailError) {
+    return { normalized, status: "INVALID", matchedRecordId: null, matchConfidence: null, errorMessage: normalized.ownerEmailError };
+  }
+  const match = await matchHoaPropertyRow(organizationId, normalized);
+  return { normalized, status: match.status, matchedRecordId: match.matchedRecordId, matchConfidence: match.matchConfidence, errorMessage: null };
+}
+
+async function analyzeRow(importKind: ImportKind, raw: Record<string, string>, mapping: Record<string, string>, organizationId: string): Promise<AnalyzedRow> {
+  if (importKind === "PTA_HOUSEHOLDS") return analyzePtaHouseholdRow(raw, mapping, organizationId);
+  if (importKind === "HOA_PROPERTIES") return analyzeHoaPropertyRow(raw, mapping, organizationId);
+  return analyzeCommunityMemberRow(raw, mapping, organizationId);
+}
+
+function fingerprintFor(importKind: ImportKind, normalized: AnalyzedNormalizedData): string {
+  if (importKind === "PTA_HOUSEHOLDS") return computePtaHouseholdFingerprint(normalized as NormalizedPtaHouseholdRow);
+  if (importKind === "HOA_PROPERTIES") return computeHoaPropertyFingerprint(normalized as NormalizedHoaPropertyRow);
+  return computeRowFingerprint(normalized as NormalizedMemberRow);
+}
+
 export async function analyzeBatch(batchId: string, organizationId: string): Promise<void> {
   const batch = await prisma.importBatch.findFirst({ where: { id: batchId, organizationId } });
   if (!batch) throw new ImportError("IMPORT_NOT_FOUND", "Import batch not found.");
@@ -93,31 +179,13 @@ export async function analyzeBatch(batchId: string, organizationId: string): Pro
   for (let i = 0; i < rows.length; i++) {
     const rowNumber = i + 2; // header is row 1 — matches importMembers()'s `i + 2` convention
     const raw = rows[i];
-    const normalized = normalizeMemberRow(raw, mapping);
-    const fingerprint = computeRowFingerprint(normalized);
+    const analyzed = await analyzeRow(batch.importKind, raw, mapping, organizationId);
+    const fingerprint = fingerprintFor(batch.importKind, analyzed.normalized);
 
-    let status: "NEW" | "EXACT_DUPLICATE" | "POSSIBLE_DUPLICATE" | "UPDATE_AVAILABLE" | "INVALID";
-    let matchedRecordId: string | null = null;
-    let matchConfidence: number | null = null;
-    let errorMessage: string | null = null;
-
-    if (!normalized.firstName && !normalized.lastName) {
-      status = "INVALID";
-      errorMessage = "First name and last name are both blank";
-      invalidCount += 1;
-    } else if (normalized.emailError) {
-      status = "INVALID";
-      errorMessage = normalized.emailError;
-      invalidCount += 1;
-    } else {
-      const match = await matchCommunityMemberRow(organizationId, normalized);
-      status = match.status;
-      matchedRecordId = match.matchedRecordId;
-      matchConfidence = match.matchConfidence;
-      if (status === "NEW") newCount += 1;
-      else if (status === "UPDATE_AVAILABLE") updateCount += 1;
-      else duplicateCount += 1; // EXACT_DUPLICATE or POSSIBLE_DUPLICATE
-    }
+    if (analyzed.status === "INVALID") invalidCount += 1;
+    else if (analyzed.status === "NEW") newCount += 1;
+    else if (analyzed.status === "UPDATE_AVAILABLE") updateCount += 1;
+    else duplicateCount += 1; // EXACT_DUPLICATE or POSSIBLE_DUPLICATE
 
     try {
       await prisma.importRow.create({
@@ -126,12 +194,12 @@ export async function analyzeBatch(batchId: string, organizationId: string): Pro
           organizationId,
           rowNumber,
           rawData: raw,
-          normalizedData: normalized as unknown as Prisma.InputJsonValue,
+          normalizedData: analyzed.normalized as unknown as Prisma.InputJsonValue,
           fingerprint,
-          status,
-          matchedRecordId,
-          matchConfidence,
-          errorMessage,
+          status: analyzed.status,
+          matchedRecordId: analyzed.matchedRecordId,
+          matchConfidence: analyzed.matchConfidence,
+          errorMessage: analyzed.errorMessage,
         },
       });
     } catch (error) {
@@ -230,6 +298,176 @@ function memberCreateData(normalized: NormalizedMemberRow, organizationId: strin
   };
 }
 
+interface ExecutedRow {
+  importedRecordId: string;
+  /** Non-null only for the HOA owner-member-limit graceful-degradation case
+   * below — the row still succeeds (IMPORTED), this is surfaced as context,
+   * never as a failure reason. */
+  note: string | null;
+}
+
+async function executeCommunityMemberRow(
+  row: { matchedRecordId: string | null; decision: string | null; normalizedData: unknown },
+  organizationId: string
+): Promise<ExecutedRow> {
+  const normalized = row.normalizedData as unknown as NormalizedMemberRow;
+  if (row.decision === "UPDATE_EXISTING" && row.matchedRecordId) {
+    const updated = await prisma.orgMember.update({ where: { id: row.matchedRecordId }, data: memberUpdateData(normalized) });
+    return { importedRecordId: updated.id, note: null };
+  }
+  const created = await prisma.orgMember.create({ data: memberCreateData(normalized, organizationId) });
+  return { importedRecordId: created.id, note: null };
+}
+
+/**
+ * Reuses createPtaHousehold/addPtaHouseholdAdult/addPtaStudent
+ * (src/lib/labs/pta/households.ts) exactly as importPtaHouseholds()
+ * (vertical-import.ts) does — same idempotent-per-student-name loop, same
+ * "reuse the matched household id, don't recreate it" behavior for
+ * UPDATE_EXISTING. A CREATE_ANYWAY on a row that matched an existing
+ * household hits PtaHousehold's own DB unique constraint and surfaces as a
+ * FAILED row via executeBatch()'s generic catch — structurally correct,
+ * since the database itself won't allow a second household with the same
+ * (organizationId, displayName, schoolYear).
+ */
+async function executePtaHouseholdRow(
+  row: { matchedRecordId: string | null; decision: string | null; normalizedData: unknown },
+  organizationId: string,
+  actorUserId: string,
+  actorEmail: string | null
+): Promise<ExecutedRow> {
+  const normalized = row.normalizedData as unknown as NormalizedPtaHouseholdRow;
+
+  let householdId: string;
+  if (row.decision === "UPDATE_EXISTING" && row.matchedRecordId) {
+    householdId = row.matchedRecordId;
+  } else {
+    const household = await createPtaHousehold({
+      organizationId,
+      displayName: normalized.householdName,
+      schoolYear: normalized.schoolYear,
+      notes: normalized.notes,
+      actorUserId,
+      actorEmail,
+    });
+    householdId = household.id;
+  }
+
+  await addPtaHouseholdAdult({
+    organizationId,
+    householdId,
+    name: normalized.contactName,
+    email: normalized.contactEmail,
+    phone: normalized.contactPhone,
+    makePrimaryContact: true,
+    actorUserId,
+    actorEmail,
+  });
+
+  for (const displayName of normalized.studentNames) {
+    // Idempotent per student name, same as importPtaHouseholds() — a
+    // retried row with some students already added from a prior partial
+    // failure doesn't duplicate them.
+    const existingStudent = await prisma.ptaStudent.findFirst({ where: { householdId, displayName }, select: { id: true } });
+    if (!existingStudent) {
+      await addPtaStudent({ organizationId, householdId, displayName, actorUserId, actorEmail });
+    }
+  }
+
+  return { importedRecordId: householdId, note: null };
+}
+
+/**
+ * Reuses createProperty/assignPropertyResident (src/lib/hoa/properties.ts)
+ * exactly as importHoaProperties() (vertical-import.ts) does, including its
+ * exact owner-member-limit graceful-degradation behavior: if creating a new
+ * owner OrgMember would exceed the plan's member limit, the property row
+ * still succeeds (IMPORTED) — only the owner link is skipped, with a note
+ * recorded so the reviewer knows to re-run after upgrading. This is a
+ * deliberate, preserved-from-today behavior (see the PR C plan's capacity
+ * decision), not a new BLOCKED_PLAN_LIMIT/batch-pause path — capacity is
+ * rechecked fresh via checkMemberLimit() on every row that needs a new
+ * owner, never trusted from a stale count.
+ */
+async function executeHoaPropertyRow(
+  row: { matchedRecordId: string | null; decision: string | null; normalizedData: unknown },
+  organizationId: string,
+  actorUserId: string,
+  actorEmail: string | null
+): Promise<ExecutedRow> {
+  const normalized = row.normalizedData as unknown as NormalizedHoaPropertyRow;
+
+  let propertyId: string;
+  if (row.decision === "UPDATE_EXISTING" && row.matchedRecordId) {
+    propertyId = row.matchedRecordId;
+  } else {
+    const property = await createProperty({
+      organizationId,
+      addressLine1: normalized.addressLine1,
+      addressLine2: normalized.addressLine2,
+      city: normalized.city,
+      state: normalized.state,
+      zipCode: normalized.zipCode,
+      unitLabel: normalized.unitLabel,
+      buildingLabel: normalized.buildingLabel,
+      propertyType: normalized.propertyType ?? undefined,
+      notes: normalized.notes,
+      actorUserId,
+      actorEmail,
+    });
+    propertyId = property.id;
+  }
+
+  if (!normalized.ownerFirstName && !normalized.ownerLastName) {
+    return { importedRecordId: propertyId, note: null };
+  }
+
+  const existingMember = normalized.ownerEmail
+    ? await prisma.orgMember.findFirst({ where: { organizationId, email: normalized.ownerEmail }, select: { id: true } })
+    : null;
+
+  let memberId: string;
+  if (existingMember) {
+    memberId = existingMember.id;
+  } else {
+    const memberLimit = await checkMemberLimit(organizationId);
+    if (!memberLimit.allowed || memberLimit.current >= memberLimit.limit) {
+      return {
+        importedRecordId: propertyId,
+        note: `Property created, but owner not linked — member limit reached (${memberLimit.limit}). Upgrade your plan and re-run the import to link remaining owners.`,
+      };
+    }
+    const created = await prisma.orgMember.create({
+      data: {
+        organizationId,
+        firstName: normalized.ownerFirstName || "Unknown",
+        lastName: normalized.ownerLastName || "Unknown",
+        email: normalized.ownerEmail,
+      },
+      select: { id: true },
+    });
+    memberId = created.id;
+  }
+
+  const existingRelationship = await prisma.propertyResident.findFirst({
+    where: { organizationId, propertyId, orgMemberId: memberId, status: "ACTIVE" },
+    select: { id: true },
+  });
+  if (!existingRelationship) {
+    await assignPropertyResident({
+      organizationId,
+      propertyId,
+      orgMemberId: memberId,
+      relationshipType: normalized.relationshipType ?? "OWNER",
+      isPrimaryContact: true,
+      actorUserId,
+      actorEmail,
+    });
+  }
+
+  return { importedRecordId: propertyId, note: null };
+}
+
 /**
  * Walks eligible, decided rows in a bounded chunk (ROWS_PER_TICK), rechecks
  * capacity before every capacity-consuming write (Phase 16's explicit
@@ -241,6 +479,23 @@ function memberCreateData(normalized: NormalizedMemberRow, organizationId: strin
 export async function executeBatch(batchId: string, organizationId: string): Promise<void> {
   const batch = await prisma.importBatch.findFirst({ where: { id: batchId, organizationId } });
   if (!batch) throw new ImportError("IMPORT_NOT_FOUND", "Import batch not found.");
+
+  // PTA/HOA rows go through the shared service-layer functions, which
+  // require a real actorUserId (for audit-event attribution) — resolved
+  // once per tick, not per row, and checked BEFORE claiming the batch so a
+  // missing actor never leaves it stuck claimed. Community rows write via
+  // raw Prisma calls and never need this.
+  let actorUserId: string | null = null;
+  let actorEmail: string | null = null;
+  if (batch.importKind === "PTA_HOUSEHOLDS" || batch.importKind === "HOA_PROPERTIES") {
+    if (!batch.uploadedByUserId) {
+      throw new ImportError("IMPORT_MISSING_ACTOR", "This import batch has no recorded uploader and cannot create household/property records.");
+    }
+    actorUserId = batch.uploadedByUserId;
+    const uploader = await prisma.user.findUnique({ where: { id: actorUserId }, select: { email: true } });
+    actorEmail = uploader?.email ?? null;
+  }
+
   if (!(await claimBatchForProcessing(batchId, "IMPORTING"))) return;
 
   // SKIP decisions never touch capacity or write anything — resolved in bulk up front.
@@ -275,25 +530,16 @@ export async function executeBatch(batchId: string, organizationId: string): Pro
     }
 
     try {
-      const normalized = row.normalizedData as unknown as NormalizedMemberRow;
-      let importedRecordId: string;
-
-      if (row.decision === "UPDATE_EXISTING" && row.matchedRecordId) {
-        const updated = await prisma.orgMember.update({
-          where: { id: row.matchedRecordId },
-          data: memberUpdateData(normalized),
-        });
-        importedRecordId = updated.id;
-      } else {
-        const created = await prisma.orgMember.create({
-          data: memberCreateData(normalized, organizationId),
-        });
-        importedRecordId = created.id;
-      }
+      const executed =
+        batch.importKind === "PTA_HOUSEHOLDS"
+          ? await executePtaHouseholdRow(row, organizationId, actorUserId!, actorEmail)
+          : batch.importKind === "HOA_PROPERTIES"
+            ? await executeHoaPropertyRow(row, organizationId, actorUserId!, actorEmail)
+            : await executeCommunityMemberRow(row, organizationId);
 
       await prisma.importRow.update({
         where: { id: row.id },
-        data: { status: "IMPORTED", importedRecordId, processedAt: new Date() },
+        data: { status: "IMPORTED", importedRecordId: executed.importedRecordId, errorMessage: executed.note, processedAt: new Date() },
       });
       imported += 1;
     } catch (error) {

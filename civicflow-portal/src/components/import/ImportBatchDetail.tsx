@@ -30,11 +30,12 @@ export interface FieldComparison {
 export interface ImportRowSummary {
   id: string;
   rowNumber: number;
-  normalizedData: { firstName: string; lastName: string; email: string | null };
+  displayName: string;
+  displaySubtitle: string | null;
   status: string;
   decision: string | null;
   errorMessage: string | null;
-  matchedRecord: { id: string; firstName: string; lastName: string; email: string | null } | null;
+  matchedRecordLabel: string | null;
   fieldComparison: FieldComparison[] | null;
 }
 
@@ -258,15 +259,13 @@ export function ImportBatchDetail({
             <tbody>
               {filteredRows.map((row) => {
                 const isExpanded = expandedRowId === row.id;
-                const hasMatch = MATCHABLE_STATUSES.has(row.status) && row.matchedRecord && row.fieldComparison;
+                const hasMatch = MATCHABLE_STATUSES.has(row.status) && row.matchedRecordLabel && row.fieldComparison;
                 return (
                   <Fragment key={row.id}>
                     <tr className="border-t border-slate-100">
                       <td className="px-2 py-2 text-slate-600">{row.rowNumber}</td>
-                      <td className="px-2 py-2 text-slate-900">
-                        {row.normalizedData.firstName} {row.normalizedData.lastName}
-                      </td>
-                      <td className="px-2 py-2 text-slate-700">{row.normalizedData.email ?? "—"}</td>
+                      <td className="px-2 py-2 text-slate-900">{row.displayName}</td>
+                      <td className="px-2 py-2 text-slate-700">{row.displaySubtitle ?? "—"}</td>
                       <td className="px-2 py-2">
                         <StatusBadge label={row.status.replaceAll("_", " ")} tone={row.status === "INVALID" || row.status === "FAILED" ? "critical" : "neutral"} />
                         {row.errorMessage ? <p className="mt-1 text-xs text-slate-500">{row.errorMessage}</p> : null}
@@ -313,10 +312,7 @@ export function ImportBatchDetail({
                     {isExpanded && hasMatch ? (
                       <tr className="border-t border-slate-100 bg-slate-50">
                         <td colSpan={6} className="px-4 py-3">
-                          <p className="mb-2 text-xs font-semibold text-slate-600">
-                            Matched existing record: {row.matchedRecord!.firstName} {row.matchedRecord!.lastName}
-                            {row.matchedRecord!.email ? ` (${row.matchedRecord!.email})` : ""}
-                          </p>
+                          <p className="mb-2 text-xs font-semibold text-slate-600">Matched existing record: {row.matchedRecordLabel}</p>
                           <table className="w-full text-xs">
                             <thead>
                               <tr className="text-left text-slate-500">
