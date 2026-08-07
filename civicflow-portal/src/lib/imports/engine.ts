@@ -476,7 +476,21 @@ async function executeHoaPropertyRow(
  * bulk update, a snapshot of the plan state is recorded, and the batch
  * transitions to PAUSED_PLAN_LIMIT rather than continuing or failing.
  */
-export async function executeBatch(batchId: string, organizationId: string): Promise<void> {
+export interface RequestActor {
+  userId: string;
+  email: string | null;
+}
+
+/**
+ * `requestActor`, when provided, is the real caller who just triggered this
+ * tick synchronously via POST .../start or .../resume — used to attribute
+ * PTA/HOA service-layer audit events to the person who actually caused the
+ * write, not the batch's original uploader. Omitted (undefined) when called
+ * from the cron worker (processImportQueue()), which has no per-request
+ * caller — that path falls back to the batch's uploadedByUserId, same as
+ * before.
+ */
+export async function executeBatch(batchId: string, organizationId: string, requestActor?: RequestActor): Promise<void> {
   const batch = await prisma.importBatch.findFirst({ where: { id: batchId, organizationId } });
   if (!batch) throw new ImportError("IMPORT_NOT_FOUND", "Import batch not found.");
 
@@ -488,12 +502,17 @@ export async function executeBatch(batchId: string, organizationId: string): Pro
   let actorUserId: string | null = null;
   let actorEmail: string | null = null;
   if (batch.importKind === "PTA_HOUSEHOLDS" || batch.importKind === "HOA_PROPERTIES") {
-    if (!batch.uploadedByUserId) {
-      throw new ImportError("IMPORT_MISSING_ACTOR", "This import batch has no recorded uploader and cannot create household/property records.");
+    if (requestActor) {
+      actorUserId = requestActor.userId;
+      actorEmail = requestActor.email;
+    } else {
+      if (!batch.uploadedByUserId) {
+        throw new ImportError("IMPORT_MISSING_ACTOR", "This import batch has no recorded uploader and cannot create household/property records.");
+      }
+      actorUserId = batch.uploadedByUserId;
+      const uploader = await prisma.user.findUnique({ where: { id: actorUserId }, select: { email: true } });
+      actorEmail = uploader?.email ?? null;
     }
-    actorUserId = batch.uploadedByUserId;
-    const uploader = await prisma.user.findUnique({ where: { id: actorUserId }, select: { email: true } });
-    actorEmail = uploader?.email ?? null;
   }
 
   if (!(await claimBatchForProcessing(batchId, "IMPORTING"))) return;
@@ -623,7 +642,12 @@ export async function executeImportingBatches(limit = EXECUTE_BATCH_LIMIT): Prom
  * immediate first tick so the administrator sees progress right away rather
  * than waiting for the next cron invocation.
  */
-export async function resumeBatch(batchId: string, organizationId: string, actorUserId: string | null): Promise<void> {
+export async function resumeBatch(
+  batchId: string,
+  organizationId: string,
+  actorUserId: string | null,
+  requestActor?: RequestActor
+): Promise<void> {
   const batch = await prisma.importBatch.findFirst({ where: { id: batchId, organizationId } });
   if (!batch) throw new ImportError("IMPORT_NOT_FOUND", "Import batch not found.");
   if (batch.status !== "PAUSED_PLAN_LIMIT") {
@@ -639,7 +663,7 @@ export async function resumeBatch(batchId: string, organizationId: string, actor
   }
 
   await transitionImportBatch({ batchId, organizationId, to: "IMPORTING", actorUserId });
-  await executeBatch(batchId, organizationId);
+  await executeBatch(batchId, organizationId, requestActor);
 }
 
 export async function processImportQueue() {

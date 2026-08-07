@@ -8,12 +8,22 @@ vi.mock("@/lib/auth-guards", async (importOriginal) => {
       session: { userId: "officer-1", userEmail: "officer@example.com" },
       organizationId: "org-a",
       role: "ORG_ADMIN",
-      can: (permission: string) => ["imports:read", "imports:create", "imports:review", "imports:resume", "imports:cancel", "imports:resolve-duplicates"].includes(permission),
+      can: (permission: string) =>
+        ["imports:read", "imports:create", "imports:review", "imports:resume", "imports:cancel", "imports:resolve-duplicates", "members:write"].includes(
+          permission
+        ),
     }),
   };
 });
 
 vi.mock("@/lib/rate-limit", () => ({ requireRateLimit: vi.fn().mockResolvedValue(null) }));
+
+vi.mock("@/lib/labs/pta/guard", () => ({
+  requirePtaVertical: vi.fn().mockResolvedValue({ primaryVertical: "PTA", status: "active" }),
+}));
+vi.mock("@/lib/hoa/guard", () => ({
+  requireHoaCapability: vi.fn().mockResolvedValue({ primaryVertical: "HOA", status: "active" }),
+}));
 
 const createAuditEvent = vi.fn().mockResolvedValue(undefined);
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...args: unknown[]) => createAuditEvent(...args) }));
@@ -148,7 +158,7 @@ describe("POST /api/imports/[id]/rows/[rowId]/decide", () => {
 
 describe("POST /api/imports/[id]/start", () => {
   it("rejects starting a batch that isn't READY_FOR_REVIEW", async () => {
-    findFirstImportBatch.mockResolvedValueOnce({ id: "batch-1", organizationId: "org-a", status: "IMPORTING" });
+    findFirstImportBatch.mockResolvedValueOnce({ id: "batch-1", organizationId: "org-a", status: "IMPORTING", importKind: "COMMUNITY_MEMBERS" });
 
     const response = await startPOST(new Request("https://portal.test/api/imports/batch-1/start", { method: "POST" }), {
       params: Promise.resolve({ id: "batch-1" }),
@@ -159,8 +169,8 @@ describe("POST /api/imports/[id]/start", () => {
   });
 
   it("applies default decisions, transitions to IMPORTING, and kicks off the first execute tick", async () => {
-    findFirstImportBatch.mockResolvedValueOnce({ id: "batch-1", organizationId: "org-a", status: "READY_FOR_REVIEW" });
-    findFirstImportBatch.mockResolvedValueOnce({ id: "batch-1", organizationId: "org-a", status: "IMPORTING" });
+    findFirstImportBatch.mockResolvedValueOnce({ id: "batch-1", organizationId: "org-a", status: "READY_FOR_REVIEW", importKind: "COMMUNITY_MEMBERS" });
+    findFirstImportBatch.mockResolvedValueOnce({ id: "batch-1", organizationId: "org-a", status: "IMPORTING", importKind: "COMMUNITY_MEMBERS" });
 
     const response = await startPOST(new Request("https://portal.test/api/imports/batch-1/start", { method: "POST" }), {
       params: Promise.resolve({ id: "batch-1" }),
@@ -169,20 +179,50 @@ describe("POST /api/imports/[id]/start", () => {
     expect(response.status).toBe(200);
     expect(applyDefaultDecisions).toHaveBeenCalledWith("batch-1");
     expect(transitionImportBatch).toHaveBeenCalledWith(expect.objectContaining({ to: "IMPORTING" }));
-    expect(executeBatch).toHaveBeenCalledWith("batch-1", "org-a");
+    expect(executeBatch).toHaveBeenCalledWith("batch-1", "org-a", { userId: "officer-1", email: "officer@example.com" });
+  });
+
+  it("SECURITY REGRESSION: rejects starting a PTA_HOUSEHOLDS batch for a caller without pta:households:manage, even though they hold imports:create", async () => {
+    // Prior to the security-review fix, start/route.ts only checked the
+    // generic imports:create permission and never re-verified the batch's
+    // actual importKind against the domain-specific permission the way
+    // POST /api/imports (creation) already did — meaning a caller who could
+    // create-and-review generic import batches but was never granted PTA
+    // household access could still trigger real household writes by hitting
+    // /start on a PTA_HOUSEHOLDS batch someone else uploaded.
+    findFirstImportBatch.mockResolvedValueOnce({ id: "batch-1", organizationId: "org-a", status: "READY_FOR_REVIEW", importKind: "PTA_HOUSEHOLDS" });
+
+    const response = await startPOST(new Request("https://portal.test/api/imports/batch-1/start", { method: "POST" }), {
+      params: Promise.resolve({ id: "batch-1" }),
+    });
+
+    expect(response.status).toBe(403);
+    expect(applyDefaultDecisions).not.toHaveBeenCalled();
+    expect(executeBatch).not.toHaveBeenCalled();
   });
 });
 
 describe("POST /api/imports/[id]/resume", () => {
-  it("delegates to resumeBatch() with the caller as actor", async () => {
-    findFirstImportBatch.mockResolvedValueOnce({ id: "batch-1", organizationId: "org-a", status: "PAUSED_PLAN_LIMIT" });
+  it("delegates to resumeBatch() with the caller as actor and requestActor", async () => {
+    findFirstImportBatch.mockResolvedValueOnce({ id: "batch-1", organizationId: "org-a", status: "PAUSED_PLAN_LIMIT", importKind: "COMMUNITY_MEMBERS" });
 
     const response = await resumePOST(new Request("https://portal.test/api/imports/batch-1/resume", { method: "POST" }), {
       params: Promise.resolve({ id: "batch-1" }),
     });
 
     expect(response.status).toBe(200);
-    expect(resumeBatch).toHaveBeenCalledWith("batch-1", "org-a", "officer-1");
+    expect(resumeBatch).toHaveBeenCalledWith("batch-1", "org-a", "officer-1", { userId: "officer-1", email: "officer@example.com" });
+  });
+
+  it("SECURITY REGRESSION: rejects resuming an HOA_PROPERTIES batch for a caller missing hoa:residents:write, even with imports:resume and hoa:properties:write", async () => {
+    findFirstImportBatch.mockResolvedValueOnce({ id: "batch-1", organizationId: "org-a", status: "PAUSED_PLAN_LIMIT", importKind: "HOA_PROPERTIES" });
+
+    const response = await resumePOST(new Request("https://portal.test/api/imports/batch-1/resume", { method: "POST" }), {
+      params: Promise.resolve({ id: "batch-1" }),
+    });
+
+    expect(response.status).toBe(403);
+    expect(resumeBatch).not.toHaveBeenCalled();
   });
 });
 

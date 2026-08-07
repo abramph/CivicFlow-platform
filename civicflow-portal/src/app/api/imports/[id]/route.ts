@@ -4,18 +4,20 @@ import { prisma } from "@/lib/prisma";
 import { ImportError } from "@/lib/imports/errors";
 import { attachFieldComparisons } from "@/lib/imports/duplicate-matching";
 import { formatRowIdentity } from "@/lib/imports/row-normalization";
+import { authorizeImportKindRead } from "@/lib/imports/authorization";
 
 const ROW_PAGE_SIZE = 100;
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   return withApiErrorHandling(async () => {
-    const { organizationId } = await requirePermission("imports:read", "throw");
+    const { organizationId, can } = await requirePermission("imports:read", "throw");
     const { id } = await params;
 
     const batch = await prisma.importBatch.findFirst({ where: { id, organizationId } });
     if (!batch) {
       throw new ImportError("IMPORT_NOT_FOUND", "Import batch not found.");
     }
+    authorizeImportKindRead(batch.importKind, can);
 
     const url = new URL(request.url);
     const statusFilter = url.searchParams.get("status");

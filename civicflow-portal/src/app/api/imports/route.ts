@@ -1,6 +1,6 @@
 import type { ImportKind } from "@prisma/client";
 import { withApiErrorHandling } from "@/lib/api-route";
-import { requirePermission, ForbiddenError } from "@/lib/auth-guards";
+import { requirePermission } from "@/lib/auth-guards";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { createAuditEvent } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
@@ -8,50 +8,11 @@ import { hashFileBuffer, findExistingBatchByHash } from "@/lib/imports/file-iden
 import { buildImportSourceObjectKey, computeImportRetentionDate, uploadImportSourceFile } from "@/lib/imports/storage";
 import { analyzeBatch } from "@/lib/imports/engine";
 import { ImportError } from "@/lib/imports/errors";
-import { requirePtaVertical } from "@/lib/labs/pta/guard";
-import { requireHoaCapability } from "@/lib/hoa/guard";
-import { PERMISSIONS, type Permission } from "@/lib/rbac";
+import { IMPORT_KINDS, authorizeImportKind } from "@/lib/imports/authorization";
 
 export const runtime = "nodejs";
 
 const MAX_BYTES = 50 * 1024 * 1024; // 50 MB — same cap as the existing /api/import
-
-const VALID_KINDS: ImportKind[] = ["COMMUNITY_MEMBERS", "PTA_HOUSEHOLDS", "HOA_PROPERTIES"];
-
-/**
- * Every kind requires both the generic imports:create permission AND a
- * domain-specific write permission — "can create an import batch" and "can
- * write [members/households/properties]" are logically separate
- * authorities, mirroring the existing /api/import route's per-type dual-gate
- * shape. PTA/HOA additionally require the same vertical-capability check
- * (Organization.primaryVertical) requirePtaAccess()/requireHoaPropertyWrite()
- * already enforce elsewhere — an org whose STAFF role happens to hold
- * pta:households:manage still can't import PTA households unless the org
- * actually IS a PTA organization.
- */
-async function authorizeImportKind(
-  importKind: ImportKind,
-  organizationId: string,
-  can: (permission: Permission) => boolean
-): Promise<void> {
-  if (importKind === "PTA_HOUSEHOLDS") {
-    await requirePtaVertical(organizationId);
-    if (!can(PERMISSIONS.PTA_HOUSEHOLDS_MANAGE)) {
-      throw new ForbiddenError("Permission denied: pta:households:manage is required to import PTA households.");
-    }
-    return;
-  }
-  if (importKind === "HOA_PROPERTIES") {
-    await requireHoaCapability(organizationId);
-    if (!can(PERMISSIONS.HOA_PROPERTIES_WRITE) || !can(PERMISSIONS.HOA_RESIDENTS_WRITE)) {
-      throw new ForbiddenError("Permission denied: hoa:properties:write and hoa:residents:write are required to import HOA properties.");
-    }
-    return;
-  }
-  if (!can("members:write")) {
-    throw new ForbiddenError("Permission denied: members:write is required to import Community members.");
-  }
-}
 
 /** Kind-specific required-mapping checks — same "at least the identity
  * fields must be mapped" spirit as Community's original check, extended per
@@ -97,7 +58,7 @@ export async function POST(request: Request) {
     const mappingRaw = String(form.get("mapping") ?? "{}");
     const forceNewAnalysis = form.get("forceNewAnalysis") === "1";
     const kindRaw = String(form.get("kind") ?? "COMMUNITY_MEMBERS");
-    if (!VALID_KINDS.includes(kindRaw as ImportKind)) {
+    if (!IMPORT_KINDS.includes(kindRaw as ImportKind)) {
       throw new ImportError("IMPORT_VALIDATION_ERROR", "Unrecognized import kind.");
     }
     const importKind = kindRaw as ImportKind;

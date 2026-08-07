@@ -1,9 +1,11 @@
+import { redirect } from "next/navigation";
 import { requirePermission } from "@/lib/auth-guards";
 import { prisma } from "@/lib/prisma";
 import { PageHeader, SectionCard } from "@/components/app/PageChrome";
 import { ImportBatchDetail } from "@/components/import/ImportBatchDetail";
 import { attachFieldComparisons } from "@/lib/imports/duplicate-matching";
 import { formatRowIdentity } from "@/lib/imports/row-normalization";
+import { authorizeImportKindRead } from "@/lib/imports/authorization";
 
 export default async function ImportBatchPage({ params }: { params: Promise<{ id: string }> }) {
   const { organizationId, can } = await requirePermission("imports:read");
@@ -17,6 +19,12 @@ export default async function ImportBatchPage({ params }: { params: Promise<{ id
         <PageHeader title="Import not found" actions={[{ href: "/imports", label: "Back to Import History" }]} />
       </main>
     );
+  }
+
+  try {
+    authorizeImportKindRead(batch.importKind, can);
+  } catch {
+    redirect("/imports?error=forbidden");
   }
 
   const rows = await prisma.importRow.findMany({
