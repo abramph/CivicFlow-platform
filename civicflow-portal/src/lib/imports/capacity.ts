@@ -10,10 +10,16 @@ import type { ImportKind } from "@prisma/client";
  * against that limit, so a long-running/paused/resumed batch never
  * over-counts or under-counts its own prior progress.
  *
- * Only COMMUNITY_MEMBERS consumes capacity in PR A — the spec is explicit
- * that "not every import type should use identical duplicate rules," and
- * the same applies to capacity: PTA households/HOA properties have their
- * own consumption rules to be defined when PR C wires those verticals.
+ * Only COMMUNITY_MEMBERS consumes capacity here. PR C wired PTA households
+ * and HOA properties without adding a new plan-limit dimension for either —
+ * neither has ever consumed one (a user-confirmed scope decision, see
+ * docs/import-architecture.md). The one place HOA imports do touch the
+ * member limit — creating an owner OrgMember for a property row — is
+ * handled inline in engine.ts's executeHoaPropertyRow() via
+ * checkMemberLimit() directly, mirroring importHoaProperties()'s existing
+ * per-row graceful-degradation behavior (property still succeeds, owner
+ * link skipped with a note) rather than routing through this module's
+ * batch-level pause/resume machinery.
  */
 export interface ImportCapacity {
   allowed: boolean;

@@ -1,5 +1,6 @@
+import type { ImportKind } from "@prisma/client";
 import { withApiErrorHandling } from "@/lib/api-route";
-import { requirePermission, ForbiddenError } from "@/lib/auth-guards";
+import { requirePermission } from "@/lib/auth-guards";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { createAuditEvent } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
@@ -7,19 +8,39 @@ import { hashFileBuffer, findExistingBatchByHash } from "@/lib/imports/file-iden
 import { buildImportSourceObjectKey, computeImportRetentionDate, uploadImportSourceFile } from "@/lib/imports/storage";
 import { analyzeBatch } from "@/lib/imports/engine";
 import { ImportError } from "@/lib/imports/errors";
+import { IMPORT_KINDS, authorizeImportKind } from "@/lib/imports/authorization";
 
 export const runtime = "nodejs";
 
 const MAX_BYTES = 50 * 1024 * 1024; // 50 MB — same cap as the existing /api/import
 
-/**
- * Resumable Import Program (PR A) — only COMMUNITY_MEMBERS is supported
- * today (PTA/HOA follow in PR C). Requires both imports:create AND
- * members:write — the same dual-gate shape the existing /api/import route
- * uses per import type, since "can create an import batch" and "can write
- * member records" are logically separate authorities even though PR A only
- * has one importKind to offer.
- */
+/** Kind-specific required-mapping checks — same "at least the identity
+ * fields must be mapped" spirit as Community's original check, extended per
+ * kind's own required fields (see analyzePtaHouseholdRow/analyzeHoaPropertyRow
+ * in engine.ts, which enforce the same requirements again per-row as a
+ * defense-in-depth backstop). */
+function validateMapping(importKind: ImportKind, mappedFields: Set<string>): void {
+  if (importKind === "PTA_HOUSEHOLDS") {
+    if (!mappedFields.has("householdName")) throw new ImportError("IMPORT_INVALID_MAPPING", "Household Name must be mapped.");
+    if (!mappedFields.has("schoolYear")) throw new ImportError("IMPORT_INVALID_MAPPING", "School Year must be mapped.");
+    if (!mappedFields.has("contactName")) throw new ImportError("IMPORT_INVALID_MAPPING", "Primary Contact Name must be mapped.");
+    return;
+  }
+  if (importKind === "HOA_PROPERTIES") {
+    if (!mappedFields.has("addressLine1")) throw new ImportError("IMPORT_INVALID_MAPPING", "Street Address must be mapped.");
+    return;
+  }
+  // columnMapping is keyed by source header, valued by canonical field
+  // (mapping[header] = field) — same direction documented on
+  // src/lib/member-import.ts's buildFieldGetter, which reverses it to read
+  // by field. Checking columnMapping.firstName directly here would look
+  // for a *header* literally named "firstName" instead of checking
+  // whether any header was mapped *to* firstName/lastName.
+  if (!mappedFields.has("firstName") && !mappedFields.has("lastName")) {
+    throw new ImportError("IMPORT_INVALID_MAPPING", "At least one of first name or last name must be mapped.");
+  }
+}
+
 export async function POST(request: Request) {
   const limited = await requireRateLimit({ scope: "api:imports:create", request, limit: 20, windowMs: 60_000 });
   if (limited) return limited;
@@ -31,14 +52,18 @@ export async function POST(request: Request) {
     }
 
     const { organizationId, session, can } = await requirePermission("imports:create", "throw");
-    if (!can("members:write")) {
-      throw new ForbiddenError("Permission denied: members:write is required to import Community members.");
-    }
 
     const form = await request.formData();
     const file = form.get("file") as File | null;
     const mappingRaw = String(form.get("mapping") ?? "{}");
     const forceNewAnalysis = form.get("forceNewAnalysis") === "1";
+    const kindRaw = String(form.get("kind") ?? "COMMUNITY_MEMBERS");
+    if (!IMPORT_KINDS.includes(kindRaw as ImportKind)) {
+      throw new ImportError("IMPORT_VALIDATION_ERROR", "Unrecognized import kind.");
+    }
+    const importKind = kindRaw as ImportKind;
+
+    await authorizeImportKind(importKind, organizationId, can);
 
     if (!file) {
       throw new ImportError("IMPORT_VALIDATION_ERROR", "No file uploaded.");
@@ -53,22 +78,13 @@ export async function POST(request: Request) {
     } catch {
       throw new ImportError("IMPORT_INVALID_MAPPING", "Column mapping must be valid JSON.");
     }
-    // columnMapping is keyed by source header, valued by canonical field
-    // (mapping[header] = field) — same direction documented on
-    // src/lib/member-import.ts's buildFieldGetter, which reverses it to read
-    // by field. Checking columnMapping.firstName directly here would look
-    // for a *header* literally named "firstName" instead of checking
-    // whether any header was mapped *to* firstName/lastName.
-    const mappedFields = new Set(Object.values(columnMapping));
-    if (!mappedFields.has("firstName") && !mappedFields.has("lastName")) {
-      throw new ImportError("IMPORT_INVALID_MAPPING", "At least one of first name or last name must be mapped.");
-    }
+    validateMapping(importKind, new Set(Object.values(columnMapping)));
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const fileHash = hashFileBuffer(buffer);
 
     if (!forceNewAnalysis) {
-      const existing = await findExistingBatchByHash(organizationId, "COMMUNITY_MEMBERS", fileHash);
+      const existing = await findExistingBatchByHash(organizationId, importKind, fileHash);
       if (existing) {
         return Response.json({ ok: true, data: { matchedExistingBatch: existing } }, { status: 200 });
       }
@@ -77,7 +93,7 @@ export async function POST(request: Request) {
     const batch = await prisma.importBatch.create({
       data: {
         organizationId,
-        importKind: "COMMUNITY_MEMBERS",
+        importKind,
         fileName: file.name,
         fileHash,
         fileSizeBytes: buffer.byteLength,
@@ -102,7 +118,7 @@ export async function POST(request: Request) {
       action: "import_batch.create",
       entityType: "import_batch",
       entityId: batch.id,
-      metadata: { importKind: "COMMUNITY_MEMBERS", fileName: file.name, fileSizeBytes: buffer.byteLength },
+      metadata: { importKind, fileName: file.name, fileSizeBytes: buffer.byteLength },
     });
 
     // Immediate first analysis pass so the administrator isn't staring at

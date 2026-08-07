@@ -1,8 +1,11 @@
+import { redirect } from "next/navigation";
 import { requirePermission } from "@/lib/auth-guards";
 import { prisma } from "@/lib/prisma";
 import { PageHeader, SectionCard } from "@/components/app/PageChrome";
 import { ImportBatchDetail } from "@/components/import/ImportBatchDetail";
 import { attachFieldComparisons } from "@/lib/imports/duplicate-matching";
+import { formatRowIdentity } from "@/lib/imports/row-normalization";
+import { authorizeImportKindRead } from "@/lib/imports/authorization";
 
 export default async function ImportBatchPage({ params }: { params: Promise<{ id: string }> }) {
   const { organizationId, can } = await requirePermission("imports:read");
@@ -18,12 +21,18 @@ export default async function ImportBatchPage({ params }: { params: Promise<{ id
     );
   }
 
+  try {
+    authorizeImportKindRead(batch.importKind, can);
+  } catch {
+    redirect("/imports?error=forbidden");
+  }
+
   const rows = await prisma.importRow.findMany({
     where: { batchId: id },
     orderBy: { rowNumber: "asc" },
     take: 200,
   });
-  const rowsWithComparison = await attachFieldComparisons(rows, organizationId);
+  const rowsWithComparison = await attachFieldComparisons(rows, organizationId, batch.importKind);
 
   return (
     <main className="space-y-6">
@@ -51,13 +60,11 @@ export default async function ImportBatchPage({ params }: { params: Promise<{ id
           initialRows={rowsWithComparison.map((row) => ({
             id: row.id,
             rowNumber: row.rowNumber,
-            normalizedData: row.normalizedData as { firstName: string; lastName: string; email: string | null },
+            ...formatRowIdentity(batch.importKind, row.normalizedData),
             status: row.status,
             decision: row.decision,
             errorMessage: row.errorMessage,
-            matchedRecord: row.matchedRecord
-              ? { id: row.matchedRecord.id, firstName: row.matchedRecord.firstName, lastName: row.matchedRecord.lastName, email: row.matchedRecord.email }
-              : null,
+            matchedRecordLabel: row.matchedRecordLabel,
             fieldComparison: row.fieldComparison,
           }))}
           canResume={can("imports:resume")}

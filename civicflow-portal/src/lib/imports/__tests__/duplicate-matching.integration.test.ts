@@ -142,3 +142,129 @@ describe.skipIf(!RUN_INTEGRATION)("matchCommunityMemberRow — real Postgres", (
     expect(result.status).toBe("UPDATE_AVAILABLE");
   });
 });
+
+describe.skipIf(!RUN_INTEGRATION)("matchPtaHouseholdRow / matchHoaPropertyRow — real Postgres (PR C)", () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let prisma: any;
+  let ptaOrgId: string;
+  let hoaOrgId: string;
+
+  function normalizedHouseholdRow(overrides: Partial<Record<string, unknown>> = {}) {
+    return {
+      householdName: "The Doe Family",
+      schoolYear: "2026-2027",
+      contactName: "Jane Doe",
+      contactEmail: "jane@example.test",
+      contactEmailError: null,
+      contactPhone: null,
+      studentNames: [],
+      notes: null,
+      ...overrides,
+    };
+  }
+
+  function normalizedPropertyRow(overrides: Partial<Record<string, unknown>> = {}) {
+    return {
+      addressLine1: "123 Main St",
+      addressLine2: null,
+      city: null,
+      state: null,
+      zipCode: null,
+      unitLabel: null,
+      buildingLabel: null,
+      propertyType: null,
+      ownerFirstName: null,
+      ownerLastName: null,
+      ownerEmail: null,
+      ownerEmailError: null,
+      relationshipType: null,
+      notes: null,
+      ...overrides,
+    };
+  }
+
+  beforeAll(async () => {
+    const { PrismaClient } = await import("@prisma/client");
+    prisma = new PrismaClient();
+
+    const ptaOrg = await prisma.organization.create({
+      data: { slug: `pta-import-matching-${Date.now()}`, name: "PTA Import Matching Test Org", primaryVertical: "PTA" },
+    });
+    ptaOrgId = ptaOrg.id;
+
+    const hoaOrg = await prisma.organization.create({
+      data: { slug: `hoa-import-matching-${Date.now()}`, name: "HOA Import Matching Test Org", primaryVertical: "HOA" },
+    });
+    hoaOrgId = hoaOrg.id;
+  });
+
+  afterAll(async () => {
+    // PropertyResident's three FKs (organization/property/orgMember) are all
+    // onDelete: Restrict, not Cascade — deleting property/orgMember before
+    // their PropertyResident rows silently fails (caught below) and leaves
+    // the whole org un-deletable. Must delete residents first.
+    await prisma?.propertyResident.deleteMany({ where: { organizationId: hoaOrgId } }).catch(() => {});
+    await prisma?.ptaHousehold.deleteMany({ where: { organizationId: ptaOrgId } }).catch(() => {});
+    await prisma?.orgMember.deleteMany({ where: { organizationId: { in: [ptaOrgId, hoaOrgId] } } }).catch(() => {});
+    await prisma?.property.deleteMany({ where: { organizationId: hoaOrgId } }).catch(() => {});
+    await prisma?.organization.deleteMany({ where: { id: { in: [ptaOrgId, hoaOrgId] } } }).catch(() => {});
+    await prisma?.$disconnect();
+  });
+
+  it("matches a household by the real (organizationId, displayName, schoolYear) unique key and distinguishes EXACT_DUPLICATE (has primary contact) from UPDATE_AVAILABLE (missing one)", async () => {
+    const { matchPtaHouseholdRow } = await import("../duplicate-matching");
+
+    const complete = await prisma.ptaHousehold.create({
+      data: { organizationId: ptaOrgId, displayName: "Complete Family", schoolYear: "2026-2027" },
+    });
+    const adult = await prisma.ptaHouseholdAdult.create({
+      data: { organizationId: ptaOrgId, householdId: complete.id, name: "Jane Doe", email: "jane@example.test" },
+    });
+    await prisma.ptaHousehold.update({ where: { id: complete.id }, data: { primaryContactAdultId: adult.id } });
+
+    await prisma.ptaHousehold.create({
+      data: { organizationId: ptaOrgId, displayName: "Partial Family", schoolYear: "2026-2027" },
+    });
+
+    const completeResult = await matchPtaHouseholdRow(ptaOrgId, normalizedHouseholdRow({ householdName: "Complete Family" }));
+    expect(completeResult.status).toBe("EXACT_DUPLICATE");
+    expect(completeResult.matchedRecordId).toBe(complete.id);
+
+    const partialResult = await matchPtaHouseholdRow(ptaOrgId, normalizedHouseholdRow({ householdName: "Partial Family" }));
+    expect(partialResult.status).toBe("UPDATE_AVAILABLE");
+
+    const newResult = await matchPtaHouseholdRow(ptaOrgId, normalizedHouseholdRow({ householdName: "Never Seen Family" }));
+    expect(newResult.status).toBe("NEW");
+  });
+
+  it("matches a property by the real (organizationId, addressLine1, unitLabel) tuple and distinguishes EXACT_DUPLICATE (owner already linked) from UPDATE_AVAILABLE (owner not yet linked)", async () => {
+    const { matchHoaPropertyRow } = await import("../duplicate-matching");
+
+    const property = await prisma.property.create({
+      data: { organizationId: hoaOrgId, addressLine1: "456 Oak Ave", unitLabel: "2B" },
+    });
+    const owner = await prisma.orgMember.create({
+      data: { organizationId: hoaOrgId, firstName: "Sam", lastName: "Owner", email: "sam.owner@example.test" },
+    });
+
+    const beforeLinking = await matchHoaPropertyRow(
+      hoaOrgId,
+      normalizedPropertyRow({ addressLine1: "456 Oak Ave", unitLabel: "2B", ownerFirstName: "Sam", ownerLastName: "Owner", ownerEmail: "sam.owner@example.test" })
+    );
+    expect(beforeLinking.status).toBe("UPDATE_AVAILABLE");
+
+    await prisma.propertyResident.create({
+      data: { organizationId: hoaOrgId, propertyId: property.id, orgMemberId: owner.id, relationshipType: "OWNER", isPrimaryContact: true, status: "ACTIVE" },
+    });
+
+    const afterLinking = await matchHoaPropertyRow(
+      hoaOrgId,
+      normalizedPropertyRow({ addressLine1: "456 Oak Ave", unitLabel: "2B", ownerFirstName: "Sam", ownerLastName: "Owner", ownerEmail: "sam.owner@example.test" })
+    );
+    expect(afterLinking.status).toBe("EXACT_DUPLICATE");
+    expect(afterLinking.matchedRecordId).toBe(property.id);
+
+    const differentUnit = await matchHoaPropertyRow(hoaOrgId, normalizedPropertyRow({ addressLine1: "456 Oak Ave", unitLabel: "3C" }));
+    expect(differentUnit.status).toBe("NEW");
+  });
+});
