@@ -518,7 +518,7 @@ export async function executeBatch(batchId: string, organizationId: string, requ
   if (!(await claimBatchForProcessing(batchId, "IMPORTING"))) return;
 
   // SKIP decisions never touch capacity or write anything — resolved in bulk up front.
-  await prisma.importRow.updateMany({
+  const skipped = await prisma.importRow.updateMany({
     where: { batchId, decision: "SKIP", status: { notIn: ["IMPORTED", "SKIPPED", "FAILED"] } },
     data: { status: "SKIPPED", processedAt: new Date() },
   });
@@ -585,7 +585,7 @@ export async function executeBatch(batchId: string, organizationId: string, requ
       to: "PAUSED_PLAN_LIMIT",
       extraData: {
         importedCount: { increment: imported },
-        skippedCount: { increment: 0 },
+        skippedCount: { increment: skipped.count },
         blockedPlanLimitCount: { increment: blocked.count },
         planLimitSnapshot: snapshot as unknown as Prisma.InputJsonValue,
         claimedAt: null,
@@ -604,7 +604,7 @@ export async function executeBatch(batchId: string, organizationId: string, requ
     // rather than waiting out the staleness window.
     await prisma.importBatch.update({
       where: { id: batchId },
-      data: { importedCount: { increment: imported }, claimedAt: null },
+      data: { importedCount: { increment: imported }, skippedCount: { increment: skipped.count }, claimedAt: null },
     });
     return;
   }
@@ -617,7 +617,7 @@ export async function executeBatch(batchId: string, organizationId: string, requ
     batchId,
     organizationId,
     to: remainingNeedingReview > 0 ? "PARTIALLY_COMPLETED" : "COMPLETED",
-    extraData: { importedCount: { increment: imported }, claimedAt: null },
+    extraData: { importedCount: { increment: imported }, skippedCount: { increment: skipped.count }, claimedAt: null },
   });
 }
 
