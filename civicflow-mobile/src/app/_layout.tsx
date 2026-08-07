@@ -56,6 +56,10 @@ export default function RootLayout() {
           <Stack.Screen name="volunteer-checkin" options={{ headerTitle: 'Event-Day Check-In' }} />
           <Stack.Screen name="volunteer-checkin/[opportunityId]" options={{ headerTitle: 'Roster' }} />
           <Stack.Screen name="volunteer-hour-approvals" options={{ headerTitle: 'Hour Approvals' }} />
+          <Stack.Screen name="admin-members" options={{ headerTitle: 'Members' }} />
+          <Stack.Screen name="admin-members/[memberId]/index" options={{ headerTitle: 'Member' }} />
+          <Stack.Screen name="admin-members/new" options={{ headerTitle: 'Add Member' }} />
+          <Stack.Screen name="admin-members/[memberId]/edit" options={{ headerTitle: 'Edit Member' }} />
         </Stack>
       </AuthProvider>
     </ThemeProvider>

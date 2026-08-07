@@ -66,6 +66,18 @@ describe("resolveMobileAdminCapabilities", () => {
     expect(result.adminCapabilities).toEqual(["adminDashboard", "manageMembers"]);
   });
 
+  it("does not grant manageMembers on a PTA org even with members:write -- PTA doesn't use OrgMember as its roster", async () => {
+    getOrganizationLabAccessMock.mockResolvedValueOnce(labAccess(true));
+    findFirstMembership.mockResolvedValueOnce({ role: "ORG_OWNER" });
+    findUniqueOrganization.mockResolvedValueOnce({ primaryVertical: "PTA" });
+    getEffectivePermissionsMock.mockResolvedValueOnce(["members:write"]);
+
+    const result = await resolveMobileAdminCapabilities("org-a", "user-1");
+
+    expect(result.adminCapabilities).not.toContain("manageMembers");
+    expect(result.available).toBe(false);
+  });
+
   it("does not grant managePtaHouseholds on a non-PTA org even if the permission string is somehow present", async () => {
     getOrganizationLabAccessMock.mockResolvedValueOnce(labAccess(true));
     findFirstMembership.mockResolvedValueOnce({ role: "ORG_OWNER" });
