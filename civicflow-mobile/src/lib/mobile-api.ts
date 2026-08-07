@@ -806,6 +806,236 @@ export function reinstateAdminMember(memberId: string, input: ReinstateAdminMemb
   });
 }
 
+// ── Admin: event administration ─────────────────────────────────────────────
+// Mobile Admin program (PR C). Backed by /api/mobile/admin/events/* in
+// civicflow-portal, delegating to the exact same createEvent()/updateEvent()
+// the web /events pages use (src/lib/event-mutations.ts). Gated on the
+// manageEvents capability (see getAdminDashboard above).
+
+export type EventStatusValue = 'upcoming' | 'in_progress' | 'completed' | 'cancelled';
+
+export interface AdminEventListRow {
+  id: string;
+  title: string;
+  location: string | null;
+  startAt: string | null;
+  endAt: string | null;
+  status: EventStatusValue;
+}
+
+export function getAdminEvents(organizationId: string) {
+  return apiFetch<AdminEventListRow[]>(`/api/mobile/admin/events?organizationId=${encodeURIComponent(organizationId)}`);
+}
+
+export interface AdminEventDetail {
+  id: string;
+  organizationId: string;
+  title: string;
+  description: string | null;
+  location: string | null;
+  startAt: string | null;
+  endAt: string | null;
+  status: EventStatusValue;
+  notes: string | null;
+}
+
+export function getAdminEvent(organizationId: string, eventId: string) {
+  return apiFetch<AdminEventDetail>(`/api/mobile/admin/events/${encodeURIComponent(eventId)}?organizationId=${encodeURIComponent(organizationId)}`);
+}
+
+export interface CreateAdminEventInput {
+  organizationId: string;
+  title: string;
+  description?: string | null;
+  location?: string | null;
+  startAt?: string | null;
+  endAt?: string | null;
+  status: EventStatusValue;
+  notes?: string | null;
+}
+
+export function createAdminEvent(input: CreateAdminEventInput) {
+  return apiFetch<AdminEventDetail>('/api/mobile/admin/events', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export type UpdateAdminEventInput = Partial<Omit<CreateAdminEventInput, 'organizationId' | 'status'>> & {
+  organizationId: string;
+  status?: EventStatusValue;
+};
+
+export function updateAdminEvent(eventId: string, input: UpdateAdminEventInput) {
+  return apiFetch<AdminEventDetail>(`/api/mobile/admin/events/${encodeURIComponent(eventId)}`, { method: 'PATCH', body: JSON.stringify(input) });
+}
+
+// ── Admin: attendance / QR check-in sessions ────────────────────────────────
+// Backed by /api/mobile/admin/events/[id]/attendance-session and
+// /api/mobile/admin/attendance-sessions/[id]/*, mirroring the web
+// AttendanceSessionManager exactly (src/components/app/AttendanceSessionManager.tsx)
+// -- same create/open/regenerate/close lifecycle, same signed rotating QR
+// token minted server-side. Gated on the manageAttendance capability.
+
+export type AttendanceSessionStatusValue = 'DRAFT' | 'OPEN' | 'CLOSED' | 'CANCELLED';
+export type AttendanceSessionModeValue = 'ROTATING_QR' | 'STATIC_QR';
+
+export interface AdminAttendanceSession {
+  id: string;
+  organizationId: string;
+  eventId: string | null;
+  meetingId: string | null;
+  status: AttendanceSessionStatusValue;
+  mode: AttendanceSessionModeValue;
+  rotationSeconds: number;
+  lateThresholdMinutes: number;
+  tokenVersion: number;
+}
+
+export function getAdminEventAttendanceSession(organizationId: string, eventId: string) {
+  return apiFetch<AdminAttendanceSession | null>(
+    `/api/mobile/admin/events/${encodeURIComponent(eventId)}/attendance-session?organizationId=${encodeURIComponent(organizationId)}`
+  );
+}
+
+export function createAdminEventAttendanceSession(organizationId: string, eventId: string) {
+  return apiFetch<AdminAttendanceSession>(`/api/mobile/admin/events/${encodeURIComponent(eventId)}/attendance-session`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId }),
+  });
+}
+
+export function openAdminAttendanceSession(organizationId: string, sessionId: string) {
+  return apiFetch<AdminAttendanceSession>(`/api/mobile/admin/attendance-sessions/${encodeURIComponent(sessionId)}/open`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId }),
+  });
+}
+
+export function closeAdminAttendanceSession(organizationId: string, sessionId: string) {
+  return apiFetch<AdminAttendanceSession>(`/api/mobile/admin/attendance-sessions/${encodeURIComponent(sessionId)}/close`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId }),
+  });
+}
+
+export function regenerateAdminAttendanceSession(organizationId: string, sessionId: string) {
+  return apiFetch<AdminAttendanceSession>(`/api/mobile/admin/attendance-sessions/${encodeURIComponent(sessionId)}/regenerate`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId }),
+  });
+}
+
+export interface AdminAttendanceQr {
+  checkInUrl: string;
+  qrDataUrl: string;
+  mode: AttendanceSessionModeValue;
+  rotationSeconds: number;
+  secondsRemainingInSlot: number | null;
+  slot: number | null;
+}
+
+export function getAdminAttendanceSessionQr(organizationId: string, sessionId: string) {
+  return apiFetch<AdminAttendanceQr>(
+    `/api/mobile/admin/attendance-sessions/${encodeURIComponent(sessionId)}/qr?organizationId=${encodeURIComponent(organizationId)}`
+  );
+}
+
+export interface AdminAttendanceSummary {
+  status: AttendanceSessionStatusValue;
+  eligibleCount: number;
+  checkedInCount: number;
+  counts: { PRESENT: number; LATE: number; EXCUSED: number; ABSENT: number; VIRTUAL: number };
+  attendancePercent: number;
+}
+
+export function getAdminAttendanceSessionSummary(organizationId: string, sessionId: string) {
+  return apiFetch<AdminAttendanceSummary>(
+    `/api/mobile/admin/attendance-sessions/${encodeURIComponent(sessionId)}/summary?organizationId=${encodeURIComponent(organizationId)}`
+  );
+}
+
+export interface AdminAttendanceRosterRow {
+  id: string;
+  attendanceStatus: 'PRESENT' | 'ABSENT' | 'EXCUSED' | 'LATE' | 'VIRTUAL';
+  checkInTime: string | null;
+  method: string;
+  correctionReason: string | null;
+  member: { id: string; firstName: string; lastName: string };
+}
+
+export function getAdminEventAttendanceRoster(organizationId: string, eventId: string) {
+  return apiFetch<AdminAttendanceRosterRow[]>(
+    `/api/mobile/admin/events/${encodeURIComponent(eventId)}/attendance?organizationId=${encodeURIComponent(organizationId)}`
+  );
+}
+
+// ── Admin: communications / campaign administration ─────────────────────────
+// Backed by /api/mobile/admin/campaigns/*, delegating to the exact same
+// createCommunicationCampaign()/sendCommunicationCampaign() the web
+// Communications pages use. Gated on the manageCommunications capability
+// (already wired since PR A). Mobile intentionally omits WhatsApp
+// template selection and custom recipientFilter UI -- those stay web-only
+// for now; the API still accepts the full web schema unchanged.
+
+export type CampaignCommunicationType = 'ANNOUNCEMENT' | 'MEETING_MINUTES' | 'DUES_REMINDER' | 'EVENT_NOTICE' | 'CAMPAIGN_UPDATE' | 'GENERAL' | 'OTHER';
+export type CampaignChannel = 'EMAIL' | 'SMS' | 'EMAIL_AND_SMS' | 'INTERNAL_LOG_ONLY';
+export type CampaignStatus = 'DRAFT' | 'READY' | 'SENDING' | 'SENT' | 'FAILED' | 'CANCELED';
+
+export interface AdminCampaignListRow {
+  id: string;
+  title: string;
+  communicationType: CampaignCommunicationType;
+  channel: CampaignChannel;
+  status: CampaignStatus;
+  scheduledFor: string | null;
+  sentAt: string | null;
+  createdAt: string;
+  _count: { recipients: number };
+}
+
+export function getAdminCampaigns(organizationId: string) {
+  return apiFetch<AdminCampaignListRow[]>(`/api/mobile/admin/campaigns?organizationId=${encodeURIComponent(organizationId)}`);
+}
+
+export interface AdminCampaignDetail {
+  id: string;
+  title: string;
+  communicationType: CampaignCommunicationType;
+  channel: CampaignChannel;
+  subject: string;
+  body: string;
+  status: CampaignStatus;
+  scheduledFor: string | null;
+  sentAt: string | null;
+  createdAt: string;
+  _count: { recipients: number };
+}
+
+export function getAdminCampaign(organizationId: string, campaignId: string) {
+  return apiFetch<AdminCampaignDetail>(
+    `/api/mobile/admin/campaigns/${encodeURIComponent(campaignId)}?organizationId=${encodeURIComponent(organizationId)}`
+  );
+}
+
+export interface CreateAdminCampaignInput {
+  organizationId: string;
+  title: string;
+  communicationType: CampaignCommunicationType;
+  channel: CampaignChannel;
+  subject: string;
+  body: string;
+  sendNow?: boolean;
+}
+
+export function createAdminCampaign(input: CreateAdminCampaignInput) {
+  return apiFetch<AdminCampaignDetail>('/api/mobile/admin/campaigns', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function sendAdminCampaign(organizationId: string, campaignId: string) {
+  return apiFetch<{ sent: number; skipped: number; failed: number }>(`/api/mobile/admin/campaigns/${encodeURIComponent(campaignId)}/send`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId }),
+  });
+}
+
 // ── Identity routing ─────────────────────────────────────────────────────────
 // A caller can have a conventional OrgMember, a PTA household link, both (an
 // officer who is also a parent), or neither. `hasMemberIdentity` always wins

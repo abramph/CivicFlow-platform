@@ -60,6 +60,14 @@ export default function RootLayout() {
           <Stack.Screen name="admin-members/[memberId]/index" options={{ headerTitle: 'Member' }} />
           <Stack.Screen name="admin-members/new" options={{ headerTitle: 'Add Member' }} />
           <Stack.Screen name="admin-members/[memberId]/edit" options={{ headerTitle: 'Edit Member' }} />
+          <Stack.Screen name="admin-events" options={{ headerTitle: 'Events' }} />
+          <Stack.Screen name="admin-events/new" options={{ headerTitle: 'Add Event' }} />
+          <Stack.Screen name="admin-events/[eventId]/index" options={{ headerTitle: 'Event' }} />
+          <Stack.Screen name="admin-events/[eventId]/edit" options={{ headerTitle: 'Edit Event' }} />
+          <Stack.Screen name="admin-events/[eventId]/attendance-session" options={{ headerTitle: 'Attendance' }} />
+          <Stack.Screen name="admin-campaigns" options={{ headerTitle: 'Campaigns' }} />
+          <Stack.Screen name="admin-campaigns/new" options={{ headerTitle: 'New Campaign' }} />
+          <Stack.Screen name="admin-campaigns/[campaignId]/index" options={{ headerTitle: 'Campaign' }} />
         </Stack>
       </AuthProvider>
     </ThemeProvider>

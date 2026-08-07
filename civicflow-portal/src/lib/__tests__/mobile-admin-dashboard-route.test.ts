@@ -25,11 +25,15 @@ const groupByOrgMember = vi.fn();
 const countOrgMember = vi.fn();
 const findManyConversationParticipant = vi.fn();
 const countEvent = vi.fn();
+const countCommunicationCampaign = vi.fn();
+const countMeetingAttendanceSession = vi.fn();
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     orgMember: { groupBy: (...args: unknown[]) => groupByOrgMember(...args), count: (...args: unknown[]) => countOrgMember(...args) },
     conversationParticipant: { findMany: (...args: unknown[]) => findManyConversationParticipant(...args) },
     event: { count: (...args: unknown[]) => countEvent(...args) },
+    communicationCampaign: { count: (...args: unknown[]) => countCommunicationCampaign(...args) },
+    meetingAttendanceSession: { count: (...args: unknown[]) => countMeetingAttendanceSession(...args) },
   },
 }));
 
@@ -50,6 +54,8 @@ beforeEach(() => {
   countOrgMember.mockReset();
   findManyConversationParticipant.mockReset();
   countEvent.mockReset();
+  countCommunicationCampaign.mockReset().mockResolvedValue(0);
+  countMeetingAttendanceSession.mockReset().mockResolvedValue(0);
 });
 
 describe("GET /api/mobile/admin/dashboard", () => {
@@ -91,7 +97,7 @@ describe("GET /api/mobile/admin/dashboard", () => {
     const response = await GET(request());
     const body = await response.json();
 
-    expect(body.data.metrics).toEqual([{ key: "eventsUpcoming", label: "Upcoming Events", value: 5, href: "/events" }]);
+    expect(body.data.metrics).toEqual([{ key: "eventsUpcoming", label: "Upcoming Events", value: 5, href: "/admin-events" }]);
     expect(groupByOrgMember).not.toHaveBeenCalled();
     expect(listPendingPtaVolunteerHourEntries).not.toHaveBeenCalled();
     expect(findManyConversationParticipant).not.toHaveBeenCalled();
@@ -139,6 +145,39 @@ describe("GET /api/mobile/admin/dashboard", () => {
     const body = await response.json();
 
     expect(body.data.needsAttention).toEqual([]);
+  });
+
+  it("includes a campaigns metric alongside inbox when manageCommunications is held", async () => {
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "STAFF", adminCapabilities: ["adminDashboard", "manageCommunications"] });
+    findManyConversationParticipant.mockResolvedValueOnce([]);
+    countCommunicationCampaign.mockResolvedValueOnce(7);
+
+    const response = await GET(request());
+    const body = await response.json();
+
+    const campaignsMetric = body.data.metrics.find((m: { key: string }) => m.key === "campaigns");
+    expect(campaignsMetric).toEqual({ key: "campaigns", label: "Campaigns", value: 7, href: "/admin-campaigns" });
+  });
+
+  it("includes an open-check-in-sessions metric and needsAttention entry when manageAttendance is held", async () => {
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "STAFF", adminCapabilities: ["adminDashboard", "manageAttendance"] });
+    countMeetingAttendanceSession.mockResolvedValueOnce(2);
+
+    const response = await GET(request());
+    const body = await response.json();
+
+    expect(body.data.metrics).toEqual([{ key: "attendanceSessionsOpen", label: "Open Check-In Sessions", value: 2, href: "/admin-events" }]);
+    expect(body.data.needsAttention).toEqual(
+      expect.arrayContaining([{ id: "attendance-sessions-open", label: "2 check-in sessions currently open", href: "/admin-events" }])
+    );
+  });
+
+  it("omits the attendance metric group entirely without manageAttendance", async () => {
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "STAFF", adminCapabilities: ["adminDashboard"] });
+
+    await GET(request());
+
+    expect(countMeetingAttendanceSession).not.toHaveBeenCalled();
   });
 
   it("always returns generatedAt", async () => {

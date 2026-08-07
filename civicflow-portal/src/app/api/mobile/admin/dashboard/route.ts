@@ -95,13 +95,30 @@ export async function GET(request: Request) {
           href: "/inbox",
         });
       }
+
+      const campaignCount = await prisma.communicationCampaign.count({ where: { organizationId } });
+      metrics.push({ key: "campaigns", label: "Campaigns", value: campaignCount, href: "/admin-campaigns" });
     }
 
     if (has("manageEvents")) {
       const upcomingEventsCount = await prisma.event.count({
         where: { organizationId, startAt: { gte: new Date() } },
       });
-      metrics.push({ key: "eventsUpcoming", label: "Upcoming Events", value: upcomingEventsCount, href: "/events" });
+      metrics.push({ key: "eventsUpcoming", label: "Upcoming Events", value: upcomingEventsCount, href: "/admin-events" });
+    }
+
+    if (has("manageAttendance")) {
+      const openSessionCount = await prisma.meetingAttendanceSession.count({
+        where: { organizationId, status: "OPEN" },
+      });
+      metrics.push({ key: "attendanceSessionsOpen", label: "Open Check-In Sessions", value: openSessionCount, href: "/admin-events" });
+      if (openSessionCount > 0) {
+        needsAttention.push({
+          id: "attendance-sessions-open",
+          label: `${openSessionCount} check-in session${openSessionCount === 1 ? "" : "s"} currently open`,
+          href: "/admin-events",
+        });
+      }
     }
 
     return Response.json({
