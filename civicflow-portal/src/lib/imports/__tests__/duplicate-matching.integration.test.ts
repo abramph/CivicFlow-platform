@@ -199,6 +199,11 @@ describe.skipIf(!RUN_INTEGRATION)("matchPtaHouseholdRow / matchHoaPropertyRow â€
   });
 
   afterAll(async () => {
+    // PropertyResident's three FKs (organization/property/orgMember) are all
+    // onDelete: Restrict, not Cascade â€” deleting property/orgMember before
+    // their PropertyResident rows silently fails (caught below) and leaves
+    // the whole org un-deletable. Must delete residents first.
+    await prisma?.propertyResident.deleteMany({ where: { organizationId: hoaOrgId } }).catch(() => {});
     await prisma?.ptaHousehold.deleteMany({ where: { organizationId: ptaOrgId } }).catch(() => {});
     await prisma?.orgMember.deleteMany({ where: { organizationId: { in: [ptaOrgId, hoaOrgId] } } }).catch(() => {});
     await prisma?.property.deleteMany({ where: { organizationId: hoaOrgId } }).catch(() => {});
