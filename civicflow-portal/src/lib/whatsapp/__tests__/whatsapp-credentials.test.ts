@@ -175,6 +175,51 @@ describe("whatsapp-credentials", () => {
       const call = update.mock.calls[0][0];
       expect(call.data.messagingServiceSidEncrypted).toBeNull();
     });
+
+    it.each([
+      "platformEnabled",
+      "sandboxMode",
+      "maintenanceMode",
+      "outboundPaused",
+      "orgMessagingEnabled",
+    ] as const)("sets %s independently, leaving other toggles untouched", async (field) => {
+      findFirst.mockResolvedValueOnce(emptySettings());
+      update.mockResolvedValueOnce(emptySettings());
+
+      await updatePlatformWhatsAppSettings({ [field]: true }, "user-1");
+
+      const call = update.mock.calls[0][0];
+      expect(call.data[field]).toBe(true);
+      const otherToggles = ["platformEnabled", "sandboxMode", "maintenanceMode", "outboundPaused", "orgMessagingEnabled"].filter(
+        (f) => f !== field
+      );
+      for (const other of otherToggles) {
+        expect(call.data[other]).toBeUndefined();
+      }
+    });
+
+    it("sets testPhoneNumbers independently of the toggles and sender fields", async () => {
+      findFirst.mockResolvedValueOnce(emptySettings());
+      update.mockResolvedValueOnce(emptySettings());
+
+      await updatePlatformWhatsAppSettings({ testPhoneNumbers: ["+15551112222", "+15553334444"] }, "user-1");
+
+      const call = update.mock.calls[0][0];
+      expect(call.data.testPhoneNumbers).toEqual(["+15551112222", "+15553334444"]);
+      expect(call.data.fromNumberEncrypted).toBeUndefined();
+      expect(call.data.platformEnabled).toBeUndefined();
+    });
+
+    it("combines sender-field and toggle updates in a single call", async () => {
+      findFirst.mockResolvedValueOnce(emptySettings());
+      update.mockResolvedValueOnce(emptySettings());
+
+      await updatePlatformWhatsAppSettings({ fromNumber: "+15551234567", maintenanceMode: true }, "user-1");
+
+      const call = update.mock.calls[0][0];
+      expect(call.data.fromNumberEncrypted).toEqual(expect.any(String));
+      expect(call.data.maintenanceMode).toBe(true);
+    });
   });
 
   describe("getMaskedWhatsAppSettingsView", () => {

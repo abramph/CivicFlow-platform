@@ -85,6 +85,12 @@ export default async function PlatformOverviewPage() {
             <StatCard label="SMS failed" value={<MetricValue metric={overview.communications.smsFailed} format={(v) => v} />} />
           </Link>
           <Link href="/admin/platform/communications">
+            <StatCard label="WhatsApp sent" value={<MetricValue metric={overview.communications.whatsappSent} format={(v) => v} />} />
+          </Link>
+          <Link href="/admin/platform/communications">
+            <StatCard label="WhatsApp failed" value={<MetricValue metric={overview.communications.whatsappFailed} format={(v) => v} />} />
+          </Link>
+          <Link href="/admin/platform/communications">
             <StatCard
               label="Email sent"
               value={<MetricValue metric={overview.communications.emailSent} format={(v) => v} />}

@@ -22,7 +22,10 @@ export default async function PlatformCommunicationsPage() {
       <PageHeader
         title="Communications"
         description={`Last ${summary.sms.windowDays} days, unless noted otherwise.`}
-        actions={[{ href: "/admin/platform/sms", label: "SMS Administration (credentials, per-org limits) →" }]}
+        actions={[
+          { href: "/admin/platform/sms", label: "SMS Administration (credentials, per-org limits) →" },
+          { href: "/admin/platform/whatsapp", label: "WhatsApp Administration (credentials, per-org limits) →" },
+        ]}
       />
 
       <SectionCard title="SMS / Twilio">
@@ -61,6 +64,60 @@ export default async function PlatformCommunicationsPage() {
             <p className="mb-2 text-sm font-semibold text-slate-900">Recent provider errors</p>
             <MetricValue
               metric={summary.sms.recentProviderErrors}
+              format={(rows) =>
+                rows.length === 0 ? (
+                  <EmptyState title="No recent errors" />
+                ) : (
+                  <ul className="divide-y divide-slate-100 text-sm">
+                    {rows.map((r) => (
+                      <li key={r.id} className="py-2">
+                        <p className="text-slate-900">{r.errorMessage}</p>
+                        <p className="text-xs text-slate-500">{formatDateTime(r.occurredAt)}</p>
+                      </li>
+                    ))}
+                  </ul>
+                )
+              }
+            />
+          </div>
+        </div>
+      </SectionCard>
+
+      <SectionCard title="WhatsApp / Twilio">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <StatCard label="Orgs with WhatsApp enabled" value={<MetricValue metric={summary.whatsapp.orgsWithWhatsAppEnabled} format={(v) => v} />} />
+          <StatCard label="Sent" value={<MetricValue metric={summary.whatsapp.sent} format={(v) => v} />} />
+          <StatCard label="Delivered" value={<MetricValue metric={summary.whatsapp.delivered} format={(v) => v} />} />
+          <StatCard label="Failed" value={<MetricValue metric={summary.whatsapp.failed} format={(v) => v} />} />
+        </div>
+
+        <div className="mt-4 grid gap-6 lg:grid-cols-2">
+          <div>
+            <p className="mb-2 text-sm font-semibold text-slate-900">Usage by organization</p>
+            <MetricValue
+              metric={summary.whatsapp.usageByOrganization}
+              format={(rows) =>
+                rows.length === 0 ? (
+                  <EmptyState title="No WhatsApp activity in this window" />
+                ) : (
+                  <ul className="divide-y divide-slate-100 text-sm">
+                    {rows.map((r) => (
+                      <li key={r.organizationId} className="flex items-center justify-between py-2">
+                        <Link href={`/admin/platform/organizations/${r.organizationId}`} className="font-semibold text-emerald-700 hover:underline">
+                          {r.organizationName}
+                        </Link>
+                        <span className="text-slate-700">{r.sent} sent · {r.failed} failed</span>
+                      </li>
+                    ))}
+                  </ul>
+                )
+              }
+            />
+          </div>
+          <div>
+            <p className="mb-2 text-sm font-semibold text-slate-900">Recent provider errors</p>
+            <MetricValue
+              metric={summary.whatsapp.recentProviderErrors}
               format={(rows) =>
                 rows.length === 0 ? (
                   <EmptyState title="No recent errors" />

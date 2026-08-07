@@ -18,6 +18,16 @@ export interface SmsSummary {
   recentProviderErrors: Metric<{ id: string; organizationId: string; errorMessage: string; occurredAt: string }[]>;
 }
 
+export interface WhatsAppSummary {
+  windowDays: number;
+  orgsWithWhatsAppEnabled: Metric<number>;
+  sent: Metric<number>;
+  delivered: Metric<number>;
+  failed: Metric<number>;
+  usageByOrganization: Metric<{ organizationId: string; organizationName: string; sent: number; failed: number }[]>;
+  recentProviderErrors: Metric<{ id: string; organizationId: string; errorMessage: string; occurredAt: string }[]>;
+}
+
 export interface EmailSummary {
   windowDays: number;
   /** EmailReminderLog only tracks dues/contribution/renewal reminder emails — NOT auth emails (verification, password reset), which are not durably logged anywhere in this codebase. */
@@ -39,6 +49,7 @@ export interface PushSummary {
 
 export interface CommunicationsOperationsSummary {
   sms: SmsSummary;
+  whatsapp: WhatsAppSummary;
   email: EmailSummary;
   push: PushSummary;
 }
@@ -57,6 +68,12 @@ export async function getCommunicationsOperationsSummary(
     smsOptOuts,
     smsByOrgGroups,
     smsErrors,
+    orgsWithWhatsAppEnabled,
+    whatsappSent,
+    whatsappDelivered,
+    whatsappFailed,
+    whatsappByOrgGroups,
+    whatsappErrors,
     emailSent,
     emailFailed,
     emailErrors,
@@ -77,6 +94,21 @@ export async function getCommunicationsOperationsSummary(
     }),
     prisma.smsMessage.findMany({
       where: { createdAt: { gte: start }, status: "FAILED", errorMessage: { not: null } },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+      select: { id: true, organizationId: true, errorMessage: true, createdAt: true },
+    }),
+    prisma.organizationWhatsAppSettings.count({ where: { whatsappAddOnActive: true } }),
+    prisma.whatsAppMessage.count({ where: { createdAt: { gte: start }, status: { in: ["SENT", "DELIVERED", "READ"] } } }),
+    prisma.whatsAppMessage.count({ where: { createdAt: { gte: start }, status: { in: ["DELIVERED", "READ"] } } }),
+    prisma.whatsAppMessage.count({ where: { createdAt: { gte: start }, status: { in: ["FAILED", "UNDELIVERED"] } } }),
+    prisma.whatsAppMessage.groupBy({
+      by: ["organizationId"],
+      where: { createdAt: { gte: start } },
+      _count: { _all: true },
+    }),
+    prisma.whatsAppMessage.findMany({
+      where: { createdAt: { gte: start }, status: { in: ["FAILED", "UNDELIVERED"] }, errorMessage: { not: null } },
       orderBy: { createdAt: "desc" },
       take: 20,
       select: { id: true, organizationId: true, errorMessage: true, createdAt: true },
@@ -104,10 +136,11 @@ export async function getCommunicationsOperationsSummary(
   ]);
 
   const smsOrgIds = smsByOrgGroups.map((g) => g.organizationId);
+  const whatsappOrgIds = whatsappByOrgGroups.map((g) => g.organizationId);
   const pushOrgIds = pushByOrgGroups.map((g) => g.organizationId);
   const emailFailOrgIds = emailFailuresByOrgGroups.map((g) => g.organizationId);
   const orgNames = await prisma.organization.findMany({
-    where: { id: { in: Array.from(new Set([...smsOrgIds, ...pushOrgIds, ...emailFailOrgIds])) } },
+    where: { id: { in: Array.from(new Set([...smsOrgIds, ...whatsappOrgIds, ...pushOrgIds, ...emailFailOrgIds])) } },
     select: { id: true, name: true },
   });
   const nameById = new Map(orgNames.map((o) => [o.id, o.name]));
@@ -119,6 +152,13 @@ export async function getCommunicationsOperationsSummary(
     _count: { _all: true },
   });
   const failedByOrg = new Map(smsFailedByOrgGroups.map((g) => [g.organizationId, g._count._all]));
+
+  const whatsappFailedByOrgGroups = await prisma.whatsAppMessage.groupBy({
+    by: ["organizationId"],
+    where: { createdAt: { gte: start }, status: { in: ["FAILED", "UNDELIVERED"] } },
+    _count: { _all: true },
+  });
+  const whatsappFailedByOrg = new Map(whatsappFailedByOrgGroups.map((g) => [g.organizationId, g._count._all]));
 
   return {
     sms: {
@@ -146,6 +186,30 @@ export async function getCommunicationsOperationsSummary(
       recentProviderErrors: {
         status: "ok",
         value: smsErrors.map((e) => ({ id: e.id, organizationId: e.organizationId, errorMessage: e.errorMessage ?? "", occurredAt: e.createdAt.toISOString() })),
+        source: "database",
+        asOf,
+      },
+    },
+    whatsapp: {
+      windowDays,
+      orgsWithWhatsAppEnabled: { status: "ok", value: orgsWithWhatsAppEnabled, source: "database", asOf },
+      sent: { status: "ok", value: whatsappSent, source: "database", asOf },
+      delivered: { status: "ok", value: whatsappDelivered, source: "database", asOf },
+      failed: { status: "ok", value: whatsappFailed, source: "database", asOf },
+      usageByOrganization: {
+        status: "ok",
+        value: whatsappByOrgGroups.map((g) => ({
+          organizationId: g.organizationId,
+          organizationName: nameById.get(g.organizationId) ?? "Unknown",
+          sent: g._count._all,
+          failed: whatsappFailedByOrg.get(g.organizationId) ?? 0,
+        })),
+        source: "database",
+        asOf,
+      },
+      recentProviderErrors: {
+        status: "ok",
+        value: whatsappErrors.map((e) => ({ id: e.id, organizationId: e.organizationId, errorMessage: e.errorMessage ?? "", occurredAt: e.createdAt.toISOString() })),
         source: "database",
         asOf,
       },
