@@ -536,6 +536,14 @@ export async function executeBatch(batchId: string, organizationId: string, requ
   const consumesCapacity = importKindConsumesCapacity(batch.importKind);
   let imported = 0;
   let capacityExhausted = false;
+  // Rows in this tick's eligible set that were already BLOCKED_PLAN_LIMIT
+  // from a prior pause (eligibleRows' query doesn't exclude that status —
+  // that's what makes them naturally pick back up on resume) and actually
+  // got processed this tick, whether they succeeded or failed. Used below
+  // to decrement blockedPlanLimitCount for rows no longer blocked —
+  // previously this only ever incremented, so a batch that paused, resumed,
+  // and fully completed still showed a stale nonzero "blocked" count.
+  let resolvedFromBlocked = 0;
 
   for (const row of eligibleRows) {
     const createsNewRecord = row.decision === "IMPORT_NEW" || row.decision === "CREATE_ANYWAY";
@@ -547,6 +555,8 @@ export async function executeBatch(batchId: string, organizationId: string, requ
         break;
       }
     }
+
+    if (row.status === "BLOCKED_PLAN_LIMIT") resolvedFromBlocked += 1;
 
     try {
       const executed =
@@ -586,7 +596,9 @@ export async function executeBatch(batchId: string, organizationId: string, requ
       extraData: {
         importedCount: { increment: imported },
         skippedCount: { increment: skipped.count },
-        blockedPlanLimitCount: { increment: blocked.count },
+        // Net delta: newly (re-)blocked this tick minus previously-blocked
+        // rows that got resolved before capacity ran out again.
+        blockedPlanLimitCount: { increment: blocked.count - resolvedFromBlocked },
         planLimitSnapshot: snapshot as unknown as Prisma.InputJsonValue,
         claimedAt: null,
       },
@@ -604,7 +616,12 @@ export async function executeBatch(batchId: string, organizationId: string, requ
     // rather than waiting out the staleness window.
     await prisma.importBatch.update({
       where: { id: batchId },
-      data: { importedCount: { increment: imported }, skippedCount: { increment: skipped.count }, claimedAt: null },
+      data: {
+        importedCount: { increment: imported },
+        skippedCount: { increment: skipped.count },
+        blockedPlanLimitCount: { increment: -resolvedFromBlocked },
+        claimedAt: null,
+      },
     });
     return;
   }
@@ -617,7 +634,12 @@ export async function executeBatch(batchId: string, organizationId: string, requ
     batchId,
     organizationId,
     to: remainingNeedingReview > 0 ? "PARTIALLY_COMPLETED" : "COMPLETED",
-    extraData: { importedCount: { increment: imported }, skippedCount: { increment: skipped.count }, claimedAt: null },
+    extraData: {
+      importedCount: { increment: imported },
+      skippedCount: { increment: skipped.count },
+      blockedPlanLimitCount: { increment: -resolvedFromBlocked },
+      claimedAt: null,
+    },
   });
 }
 
