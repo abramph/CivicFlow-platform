@@ -37,6 +37,8 @@ export interface CommunicationsOverview {
   windowDays: number;
   smsSent: Metric<number>;
   smsFailed: Metric<number>;
+  whatsappSent: Metric<number>;
+  whatsappFailed: Metric<number>;
   emailSent: Metric<number>;
   emailFailed: Metric<number>;
   pushSent: Metric<number>;
@@ -89,6 +91,8 @@ export async function getPlatformOverview(): Promise<PlatformOverview> {
     estimatedMrr,
     smsSent,
     smsFailed,
+    whatsappSent,
+    whatsappFailed,
     emailSent,
     emailFailed,
     pushSent,
@@ -97,6 +101,7 @@ export async function getPlatformOverview(): Promise<PlatformOverview> {
     recentOrgs,
     recentSubChanges,
     recentCommFailures,
+    recentWhatsAppFailures,
   ] = await Promise.all([
     prisma.organization.count(),
     prisma.organization.count({ where: { status: "active" } }),
@@ -124,6 +129,8 @@ export async function getPlatformOverview(): Promise<PlatformOverview> {
     estimateMrr(),
     prisma.smsMessage.count({ where: { createdAt: { gte: windowStart }, status: { in: ["SENT", "DELIVERED"] } } }),
     prisma.smsMessage.count({ where: { createdAt: { gte: windowStart }, status: "FAILED" } }),
+    prisma.whatsAppMessage.count({ where: { createdAt: { gte: windowStart }, status: { in: ["SENT", "DELIVERED", "READ"] } } }),
+    prisma.whatsAppMessage.count({ where: { createdAt: { gte: windowStart }, status: { in: ["FAILED", "UNDELIVERED"] } } }),
     prisma.emailReminderLog.count({ where: { createdAt: { gte: windowStart }, status: "SENT" } }),
     prisma.emailReminderLog.count({ where: { createdAt: { gte: windowStart }, status: "FAILED" } }),
     prisma.communicationLog.count({ where: { createdAt: { gte: windowStart }, communicationType: "PUSH" } }),
@@ -146,6 +153,12 @@ export async function getPlatformOverview(): Promise<PlatformOverview> {
     }),
     prisma.smsMessage.findMany({
       where: { status: "FAILED" },
+      orderBy: { createdAt: "desc" },
+      take: 5,
+      select: { id: true, organizationId: true, errorMessage: true, createdAt: true },
+    }),
+    prisma.whatsAppMessage.findMany({
+      where: { status: { in: ["FAILED", "UNDELIVERED"] } },
       orderBy: { createdAt: "desc" },
       take: 5,
       select: { id: true, organizationId: true, errorMessage: true, createdAt: true },
@@ -187,6 +200,14 @@ export async function getPlatformOverview(): Promise<PlatformOverview> {
       organizationId: f.organizationId,
       occurredAt: f.createdAt.toISOString(),
     })),
+    ...recentWhatsAppFailures.map((f) => ({
+      id: `whatsapp-fail:${f.id}`,
+      kind: "communication_failure" as const,
+      label: "WhatsApp delivery failed",
+      detail: f.errorMessage ?? "No error detail recorded",
+      organizationId: f.organizationId,
+      occurredAt: f.createdAt.toISOString(),
+    })),
   ]
     .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))
     .slice(0, 15);
@@ -217,6 +238,8 @@ export async function getPlatformOverview(): Promise<PlatformOverview> {
       windowDays: DEFAULT_REPORTING_WINDOW_DAYS,
       smsSent: { status: "ok", value: smsSent, source: "database", asOf },
       smsFailed: { status: "ok", value: smsFailed, source: "database", asOf },
+      whatsappSent: { status: "ok", value: whatsappSent, source: "database", asOf },
+      whatsappFailed: { status: "ok", value: whatsappFailed, source: "database", asOf },
       // EmailReminderLog only covers dues/contribution/renewal reminder
       // emails — auth emails (verification, password reset) are not
       // durably logged anywhere in this codebase. Labeled in the UI.
