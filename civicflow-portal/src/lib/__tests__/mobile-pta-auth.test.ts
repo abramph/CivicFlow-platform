@@ -29,7 +29,7 @@ vi.mock("@/lib/role-permissions", () => ({
   getEffectivePermissions: (...args: unknown[]) => getEffectivePermissionsMock(...args),
 }));
 
-import { completeMobileLogin, requireMobileOrgAccess, requireMobilePtaHouseholdAccess, requireMobileStaffPermission, signAccessToken } from "@/lib/mobile-auth";
+import { completeMobileLogin, requireMobileOrgAccess, requireMobilePtaHouseholdAccess, requireMobileStaffPermission, requirePtaVerticalForMobile, signAccessToken } from "@/lib/mobile-auth";
 
 function requestWithToken(token: string) {
   return new Request("https://portal.test/api/mobile/pta/volunteers/opportunities", {
@@ -48,12 +48,19 @@ beforeEach(() => {
   getEffectivePermissionsMock.mockReset();
 });
 
-describe("completeMobileLogin — PTA household adults must be able to obtain a mobile token", () => {
+describe("completeMobileLogin — three independent eligible identities (member, PTA parent, staff officer)", () => {
   const user = { id: "user-1", email: "parent@example.com", displayName: "Casey Kim", mobileTokenVersion: 0 };
 
+  // organizationMembership.count backs BOTH the role:MEMBER query and the
+  // staff (non-MEMBER) query, called in that order inside the same
+  // Promise.all — every test must queue both.
+  function mockCounts({ member = 0, pta = 0, staff = 0 }: { member?: number; pta?: number; staff?: number }) {
+    countMembership.mockResolvedValueOnce(member).mockResolvedValueOnce(staff);
+    countPtaHouseholdAdult.mockResolvedValueOnce(pta);
+  }
+
   it("issues a token pair for a pure PTA parent with zero OrganizationMembership rows", async () => {
-    countMembership.mockResolvedValueOnce(0);
-    countPtaHouseholdAdult.mockResolvedValueOnce(1);
+    mockCounts({ pta: 1 });
 
     const result = await completeMobileLogin(user);
 
@@ -61,17 +68,23 @@ describe("completeMobileLogin — PTA household adults must be able to obtain a 
   });
 
   it("still issues a token pair for a regular MEMBER-role account (existing behavior preserved)", async () => {
-    countMembership.mockResolvedValueOnce(1);
-    countPtaHouseholdAdult.mockResolvedValueOnce(0);
+    mockCounts({ member: 1 });
 
     const result = await completeMobileLogin(user);
 
     expect(result.ok).toBe(true);
   });
 
-  it("rejects an account that is neither a MEMBER nor a linked PTA household adult", async () => {
-    countMembership.mockResolvedValueOnce(0);
-    countPtaHouseholdAdult.mockResolvedValueOnce(0);
+  it("issues a token pair for a staff/officer account with no personal MEMBER identity and no PTA household link — the Mobile Admin program's load-bearing fix (found via a live login walkthrough: an ORG_OWNER who isn't also a dues-paying member was previously rejected at login entirely)", async () => {
+    mockCounts({ staff: 1 });
+
+    const result = await completeMobileLogin(user);
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("rejects an account with none of the three identities", async () => {
+    mockCounts({});
 
     const result = await completeMobileLogin(user);
 
@@ -171,16 +184,33 @@ describe("requireMobileStaffPermission — officer-side mobile PTA guard", () =>
     ).rejects.toThrow(/Permission denied/);
   });
 
-  it("denies access when the organization's primaryVertical is not PTA, even for a real officer (PR #40 — no Labs enrollment involved)", async () => {
+  it("is vertical-agnostic on its own — grants access on a non-PTA org when the permission matches (vertical-locking is now the caller's own responsibility, see requirePtaVerticalForMobile)", async () => {
     findUniqueUser.mockResolvedValueOnce({ id: "officer-1", email: "coordinator@example.com", mobileTokenVersion: 0 });
     findFirstMembership.mockResolvedValueOnce({ id: "membership-1", organizationId: "org-a", userId: "officer-1", role: "ORG_OWNER" });
-    findUniqueOrganization.mockResolvedValueOnce({ primaryVertical: "COMMUNITY", status: "active" });
+    getEffectivePermissionsMock.mockResolvedValueOnce(["hoa:violations:write"]);
 
     const token = await signAccessToken("officer-1", 0);
-    await expect(
-      requireMobileStaffPermission(requestWithToken(token), "org-a", "pta:volunteers:checkin" as never)
-    ).rejects.toThrow(/not available/);
-    expect(getEffectivePermissionsMock).not.toHaveBeenCalled();
+    const result = await requireMobileStaffPermission(requestWithToken(token), "org-a", "hoa:violations:write" as never);
+
+    expect(result.role).toBe("ORG_OWNER");
+    expect(findUniqueOrganization).not.toHaveBeenCalled();
+  });
+});
+
+describe("requirePtaVerticalForMobile — the explicit, separate vertical lock PTA-only mobile routes must call themselves", () => {
+  it("passes silently for an active PTA organization", async () => {
+    findUniqueOrganization.mockResolvedValueOnce({ primaryVertical: "PTA", status: "active" });
+    await expect(requirePtaVerticalForMobile("org-a")).resolves.toBeUndefined();
+  });
+
+  it("throws for a non-PTA organization, even with a real officer permission already granted", async () => {
+    findUniqueOrganization.mockResolvedValueOnce({ primaryVertical: "COMMUNITY", status: "active" });
+    await expect(requirePtaVerticalForMobile("org-a")).rejects.toThrow(/not available/);
+  });
+
+  it("throws for a PTA organization that is not active", async () => {
+    findUniqueOrganization.mockResolvedValueOnce({ primaryVertical: "PTA", status: "suspended" });
+    await expect(requirePtaVerticalForMobile("org-a")).rejects.toThrow(/not available/);
   });
 });
 

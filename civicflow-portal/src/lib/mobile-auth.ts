@@ -26,7 +26,7 @@ import type { Permission, Role } from "@/lib/rbac";
  * gated on Organization.primaryVertical alone, never a separate Labs
  * enrollment (see docs/pta-access-architecture.md).
  */
-async function requirePtaVerticalForMobile(organizationId: string): Promise<void> {
+export async function requirePtaVerticalForMobile(organizationId: string): Promise<void> {
   const organization = await prisma.organization.findUnique({
     where: { id: organizationId },
     select: { primaryVertical: true, status: true },
@@ -101,17 +101,28 @@ export async function signMobileTokenPair(userId: string, tokenVersion: number) 
 /**
  * Shared final step of mobile login, used both by the direct (no-MFA) path
  * in mobile/auth/login and by mobile/auth/mfa/challenge once a code is
- * verified — checks the account is eligible for the member-facing app at
- * all, then issues a fresh token pair.
+ * verified — checks the account is eligible for the mobile app at all, then
+ * issues a fresh token pair.
  *
- * Eligibility is EITHER of two independent identities, since PTA parents are
- * not "regular" members: a real OrganizationMembership{role: MEMBER} row
- * (the general case), OR a PtaHouseholdAdult.userId link in at least one PTA
- * household (household adults deliberately have no OrganizationMembership at
- * all — the household's single shared OrgMember is a billing identity, not a
- * per-adult one; see requireMobilePtaHouseholdAccess()). Without this second
- * branch, no PTA parent could ever obtain a mobile token — the PTA volunteer
- * app would be permanently unreachable for its actual target audience.
+ * Eligibility is ANY of three independent identities:
+ *  1. A real OrganizationMembership{role: MEMBER} row (the general member case).
+ *  2. A PtaHouseholdAdult.userId link in at least one PTA household
+ *     (household adults deliberately have no OrganizationMembership at all —
+ *     the household's single shared OrgMember is a billing identity, not a
+ *     per-adult one; see requireMobilePtaHouseholdAccess()). Without this
+ *     branch, no PTA parent could ever obtain a mobile token.
+ *  3. A real active non-MEMBER (staff/officer) OrganizationMembership row —
+ *     added for the Mobile Admin program. Discovered via a live login
+ *     walkthrough (not a mocked test) that an officer with no personal
+ *     MEMBER identity of their own — the normal case for an ORG_OWNER/
+ *     ORG_ADMIN who isn't also enrolled as a dues-paying member — was
+ *     rejected at login before ever reaching GET /api/mobile/organizations'
+ *     own (already-correct) staff-membership branch, making the entire
+ *     Admin tab permanently unreachable for exactly the people it's for.
+ *     This does not itself grant any admin capability — resolveMobileAdminCapabilities()
+ *     still independently gates the Labs enrollment and RBAC permission a
+ *     staff row must additionally clear before anything admin-shaped becomes
+ *     visible; this only lets the account past the login eligibility check.
  */
 export async function completeMobileLogin(user: {
   id: string;
@@ -122,15 +133,18 @@ export async function completeMobileLogin(user: {
   | { ok: true; data: { accessToken: string; refreshToken: string; expiresIn: number; user: { id: string; email: string; displayName: string | null } } }
   | { ok: false; status: number; error: string }
 > {
-  const [membershipCount, ptaHouseholdAdultCount] = await Promise.all([
+  const [membershipCount, ptaHouseholdAdultCount, staffMembershipCount] = await Promise.all([
     prisma.organizationMembership.count({
       where: { userId: user.id, role: "MEMBER", organization: { status: "active" } },
     }),
     prisma.ptaHouseholdAdult.count({
       where: { userId: user.id, organization: { status: "active" }, household: { status: "ACTIVE" } },
     }),
+    prisma.organizationMembership.count({
+      where: { userId: user.id, role: { not: "MEMBER" }, status: "active", organization: { status: "active" } },
+    }),
   ]);
-  if (membershipCount === 0 && ptaHouseholdAdultCount === 0) {
+  if (membershipCount === 0 && ptaHouseholdAdultCount === 0 && staffMembershipCount === 0) {
     return {
       ok: false,
       status: 403,
@@ -340,6 +354,15 @@ export interface MobileStaffAccess {
  * accounts are excluded up front since `getEffectivePermissions()` already
  * hard-codes zero permissions for that role (see role-permissions.ts) — this
  * is just a clearer 403 than letting every subsequent permission check fail.
+ *
+ * Vertical-agnostic by design (originally hardcoded to
+ * `requirePtaVerticalForMobile()`, generalized for the Mobile Admin
+ * program — see docs/mobile-admin-architecture.md): a permission alone
+ * already implies its vertical (e.g. `hoa:violations:write` cannot be held
+ * on a non-HOA org's effective permission set), so a caller whose feature IS
+ * genuinely vertical-locked (like the PTA volunteer routes below) checks
+ * that separately and explicitly, rather than this shared guard assuming
+ * every caller means PTA.
  */
 export async function requireMobileStaffPermission(
   request: Request,
@@ -352,8 +375,6 @@ export async function requireMobileStaffPermission(
     where: { userId: session.userId, organizationId, status: "active", organization: { status: "active" }, role: { not: "MEMBER" } },
   });
   if (!membership) throw new MobileForbiddenError("No active staff membership for this organization");
-
-  await requirePtaVerticalForMobile(organizationId);
 
   const effective = await getEffectivePermissions(organizationId, membership.role as Role);
   if (!effective.includes(permission)) {

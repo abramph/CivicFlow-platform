@@ -248,7 +248,11 @@ describe("POST /api/mobile/auth/mfa/challenge", () => {
       mfaBackupCodes: [],
     });
     totpVerify.mockReturnValueOnce(true);
-    countMembership.mockResolvedValueOnce(0);
+    // organizationMembership.count backs both the role:MEMBER query and the
+    // staff (non-MEMBER) query inside completeMobileLogin's Promise.all —
+    // zero out both calls, not just the first.
+    countMembership.mockResolvedValueOnce(0).mockResolvedValueOnce(0);
+    countPtaHouseholdAdult.mockResolvedValueOnce(0);
 
     const response = await challengePOST(
       jsonRequest("https://portal.test/api/mobile/auth/mfa/challenge", { mfaToken: "mfa-token-abc", code: "123456" })

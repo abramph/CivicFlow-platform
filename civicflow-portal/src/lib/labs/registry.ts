@@ -150,6 +150,19 @@ export const LAB_FEATURES = {
     metered: true,
     riskClassification: "medium",
   },
+  mobileAdmin: {
+    key: "mobileAdmin",
+    name: "Mobile Administration Experience",
+    description:
+      "Permission-driven officer/administrator experience inside the Unestra mobile app (member management, events, attendance, communications, payments, reports, vertical-specific tools) alongside the existing member-facing app. Not a premium/plan feature -- an operational capability staged out org-by-org (see docs/mobile-admin-rollout.md) via this same Labs enrollment/lifecycle machinery: INTERNAL (APH-only) -> ALPHA (fictional demo orgs) -> BETA (PTA/Community pilot) -> PREVIEW (HOA/Union pilot) -> GENERAL_AVAILABILITY, advanced by registry/enrollment changes only, never a new binary.",
+    lifecycle: "INTERNAL",
+    requiresEntitlement: false,
+    requiresEnrollment: true,
+    internalOnly: true,
+    metered: false,
+    helpText: "Visible only to billing-exempt internal organizations (APH Technologies) at this stage.",
+    riskClassification: "medium",
+  },
   // RETIRED, not deleted (PR #40 — PTA/PTO graduation from Labs to a
   // first-class vertical; see docs/pta-access-architecture.md and
   // docs/labs-feature-lifecycle.md). Core PTA access is now gated

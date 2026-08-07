@@ -42,6 +42,13 @@ export interface MobileOrganizationCapability {
     properties: boolean;
     propertyResidents: boolean;
   };
+  /** Mobile Admin program (PR A) — only the flags the caller actually holds
+   * for this org, server-resolved (see civicflow-portal's
+   * resolveMobileAdminCapabilities()). Empty for every ordinary member/PTA
+   * parent. Never derive Admin-tab visibility from role/permission strings
+   * on this client — this array is the sole authority, and it's already
+   * been filtered server-side down to only what the caller holds. */
+  adminCapabilities: string[];
 }
 
 export interface MobileOrganization {

@@ -19,8 +19,15 @@ vi.mock("@/lib/role-permissions", () => ({
   getEffectivePermissions: (...args: unknown[]) => getEffectivePermissions(...args),
 }));
 
+const resolveMobileAdminCapabilities = vi.fn();
+vi.mock("@/lib/mobile-admin", () => ({
+  resolveMobileAdminCapabilities: (...args: unknown[]) => resolveMobileAdminCapabilities(...args),
+}));
+
 import { GET } from "@/app/api/mobile/organizations/route";
 import { signAccessToken } from "@/lib/mobile-auth";
+
+const NO_ADMIN_ACCESS = { available: false, role: null, adminCapabilities: [] };
 
 function request() {
   return new Request("https://portal.test/api/mobile/organizations", { headers: { Authorization: "Bearer test-token" } });
@@ -32,6 +39,8 @@ beforeEach(() => {
   findManyHouseholdAdult.mockReset();
   findUniqueUser.mockReset();
   getEffectivePermissions.mockReset();
+  resolveMobileAdminCapabilities.mockReset();
+  resolveMobileAdminCapabilities.mockResolvedValue(NO_ADMIN_ACCESS);
   findUniqueUser.mockResolvedValue({ id: "user-1", email: "user@example.com", mobileTokenVersion: 0 });
 });
 
@@ -167,5 +176,76 @@ describe("GET /api/mobile/organizations", () => {
         pta: expect.objectContaining({ householdAdultId: "adult-1", isOfficer: true, canCheckIn: true, canApproveHours: true }),
       })
     );
+  });
+
+  it("surfaces a non-PTA officer's org via general adminCapabilities alone — the Mobile Admin program's load-bearing fix (a Community/HOA/Union officer with no PTA signal and no personal OrgMember previously got zero rows at all)", async () => {
+    findManyMembership
+      .mockResolvedValueOnce([]) // MEMBER-role query
+      .mockResolvedValueOnce([{ id: "membership-1", organizationId: "org-hoa", role: "ORG_OWNER", organization: { id: "org-hoa", name: "Oak Ridge HOA", logoUrl: null, status: "active", primaryVertical: "HOA" } }]);
+    findManyOrgMember.mockResolvedValueOnce([]);
+    findManyHouseholdAdult.mockResolvedValueOnce([]);
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "ORG_OWNER", adminCapabilities: ["adminDashboard", "manageHoaProperties"] });
+
+    const token = await signAccessToken("user-1", 0);
+    const response = await GET(new Request("https://portal.test/api/mobile/organizations", { headers: { Authorization: `Bearer ${token}` } }));
+    const body = await response.json();
+
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0]).toEqual(expect.objectContaining({ organizationId: "org-hoa", pta: null }));
+    expect(body.data[0].capability.adminCapabilities).toEqual(["adminDashboard", "manageHoaProperties"]);
+    expect(body.data[0].capability.supportedModules).toContain("admin");
+    // getEffectivePermissions is only called on the PTA-only checkin/approve
+    // path — a non-PTA org must never invoke it directly from this route.
+    expect(getEffectivePermissions).not.toHaveBeenCalled();
+  });
+
+  it("excludes a staff member's org entirely when resolveMobileAdminCapabilities returns unavailable and there's no PTA signal either", async () => {
+    findManyMembership
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: "membership-1", organizationId: "org-hoa", role: "STAFF", organization: { id: "org-hoa", name: "Oak Ridge HOA", logoUrl: null, status: "active", primaryVertical: "HOA" } }]);
+    findManyOrgMember.mockResolvedValueOnce([]);
+    findManyHouseholdAdult.mockResolvedValueOnce([]);
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: false, role: null, adminCapabilities: [] });
+
+    const token = await signAccessToken("user-1", 0);
+    const response = await GET(new Request("https://portal.test/api/mobile/organizations", { headers: { Authorization: `Bearer ${token}` } }));
+    const body = await response.json();
+
+    expect(body.data).toEqual([]);
+  });
+
+  it("merges PTA officer signal AND general adminCapabilities into the same row when both are present for the same org", async () => {
+    findManyMembership
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: "membership-1", organizationId: "org-pta", role: "ORG_OWNER", organization: { id: "org-pta", name: "Pine Grove School PTA", logoUrl: null, status: "active", primaryVertical: "PTA" } }]);
+    findManyOrgMember.mockResolvedValueOnce([]);
+    findManyHouseholdAdult.mockResolvedValueOnce([]);
+    getEffectivePermissions.mockResolvedValueOnce(["pta:volunteers:checkin"]);
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "ORG_OWNER", adminCapabilities: ["adminDashboard", "managePtaVolunteers"] });
+
+    const token = await signAccessToken("user-1", 0);
+    const response = await GET(new Request("https://portal.test/api/mobile/organizations", { headers: { Authorization: `Bearer ${token}` } }));
+    const body = await response.json();
+
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0].pta).toEqual(expect.objectContaining({ isOfficer: true, canCheckIn: true }));
+    expect(body.data[0].capability.adminCapabilities).toEqual(["adminDashboard", "managePtaVolunteers"]);
+  });
+
+  it("does not surface adminCapabilities for a plain member/PTA-parent row with no staff membership at all", async () => {
+    findManyMembership.mockResolvedValueOnce([
+      { organizationId: "org-a", organization: { id: "org-a", name: "Sample Org", logoUrl: null, primaryVertical: "COMMUNITY" }, joinedAt: new Date() },
+    ]);
+    findManyOrgMember.mockResolvedValueOnce([{ id: "member-1", organizationId: "org-a", firstName: "Jamie", lastName: "Lee", membershipStatus: "active", isDelinquent: false }]);
+    findManyHouseholdAdult.mockResolvedValueOnce([]);
+    findManyMembership.mockResolvedValueOnce([]); // no staff memberships
+
+    const token = await signAccessToken("user-1", 0);
+    const response = await GET(new Request("https://portal.test/api/mobile/organizations", { headers: { Authorization: `Bearer ${token}` } }));
+    const body = await response.json();
+
+    expect(body.data[0].capability.adminCapabilities).toEqual([]);
+    expect(body.data[0].capability.supportedModules).not.toContain("admin");
+    expect(resolveMobileAdminCapabilities).not.toHaveBeenCalled();
   });
 });

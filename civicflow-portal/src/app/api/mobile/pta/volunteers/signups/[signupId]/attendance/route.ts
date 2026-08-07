@@ -1,5 +1,5 @@
 import { withApiErrorHandling } from "@/lib/api-route";
-import { requireMobileStaffPermission } from "@/lib/mobile-auth";
+import { requireMobileStaffPermission, requirePtaVerticalForMobile } from "@/lib/mobile-auth";
 import { setPtaVolunteerAttendanceStatus } from "@/lib/labs/pta/volunteers";
 import { PERMISSIONS } from "@/lib/rbac";
 import { parseJsonBody } from "@/lib/validation";
@@ -24,6 +24,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ sig
     const { organizationId, status, manualMinutes } = await parseJsonBody(request, bodySchema);
 
     const { organizationId: verifiedOrgId, session } = await requireMobileStaffPermission(request, organizationId, PERMISSIONS.PTA_VOLUNTEERS_CHECKIN);
+    await requirePtaVerticalForMobile(verifiedOrgId);
     const { signupId } = await params;
 
     const result = await setPtaVolunteerAttendanceStatus(verifiedOrgId, signupId, status, session.userId, { manualMinutes: manualMinutes ?? null }, session.email);

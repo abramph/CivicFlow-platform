@@ -4,6 +4,7 @@ import { getEffectivePermissions } from "@/lib/role-permissions";
 import { resolveEffectiveVertical } from "@/lib/organization-experience";
 import { getVerticalTerminology, getQuickActions } from "@/lib/vertical-terminology";
 import { getVerticalCapabilities } from "@/lib/vertical-capabilities";
+import { resolveMobileAdminCapabilities, type AdminCapabilityFlag } from "@/lib/mobile-admin";
 import { prisma } from "@/lib/prisma";
 import { PERMISSIONS, type Role } from "@/lib/rbac";
 import type { OrganizationVertical } from "@prisma/client";
@@ -57,16 +58,24 @@ interface OrgCapability {
     properties: boolean;
     propertyResidents: boolean;
   };
+  /** Mobile Admin program (PR A) — only the flags the caller actually holds
+   * for this org, server-resolved fresh on every request via
+   * resolveMobileAdminCapabilities(). Empty for every ordinary member/PTA
+   * parent row; old mobile app builds that don't know this field exists
+   * simply ignore it. Never derive admin UI from role/permission strings
+   * client-side -- this array is the sole authority. */
+  adminCapabilities: AdminCapabilityFlag[];
 }
 
 /** `vertical` must already be the effective vertical (see
  * resolveEffectiveVertical) — resolved once per row by the caller, which
  * knows whether that check is even necessary (rows already confirmed PTA by
  * branches 2/3 below don't need a second Labs-access check). */
-function buildCapability(vertical: OrganizationVertical, hasPtaAccess: boolean) {
+function buildCapability(vertical: OrganizationVertical, hasPtaAccess: boolean, adminCapabilities: AdminCapabilityFlag[]) {
   const terminology = getVerticalTerminology(vertical);
   const supportedModules = ["dashboard", "inbox", "announcements", "dues", "events", "profile"];
   if (hasPtaAccess) supportedModules.push("volunteers");
+  if (adminCapabilities.length > 0) supportedModules.push("admin");
   const verticalCapabilities = getVerticalCapabilities(vertical);
   return {
     primaryVertical: vertical,
@@ -78,6 +87,7 @@ function buildCapability(vertical: OrganizationVertical, hasPtaAccess: boolean) 
       properties: verticalCapabilities.properties,
       propertyResidents: verticalCapabilities.propertyResidents,
     },
+    adminCapabilities,
   };
 }
 
@@ -174,29 +184,52 @@ export async function GET(request: Request) {
       }
     }
 
-    // ── 3. PTA officers with a relevant permission ──────────────────────
+    // ── 3. Staff members with a relevant mobile capability ──────────────
+    // Two independent officer signals, either of which earns the org a row:
+    // the PTA-only volunteer checkin/hour-approval pair (unchanged from
+    // before the Mobile Admin program), and the general adminCapabilities
+    // set (any vertical) resolved via resolveMobileAdminCapabilities() — PR
+    // A of the Mobile Admin program. Deliberately NOT "any staff role in any
+    // org": an officer with neither signal has nothing to do in this app
+    // yet, so surfacing them here would be a dead end (matches the
+    // pre-existing PTA-only rationale, now generalized).
     const staffMemberships = await prisma.organizationMembership.findMany({
       where: { userId, role: { not: "MEMBER" }, status: "active", organization: { status: "active" } },
       include: { organization: { select: { id: true, name: true, logoUrl: true, status: true, primaryVertical: true } } },
     });
+    const adminCapabilitiesByOrgId = new Map<string, AdminCapabilityFlag[]>();
     for (const membership of staffMemberships) {
-      // PTA/PTO is a first-class vertical (PR #40) — see the household-adult
-      // branch above for the same rationale.
-      if (membership.organization.primaryVertical !== "PTA") continue;
+      const orgId = membership.organizationId;
+      const isPtaVertical = membership.organization.primaryVertical === "PTA";
 
-      const effective = await getEffectivePermissions(membership.organizationId, membership.role as Role);
-      const canCheckIn = effective.includes(PERMISSIONS.PTA_VOLUNTEERS_CHECKIN);
-      const canApproveHours = effective.includes(PERMISSIONS.PTA_VOLUNTEER_HOURS_APPROVE);
-      if (!canCheckIn && !canApproveHours) continue;
+      let canCheckIn = false;
+      let canApproveHours = false;
+      if (isPtaVertical) {
+        const effective = await getEffectivePermissions(orgId, membership.role as Role);
+        canCheckIn = effective.includes(PERMISSIONS.PTA_VOLUNTEERS_CHECKIN);
+        canApproveHours = effective.includes(PERMISSIONS.PTA_VOLUNTEER_HOURS_APPROVE);
+      }
+      const hasPtaOfficerSignal = canCheckIn || canApproveHours;
 
-      rawVerticalByOrgId.set(membership.organizationId, "PTA");
-      confirmedPtaOrgIds.add(membership.organizationId);
-      const existing = rows.get(membership.organizationId);
+      const adminResult = await resolveMobileAdminCapabilities(orgId, userId);
+      if (adminResult.available) adminCapabilitiesByOrgId.set(orgId, adminResult.adminCapabilities);
+
+      if (!hasPtaOfficerSignal && !adminResult.available) continue;
+
+      // Always the real stored vertical for a staff row — resolveEffectiveVertical
+      // is a passthrough (see its own doc comment), so this is equivalent to
+      // and more direct than re-deriving it later.
+      rawVerticalByOrgId.set(orgId, membership.organization.primaryVertical);
+      if (isPtaVertical) confirmedPtaOrgIds.add(orgId);
+
+      const existing = rows.get(orgId);
       if (existing) {
-        existing.pta = { householdAdultId: existing.pta?.householdAdultId ?? null, householdName: null, isOfficer: true, canCheckIn, canApproveHours };
+        if (hasPtaOfficerSignal) {
+          existing.pta = { householdAdultId: existing.pta?.householdAdultId ?? null, householdName: null, isOfficer: true, canCheckIn, canApproveHours };
+        }
       } else {
-        rows.set(membership.organizationId, {
-          organizationId: membership.organizationId,
+        rows.set(orgId, {
+          organizationId: orgId,
           organizationName: membership.organization.name,
           organizationLogoUrl: membership.organization.logoUrl,
           memberId: null,
@@ -204,7 +237,7 @@ export async function GET(request: Request) {
           lastName: null,
           membershipStatus: null,
           isDelinquent: false,
-          pta: { householdAdultId: null, householdName: null, isOfficer: true, canCheckIn, canApproveHours },
+          pta: hasPtaOfficerSignal ? { householdAdultId: null, householdName: null, isOfficer: true, canCheckIn, canApproveHours } : null,
         });
       }
     }
@@ -214,7 +247,8 @@ export async function GET(request: Request) {
         const vertical = confirmedPtaOrgIds.has(row.organizationId)
           ? "PTA"
           : await resolveEffectiveVertical(row.organizationId, rawVerticalByOrgId.get(row.organizationId) ?? "COMMUNITY");
-        return { ...row, capability: buildCapability(vertical, row.pta !== null) };
+        const adminCapabilities = adminCapabilitiesByOrgId.get(row.organizationId) ?? [];
+        return { ...row, capability: buildCapability(vertical, row.pta !== null, adminCapabilities) };
       })
     );
 
