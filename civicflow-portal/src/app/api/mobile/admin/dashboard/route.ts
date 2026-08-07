@@ -56,10 +56,10 @@ export async function GET(request: Request) {
       const delinquentCount = await prisma.orgMember.count({ where: { organizationId, isDelinquent: true } });
 
       metrics.push(
-        { key: "membersActive", label: "Active Members", value: byStatus["active"] ?? 0 },
-        { key: "membersDelinquent", label: "Delinquent", value: delinquentCount },
-        { key: "membersInactive", label: "Inactive", value: byStatus["inactive"] ?? 0 },
-        { key: "membersTerminated", label: "Terminated", value: byStatus["terminated"] ?? 0 }
+        { key: "membersActive", label: "Active Members", value: byStatus["active"] ?? 0, href: "/admin-members?membershipStatus=active" },
+        { key: "membersDelinquent", label: "Delinquent", value: delinquentCount, href: "/admin-members?delinquency=delinquent" },
+        { key: "membersInactive", label: "Inactive", value: byStatus["inactive"] ?? 0, href: "/admin-members?membershipStatus=inactive" },
+        { key: "membersTerminated", label: "Terminated", value: byStatus["terminated"] ?? 0, href: "/admin-members?membershipStatus=terminated" }
       );
     }
 

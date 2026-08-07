@@ -69,12 +69,18 @@ const EMPTY_RESULT: MobileAdminCapabilityResult = { available: false, role: null
  * capabilityFlag: if set, additionally requires getVerticalCapabilities()
  * to have this flag on (e.g. HOA Architectural Requests is a distinct
  * rollout from HOA Properties, even though both are HOA-only).
+ * excludedVerticals: if set, the flag is unavailable for these verticals
+ * regardless of permission — used for manageMembers because PTA orgs don't
+ * use OrgMember as their roster at all (parents are PtaHouseholdAdult rows
+ * under PtaHousehold, a completely different model); a generic OrgMember
+ * member-admin screen would be structurally wrong for them. PTA household
+ * administration is out of scope here and belongs in its own future flag.
  */
 const FLAG_RULES: Record<
   Exclude<AdminCapabilityFlag, "adminDashboard">,
-  { permission: Permission; vertical?: OrganizationVertical; capabilityFlag?: CapabilityFlag }
+  { permission: Permission; vertical?: OrganizationVertical; capabilityFlag?: CapabilityFlag; excludedVerticals?: OrganizationVertical[] }
 > = {
-  manageMembers: { permission: PERMISSIONS.MEMBERS_WRITE },
+  manageMembers: { permission: PERMISSIONS.MEMBERS_WRITE, excludedVerticals: ["PTA"] },
   manageEvents: { permission: PERMISSIONS.EVENTS_WRITE },
   manageAttendance: { permission: PERMISSIONS.ATTENDANCE_WRITE },
   manageCommunications: { permission: PERMISSIONS.COMMUNICATIONS_WRITE },
@@ -121,6 +127,7 @@ export async function resolveMobileAdminCapabilities(
     const rule = FLAG_RULES[flag];
     if (!effective.includes(rule.permission)) continue;
     if (rule.vertical && organization.primaryVertical !== rule.vertical) continue;
+    if (rule.excludedVerticals?.includes(organization.primaryVertical)) continue;
     if (rule.capabilityFlag && !verticalCapabilities[rule.capabilityFlag]) continue;
     adminCapabilities.push(flag);
   }
