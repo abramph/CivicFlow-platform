@@ -651,6 +651,161 @@ export function getAdminDashboard(organizationId: string) {
   return apiFetch<AdminDashboard>(`/api/mobile/admin/dashboard?organizationId=${encodeURIComponent(organizationId)}`);
 }
 
+// ── Admin: member administration ────────────────────────────────────────────
+// Mobile Admin program (PR B). Backed by /api/mobile/admin/members/* in
+// civicflow-portal, which delegates to the exact same createMember()/
+// updateMember()/terminateMember()/reinstateMember() the web portal's
+// /members pages use (src/lib/member-mutations.ts, src/lib/member-lifecycle.ts)
+// -- no business logic is duplicated here. Gated on the manageMembers
+// capability (see getAdminDashboard above); unavailable for PTA orgs, which
+// don't use OrgMember as their roster at all.
+
+export type MembershipStatus = 'active' | 'inactive' | 'deactivated' | 'pending' | 'retired' | 'suspended' | 'terminated';
+
+export interface AdminMemberListRow {
+  id: string;
+  firstName: string;
+  lastName: string;
+  preferredName: string | null;
+  email: string | null;
+  phone: string | null;
+  membershipStatus: MembershipStatus;
+  isDelinquent: boolean;
+  householdName: string | null;
+  city: string | null;
+  state: string | null;
+}
+
+export interface AdminMemberListResult {
+  members: AdminMemberListRow[];
+  page: number;
+  pageSize: number;
+  total: number;
+  hasMore: boolean;
+}
+
+export interface AdminMemberListParams {
+  search?: string;
+  membershipStatus?: string;
+  delinquency?: 'delinquent' | 'not-delinquent';
+  page?: number;
+}
+
+export function getAdminMembers(organizationId: string, params: AdminMemberListParams = {}) {
+  const query = new URLSearchParams({ organizationId });
+  if (params.search) query.set('search', params.search);
+  if (params.membershipStatus) query.set('membershipStatus', params.membershipStatus);
+  if (params.delinquency) query.set('delinquency', params.delinquency);
+  if (params.page) query.set('page', String(params.page));
+  return apiFetch<AdminMemberListResult>(`/api/mobile/admin/members?${query.toString()}`);
+}
+
+export interface AdminMemberDetail {
+  id: string;
+  organizationId: string;
+  firstName: string;
+  lastName: string;
+  preferredName: string | null;
+  email: string | null;
+  phone: string | null;
+  membershipStatus: MembershipStatus;
+  statusChangeReason: string | null;
+  isDelinquent: boolean;
+  joinDate: string | null;
+  dateOfBirth: string | null;
+  gender: string | null;
+  addressLine1: string | null;
+  addressLine2: string | null;
+  city: string | null;
+  state: string | null;
+  zipCode: string | null;
+  county: string | null;
+  country: string | null;
+  membershipCategoryId: string | null;
+  membershipCategoryManualOverride: boolean;
+  householdName: string | null;
+  emergencyContactName: string | null;
+  emergencyContactPhone: string | null;
+  notes: string | null;
+  commsSmsEnabled: boolean;
+  userId: string | null;
+}
+
+export function getAdminMember(organizationId: string, memberId: string) {
+  return apiFetch<AdminMemberDetail>(
+    `/api/mobile/admin/members/${encodeURIComponent(memberId)}?organizationId=${encodeURIComponent(organizationId)}`
+  );
+}
+
+export interface CreateAdminMemberInput {
+  organizationId: string;
+  firstName: string;
+  lastName: string;
+  preferredName?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  joinDate?: string | null;
+  dateOfBirth?: string | null;
+  gender?: string | null;
+  addressLine1?: string | null;
+  addressLine2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zipCode?: string | null;
+  county?: string | null;
+  country?: string | null;
+  householdName?: string | null;
+  emergencyContactName?: string | null;
+  emergencyContactPhone?: string | null;
+  notes?: string | null;
+}
+
+export function createAdminMember(input: CreateAdminMemberInput) {
+  return apiFetch<AdminMemberDetail>('/api/mobile/admin/members', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export type UpdateAdminMemberInput = Partial<Omit<CreateAdminMemberInput, 'organizationId'>> & {
+  organizationId: string;
+  statusChangeReason?: string | null;
+  commsSmsEnabled?: boolean;
+};
+
+export function updateAdminMember(memberId: string, input: UpdateAdminMemberInput) {
+  return apiFetch<AdminMemberDetail>(`/api/mobile/admin/members/${encodeURIComponent(memberId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export interface TerminateAdminMemberInput {
+  organizationId: string;
+  reasonCode: string;
+  reasonOther?: string;
+  effectiveDate: string;
+  internalNotes?: string;
+}
+
+export function terminateAdminMember(memberId: string, input: TerminateAdminMemberInput) {
+  return apiFetch<AdminMemberDetail>(`/api/mobile/admin/members/${encodeURIComponent(memberId)}/terminate`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export interface ReinstateAdminMemberInput {
+  organizationId: string;
+  reason: string;
+  effectiveDate: string;
+  internalNotes?: string;
+}
+
+export function reinstateAdminMember(memberId: string, input: ReinstateAdminMemberInput) {
+  return apiFetch<AdminMemberDetail>(`/api/mobile/admin/members/${encodeURIComponent(memberId)}/reinstate`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
 // ── Identity routing ─────────────────────────────────────────────────────────
 // A caller can have a conventional OrgMember, a PTA household link, both (an
 // officer who is also a parent), or neither. `hasMemberIdentity` always wins
