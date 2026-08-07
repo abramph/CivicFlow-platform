@@ -2,9 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const requireMobilePtaHouseholdAccess = vi.fn();
 const requireMobileStaffPermission = vi.fn();
+const requirePtaVerticalForMobile = vi.fn().mockResolvedValue(undefined);
 vi.mock("@/lib/mobile-auth", () => ({
   requireMobilePtaHouseholdAccess: (...args: unknown[]) => requireMobilePtaHouseholdAccess(...args),
   requireMobileStaffPermission: (...args: unknown[]) => requireMobileStaffPermission(...args),
+  requirePtaVerticalForMobile: (...args: unknown[]) => requirePtaVerticalForMobile(...args),
   MobileAuthError: class MobileAuthError extends Error {
     status = 401;
   },
@@ -59,6 +61,8 @@ function jsonRequest(url: string, body: unknown) {
 beforeEach(() => {
   requireMobilePtaHouseholdAccess.mockReset();
   requireMobileStaffPermission.mockReset();
+  requirePtaVerticalForMobile.mockReset();
+  requirePtaVerticalForMobile.mockResolvedValue(undefined);
   claimPtaVolunteerSlot.mockReset();
   cancelPtaVolunteerSignup.mockReset();
   checkInPtaVolunteer.mockReset();

@@ -1,5 +1,5 @@
 import { withApiErrorHandling } from "@/lib/api-route";
-import { requireMobileStaffPermission } from "@/lib/mobile-auth";
+import { requireMobileStaffPermission, requirePtaVerticalForMobile } from "@/lib/mobile-auth";
 import { checkOutPtaVolunteer } from "@/lib/labs/pta/volunteers";
 import { PERMISSIONS } from "@/lib/rbac";
 import { ValidationError } from "@/lib/validation";
@@ -16,6 +16,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ sig
     if (!organizationId) throw new ValidationError("organizationId is required");
 
     const { organizationId: verifiedOrgId, session } = await requireMobileStaffPermission(request, organizationId, PERMISSIONS.PTA_VOLUNTEERS_CHECKIN);
+    await requirePtaVerticalForMobile(verifiedOrgId);
     const { signupId } = await params;
 
     const attendance = await checkOutPtaVolunteer(verifiedOrgId, signupId, session.userId, session.email);

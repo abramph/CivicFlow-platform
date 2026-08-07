@@ -1,5 +1,5 @@
 import { withApiErrorHandling } from "@/lib/api-route";
-import { requireMobileStaffPermission } from "@/lib/mobile-auth";
+import { requireMobileStaffPermission, requirePtaVerticalForMobile } from "@/lib/mobile-auth";
 import { getPtaVolunteerOpportunity } from "@/lib/labs/pta/volunteers";
 import { PERMISSIONS } from "@/lib/rbac";
 import { ValidationError } from "@/lib/validation";
@@ -18,6 +18,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ oppo
     if (!organizationId) throw new ValidationError("organizationId is required");
 
     const { organizationId: verifiedOrgId } = await requireMobileStaffPermission(request, organizationId, PERMISSIONS.PTA_VOLUNTEERS_CHECKIN);
+    await requirePtaVerticalForMobile(verifiedOrgId);
     const { opportunityId } = await params;
 
     const opportunity = await getPtaVolunteerOpportunity(verifiedOrgId, opportunityId);

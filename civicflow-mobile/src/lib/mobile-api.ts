@@ -620,6 +620,37 @@ export function getPtaDocuments(organizationId: string) {
   return apiFetch<PtaDocument[]>(`/api/mobile/pta/documents?organizationId=${encodeURIComponent(organizationId)}`);
 }
 
+// ── Admin ─────────────────────────────────────────────────────────────────
+// Mobile Admin program (PR A). Gated server-side on resolveMobileAdminCapabilities()
+// (see civicflow-portal's GET /api/mobile/admin/dashboard) -- a 403 here means
+// the caller genuinely has no admin capability for this org right now, not a
+// client bug; the Admin tab is already hidden in that case (see
+// (tabs)/_layout.tsx's hasAdminAccess), so reaching this function at all
+// implies the caller believed they had access when the screen last rendered.
+
+export interface AdminMetric {
+  key: string;
+  label: string;
+  value: number;
+  href?: string;
+}
+
+export interface AdminNeedsAttentionItem {
+  id: string;
+  label: string;
+  href: string;
+}
+
+export interface AdminDashboard {
+  metrics: AdminMetric[];
+  needsAttention: AdminNeedsAttentionItem[];
+  generatedAt: string;
+}
+
+export function getAdminDashboard(organizationId: string) {
+  return apiFetch<AdminDashboard>(`/api/mobile/admin/dashboard?organizationId=${encodeURIComponent(organizationId)}`);
+}
+
 // ── Identity routing ─────────────────────────────────────────────────────────
 // A caller can have a conventional OrgMember, a PTA household link, both (an
 // officer who is also a parent), or neither. `hasMemberIdentity` always wins
