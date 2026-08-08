@@ -32,6 +32,10 @@ export default withSentryConfig(nextConfig, {
   silent: true,
   disableLogger: true,
   automaticVercelMonitors: false,
-  // Source map uploads require SENTRY_AUTH_TOKEN, SENTRY_ORG, SENTRY_PROJECT
-  // Omit those env vars to skip uploads (errors still report at runtime)
+  // Source map uploads require SENTRY_AUTH_TOKEN, SENTRY_ORG, SENTRY_PROJECT.
+  // Those aren't configured on this app, so uploads never happen — but
+  // generation still ran on every build regardless, and at 337+ API routes
+  // that pushed `next build`'s heap past the DO builder's ceiling (OOM).
+  // Disabled outright since we get zero benefit from maps nothing uploads.
+  sourcemaps: { disable: true },
 });
