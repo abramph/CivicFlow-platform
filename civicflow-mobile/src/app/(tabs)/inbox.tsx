@@ -6,6 +6,7 @@ import { LoadErrorBanner } from '@/components/load-error-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
+import { useScreenTopPadding } from '@/hooks/use-screen-top-padding';
 import { useAuth } from '@/lib/auth-context';
 import { getConversations, type ConversationSummary } from '@/lib/mobile-api';
 
@@ -52,8 +53,10 @@ export default function InboxScreen() {
     setRefreshing(false);
   }
 
+  const topPadding = useScreenTopPadding();
+
   return (
-    <ThemedView style={styles.container}>
+    <ThemedView style={[styles.container, topPadding]}>
       <ThemedText type="title">Inbox</ThemedText>
       <LoadErrorBanner message={loadError} onRetry={load} />
       <FlatList

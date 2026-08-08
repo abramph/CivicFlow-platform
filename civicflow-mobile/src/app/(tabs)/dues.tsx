@@ -7,6 +7,7 @@ import { LoadErrorBanner } from '@/components/load-error-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
+import { useScreenTopPadding } from '@/hooks/use-screen-top-padding';
 import { API_BASE_URL } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { getDues, getPtaDues, type DuesSummary, type PtaDuesStatus, type PtaDuesSummary } from '@/lib/mobile-api';
@@ -80,12 +81,14 @@ export default function DuesScreen() {
     setRefreshing(false);
   }
 
+  const topPadding = useScreenTopPadding();
+
   if (hasPtaIdentity && !hasMemberIdentity) {
     const charge = ptaSummary?.currentCharge ?? null;
     const statusStyle = charge ? STATUS_STYLES[charge.status] : 'neutral';
 
     return (
-      <ThemedView style={styles.container}>
+      <ThemedView style={[styles.container, topPadding]}>
         <ThemedText type="title">Membership Dues</ThemedText>
         <LoadErrorBanner message={loadError} onRetry={load} />
 
@@ -186,7 +189,7 @@ export default function DuesScreen() {
   }
 
   return (
-    <ThemedView style={styles.container}>
+    <ThemedView style={[styles.container, topPadding]}>
       <ThemedText type="title">Dues Status</ThemedText>
       <LoadErrorBanner message={loadError} onRetry={load} />
 

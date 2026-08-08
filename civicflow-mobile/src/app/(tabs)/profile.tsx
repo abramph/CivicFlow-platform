@@ -5,6 +5,7 @@ import { Pressable, ScrollView, StyleSheet, Switch } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
+import { useScreenTopPadding } from '@/hooks/use-screen-top-padding';
 import { useAuth } from '@/lib/auth-context';
 import { getProfile, updateProfile, type MobileProfile } from '@/lib/mobile-api';
 
@@ -52,8 +53,10 @@ export default function ProfileScreen() {
     router.replace('/login');
   }
 
+  const topPadding = useScreenTopPadding();
+
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <ScrollView contentContainerStyle={[styles.container, topPadding]}>
       <ThemedText type="title">Profile</ThemedText>
 
       <ThemedView type="backgroundElement" style={styles.card}>
