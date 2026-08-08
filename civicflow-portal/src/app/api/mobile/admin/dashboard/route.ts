@@ -155,6 +155,54 @@ export async function GET(request: Request) {
       }
     }
 
+    if (has("managePtaHouseholds")) {
+      const activeHouseholdCount = await prisma.ptaHousehold.count({ where: { organizationId, status: "ACTIVE" } });
+      metrics.push({ key: "ptaHouseholds", label: "Active Households", value: activeHouseholdCount, href: "/admin-pta-households" });
+    }
+
+    if (has("manageHoaProperties")) {
+      const [activePropertyCount, noActiveResidentCount] = await Promise.all([
+        prisma.property.count({ where: { organizationId, status: "ACTIVE" } }),
+        prisma.property.count({ where: { organizationId, status: "ACTIVE", residents: { none: { status: "ACTIVE" } } } }),
+      ]);
+      metrics.push({ key: "hoaProperties", label: "Active Properties", value: activePropertyCount, href: "/admin-hoa-properties" });
+      if (noActiveResidentCount > 0) {
+        needsAttention.push({
+          id: "hoa-properties-no-resident",
+          label: `${noActiveResidentCount} propert${noActiveResidentCount === 1 ? "y has" : "ies have"} no active resident`,
+          href: "/admin-hoa-properties?noActiveResident=true",
+        });
+      }
+    }
+
+    if (has("manageHoaViolations")) {
+      const openViolationCount = await prisma.violation.count({
+        where: { organizationId, status: { in: ["ISSUED", "ACKNOWLEDGED", "IN_REVIEW"] } },
+      });
+      metrics.push({ key: "hoaViolationsOpen", label: "Open Violations", value: openViolationCount, href: "/admin-hoa-violations" });
+      if (openViolationCount > 0) {
+        needsAttention.push({
+          id: "hoa-violations-open",
+          label: `${openViolationCount} violation${openViolationCount === 1 ? "" : "s"} open`,
+          href: "/admin-hoa-violations",
+        });
+      }
+    }
+
+    if (has("manageHoaArchitecturalRequests")) {
+      const pendingRequestCount = await prisma.architecturalRequest.count({
+        where: { organizationId, status: { in: ["SUBMITTED", "IN_REVIEW", "RESUBMITTED"] } },
+      });
+      metrics.push({ key: "hoaArchitecturalRequestsPending", label: "Requests Awaiting Review", value: pendingRequestCount, href: "/admin-hoa-architectural-requests" });
+      if (pendingRequestCount > 0) {
+        needsAttention.push({
+          id: "hoa-architectural-requests-pending",
+          label: `${pendingRequestCount} architectural request${pendingRequestCount === 1 ? "" : "s"} awaiting review`,
+          href: "/admin-hoa-architectural-requests",
+        });
+      }
+    }
+
     return Response.json({
       ok: true,
       data: { metrics, needsAttention, generatedAt: new Date().toISOString() },

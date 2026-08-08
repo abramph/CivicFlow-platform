@@ -29,6 +29,10 @@ const countCommunicationCampaign = vi.fn();
 const countMeetingAttendanceSession = vi.fn();
 const countPaymentReport = vi.fn();
 const countPaymentLinkOfflineReport = vi.fn();
+const countPtaHousehold = vi.fn();
+const countProperty = vi.fn();
+const countViolation = vi.fn();
+const countArchitecturalRequest = vi.fn();
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     orgMember: { groupBy: (...args: unknown[]) => groupByOrgMember(...args), count: (...args: unknown[]) => countOrgMember(...args) },
@@ -38,6 +42,10 @@ vi.mock("@/lib/prisma", () => ({
     meetingAttendanceSession: { count: (...args: unknown[]) => countMeetingAttendanceSession(...args) },
     paymentReport: { count: (...args: unknown[]) => countPaymentReport(...args) },
     paymentLinkOfflineReport: { count: (...args: unknown[]) => countPaymentLinkOfflineReport(...args) },
+    ptaHousehold: { count: (...args: unknown[]) => countPtaHousehold(...args) },
+    property: { count: (...args: unknown[]) => countProperty(...args) },
+    violation: { count: (...args: unknown[]) => countViolation(...args) },
+    architecturalRequest: { count: (...args: unknown[]) => countArchitecturalRequest(...args) },
   },
 }));
 
@@ -67,6 +75,10 @@ beforeEach(() => {
   countMeetingAttendanceSession.mockReset().mockResolvedValue(0);
   countPaymentReport.mockReset().mockResolvedValue(0);
   countPaymentLinkOfflineReport.mockReset().mockResolvedValue(0);
+  countPtaHousehold.mockReset().mockResolvedValue(0);
+  countProperty.mockReset().mockResolvedValue(0);
+  countViolation.mockReset().mockResolvedValue(0);
+  countArchitecturalRequest.mockReset().mockResolvedValue(0);
   getMemberPaymentsFinancialSummary.mockReset().mockResolvedValue({
     totalDuesCollectedCents: 0,
     totalContributionsCents: 0,
@@ -235,6 +247,69 @@ describe("GET /api/mobile/admin/dashboard", () => {
     const body = await response.json();
 
     expect(body.data.metrics).toEqual([{ key: "reports", label: "Reports", value: "View", href: "/admin-reports" }]);
+  });
+
+  it("includes an active-households metric when managePtaHouseholds is held", async () => {
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "STAFF", adminCapabilities: ["adminDashboard", "managePtaHouseholds"] });
+    countPtaHousehold.mockResolvedValueOnce(12);
+
+    const response = await GET(request());
+    const body = await response.json();
+
+    expect(body.data.metrics).toEqual([{ key: "ptaHouseholds", label: "Active Households", value: 12, href: "/admin-pta-households" }]);
+    expect(countPtaHousehold).toHaveBeenCalledWith({ where: { organizationId: "org-a", status: "ACTIVE" } });
+  });
+
+  it("includes properties metric and a needsAttention entry for properties with no active resident when manageHoaProperties is held", async () => {
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "STAFF", adminCapabilities: ["adminDashboard", "manageHoaProperties"] });
+    countProperty.mockResolvedValueOnce(50).mockResolvedValueOnce(3);
+
+    const response = await GET(request());
+    const body = await response.json();
+
+    const propertiesMetric = body.data.metrics.find((m: { key: string }) => m.key === "hoaProperties");
+    expect(propertiesMetric).toEqual({ key: "hoaProperties", label: "Active Properties", value: 50, href: "/admin-hoa-properties" });
+    expect(body.data.needsAttention).toEqual(
+      expect.arrayContaining([{ id: "hoa-properties-no-resident", label: "3 properties have no active resident", href: "/admin-hoa-properties?noActiveResident=true" }])
+    );
+  });
+
+  it("includes an open-violations metric and needsAttention entry when manageHoaViolations is held", async () => {
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "STAFF", adminCapabilities: ["adminDashboard", "manageHoaViolations"] });
+    countViolation.mockResolvedValueOnce(4);
+
+    const response = await GET(request());
+    const body = await response.json();
+
+    expect(body.data.metrics).toEqual([{ key: "hoaViolationsOpen", label: "Open Violations", value: 4, href: "/admin-hoa-violations" }]);
+    expect(countViolation).toHaveBeenCalledWith({ where: { organizationId: "org-a", status: { in: ["ISSUED", "ACKNOWLEDGED", "IN_REVIEW"] } } });
+    expect(body.data.needsAttention).toEqual(
+      expect.arrayContaining([{ id: "hoa-violations-open", label: "4 violations open", href: "/admin-hoa-violations" }])
+    );
+  });
+
+  it("includes a pending-architectural-requests metric and needsAttention entry when manageHoaArchitecturalRequests is held", async () => {
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "STAFF", adminCapabilities: ["adminDashboard", "manageHoaArchitecturalRequests"] });
+    countArchitecturalRequest.mockResolvedValueOnce(1);
+
+    const response = await GET(request());
+    const body = await response.json();
+
+    expect(body.data.metrics).toEqual([{ key: "hoaArchitecturalRequestsPending", label: "Requests Awaiting Review", value: 1, href: "/admin-hoa-architectural-requests" }]);
+    expect(body.data.needsAttention).toEqual(
+      expect.arrayContaining([{ id: "hoa-architectural-requests-pending", label: "1 architectural request awaiting review", href: "/admin-hoa-architectural-requests" }])
+    );
+  });
+
+  it("omits all four new PR E metric groups without their respective capabilities", async () => {
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "STAFF", adminCapabilities: ["adminDashboard"] });
+
+    await GET(request());
+
+    expect(countPtaHousehold).not.toHaveBeenCalled();
+    expect(countProperty).not.toHaveBeenCalled();
+    expect(countViolation).not.toHaveBeenCalled();
+    expect(countArchitecturalRequest).not.toHaveBeenCalled();
   });
 
   it("always returns generatedAt", async () => {

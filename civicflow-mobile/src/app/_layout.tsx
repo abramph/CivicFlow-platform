@@ -77,6 +77,19 @@ export default function RootLayout() {
           <Stack.Screen name="admin-contributions/[contributionId]/edit" options={{ headerTitle: 'Edit Contribution' }} />
           <Stack.Screen name="admin-payment-reports" options={{ headerTitle: 'Payment Reports' }} />
           <Stack.Screen name="admin-reports" options={{ headerTitle: 'Reports' }} />
+          <Stack.Screen name="admin-pta-households" options={{ headerTitle: 'Households' }} />
+          <Stack.Screen name="admin-pta-households/new" options={{ headerTitle: 'New Household' }} />
+          <Stack.Screen name="admin-pta-households/[householdId]/index" options={{ headerTitle: 'Household' }} />
+          <Stack.Screen name="admin-pta-households/[householdId]/edit" options={{ headerTitle: 'Edit Household' }} />
+          <Stack.Screen name="admin-hoa-properties" options={{ headerTitle: 'Properties' }} />
+          <Stack.Screen name="admin-hoa-properties/new" options={{ headerTitle: 'New Property' }} />
+          <Stack.Screen name="admin-hoa-properties/[propertyId]/index" options={{ headerTitle: 'Property' }} />
+          <Stack.Screen name="admin-hoa-properties/[propertyId]/edit" options={{ headerTitle: 'Edit Property' }} />
+          <Stack.Screen name="admin-hoa-violations" options={{ headerTitle: 'Violations' }} />
+          <Stack.Screen name="admin-hoa-violations/new" options={{ headerTitle: 'New Violation' }} />
+          <Stack.Screen name="admin-hoa-violations/[violationId]/index" options={{ headerTitle: 'Violation' }} />
+          <Stack.Screen name="admin-hoa-architectural-requests" options={{ headerTitle: 'Architectural Requests' }} />
+          <Stack.Screen name="admin-hoa-architectural-requests/[requestId]/index" options={{ headerTitle: 'Request' }} />
         </Stack>
       </AuthProvider>
     </ThemeProvider>
