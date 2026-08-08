@@ -62,13 +62,16 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Unestra uses your photos to attach a receipt when you report a payment."
+          "photosPermission": "Unestra uses your photos to attach a receipt when you report a payment.",
+          "microphonePermission": false
         }
       ],
       [
         "expo-camera",
         {
-          "cameraPermission": "Unestra uses your camera to scan the meeting QR code so you can check in to attendance."
+          "cameraPermission": "Unestra uses your camera to scan the meeting QR code so you can check in to attendance.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
         }
       ]
     ],
