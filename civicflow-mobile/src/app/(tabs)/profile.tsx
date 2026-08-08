@@ -9,7 +9,7 @@ import { useAuth } from '@/lib/auth-context';
 import { getProfile, updateProfile, type MobileProfile } from '@/lib/mobile-api';
 
 export default function ProfileScreen() {
-  const { user, organizations, selectedOrganization, selectedOrganizationId, logout } = useAuth();
+  const { user, selectedOrganization, selectedOrganizationId, logout } = useAuth();
   const hasMemberIdentity = Boolean(selectedOrganization?.memberId);
   const [profile, setProfile] = useState<MobileProfile | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
@@ -69,11 +69,16 @@ export default function ProfileScreen() {
         <ThemedText type="smallBold">{selectedOrganization?.organizationName ?? '—'}</ThemedText>
       </ThemedView>
 
-      {organizations.length > 1 ? (
-        <Pressable style={styles.secondaryButton} onPress={() => router.push('/org-switcher')} accessibilityRole="button" accessibilityLabel="Switch organization">
-          <ThemedText type="link">Switch Organization</ThemedText>
-        </Pressable>
-      ) : null}
+      {/* Always visible, even with exactly one organization -- see GitHub #71:
+          gating this on organizations.length > 1 left no discoverable way to
+          reach /org-switcher for the common single-org case (only reachable
+          before via an automatic Redirect, e.g. when selectedOrganizationId
+          is null). A single-org account still benefits from confirming which
+          org it's in and from a working path if a second org gets added
+          later without a re-login. */}
+      <Pressable style={styles.secondaryButton} onPress={() => router.push('/org-switcher')} accessibilityRole="button" accessibilityLabel="Switch organization">
+        <ThemedText type="link">Switch Organization</ThemedText>
+      </Pressable>
 
       {hasMemberIdentity ? (
         <Pressable style={styles.secondaryButton} onPress={() => router.push('/attendance-history')} accessibilityRole="button" accessibilityLabel="Attendance history">

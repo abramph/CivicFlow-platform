@@ -120,15 +120,17 @@ export default function ReportPaymentScreen() {
       <ScrollView contentContainerStyle={styles.container}>
         <ThemedText type="title">Report a Payment</ThemedText>
 
-        {organizations.length > 1 ? (
-          <ThemedView type="backgroundElement" style={styles.orgRow}>
-            <ThemedText type="small" themeColor="textSecondary">Reporting for</ThemedText>
-            <ThemedText type="smallBold">{selectedOrg?.organizationName ?? 'Select an organization'}</ThemedText>
-            <Pressable onPress={() => router.push('/org-switcher')} accessibilityRole="button" accessibilityLabel="Change organization">
-              <ThemedText type="link">Change organization</ThemedText>
-            </Pressable>
-          </ThemedView>
-        ) : null}
+        {/* Always visible, even with exactly one organization -- see GitHub
+            #71: gating this on organizations.length > 1 left no discoverable
+            way to reach /org-switcher for the common single-org case, and
+            "Reporting for X" is useful confirmation regardless of org count. */}
+        <ThemedView type="backgroundElement" style={styles.orgRow}>
+          <ThemedText type="small" themeColor="textSecondary">Reporting for</ThemedText>
+          <ThemedText type="smallBold">{selectedOrg?.organizationName ?? 'Select an organization'}</ThemedText>
+          <Pressable onPress={() => router.push('/org-switcher')} accessibilityRole="button" accessibilityLabel="Change organization">
+            <ThemedText type="link">Change organization</ThemedText>
+          </Pressable>
+        </ThemedView>
 
         <ThemedText type="small" themeColor="textSecondary">What&apos;s this payment for?</ThemedText>
         <ThemedView style={styles.methodRow} accessibilityRole="radiogroup" accessibilityLabel="Payment category">
