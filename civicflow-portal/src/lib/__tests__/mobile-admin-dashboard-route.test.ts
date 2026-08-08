@@ -27,6 +27,8 @@ const findManyConversationParticipant = vi.fn();
 const countEvent = vi.fn();
 const countCommunicationCampaign = vi.fn();
 const countMeetingAttendanceSession = vi.fn();
+const countPaymentReport = vi.fn();
+const countPaymentLinkOfflineReport = vi.fn();
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     orgMember: { groupBy: (...args: unknown[]) => groupByOrgMember(...args), count: (...args: unknown[]) => countOrgMember(...args) },
@@ -34,7 +36,14 @@ vi.mock("@/lib/prisma", () => ({
     event: { count: (...args: unknown[]) => countEvent(...args) },
     communicationCampaign: { count: (...args: unknown[]) => countCommunicationCampaign(...args) },
     meetingAttendanceSession: { count: (...args: unknown[]) => countMeetingAttendanceSession(...args) },
+    paymentReport: { count: (...args: unknown[]) => countPaymentReport(...args) },
+    paymentLinkOfflineReport: { count: (...args: unknown[]) => countPaymentLinkOfflineReport(...args) },
   },
+}));
+
+const getMemberPaymentsFinancialSummary = vi.fn();
+vi.mock("@/lib/financial-summary", () => ({
+  getMemberPaymentsFinancialSummary: (...args: unknown[]) => getMemberPaymentsFinancialSummary(...args),
 }));
 
 import { GET } from "@/app/api/mobile/admin/dashboard/route";
@@ -56,6 +65,14 @@ beforeEach(() => {
   countEvent.mockReset();
   countCommunicationCampaign.mockReset().mockResolvedValue(0);
   countMeetingAttendanceSession.mockReset().mockResolvedValue(0);
+  countPaymentReport.mockReset().mockResolvedValue(0);
+  countPaymentLinkOfflineReport.mockReset().mockResolvedValue(0);
+  getMemberPaymentsFinancialSummary.mockReset().mockResolvedValue({
+    totalDuesCollectedCents: 0,
+    totalContributionsCents: 0,
+    duesOutstandingCents: 0,
+    duesCollected30dCents: 0,
+  });
 });
 
 describe("GET /api/mobile/admin/dashboard", () => {
@@ -178,6 +195,46 @@ describe("GET /api/mobile/admin/dashboard", () => {
     await GET(request());
 
     expect(countMeetingAttendanceSession).not.toHaveBeenCalled();
+  });
+
+  it("includes formatted currency metrics and a needsAttention entry when managePayments is held with pending reports", async () => {
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "FINANCE", adminCapabilities: ["adminDashboard", "managePayments"] });
+    getMemberPaymentsFinancialSummary.mockResolvedValueOnce({
+      totalDuesCollectedCents: 100000,
+      totalContributionsCents: 30075,
+      duesOutstandingCents: 5020,
+      duesCollected30dCents: 2505,
+    });
+    countPaymentReport.mockResolvedValueOnce(2);
+    countPaymentLinkOfflineReport.mockResolvedValueOnce(1);
+
+    const response = await GET(request());
+    const body = await response.json();
+
+    const outstanding = body.data.metrics.find((m: { key: string }) => m.key === "duesOutstanding");
+    expect(outstanding.value).toBe("$50.20");
+    const pending = body.data.metrics.find((m: { key: string }) => m.key === "pendingPaymentReports");
+    expect(pending.value).toBe(3);
+    expect(body.data.needsAttention).toEqual(
+      expect.arrayContaining([{ id: "pending-payment-reports", label: "3 self-reported payments awaiting review", href: "/admin-payment-reports" }])
+    );
+  });
+
+  it("omits the payments metric group entirely without managePayments", async () => {
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "STAFF", adminCapabilities: ["adminDashboard"] });
+
+    await GET(request());
+
+    expect(getMemberPaymentsFinancialSummary).not.toHaveBeenCalled();
+  });
+
+  it("includes a Reports entry point when manageReports is held", async () => {
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "STAFF", adminCapabilities: ["adminDashboard", "manageReports"] });
+
+    const response = await GET(request());
+    const body = await response.json();
+
+    expect(body.data.metrics).toEqual([{ key: "reports", label: "Reports", value: "View", href: "/admin-reports" }]);
   });
 
   it("always returns generatedAt", async () => {
