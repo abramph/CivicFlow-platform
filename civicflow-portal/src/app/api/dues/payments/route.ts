@@ -1,39 +1,10 @@
-import type { DuesPaymentMethod } from "@prisma/client";
 import { requirePermission } from "@/lib/auth-guards";
 import { withApiErrorHandling } from "@/lib/api-route";
 import { createAuditEvent } from "@/lib/audit";
-import { parseJsonBody, z } from "@/lib/validation";
+import { parseJsonBody } from "@/lib/validation";
 import { prisma } from "@/lib/prisma";
 import { requireRateLimit } from "@/lib/rate-limit";
-import { createMemberTimelineEvent } from "@/lib/member-timeline";
-import { recordDuesPayment } from "@/lib/dues-payments";
-
-const createDuesPaymentSchema = z.object({
-  memberId: z.union([z.string().min(1), z.literal(""), z.null()]).optional(),
-  duesChargeId: z.union([z.string().min(1), z.literal(""), z.null()]).optional(),
-  duesAccountId: z.union([z.string().min(1), z.literal(""), z.null()]).optional(),
-  amount: z.number().positive(),
-  paymentDate: z.string().datetime(),
-  paymentMethodId: z.union([z.string().min(1), z.literal(""), z.null()]).optional(),
-  method: z.enum([
-    "CASH",
-    "CHECK",
-    "CREDIT_CARD",
-    "DEBIT_CARD",
-    "CARD",
-    "ACH",
-    "ZELLE",
-    "CASH_APP",
-    "VENMO",
-    "PAYPAL",
-    "STRIPE",
-    "ZEFFY",
-    "OTHER",
-  ]).optional(),
-  reference: z.union([z.string().max(120), z.literal(""), z.null()]).optional(),
-  referenceNumber: z.union([z.string().max(120), z.literal(""), z.null()]).optional(),
-  notes: z.union([z.string().max(4000), z.literal(""), z.null()]).optional(),
-});
+import { resolveAndRecordDuesPayment, createDuesPaymentSchema } from "@/lib/dues-payment-creation";
 
 export async function GET() {
   return withApiErrorHandling(async () => {
@@ -71,123 +42,12 @@ export async function POST(request: Request) {
 
     const { session, organizationId } = await requirePermission("dues:write", "throw");
     const input = await parseJsonBody(request, createDuesPaymentSchema);
-    const duesChargeId = input.duesChargeId || null;
-    const duesAccountIdFromInput = input.duesAccountId || null;
-    const reference =
-      typeof (input.reference ?? input.referenceNumber) === "string"
-        ? (input.reference ?? input.referenceNumber ?? "").trim() || null
-        : input.reference ?? input.referenceNumber ?? null;
-    const notes = typeof input.notes === "string" ? input.notes.trim() || null : input.notes ?? null;
 
-    let charge = null;
-    let account = null;
-
-    if (duesChargeId) {
-      charge = await prisma.duesCharge.findFirst({
-        where: { id: duesChargeId, organizationId },
-        include: { duesAccount: true },
-      });
-      if (!charge) {
-        return Response.json({ ok: false, error: "Dues charge not found in organization" }, { status: 404 });
-      }
+    const result = await resolveAndRecordDuesPayment(organizationId, { userId: session.userId, userEmail: session.userEmail }, input);
+    if (!result.ok) {
+      return Response.json({ ok: false, error: result.error }, { status: result.status });
     }
 
-    const resolvedDuesAccountId = duesAccountIdFromInput ?? charge?.duesAccountId ?? null;
-    if (resolvedDuesAccountId) {
-      account = await prisma.duesAccount.findFirst({
-        where: { id: resolvedDuesAccountId, organizationId },
-      });
-      if (!account) {
-        return Response.json({ ok: false, error: "Dues account not found in organization" }, { status: 404 });
-      }
-    }
-
-    const resolvedMemberId = input.memberId || charge?.memberId || account?.memberId || null;
-    if (!resolvedMemberId) {
-      return Response.json(
-        { ok: false, error: "Member is required unless the selected charge or account resolves to a member." },
-        { status: 400 }
-      );
-    }
-
-    const member = await prisma.orgMember.findFirst({ where: { id: resolvedMemberId, organizationId } });
-    if (!member) {
-      return Response.json({ ok: false, error: "Member not found in organization" }, { status: 404 });
-    }
-
-    if (charge) {
-      if (charge.memberId !== resolvedMemberId) {
-        return Response.json(
-          { ok: false, error: "The selected dues charge belongs to a different member." },
-          { status: 400 }
-        );
-      }
-    }
-
-    if (account?.memberId && account.memberId !== resolvedMemberId) {
-      return Response.json(
-        { ok: false, error: "The selected dues account belongs to a different member." },
-        { status: 400 }
-      );
-    }
-
-    // Widened to the full DuesPaymentMethod enum (not the narrower manual-entry
-    // Zod literal union above) because a configured PaymentMethodConfig row's
-    // .method column is typed as the full enum, which now has one more
-    // bulk-import-only value than this manual-entry schema exposes. That value
-    // can never actually reach here in practice — no PaymentMethodConfig row
-    // can hold it (see settings/payment-methods route's own, still-narrower
-    // Zod schema) — but the variable's type must honestly reflect the column.
-    let resolvedMethod: DuesPaymentMethod = input.method ?? "CASH";
-    if (input.paymentMethodId) {
-      const paymentMethod = await prisma.paymentMethodConfig.findFirst({
-        where: { id: input.paymentMethodId, organizationId, isActive: true },
-      });
-      if (!paymentMethod) {
-        return Response.json({ ok: false, error: "Payment method not found in organization" }, { status: 404 });
-      }
-      resolvedMethod = paymentMethod.method;
-    }
-
-    const row = await recordDuesPayment({
-      organizationId,
-      memberId: resolvedMemberId,
-      duesChargeId,
-      duesAccountId: resolvedDuesAccountId,
-      amount: input.amount,
-      paymentDate: new Date(input.paymentDate),
-      method: resolvedMethod,
-      reference,
-      notes,
-      charge,
-    });
-
-    await createAuditEvent({
-      organizationId,
-      actorUserId: session.userId,
-      actorEmail: session.userEmail,
-      action: "payment",
-      entityType: "dues_payment",
-      entityId: row.id,
-      metadata: {
-        amount: row.amount.toString(),
-        method: row.method,
-        paymentDate: row.paymentDate.toISOString(),
-        duesChargeId: row.duesChargeId,
-        duesAccountId: row.duesAccountId,
-      },
-    });
-
-    await createMemberTimelineEvent({
-      organizationId,
-      memberId: row.memberId,
-      eventType: "PAYMENT_RECORDED",
-      title: "Dues payment recorded",
-      newValue: { duesPaymentId: row.id, amount: row.amount.toString(), method: row.method, duesChargeId: row.duesChargeId, duesAccountId: row.duesAccountId },
-      occurredAt: row.paymentDate,
-      createdByUserId: session.userId,
-    });
-
-    return Response.json({ ok: true, data: row }, { status: 201 });
+    return Response.json({ ok: true, data: result.data }, { status: 201 });
   });
 }

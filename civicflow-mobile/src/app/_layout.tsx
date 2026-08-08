@@ -60,6 +60,8 @@ export default function RootLayout() {
           <Stack.Screen name="admin-members/[memberId]/index" options={{ headerTitle: 'Member' }} />
           <Stack.Screen name="admin-members/new" options={{ headerTitle: 'Add Member' }} />
           <Stack.Screen name="admin-members/[memberId]/edit" options={{ headerTitle: 'Edit Member' }} />
+          <Stack.Screen name="admin-members/[memberId]/record-payment" options={{ headerTitle: 'Record Payment' }} />
+          <Stack.Screen name="admin-members/[memberId]/add-adjustment" options={{ headerTitle: 'Add Adjustment' }} />
           <Stack.Screen name="admin-events" options={{ headerTitle: 'Events' }} />
           <Stack.Screen name="admin-events/new" options={{ headerTitle: 'Add Event' }} />
           <Stack.Screen name="admin-events/[eventId]/index" options={{ headerTitle: 'Event' }} />
@@ -68,6 +70,13 @@ export default function RootLayout() {
           <Stack.Screen name="admin-campaigns" options={{ headerTitle: 'Campaigns' }} />
           <Stack.Screen name="admin-campaigns/new" options={{ headerTitle: 'New Campaign' }} />
           <Stack.Screen name="admin-campaigns/[campaignId]/index" options={{ headerTitle: 'Campaign' }} />
+          <Stack.Screen name="admin-payments" options={{ headerTitle: 'Payments' }} />
+          <Stack.Screen name="admin-contributions" options={{ headerTitle: 'Contributions' }} />
+          <Stack.Screen name="admin-contributions/new" options={{ headerTitle: 'New Contribution' }} />
+          <Stack.Screen name="admin-contributions/[contributionId]/index" options={{ headerTitle: 'Contribution' }} />
+          <Stack.Screen name="admin-contributions/[contributionId]/edit" options={{ headerTitle: 'Edit Contribution' }} />
+          <Stack.Screen name="admin-payment-reports" options={{ headerTitle: 'Payment Reports' }} />
+          <Stack.Screen name="admin-reports" options={{ headerTitle: 'Reports' }} />
         </Stack>
       </AuthProvider>
     </ThemeProvider>

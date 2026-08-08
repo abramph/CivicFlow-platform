@@ -9,10 +9,13 @@ import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import {
+  generateAdminDuesForMember,
   getAdminMember,
+  getAdminMemberDues,
   reinstateAdminMember,
   terminateAdminMember,
   type AdminMemberDetail,
+  type AdminMemberDues,
 } from '@/lib/mobile-api';
 
 const TERMINATION_REASONS: { value: string; label: string }[] = [
@@ -44,6 +47,7 @@ function todayIsoDate() {
 export default function AdminMemberDetailScreen() {
   const { selectedOrganization, selectedOrganizationId } = useAuth();
   const hasManageMembers = Boolean(selectedOrganization?.capability?.adminCapabilities?.includes('manageMembers'));
+  const hasManagePayments = Boolean(selectedOrganization?.capability?.adminCapabilities?.includes('managePayments'));
   const { memberId } = useLocalSearchParams<{ memberId: string }>();
 
   const [member, setMember] = useState<AdminMemberDetail | null>(null);
@@ -52,6 +56,10 @@ export default function AdminMemberDetailScreen() {
   const [actionPending, setActionPending] = useState(false);
   const [showTerminateForm, setShowTerminateForm] = useState(false);
   const [reasonCode, setReasonCode] = useState<string | null>(null);
+
+  const [dues, setDues] = useState<AdminMemberDues | null>(null);
+  const [duesLoadError, setDuesLoadError] = useState<string | null>(null);
+  const [generatingCharges, setGeneratingCharges] = useState(false);
 
   const load = useCallback(async () => {
     if (!selectedOrganizationId || !memberId || !hasManageMembers) return;
@@ -64,6 +72,21 @@ export default function AdminMemberDetailScreen() {
     }
   }, [selectedOrganizationId, memberId, hasManageMembers]);
 
+  const loadDues = useCallback(async () => {
+    if (!selectedOrganizationId || !memberId || !hasManagePayments) return;
+    try {
+      setDues(await getAdminMemberDues(selectedOrganizationId, memberId));
+      setDuesLoadError(null);
+    } catch (error) {
+      setDues(null);
+      setDuesLoadError(
+        error instanceof ApiError && error.status === 403
+          ? "You don't have dues administration access for this organization."
+          : 'Unable to load dues. Check your connection and try again.'
+      );
+    }
+  }, [selectedOrganizationId, memberId, hasManagePayments]);
+
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -74,6 +97,32 @@ export default function AdminMemberDetailScreen() {
       }
     })();
   }, [load]);
+
+  useEffect(() => {
+    (async () => {
+      await loadDues();
+    })();
+  }, [loadDues]);
+
+  async function handleGenerateCharges() {
+    if (!selectedOrganizationId || !memberId || generatingCharges) return;
+    setGeneratingCharges(true);
+    try {
+      await generateAdminDuesForMember(selectedOrganizationId, memberId);
+      await loadDues();
+    } catch (error) {
+      Alert.alert('Unable to generate charges', error instanceof ApiError ? error.message : 'Please try again.');
+    } finally {
+      setGeneratingCharges(false);
+    }
+  }
+
+  function confirmGenerateCharges() {
+    Alert.alert('Generate dues charges?', 'This creates any dues charges this member is currently due for, based on their dues account schedule.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Generate', onPress: handleGenerateCharges },
+    ]);
+  }
 
   async function handleTerminate() {
     if (!selectedOrganizationId || !memberId || !reasonCode || actionPending) return;
@@ -180,6 +229,61 @@ export default function AdminMemberDetailScreen() {
         <ThemedText type="link">Edit Member</ThemedText>
       </Pressable>
 
+      {hasManagePayments ? (
+        <ThemedView style={styles.section}>
+          <ThemedText type="subtitle">Dues</ThemedText>
+          <LoadErrorBanner message={duesLoadError} onRetry={loadDues} />
+
+          {dues ? (
+            <>
+              {dues.charges.length === 0 ? (
+                <ThemedText type="small" themeColor="textSecondary">No dues charges on file.</ThemedText>
+              ) : (
+                dues.charges.map((charge) => (
+                  <ThemedView key={charge.id} type="backgroundElement" style={styles.duesChargeCard}>
+                    <ThemedText type="small">
+                      ${Number(charge.amountDue).toFixed(2)} due {new Date(charge.dueDate).toLocaleDateString()}
+                    </ThemedText>
+                    <ThemedText type="small" themeColor="textSecondary">
+                      {charge.status} · ${Number(charge.amountPaid).toFixed(2)} paid
+                    </ThemedText>
+                  </ThemedView>
+                ))
+              )}
+
+              <ThemedView style={styles.actionRow}>
+                <Pressable
+                  style={styles.secondaryButton}
+                  onPress={() => router.push(`/admin-members/${member.id}/record-payment`)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Record payment"
+                >
+                  <ThemedText type="link">Record Payment</ThemedText>
+                </Pressable>
+                <Pressable
+                  style={styles.secondaryButton}
+                  onPress={() => router.push(`/admin-members/${member.id}/add-adjustment`)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Add adjustment"
+                >
+                  <ThemedText type="link">Add Adjustment</ThemedText>
+                </Pressable>
+              </ThemedView>
+              <Pressable
+                style={[styles.secondaryButton, generatingCharges && styles.buttonDisabled]}
+                onPress={confirmGenerateCharges}
+                disabled={generatingCharges}
+                accessibilityRole="button"
+                accessibilityLabel="Generate dues charges"
+                accessibilityState={{ disabled: generatingCharges, busy: generatingCharges }}
+              >
+                <ThemedText type="link">{generatingCharges ? 'Generating…' : 'Generate Charges'}</ThemedText>
+              </Pressable>
+            </>
+          ) : null}
+        </ThemedView>
+      ) : null}
+
       {member.membershipStatus === 'terminated' ? (
         <Pressable
           style={[styles.button, styles.buttonAmber, actionPending && styles.buttonDisabled]}
@@ -265,6 +369,14 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: Spacing.three,
     gap: 6,
+  },
+  section: {
+    gap: Spacing.two,
+  },
+  duesChargeCard: {
+    borderRadius: 10,
+    padding: Spacing.two,
+    gap: 2,
   },
   button: {
     borderRadius: 10,

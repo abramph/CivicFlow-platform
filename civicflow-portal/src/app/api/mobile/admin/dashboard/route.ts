@@ -2,13 +2,21 @@ import { withApiErrorHandling } from "@/lib/api-route";
 import { requireMobileAuth, MobileForbiddenError } from "@/lib/mobile-auth";
 import { resolveMobileAdminCapabilities, type AdminCapabilityFlag } from "@/lib/mobile-admin";
 import { listPendingPtaVolunteerHourEntries } from "@/lib/labs/pta/volunteers";
+import { getMemberPaymentsFinancialSummary } from "@/lib/financial-summary";
 import { prisma } from "@/lib/prisma";
 import { ValidationError } from "@/lib/validation";
+
+function centsToCurrency(cents: number) {
+  return `$${(cents / 100).toFixed(2)}`;
+}
 
 interface AdminMetric {
   key: string;
   label: string;
-  value: number;
+  /** A pre-formatted currency string (e.g. "$150.20") for money metrics -- the
+   * client never re-derives currency formatting from a raw cents/dollar
+   * number, avoiding a second place float/rounding logic could diverge. */
+  value: number | string;
   /** Mobile deep-link (expo-router path) — omitted when no screen exists yet to show more detail. */
   href?: string;
 }
@@ -105,6 +113,32 @@ export async function GET(request: Request) {
         where: { organizationId, startAt: { gte: new Date() } },
       });
       metrics.push({ key: "eventsUpcoming", label: "Upcoming Events", value: upcomingEventsCount, href: "/admin-events" });
+    }
+
+    if (has("managePayments")) {
+      const [financialSummary, pendingPaymentReports, pendingPaymentLinkReports] = await Promise.all([
+        getMemberPaymentsFinancialSummary(organizationId),
+        prisma.paymentReport.count({ where: { organizationId, status: "pending" } }),
+        prisma.paymentLinkOfflineReport.count({ where: { organizationId, status: "pending" } }),
+      ]);
+      const pendingTotal = pendingPaymentReports + pendingPaymentLinkReports;
+
+      metrics.push(
+        { key: "duesOutstanding", label: "Dues Outstanding", value: centsToCurrency(financialSummary.duesOutstandingCents), href: "/admin-payments" },
+        { key: "duesCollected30d", label: "Dues Collected (30d)", value: centsToCurrency(financialSummary.duesCollected30dCents), href: "/admin-payments" },
+        { key: "pendingPaymentReports", label: "Pending Payment Reports", value: pendingTotal, href: "/admin-payment-reports" }
+      );
+      if (pendingTotal > 0) {
+        needsAttention.push({
+          id: "pending-payment-reports",
+          label: `${pendingTotal} self-reported payment${pendingTotal === 1 ? "" : "s"} awaiting review`,
+          href: "/admin-payment-reports",
+        });
+      }
+    }
+
+    if (has("manageReports")) {
+      metrics.push({ key: "reports", label: "Reports", value: "View", href: "/admin-reports" });
     }
 
     if (has("manageAttendance")) {
