@@ -7,6 +7,7 @@ import { LoadErrorBanner } from '@/components/load-error-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
+import { useScreenTopPadding } from '@/hooks/use-screen-top-padding';
 import { API_BASE_URL } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import {
@@ -111,10 +112,11 @@ export default function DashboardScreen() {
 
   const nextEvent = events[0] ?? null;
   const unreadAnnouncementCount = announcements.filter((a) => !a.isRead).length;
+  const topPadding = useScreenTopPadding();
 
   return (
     <ScrollView
-      contentContainerStyle={styles.container}
+      contentContainerStyle={[styles.container, topPadding]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
     >
       <ThemedText type="title">

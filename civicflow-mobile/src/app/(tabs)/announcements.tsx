@@ -6,6 +6,7 @@ import { LoadErrorBanner } from '@/components/load-error-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
+import { useScreenTopPadding } from '@/hooks/use-screen-top-padding';
 import { useAuth } from '@/lib/auth-context';
 import { getAnnouncementsForIdentity, type Announcement } from '@/lib/mobile-api';
 
@@ -39,8 +40,10 @@ export default function AnnouncementsScreen() {
     setRefreshing(false);
   }
 
+  const topPadding = useScreenTopPadding();
+
   return (
-    <ThemedView style={styles.container}>
+    <ThemedView style={[styles.container, topPadding]}>
       <ThemedText type="title">Announcements</ThemedText>
       <LoadErrorBanner message={loadError} onRetry={load} />
       <FlatList

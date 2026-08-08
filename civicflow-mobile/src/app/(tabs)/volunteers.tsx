@@ -6,6 +6,7 @@ import { LoadErrorBanner } from '@/components/load-error-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
+import { useScreenTopPadding } from '@/hooks/use-screen-top-padding';
 import { useAuth } from '@/lib/auth-context';
 import {
   getPtaVolunteerCommitments,
@@ -77,12 +78,14 @@ export default function VolunteersScreen() {
     setRefreshing(false);
   }
 
+  const topPadding = useScreenTopPadding();
+
   if (!pta) {
     // Not enrolled in PTA Labs, or no PTA identity for this org — the tab
     // itself is hidden in this case (see (tabs)/_layout.tsx), but this
     // guards direct navigation too.
     return (
-      <ThemedView style={styles.container}>
+      <ThemedView style={[styles.container, topPadding]}>
         <ThemedText type="subtitle" themeColor="textSecondary">
           Volunteer features aren&apos;t available for this organization.
         </ThemedText>
@@ -95,7 +98,7 @@ export default function VolunteersScreen() {
 
   return (
     <ScrollView
-      contentContainerStyle={styles.container}
+      contentContainerStyle={[styles.container, topPadding]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
     >
       <ThemedText type="title">Volunteers</ThemedText>

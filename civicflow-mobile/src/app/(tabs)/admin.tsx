@@ -6,6 +6,7 @@ import { LoadErrorBanner } from '@/components/load-error-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
+import { useScreenTopPadding } from '@/hooks/use-screen-top-padding';
 import { useAuth } from '@/lib/auth-context';
 import { getAdminDashboard, type AdminDashboard } from '@/lib/mobile-api';
 
@@ -54,9 +55,11 @@ export default function AdminDashboardScreen() {
     setRefreshing(false);
   }
 
+  const topPadding = useScreenTopPadding();
+
   if (!hasAdminAccess) {
     return (
-      <ThemedView style={styles.container}>
+      <ThemedView style={[styles.container, topPadding]}>
         <ThemedText type="subtitle" themeColor="textSecondary">
           You don&apos;t have administration access for this organization.
         </ThemedText>
@@ -66,7 +69,7 @@ export default function AdminDashboardScreen() {
 
   return (
     <ScrollView
-      contentContainerStyle={styles.container}
+      contentContainerStyle={[styles.container, topPadding]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
     >
       <ThemedText type="title">Admin</ThemedText>
