@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
-import { API_BASE_URL, apiFetch, ApiError, registerSessionExpiredHandler, setAccessToken } from '@/lib/api-client';
+import { API_BASE_URL, apiFetch, ApiError, fetchOrThrow, registerSessionExpiredHandler, setAccessToken } from '@/lib/api-client';
 import { registerDeviceToken, unregisterDeviceToken } from '@/lib/push-registration';
 import { secureStorage } from '@/lib/secure-storage';
 
@@ -98,7 +98,7 @@ interface AuthContextValue {
  * needs the full parsed payload to tell the two shapes apart.
  */
 async function rawPost<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetchOrThrow(`${API_BASE_URL}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

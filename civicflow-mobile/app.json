@@ -11,7 +11,10 @@
       "icon": "./assets/expo.icon",
       "bundleIdentifier": "com.aphtechnologies.unestra",
       "supportsTablet": true,
-      "associatedDomains": ["applinks:app.getunestra.com", "applinks:app.civicflowapp.com"]
+      "associatedDomains": ["applinks:app.getunestra.com", "applinks:app.civicflowapp.com"],
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.aphtechnologies.unestra",

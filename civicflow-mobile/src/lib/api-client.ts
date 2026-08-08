@@ -31,11 +31,31 @@ export function registerSessionExpiredHandler(handler: (() => void) | null) {
   onSessionExpired = handler;
 }
 
+/**
+ * Wraps a bare fetch() for the call sites that need the same "dropped
+ * connection becomes a normal ApiError" protection apiFetch has, but can't
+ * use apiFetch itself (no auth header / 401-retry semantics wanted here) --
+ * the auth rawPost() helper and refreshAccessToken() below. No timeout: both
+ * callers are one-shot auth requests already guarded by their own retry/
+ * fallback logic rather than a screen's load() waiting indefinitely.
+ */
+export async function fetchOrThrow(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch {
+    throw new ApiError('Network request failed. Check your connection and try again.', 0);
+  }
+}
+
 async function refreshAccessToken(): Promise<string | null> {
   const refreshToken = await secureStorage.getRefreshToken();
   if (!refreshToken) return null;
 
-  const response = await fetch(`${API_BASE_URL}/api/mobile/auth/refresh`, {
+  // A network failure here throws (via fetchOrThrow) rather than returning
+  // null, so it propagates out of apiFetch's 401 handler below instead of
+  // being treated as "refresh rejected" -- an unreachable server shouldn't
+  // force a sign-out the way an actually-invalid refresh token should.
+  const response = await fetchOrThrow(`${API_BASE_URL}/api/mobile/auth/refresh`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ refreshToken }),
