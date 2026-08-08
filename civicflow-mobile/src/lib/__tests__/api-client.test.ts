@@ -1,4 +1,4 @@
-import { apiFetch, ApiError } from '@/lib/api-client';
+import { apiFetch, ApiError, fetchOrThrow } from '@/lib/api-client';
 
 jest.mock('@/lib/secure-storage', () => ({
   secureStorage: { getRefreshToken: jest.fn(), setRefreshToken: jest.fn() },
@@ -63,5 +63,30 @@ describe('apiFetch network-failure handling', () => {
     });
 
     await expect(apiFetch('/api/mobile/dues', { authenticated: false })).resolves.toEqual({ outstandingBalance: 60 });
+  });
+});
+
+describe('fetchOrThrow (used by auth rawPost/refreshAccessToken, which bypass apiFetch)', () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  it('throws an ApiError with status 0 instead of an unhandled rejection when the network request fails', async () => {
+    global.fetch = jest.fn().mockRejectedValue(new TypeError('Network request failed'));
+
+    await expect(fetchOrThrow('http://localhost:3000/api/mobile/auth/refresh', { method: 'POST' })).rejects.toMatchObject(
+      { status: 0 }
+    );
+  });
+
+  it('returns the response as-is on success', async () => {
+    const fakeResponse = { status: 200, ok: true, json: async () => ({ ok: true }) };
+    global.fetch = jest.fn().mockResolvedValue(fakeResponse);
+
+    await expect(fetchOrThrow('http://localhost:3000/api/mobile/auth/refresh', { method: 'POST' })).resolves.toBe(
+      fakeResponse
+    );
   });
 });

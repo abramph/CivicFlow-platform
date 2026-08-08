@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
-import { API_BASE_URL, apiFetch, ApiError, registerSessionExpiredHandler, setAccessToken } from '@/lib/api-client';
+import { API_BASE_URL, apiFetch, ApiError, fetchOrThrow, registerSessionExpiredHandler, setAccessToken } from '@/lib/api-client';
 import { registerDeviceToken, unregisterDeviceToken } from '@/lib/push-registration';
 import { secureStorage } from '@/lib/secure-storage';
 
@@ -98,7 +98,7 @@ interface AuthContextValue {
  * needs the full parsed payload to tell the two shapes apart.
  */
 async function rawPost<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetchOrThrow(`${API_BASE_URL}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -140,6 +140,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAccessToken(null);
     await secureStorage.clearRefreshToken();
     await secureStorage.clearSelectedOrganizationId();
+    await secureStorage.clearUser();
     setUser(null);
     setOrganizations([]);
     setSelectedOrganizationId(null);
@@ -158,6 +159,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setStatus('signedOut');
           return;
         }
+        const cachedUser = await secureStorage.getUser<MobileUser>();
+        if (cachedUser) setUser(cachedUser);
         const { organizations: orgs, selectedOrganizationId: selected } = await loadOrganizationsAndRestoreSelection();
         setOrganizations(orgs);
         setSelectedOrganizationId(selected);
@@ -174,6 +177,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function applyTokensAndUser(tokens: TokenPair, signedInUser: MobileUser) {
     setAccessToken(tokens.accessToken);
     await secureStorage.setRefreshToken(tokens.refreshToken);
+    await secureStorage.setUser(signedInUser);
     setUser(signedInUser);
     const { organizations: orgs, selectedOrganizationId: selected } = await loadOrganizationsAndRestoreSelection();
     setOrganizations(orgs);

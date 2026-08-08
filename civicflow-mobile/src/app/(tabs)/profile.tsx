@@ -59,7 +59,7 @@ export default function ProfileScreen() {
       <ThemedView type="backgroundElement" style={styles.card}>
         <ThemedText type="small" themeColor="textSecondary">Name</ThemedText>
         <ThemedText type="smallBold">
-          {selectedOrganization ? `${selectedOrganization.firstName} ${selectedOrganization.lastName}` : user?.displayName ?? '—'}
+          {hasMemberIdentity ? `${selectedOrganization!.firstName} ${selectedOrganization!.lastName}` : user?.displayName ?? '—'}
         </ThemedText>
 
         <ThemedText type="small" themeColor="textSecondary" style={styles.spacedTop}>Email</ThemedText>
