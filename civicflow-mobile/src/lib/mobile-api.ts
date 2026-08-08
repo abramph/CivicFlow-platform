@@ -1036,6 +1036,300 @@ export function sendAdminCampaign(organizationId: string, campaignId: string) {
   });
 }
 
+// ── Admin: payments / dues / contributions / reports ────────────────────────
+// Mobile Admin program (PR D). Backed by /api/mobile/admin/{financial-summary,
+// dues,contributions,payment-reports,payment-link-reports,reports}/* in
+// civicflow-portal, delegating to the exact same shared services the web
+// /dues, /contributions, /receipts, /payment-reports, and /reports pages
+// use -- no separate mobile-only financial write path. Money amounts are
+// always plain strings (the server's Decimal.toString()), never converted
+// to a JS number for display -- this app never does its own currency math,
+// it only shows what the server computed. Gated on the managePayments/
+// manageReports capabilities (see getAdminDashboard above); managePayments
+// alone does not imply every specific dues/contributions/receipts
+// permission, so a 403 from any of these can mean "you hold some payments
+// capability but not this specific one" -- a normal, expected state.
+
+export interface AdminFinancialSummary {
+  totalDuesCollectedCents: number;
+  totalContributionsCents: number;
+  duesOutstandingCents: number;
+  duesCollected30dCents: number;
+  pendingPaymentReports: number;
+  pendingPaymentLinkReports: number;
+}
+
+export function getAdminFinancialSummary(organizationId: string) {
+  return apiFetch<AdminFinancialSummary>(`/api/mobile/admin/financial-summary?organizationId=${encodeURIComponent(organizationId)}`);
+}
+
+export type DuesChargeStatus = 'PENDING' | 'PARTIAL' | 'PAID' | 'WAIVED' | 'VOID';
+export type DuesAdjustmentType = 'WAIVER' | 'DISCOUNT' | 'CREDIT' | 'WRITE_OFF' | 'MANUAL_ADJUSTMENT';
+export type DuesPaymentMethodValue =
+  | 'CASH' | 'CHECK' | 'CREDIT_CARD' | 'DEBIT_CARD' | 'CARD' | 'ACH' | 'ZELLE' | 'CASH_APP' | 'VENMO' | 'PAYPAL' | 'STRIPE' | 'ZEFFY' | 'OTHER';
+
+export interface AdminDuesCharge {
+  id: string;
+  amountDue: string;
+  amountPaid: string;
+  dueDate: string;
+  status: DuesChargeStatus;
+  duesAccountId: string | null;
+}
+
+export interface AdminDuesPaymentRow {
+  id: string;
+  amount: string;
+  paymentDate: string;
+  method: DuesPaymentMethodValue;
+  reference: string | null;
+  duesChargeId: string | null;
+}
+
+export interface AdminDuesAdjustmentRow {
+  id: string;
+  adjustmentType: DuesAdjustmentType;
+  amount: string;
+  reason: string;
+  duesChargeId: string | null;
+  createdAt: string;
+}
+
+export interface AdminMemberDues {
+  member: { id: string; firstName: string; lastName: string; isDelinquent: boolean };
+  charges: AdminDuesCharge[];
+  payments: AdminDuesPaymentRow[];
+  adjustments: AdminDuesAdjustmentRow[];
+}
+
+export function getAdminMemberDues(organizationId: string, memberId: string) {
+  return apiFetch<AdminMemberDues>(
+    `/api/mobile/admin/dues?organizationId=${encodeURIComponent(organizationId)}&memberId=${encodeURIComponent(memberId)}`
+  );
+}
+
+export interface RecordAdminDuesPaymentInput {
+  organizationId: string;
+  memberId?: string;
+  duesChargeId?: string | null;
+  duesAccountId?: string | null;
+  amount: number;
+  paymentDate: string;
+  method?: DuesPaymentMethodValue;
+  reference?: string | null;
+  notes?: string | null;
+}
+
+export function recordAdminDuesPayment(input: RecordAdminDuesPaymentInput) {
+  return apiFetch<AdminDuesPaymentRow>('/api/mobile/admin/dues/payments', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export interface CreateAdminDuesAdjustmentInput {
+  organizationId: string;
+  memberId: string;
+  duesChargeId?: string | null;
+  adjustmentType: DuesAdjustmentType;
+  amount: number;
+  reason: string;
+}
+
+export function createAdminDuesAdjustment(input: CreateAdminDuesAdjustmentInput) {
+  return apiFetch<AdminDuesAdjustmentRow>('/api/mobile/admin/dues/adjustments', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function generateAdminDuesForMember(organizationId: string, memberId: string) {
+  return apiFetch<{ result: unknown; delinquencyResult: unknown }>('/api/mobile/admin/dues/generate', {
+    method: 'POST',
+    body: JSON.stringify({ organizationId, memberId }),
+  });
+}
+
+export type ContributionSourceValue = 'MEMBER_PROFILE' | 'CAMPAIGN_PAGE' | 'EVENT_PAGE' | 'MANUAL' | 'IMPORT';
+
+export interface AdminContributionListRow {
+  id: string;
+  amount: string;
+  contributionDate: string;
+  source: ContributionSourceValue;
+  paymentMethod: DuesPaymentMethodValue | null;
+  voidedAt: string | null;
+  member: { id: string; firstName: string; lastName: string } | null;
+  campaign: { id: string; name: string } | null;
+  event: { id: string; title: string } | null;
+}
+
+export function getAdminContributions(organizationId: string) {
+  return apiFetch<AdminContributionListRow[]>(`/api/mobile/admin/contributions?organizationId=${encodeURIComponent(organizationId)}`);
+}
+
+export interface AdminContributionDetail {
+  id: string;
+  amount: string;
+  contributionDate: string;
+  source: ContributionSourceValue;
+  paymentMethod: DuesPaymentMethodValue | null;
+  notes: string | null;
+  voidedAt: string | null;
+  voidReason: string | null;
+  lockedAt: string | null;
+  member: { id: string; firstName: string; lastName: string } | null;
+  campaign: { id: string; name: string } | null;
+  event: { id: string; title: string } | null;
+  receipts: { id: string; receiptNumber: string; deliveryStatus: string; createdAt: string }[];
+}
+
+export function getAdminContribution(organizationId: string, contributionId: string) {
+  return apiFetch<AdminContributionDetail>(
+    `/api/mobile/admin/contributions/${encodeURIComponent(contributionId)}?organizationId=${encodeURIComponent(organizationId)}`
+  );
+}
+
+export interface CreateAdminContributionInput {
+  organizationId: string;
+  memberId?: string | null;
+  campaignId?: string | null;
+  eventId?: string | null;
+  contributorName?: string | null;
+  amount: number;
+  contributionDate: string;
+  paymentMethod?: DuesPaymentMethodValue;
+  source: ContributionSourceValue;
+  receiptRequested?: boolean;
+  notes?: string | null;
+}
+
+export function createAdminContribution(input: CreateAdminContributionInput) {
+  return apiFetch<AdminContributionDetail>('/api/mobile/admin/contributions', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export type UpdateAdminContributionInput = Partial<{
+  amount: number;
+  contributionDate: string;
+  paymentMethod: DuesPaymentMethodValue | null;
+  notes: string | null;
+  receiptRequested: boolean;
+  editReason: string;
+}> & { organizationId: string };
+
+export function updateAdminContribution(contributionId: string, input: UpdateAdminContributionInput) {
+  return apiFetch<AdminContributionDetail>(`/api/mobile/admin/contributions/${encodeURIComponent(contributionId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export function voidAdminContribution(contributionId: string, organizationId: string, reason?: string) {
+  return apiFetch<AdminContributionDetail>(`/api/mobile/admin/contributions/${encodeURIComponent(contributionId)}/void`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId, reason }),
+  });
+}
+
+export function generateAdminContributionReceipt(contributionId: string, organizationId: string) {
+  return apiFetch<{ id: string; receiptNumber: string }>(`/api/mobile/admin/contributions/${encodeURIComponent(contributionId)}/receipt`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId }),
+  });
+}
+
+// ── Admin: payment report review (member self-reports + payment-link offline reports) ─
+
+export type PaymentReportStatusValue = 'pending' | 'approved' | 'rejected';
+export type PaymentReportCategoryValue =
+  | 'MEMBERSHIP_DUES' | 'EVENT_REGISTRATION' | 'DONATION' | 'FUNDRAISER' | 'MERCHANDISE' | 'SPONSORSHIP' | 'ASSESSMENT' | 'OTHER';
+
+export interface AdminPaymentReportRow {
+  id: string;
+  amount: string;
+  paymentMethod: DuesPaymentMethodValue;
+  paymentDate: string;
+  category: PaymentReportCategoryValue;
+  status: PaymentReportStatusValue;
+  rejectionReason: string | null;
+  createdAt: string;
+  member: { id: string; firstName: string; lastName: string };
+}
+
+export function getAdminPaymentReports(organizationId: string, status: PaymentReportStatusValue = 'pending') {
+  return apiFetch<AdminPaymentReportRow[]>(
+    `/api/mobile/admin/payment-reports?organizationId=${encodeURIComponent(organizationId)}&status=${status}`
+  );
+}
+
+export function approveAdminPaymentReport(reportId: string, organizationId: string, note?: string) {
+  return apiFetch<AdminPaymentReportRow>(`/api/mobile/admin/payment-reports/${encodeURIComponent(reportId)}/approve`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId, note }),
+  });
+}
+
+export function rejectAdminPaymentReport(reportId: string, organizationId: string, rejectionReason: string) {
+  return apiFetch<AdminPaymentReportRow>(`/api/mobile/admin/payment-reports/${encodeURIComponent(reportId)}/reject`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId, rejectionReason }),
+  });
+}
+
+export interface AdminPaymentLinkReportRow {
+  id: string;
+  amount: string;
+  payerName: string;
+  payerEmail: string;
+  referenceNumber: string | null;
+  status: PaymentReportStatusValue;
+  rejectionReason: string | null;
+  createdAt: string;
+  paymentLink: { id: string; title: string };
+}
+
+export function getAdminPaymentLinkReports(organizationId: string, status: PaymentReportStatusValue = 'pending') {
+  return apiFetch<AdminPaymentLinkReportRow[]>(
+    `/api/mobile/admin/payment-link-reports?organizationId=${encodeURIComponent(organizationId)}&status=${status}`
+  );
+}
+
+export function approveAdminPaymentLinkReport(reportId: string, organizationId: string, note?: string) {
+  return apiFetch<AdminPaymentLinkReportRow>(`/api/mobile/admin/payment-link-reports/${encodeURIComponent(reportId)}/approve`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId, note }),
+  });
+}
+
+export function rejectAdminPaymentLinkReport(reportId: string, organizationId: string, rejectionReason: string) {
+  return apiFetch<AdminPaymentLinkReportRow>(`/api/mobile/admin/payment-link-reports/${encodeURIComponent(reportId)}/reject`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId, rejectionReason }),
+  });
+}
+
+// ── Admin: reports (email delivery only -- see mobile-report-send.ts) ───────
+
+export type AdminReportType =
+  | 'GENERAL_FINANCIAL' | 'OUTSTANDING_DUES' | 'MONTHLY_DUES_COLLECTION' | 'DELINQUENT_MEMBERS'
+  | 'CONTRIBUTIONS' | 'ACTIVE_MEMBER_ROSTER' | 'DELINQUENT_MEMBER_ROSTER';
+
+export const ADMIN_REPORT_TYPE_LABELS: Record<AdminReportType, string> = {
+  GENERAL_FINANCIAL: 'General Financial Summary',
+  OUTSTANDING_DUES: 'Outstanding Dues',
+  MONTHLY_DUES_COLLECTION: 'Monthly Dues Collection',
+  DELINQUENT_MEMBERS: 'Delinquent Members',
+  CONTRIBUTIONS: 'Contributions',
+  ACTIVE_MEMBER_ROSTER: 'Active Member Roster',
+  DELINQUENT_MEMBER_ROSTER: 'Delinquent Member Roster',
+};
+
+export interface SendAdminReportInput {
+  organizationId: string;
+  reportType: AdminReportType;
+  startDate?: string | null;
+  endDate?: string | null;
+  format?: 'csv' | 'xlsx' | 'pdf';
+}
+
+export function sendAdminReport(input: SendAdminReportInput) {
+  return apiFetch<{ sent: boolean }>('/api/mobile/admin/reports/send', { method: 'POST', body: JSON.stringify(input) });
+}
+
 // ── Identity routing ─────────────────────────────────────────────────────────
 // A caller can have a conventional OrgMember, a PTA household link, both (an
 // officer who is also a parent), or neither. `hasMemberIdentity` always wins
