@@ -140,6 +140,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAccessToken(null);
     await secureStorage.clearRefreshToken();
     await secureStorage.clearSelectedOrganizationId();
+    await secureStorage.clearUser();
     setUser(null);
     setOrganizations([]);
     setSelectedOrganizationId(null);
@@ -158,6 +159,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setStatus('signedOut');
           return;
         }
+        const cachedUser = await secureStorage.getUser<MobileUser>();
+        if (cachedUser) setUser(cachedUser);
         const { organizations: orgs, selectedOrganizationId: selected } = await loadOrganizationsAndRestoreSelection();
         setOrganizations(orgs);
         setSelectedOrganizationId(selected);
@@ -174,6 +177,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function applyTokensAndUser(tokens: TokenPair, signedInUser: MobileUser) {
     setAccessToken(tokens.accessToken);
     await secureStorage.setRefreshToken(tokens.refreshToken);
+    await secureStorage.setUser(signedInUser);
     setUser(signedInUser);
     const { organizations: orgs, selectedOrganizationId: selected } = await loadOrganizationsAndRestoreSelection();
     setOrganizations(orgs);

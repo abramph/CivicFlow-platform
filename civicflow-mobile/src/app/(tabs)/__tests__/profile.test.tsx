@@ -66,3 +66,27 @@ describe('Profile screen — org switcher discoverability (GitHub #71)', () => {
     expect(mockPush).toHaveBeenCalledWith('/org-switcher');
   });
 });
+
+describe('Profile screen — org owner/admin without a personal member identity', () => {
+  beforeEach(() => {
+    mockGetProfile.mockReset();
+    mockUpdateProfile.mockReset();
+  });
+
+  it('falls back to the account name/email instead of rendering "null null"', async () => {
+    mockUseAuth.mockReturnValue({
+      user: { id: 'user-1', email: 'owner@example.com', displayName: 'Org Owner' },
+      organizations: [{ organizationId: 'org-0', organizationName: 'Sample Org' }],
+      selectedOrganization: { organizationName: 'Sample Org', memberId: null, firstName: null, lastName: null },
+      selectedOrganizationId: 'org-0',
+      logout: mockLogout,
+    });
+
+    await render(<ProfileScreen />);
+
+    await waitFor(() => expect(screen.getByText('Org Owner')).toBeTruthy());
+    expect(screen.getByText('owner@example.com')).toBeTruthy();
+    expect(screen.queryByText('null null')).toBeNull();
+    expect(mockGetProfile).not.toHaveBeenCalled();
+  });
+});
