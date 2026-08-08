@@ -1330,6 +1330,383 @@ export function sendAdminReport(input: SendAdminReportInput) {
   return apiFetch<{ sent: boolean }>('/api/mobile/admin/reports/send', { method: 'POST', body: JSON.stringify(input) });
 }
 
+// ── Admin: PTA households / HOA properties, violations, architectural requests ──
+// Mobile Admin program (PR E) — per-vertical admin. Backed by
+// /api/mobile/admin/pta/households/* and /api/mobile/admin/hoa/* in
+// civicflow-portal, delegating to the exact same src/lib service functions
+// the web /labs/pta/households and /hoa/* pages use. Gated on
+// managePtaHouseholds / manageHoaProperties / manageHoaViolations /
+// manageHoaArchitecturalRequests -- each of those capabilities maps to only
+// ONE specific RBAC permission server-side (see mobile-admin.ts's
+// FLAG_RULES), so holding the coarse flag never implies every fine-grained
+// permission a given screen's actions need (e.g. managePtaHouseholds does
+// NOT imply pta:students:manage; manageHoaViolations does NOT imply
+// hoa:violations:resolve). A 403 from any of these calls can mean "you can
+// see this screen but not do this specific action" -- a normal, expected
+// state, not a bug. Architectural requests are READ + COMMENT ONLY here on
+// purpose -- there is no client function for deciding one (approve/deny/
+// conditionally-approve), matching the portal's documented decision that
+// board-level decisions don't belong on mobile.
+
+export type PtaHouseholdStatus = 'ACTIVE' | 'INACTIVE' | 'PENDING';
+export type PtaStudentStatus = 'ACTIVE' | 'INACTIVE';
+
+export interface AdminPtaHouseholdAdult {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  relationshipLabel: string | null;
+  userId: string | null;
+}
+
+export interface AdminPtaStudent {
+  id: string;
+  displayName: string;
+  status: PtaStudentStatus;
+}
+
+export interface AdminPtaHouseholdListRow {
+  id: string;
+  displayName: string;
+  status: PtaHouseholdStatus;
+  schoolYear: string;
+  adults: AdminPtaHouseholdAdult[];
+  students: { id: string; displayName: string; status: PtaStudentStatus }[];
+}
+
+export interface AdminPtaHouseholdDetail extends Omit<AdminPtaHouseholdListRow, 'students'> {
+  notes: string | null;
+  volunteerInterests: string[];
+  students: AdminPtaStudent[];
+}
+
+export function getAdminPtaHouseholds(organizationId: string, filters: { schoolYear?: string; status?: string; search?: string } = {}) {
+  const params = new URLSearchParams({ organizationId });
+  if (filters.schoolYear) params.set('schoolYear', filters.schoolYear);
+  if (filters.status) params.set('status', filters.status);
+  if (filters.search) params.set('search', filters.search);
+  return apiFetch<AdminPtaHouseholdListRow[]>(`/api/mobile/admin/pta/households?${params.toString()}`);
+}
+
+export function getAdminPtaHousehold(organizationId: string, householdId: string) {
+  return apiFetch<AdminPtaHouseholdDetail>(`/api/mobile/admin/pta/households/${encodeURIComponent(householdId)}?organizationId=${encodeURIComponent(organizationId)}`);
+}
+
+export interface CreateAdminPtaHouseholdInput {
+  organizationId: string;
+  displayName: string;
+  schoolYear: string;
+  status?: PtaHouseholdStatus;
+  notes?: string | null;
+}
+
+export function createAdminPtaHousehold(input: CreateAdminPtaHouseholdInput) {
+  return apiFetch<AdminPtaHouseholdDetail>('/api/mobile/admin/pta/households', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export type UpdateAdminPtaHouseholdInput = Partial<{
+  displayName: string;
+  status: PtaHouseholdStatus;
+  notes: string | null;
+}> & { organizationId: string };
+
+export function updateAdminPtaHousehold(householdId: string, input: UpdateAdminPtaHouseholdInput) {
+  return apiFetch<AdminPtaHouseholdDetail>(`/api/mobile/admin/pta/households/${encodeURIComponent(householdId)}`, { method: 'PATCH', body: JSON.stringify(input) });
+}
+
+export function deactivateAdminPtaHousehold(householdId: string, organizationId: string) {
+  return apiFetch<AdminPtaHouseholdDetail>(`/api/mobile/admin/pta/households/${encodeURIComponent(householdId)}?organizationId=${encodeURIComponent(organizationId)}`, { method: 'DELETE' });
+}
+
+export interface AddAdminPtaHouseholdAdultInput {
+  organizationId: string;
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+  relationshipLabel?: string | null;
+  makePrimaryContact?: boolean;
+}
+
+export function addAdminPtaHouseholdAdult(householdId: string, input: AddAdminPtaHouseholdAdultInput) {
+  return apiFetch<AdminPtaHouseholdAdult>(`/api/mobile/admin/pta/households/${encodeURIComponent(householdId)}/adults`, { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function removeAdminPtaHouseholdAdult(householdId: string, adultId: string, organizationId: string) {
+  return apiFetch<{ removed: boolean }>(
+    `/api/mobile/admin/pta/households/${encodeURIComponent(householdId)}/adults/${encodeURIComponent(adultId)}?organizationId=${encodeURIComponent(organizationId)}`,
+    { method: 'DELETE' }
+  );
+}
+
+export function addAdminPtaStudent(householdId: string, organizationId: string, displayName: string) {
+  return apiFetch<AdminPtaStudent>(`/api/mobile/admin/pta/households/${encodeURIComponent(householdId)}/students`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId, displayName }),
+  });
+}
+
+export function deactivateAdminPtaStudent(householdId: string, studentId: string, organizationId: string) {
+  return apiFetch<AdminPtaStudent>(
+    `/api/mobile/admin/pta/households/${encodeURIComponent(householdId)}/students/${encodeURIComponent(studentId)}?organizationId=${encodeURIComponent(organizationId)}`,
+    { method: 'DELETE' }
+  );
+}
+
+// ── Admin: HOA properties & residents ────────────────────────────────────────
+
+export type HoaPropertyType = 'SINGLE_FAMILY' | 'CONDO_UNIT' | 'TOWNHOME' | 'VACANT_LOT' | 'COMMON_PROPERTY' | 'OTHER';
+export type HoaPropertyStatus = 'ACTIVE' | 'INACTIVE';
+export type HoaResidentType = 'OWNER' | 'CO_OWNER' | 'RESIDENT' | 'TENANT' | 'NON_RESIDENT_OWNER' | 'OTHER';
+export type HoaResidentStatus = 'ACTIVE' | 'ENDED';
+
+export interface AdminHoaPropertyListRow {
+  id: string;
+  addressLine1: string;
+  addressLine2: string | null;
+  city: string | null;
+  state: string | null;
+  zipCode: string | null;
+  unitLabel: string | null;
+  buildingLabel: string | null;
+  propertyType: HoaPropertyType;
+  displayName: string | null;
+  status: HoaPropertyStatus;
+  billingMember: { id: string; firstName: string; lastName: string } | null;
+  _count: { residents: number };
+}
+
+export interface AdminHoaResident {
+  id: string;
+  relationshipType: HoaResidentType;
+  status: HoaResidentStatus;
+  isPrimaryContact: boolean;
+  ownershipPercentage: string | null;
+  moveInDate: string | null;
+  moveOutDate: string | null;
+  orgMember: { id: string; firstName: string; lastName: string; email: string | null; phone: string | null } | null;
+}
+
+export interface AdminHoaPropertyDetail extends Omit<AdminHoaPropertyListRow, '_count'> {
+  country: string | null;
+  notes: string | null;
+  billingMember: { id: string; firstName: string; lastName: string; email: string | null } | null;
+  residents: AdminHoaResident[];
+}
+
+export function getAdminHoaProperties(organizationId: string, filters: { status?: string; search?: string } = {}) {
+  const params = new URLSearchParams({ organizationId });
+  if (filters.status) params.set('status', filters.status);
+  if (filters.search) params.set('search', filters.search);
+  return apiFetch<{ properties: AdminHoaPropertyListRow[]; total: number; take: number; skip: number }>(`/api/mobile/admin/hoa/properties?${params.toString()}`);
+}
+
+export function getAdminHoaProperty(organizationId: string, propertyId: string) {
+  return apiFetch<AdminHoaPropertyDetail>(`/api/mobile/admin/hoa/properties/${encodeURIComponent(propertyId)}?organizationId=${encodeURIComponent(organizationId)}`);
+}
+
+export interface CreateAdminHoaPropertyInput {
+  organizationId: string;
+  addressLine1: string;
+  addressLine2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zipCode?: string | null;
+  unitLabel?: string | null;
+  buildingLabel?: string | null;
+  propertyType?: HoaPropertyType;
+  displayName?: string | null;
+  notes?: string | null;
+}
+
+export function createAdminHoaProperty(input: CreateAdminHoaPropertyInput) {
+  return apiFetch<AdminHoaPropertyDetail>('/api/mobile/admin/hoa/properties', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export type UpdateAdminHoaPropertyInput = Partial<{
+  addressLine1: string;
+  addressLine2: string | null;
+  city: string | null;
+  state: string | null;
+  zipCode: string | null;
+  unitLabel: string | null;
+  buildingLabel: string | null;
+  propertyType: HoaPropertyType;
+  displayName: string | null;
+  notes: string | null;
+}> & { organizationId: string };
+
+export function updateAdminHoaProperty(propertyId: string, input: UpdateAdminHoaPropertyInput) {
+  return apiFetch<AdminHoaPropertyDetail>(`/api/mobile/admin/hoa/properties/${encodeURIComponent(propertyId)}`, { method: 'PATCH', body: JSON.stringify(input) });
+}
+
+export function archiveAdminHoaProperty(propertyId: string, organizationId: string) {
+  return apiFetch<AdminHoaPropertyDetail>(`/api/mobile/admin/hoa/properties/${encodeURIComponent(propertyId)}/archive`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId }),
+  });
+}
+
+export function reactivateAdminHoaProperty(propertyId: string, organizationId: string) {
+  return apiFetch<AdminHoaPropertyDetail>(`/api/mobile/admin/hoa/properties/${encodeURIComponent(propertyId)}/reactivate`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId }),
+  });
+}
+
+export interface AssignAdminHoaResidentInput {
+  organizationId: string;
+  orgMemberId: string;
+  relationshipType: HoaResidentType;
+  isPrimaryContact?: boolean;
+  ownershipPercentage?: number | null;
+  moveInDate?: string | null;
+}
+
+export function assignAdminHoaResident(propertyId: string, input: AssignAdminHoaResidentInput) {
+  return apiFetch<AdminHoaResident>(`/api/mobile/admin/hoa/properties/${encodeURIComponent(propertyId)}/residents`, { method: 'POST', body: JSON.stringify(input) });
+}
+
+export type UpdateAdminHoaResidentInput = Partial<{
+  relationshipType: HoaResidentType;
+  isPrimaryContact: boolean;
+  ownershipPercentage: number | null;
+}> & { organizationId: string };
+
+export function updateAdminHoaResident(propertyId: string, residentId: string, input: UpdateAdminHoaResidentInput) {
+  return apiFetch<AdminHoaResident>(`/api/mobile/admin/hoa/properties/${encodeURIComponent(propertyId)}/residents/${encodeURIComponent(residentId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export function endAdminHoaResident(propertyId: string, residentId: string, organizationId: string, moveOutDate?: string | null) {
+  return apiFetch<AdminHoaResident>(`/api/mobile/admin/hoa/properties/${encodeURIComponent(propertyId)}/residents/${encodeURIComponent(residentId)}/end`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId, moveOutDate }),
+  });
+}
+
+// ── Admin: HOA violations ────────────────────────────────────────────────────
+
+export type HoaViolationStatus = 'DRAFT' | 'ISSUED' | 'ACKNOWLEDGED' | 'IN_REVIEW' | 'CURED' | 'RESOLVED' | 'DISMISSED';
+
+export interface AdminHoaViolationListRow {
+  id: string;
+  violationType: string;
+  status: HoaViolationStatus;
+  cureByDate: string | null;
+  issuedAt: string | null;
+  createdAt: string;
+  property: { id: string; addressLine1: string; unitLabel: string | null; displayName: string | null };
+}
+
+export interface AdminHoaViolationDetail extends AdminHoaViolationListRow {
+  description: string;
+  resolvedAt: string | null;
+  resolutionNotes: string | null;
+  notices: { id: string; noticeType: string; sentAt: string; channel: string; body: string }[];
+  comments: { id: string; authorUserId: string | null; body: string; isPrivate: boolean; createdAt: string }[];
+  statusHistory: { id: string; fromStatus: HoaViolationStatus | null; toStatus: HoaViolationStatus; notes: string | null; createdAt: string }[];
+}
+
+export function getAdminHoaViolations(organizationId: string, filters: { propertyId?: string; status?: string } = {}) {
+  const params = new URLSearchParams({ organizationId });
+  if (filters.propertyId) params.set('propertyId', filters.propertyId);
+  if (filters.status) params.set('status', filters.status);
+  return apiFetch<AdminHoaViolationListRow[]>(`/api/mobile/admin/hoa/violations?${params.toString()}`);
+}
+
+export function getAdminHoaViolation(organizationId: string, violationId: string) {
+  return apiFetch<AdminHoaViolationDetail>(`/api/mobile/admin/hoa/violations/${encodeURIComponent(violationId)}?organizationId=${encodeURIComponent(organizationId)}`);
+}
+
+export interface CreateAdminHoaViolationInput {
+  organizationId: string;
+  propertyId: string;
+  violationType: string;
+  description: string;
+  cureByDate?: string | null;
+}
+
+export function createAdminHoaViolation(input: CreateAdminHoaViolationInput) {
+  return apiFetch<AdminHoaViolationDetail>('/api/mobile/admin/hoa/violations', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function issueAdminHoaViolation(violationId: string, organizationId: string, noticeBody: string, cureByDate?: string | null) {
+  return apiFetch<AdminHoaViolationDetail>(`/api/mobile/admin/hoa/violations/${encodeURIComponent(violationId)}/issue`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId, noticeBody, cureByDate }),
+  });
+}
+
+export type AdminHoaViolationTransitionTarget = 'ACKNOWLEDGED' | 'IN_REVIEW' | 'CURED' | 'RESOLVED' | 'DISMISSED';
+
+export function transitionAdminHoaViolation(
+  violationId: string,
+  organizationId: string,
+  toStatus: AdminHoaViolationTransitionTarget,
+  input?: { notes?: string | null; resolutionNotes?: string | null }
+) {
+  return apiFetch<AdminHoaViolationDetail>(`/api/mobile/admin/hoa/violations/${encodeURIComponent(violationId)}/transition`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId, toStatus, ...input }),
+  });
+}
+
+export function addAdminHoaViolationComment(violationId: string, organizationId: string, body: string, isPrivate: boolean = true) {
+  return apiFetch<{ id: string; body: string; isPrivate: boolean }>(`/api/mobile/admin/hoa/violations/${encodeURIComponent(violationId)}/comments`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId, body, isPrivate }),
+  });
+}
+
+// ── Admin: HOA architectural requests (read + comment only, never decide) ───
+
+export type HoaArchitecturalRequestStatus =
+  | 'DRAFT' | 'SUBMITTED' | 'IN_REVIEW' | 'CHANGES_REQUESTED' | 'RESUBMITTED'
+  | 'APPROVED' | 'CONDITIONALLY_APPROVED' | 'DENIED' | 'WITHDRAWN' | 'EXPIRED';
+
+export interface AdminHoaArchitecturalRequestListRow {
+  id: string;
+  requestNumber: number;
+  category: string;
+  title: string;
+  status: HoaArchitecturalRequestStatus;
+  createdAt: string;
+  property: { id: string; addressLine1: string; unitLabel: string | null; displayName: string | null };
+}
+
+export interface AdminHoaArchitecturalRequestDetail extends AdminHoaArchitecturalRequestListRow {
+  projectDescription: string;
+  proposedStartDate: string | null;
+  proposedCompletionDate: string | null;
+  decisionSummary: string | null;
+  conditions: string | null;
+  comments: { id: string; authorUserId: string | null; body: string; isPrivate: boolean; createdAt: string }[];
+  statusHistory: { id: string; fromStatus: HoaArchitecturalRequestStatus | null; toStatus: HoaArchitecturalRequestStatus; createdAt: string }[];
+}
+
+export function getAdminHoaArchitecturalRequests(organizationId: string, filters: { propertyId?: string; status?: string } = {}) {
+  const params = new URLSearchParams({ organizationId });
+  if (filters.propertyId) params.set('propertyId', filters.propertyId);
+  if (filters.status) params.set('status', filters.status);
+  return apiFetch<AdminHoaArchitecturalRequestListRow[]>(`/api/mobile/admin/hoa/architectural-requests?${params.toString()}`);
+}
+
+export function getAdminHoaArchitecturalRequest(organizationId: string, requestId: string) {
+  return apiFetch<AdminHoaArchitecturalRequestDetail>(
+    `/api/mobile/admin/hoa/architectural-requests/${encodeURIComponent(requestId)}?organizationId=${encodeURIComponent(organizationId)}`
+  );
+}
+
+export function addAdminHoaArchitecturalRequestComment(requestId: string, organizationId: string, body: string, isPrivate: boolean = true) {
+  return apiFetch<{ id: string; body: string; isPrivate: boolean }>(`/api/mobile/admin/hoa/architectural-requests/${encodeURIComponent(requestId)}/comments`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId, body, isPrivate }),
+  });
+}
+
 // ── Identity routing ─────────────────────────────────────────────────────────
 // A caller can have a conventional OrgMember, a PTA household link, both (an
 // officer who is also a parent), or neither. `hasMemberIdentity` always wins
