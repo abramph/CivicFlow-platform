@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { createAuditEvent } from "@/lib/audit";
 import { PtaError } from "./errors";
+import { getPtaProfile } from "./profile";
 
 /**
  * Volunteer opportunities, shifts ("slots"), assignments ("signups"),
@@ -53,6 +54,17 @@ export async function createPtaVolunteerOpportunity(input: CreateOpportunityInpu
     if (!committee) throw new PtaError("PTA_COMMITTEE_NOT_FOUND", "Committee not found in this organization.");
   }
 
+  // The create form never sends schoolYear, so without this fallback every
+  // web-created opportunity was persisted with schoolYear: null while
+  // listPtaVolunteerOpportunities()'s officer-facing "manage" page filters
+  // by the org's current school year (present for virtually every real org
+  // since PtaProfile setup is onboarding step 1) — the opportunity saved
+  // correctly but became invisible on the very page you'd look at right
+  // after creating it. Matches the schema's own doc comment on
+  // PtaVolunteerOpportunity.schoolYear, which already documented this as
+  // the intended behavior.
+  const schoolYear = input.schoolYear ?? (await getPtaProfile(input.organizationId))?.currentSchoolYear ?? null;
+
   const opportunity = await prisma.ptaVolunteerOpportunity.create({
     data: {
       organizationId: input.organizationId,
@@ -61,7 +73,7 @@ export async function createPtaVolunteerOpportunity(input: CreateOpportunityInpu
       committeeId: input.committeeId ?? null,
       description: input.description ?? null,
       instructions: input.instructions ?? null,
-      schoolYear: input.schoolYear ?? null,
+      schoolYear,
       coordinatorUserId: input.coordinatorUserId ?? null,
       startAt: input.startAt ?? null,
       endAt: input.endAt ?? null,
