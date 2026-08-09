@@ -151,6 +151,33 @@ export async function resolvePtaHouseholdAdultUserIds(organizationId: string, or
   return household.adults.map((adult) => adult.userId).filter((userId): userId is string => userId != null);
 }
 
+/**
+ * Batched sibling of resolvePtaHouseholdAdultUserIds() for a set of
+ * billing-identity OrgMember ids at once — one query instead of N, for a
+ * bulk communication campaign's recipient list (see
+ * communication-campaigns.ts's processRecipient(), which otherwise only
+ * ever checked a recipient's own OrgMember.userId directly and silently
+ * sent zero push notifications for every PTA household recipient, since a
+ * household billing identity never has a personal login of its own).
+ */
+export async function resolvePtaHouseholdAdultUserIdsBatch(organizationId: string, orgMemberIds: string[]): Promise<Map<string, string[]>> {
+  const result = new Map<string, string[]>();
+  if (orgMemberIds.length === 0) return result;
+
+  const households = await prisma.ptaHousehold.findMany({
+    where: { organizationId, orgMemberId: { in: orgMemberIds }, status: "ACTIVE" },
+    select: { orgMemberId: true, adults: { where: { userId: { not: null } }, select: { userId: true } } },
+  });
+
+  for (const household of households) {
+    if (!household.orgMemberId) continue;
+    const userIds = household.adults.map((adult) => adult.userId).filter((userId): userId is string => userId != null);
+    if (userIds.length > 0) result.set(household.orgMemberId, userIds);
+  }
+
+  return result;
+}
+
 export async function listPtaHouseholds(organizationId: string, filters: { schoolYear?: string; status?: string; search?: string } = {}) {
   return prisma.ptaHousehold.findMany({
     where: {

@@ -66,6 +66,11 @@ vi.mock("@/lib/sms-service", () => ({
 vi.mock("@/lib/storage", () => ({ getSignedObjectUrl: vi.fn().mockResolvedValue("https://signed.example/file") }));
 vi.mock("@/lib/env", () => ({ getMobileAppWebBaseUrl: () => "https://app.getunestra.com" }));
 
+const resolvePtaHouseholdAdultUserIdsBatch = vi.fn().mockResolvedValue(new Map());
+vi.mock("@/lib/labs/pta/households", () => ({
+  resolvePtaHouseholdAdultUserIdsBatch: (...args: unknown[]) => resolvePtaHouseholdAdultUserIdsBatch(...args),
+}));
+
 import { processScheduledCampaigns, sendCommunicationCampaign } from "@/lib/communication-campaigns";
 
 function makeCampaign(overrides: Record<string, unknown> = {}) {
@@ -116,6 +121,8 @@ describe("sendCommunicationCampaign", () => {
     sendEmail.mockResolvedValue({ sent: true, skipped: false });
     sendMemberSms.mockClear();
     sendPushToTokens.mockClear();
+    resolvePtaHouseholdAdultUserIdsBatch.mockClear();
+    resolvePtaHouseholdAdultUserIdsBatch.mockResolvedValue(new Map());
   });
 
   it("short-circuits without reprocessing when the campaign is already SENT", async () => {
@@ -156,6 +163,55 @@ describe("sendCommunicationCampaign", () => {
     expect(findManyDeviceToken).toHaveBeenCalledWith(
       expect.objectContaining({ where: { userId: { in: ["user-1", "user-2"] } } })
     );
+  });
+
+  it("falls back to a PTA household's linked adults for push when the recipient's own billing OrgMember has no userId — the real production gap this fixes", async () => {
+    findFirstCampaign.mockResolvedValueOnce(makeCampaign({ pushEnabled: true }));
+    findManyRecipient.mockResolvedValueOnce([
+      makeRecipient("r1", { memberId: "household-member-1", member: { userId: null, commsPushEnabled: true, requiredNoticesOnly: false } }),
+    ]);
+    resolvePtaHouseholdAdultUserIdsBatch.mockResolvedValueOnce(new Map([["household-member-1", ["adult-user-1", "adult-user-2"]]]));
+    findManyDeviceToken.mockResolvedValueOnce([
+      { userId: "adult-user-1", token: "token-a" },
+      { userId: "adult-user-2", token: "token-b" },
+    ]);
+    countRecipient.mockResolvedValueOnce(0);
+
+    await sendCommunicationCampaign({ organizationId: "org-a", campaignId: "campaign-1" });
+
+    expect(resolvePtaHouseholdAdultUserIdsBatch).toHaveBeenCalledWith("org-a", ["household-member-1"]);
+    expect(findManyDeviceToken).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { userId: { in: ["adult-user-1", "adult-user-2"] } } })
+    );
+    expect(sendPushToTokens).toHaveBeenCalledWith(expect.arrayContaining(["token-a", "token-b"]), expect.anything());
+  });
+
+  it("records an explicit skipped push outcome (not silence) when a recipient has no push target at all", async () => {
+    findFirstCampaign.mockResolvedValueOnce(makeCampaign({ pushEnabled: true }));
+    findManyRecipient.mockResolvedValueOnce([
+      makeRecipient("r1", { memberId: "household-member-1", member: { userId: null, commsPushEnabled: true, requiredNoticesOnly: false } }),
+    ]);
+    resolvePtaHouseholdAdultUserIdsBatch.mockResolvedValueOnce(new Map()); // no adult has a linked login
+    countRecipient.mockResolvedValueOnce(0);
+
+    await sendCommunicationCampaign({ organizationId: "org-a", campaignId: "campaign-1" });
+
+    expect(sendPushToTokens).not.toHaveBeenCalled();
+    expect(createCommunicationLog).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ communicationType: "PUSH", outcome: "No linked mobile login" }) })
+    );
+  });
+
+  it("never queries the household push fallback when the campaign doesn't have push enabled", async () => {
+    findFirstCampaign.mockResolvedValueOnce(makeCampaign({ pushEnabled: false }));
+    findManyRecipient.mockResolvedValueOnce([
+      makeRecipient("r1", { memberId: "household-member-1", member: { userId: null, commsPushEnabled: true, requiredNoticesOnly: false } }),
+    ]);
+    countRecipient.mockResolvedValueOnce(0);
+
+    await sendCommunicationCampaign({ organizationId: "org-a", campaignId: "campaign-1" });
+
+    expect(resolvePtaHouseholdAdultUserIdsBatch).not.toHaveBeenCalled();
   });
 
   it("defaults the push deep link to the announcement's own detail screen when staff didn't set one", async () => {

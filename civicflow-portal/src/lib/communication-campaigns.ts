@@ -13,6 +13,7 @@ import { WhatsAppChannel } from "@/lib/communications/channel";
 import { getWhatsAppEntitlement } from "@/lib/whatsapp/entitlement";
 import { isWithinQuietHours } from "@/lib/whatsapp/quiet-hours";
 import { resolvePtaTargetMemberIds, ptaTargetingRuleSchema, type PtaTargetingRule } from "@/lib/labs/pta/communications";
+import { resolvePtaHouseholdAdultUserIdsBatch } from "@/lib/labs/pta/households";
 import { ValidationError } from "@/lib/validation";
 
 type RecipientFilter = {
@@ -102,12 +103,29 @@ export async function resolveCommunicationRecipients(organizationId: string, fil
     take: 5000,
   });
 
-  return members.filter((member) => {
+  const eligible = members.filter((member) => {
     if (channel === "INTERNAL_LOG_ONLY") return true;
     if (emailEnabled(channel) && member.email) return true;
     if (smsEnabled(channel) && member.phone) return true;
     return false;
   });
+
+  // No PII — ids and counts only. Lets an operator see, from doctl apps
+  // logs alone (no DB access needed), whether a campaign's recipient count
+  // looks plausible for its selector/channel without waiting for a support
+  // report; matches mail.ts's existing structured-event convention.
+  console.log(
+    JSON.stringify({
+      event: "communication_recipients_resolved",
+      organizationId,
+      selector,
+      channel,
+      matchedCount: members.length,
+      eligibleCount: eligible.length,
+    })
+  );
+
+  return eligible;
 }
 
 // Max recipients processed synchronously per sendCommunicationCampaign()
@@ -138,6 +156,7 @@ async function processRecipient(
     smsBody: string;
     isMultiChannel: boolean;
     tokensByUserId: Map<string, string[]>;
+    pushUserIdsByMemberId: Map<string, string[]>;
     whatsappQuietHours: { timezone: string; startHour: number; endHour: number } | null;
   }
 ): Promise<"SENT" | "SKIPPED" | "FAILED"> {
@@ -187,9 +206,21 @@ async function processRecipient(
 
     let pushDeliveryStatus: "SENT" | "SKIPPED" | "FAILED" | null = null;
     let pushError: string | null = null;
-    if (ctx.campaign.pushEnabled && recipient.member?.userId) {
-      if (recipient.member.commsPushEnabled && !recipient.member.requiredNoticesOnly) {
-        const tokens = ctx.tokensByUserId.get(recipient.member.userId) ?? [];
+    if (ctx.campaign.pushEnabled && recipient.member) {
+      // A PTA household's billing-identity OrgMember never carries a
+      // personal userId of its own (see households.ts) — falling back to
+      // its real adults' userIds here is what fixes a previously fully
+      // silent gap: this block used to require recipient.member.userId
+      // directly, so every PTA household recipient produced zero push sends
+      // AND zero CommunicationLog row (the whole block was skipped, not
+      // just the send), with no record anywhere that anything was missed.
+      const pushUserIds = recipient.member.userId ? [recipient.member.userId] : (ctx.pushUserIdsByMemberId.get(recipient.memberId ?? "") ?? []);
+
+      if (pushUserIds.length === 0) {
+        pushDeliveryStatus = "SKIPPED";
+        pushError = "No linked mobile login";
+      } else if (recipient.member.commsPushEnabled && !recipient.member.requiredNoticesOnly) {
+        const tokens = pushUserIds.flatMap((userId) => ctx.tokensByUserId.get(userId) ?? []);
         // Staff can set an explicit deepLink; otherwise an announcement-type
         // campaign defaults to its own detail screen so tapping the push
         // actually opens that announcement instead of just the list.
@@ -360,6 +391,10 @@ async function finalizeCampaign(
       entityId: campaignId,
       metadata: { sent, skipped, failed },
     });
+    // Same breakdown as the audit event above, but visible via doctl apps
+    // logs directly — the audit event requires a DB query to see, this
+    // doesn't. No PII: campaign/organization ids and counts only.
+    console.log(JSON.stringify({ event: "communication_campaign_finalized", organizationId, campaignId, status, sent, skipped, failed }));
   }
 
   return { sent, skipped, failed };
@@ -494,11 +529,30 @@ export async function sendCommunicationCampaign(input: {
     ? `${campaign.body}\n\nAttachments:\n${attachmentLines.join("\n")}`
     : campaign.body;
 
+  // A PTA household's billing-identity OrgMember never has a personal
+  // userId of its own — resolve its real adults' userIds as a push
+  // fallback, batched in one query for every such recipient in this batch
+  // rather than one call per recipient. Only queried when the campaign
+  // actually has push enabled, mirroring the WhatsApp entitlement check's
+  // own "only do this work if it's actually needed" pattern just above.
+  const pushUserIdsByMemberId = new Map<string, string[]>();
+  if (campaign.pushEnabled) {
+    const householdBillingMemberIds = pendingRecipients
+      .filter((recipient) => recipient.member && !recipient.member.userId)
+      .map((recipient) => recipient.memberId)
+      .filter((id): id is string => Boolean(id));
+    const householdUserIds = await resolvePtaHouseholdAdultUserIdsBatch(input.organizationId, householdBillingMemberIds);
+    for (const [memberId, resolvedUserIds] of householdUserIds) {
+      pushUserIdsByMemberId.set(memberId, resolvedUserIds);
+    }
+  }
+
   // Batch-fetch every recipient's mobile device tokens up front, instead of
   // one query per recipient inside the loop — the single largest N+1 here.
-  const userIds = pendingRecipients
+  const directUserIds = pendingRecipients
     .map((recipient) => recipient.member?.userId)
     .filter((id): id is string => Boolean(id));
+  const userIds = [...directUserIds, ...Array.from(pushUserIdsByMemberId.values()).flat()];
   const deviceTokens = userIds.length
     ? await prisma.mobileDeviceToken.findMany({
         where: { userId: { in: userIds } },
@@ -528,6 +582,7 @@ export async function sendCommunicationCampaign(input: {
           smsBody,
           isMultiChannel,
           tokensByUserId,
+          pushUserIdsByMemberId,
           whatsappQuietHours,
         })
       )
