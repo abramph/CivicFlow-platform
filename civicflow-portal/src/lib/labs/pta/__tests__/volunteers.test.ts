@@ -13,6 +13,7 @@ const findFirstEvent = vi.fn();
 const createOpportunity = vi.fn();
 const updateOpportunity = vi.fn();
 const findManyOpportunity = vi.fn();
+const findUniqueProfile = vi.fn();
 
 // claimPtaVolunteerSlot/cancelPtaVolunteerSignup wrap their writes in
 // prisma.$transaction(async (tx) => ...) — the mocked $transaction just
@@ -43,6 +44,7 @@ vi.mock("@/lib/prisma", () => ({
       update: (...a: unknown[]) => updateOpportunity(...a),
     },
     event: { findFirst: (...a: unknown[]) => findFirstEvent(...a) },
+    ptaProfile: { findUnique: (...a: unknown[]) => findUniqueProfile(...a) },
   },
 }));
 vi.mock("@/lib/audit", () => ({ createAuditEvent: vi.fn().mockResolvedValue(undefined) }));
@@ -187,6 +189,39 @@ describe("createPtaVolunteerOpportunity / updatePtaVolunteerOpportunity — even
     expect(findFirstOpportunity).toHaveBeenCalledWith(
       expect.objectContaining({ include: expect.objectContaining({ event: { select: { id: true, title: true, startAt: true } } }) })
     );
+  });
+});
+
+describe("createPtaVolunteerOpportunity — schoolYear regression (an opportunity must not disappear from the officer's own manage-page list)", () => {
+  it("falls back to the org's current school year when the caller doesn't supply one, matching what listPtaVolunteerOpportunities' officer-facing filter expects", async () => {
+    findUniqueProfile.mockResolvedValueOnce({ organizationId: "org-a", currentSchoolYear: "2025-2026" });
+    createOpportunity.mockResolvedValueOnce({ id: "opp-1", schoolYear: "2025-2026" });
+
+    const { createPtaVolunteerOpportunity } = await import("../volunteers");
+    await createPtaVolunteerOpportunity({ organizationId: "org-a", title: "Book Fair setup", actorUserId: "u1" });
+
+    expect(findUniqueProfile).toHaveBeenCalledWith({ where: { organizationId: "org-a" } });
+    expect(createOpportunity).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ schoolYear: "2025-2026" }) }));
+  });
+
+  it("respects an explicitly supplied schoolYear rather than overriding it with the org's profile, and skips the profile lookup entirely", async () => {
+    createOpportunity.mockResolvedValueOnce({ id: "opp-1", schoolYear: "2024-2025" });
+
+    const { createPtaVolunteerOpportunity } = await import("../volunteers");
+    await createPtaVolunteerOpportunity({ organizationId: "org-a", title: "Archive import", schoolYear: "2024-2025", actorUserId: "u1" });
+
+    expect(findUniqueProfile).not.toHaveBeenCalled();
+    expect(createOpportunity).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ schoolYear: "2024-2025" }) }));
+  });
+
+  it("falls back to null (not a crash) when the org has no PtaProfile yet", async () => {
+    findUniqueProfile.mockResolvedValueOnce(null);
+    createOpportunity.mockResolvedValueOnce({ id: "opp-1", schoolYear: null });
+
+    const { createPtaVolunteerOpportunity } = await import("../volunteers");
+    await createPtaVolunteerOpportunity({ organizationId: "org-a", title: "Pre-onboarding opportunity", actorUserId: "u1" });
+
+    expect(createOpportunity).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ schoolYear: null }) }));
   });
 });
 

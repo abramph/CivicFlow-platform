@@ -12,6 +12,8 @@ import { getMobileAppWebBaseUrl } from "@/lib/env";
 import { WhatsAppChannel } from "@/lib/communications/channel";
 import { getWhatsAppEntitlement } from "@/lib/whatsapp/entitlement";
 import { isWithinQuietHours } from "@/lib/whatsapp/quiet-hours";
+import { resolvePtaTargetMemberIds, ptaTargetingRuleSchema, type PtaTargetingRule } from "@/lib/labs/pta/communications";
+import { ValidationError } from "@/lib/validation";
 
 type RecipientFilter = {
   selector?: string;
@@ -23,6 +25,11 @@ type RecipientFilter = {
   delinquency?: string | null;
   memberIds?: string[];
   memberFilters?: Record<string, string>;
+  /** PTA-only targeting rule (grade/classroom/committee/event volunteers/
+   * unpaid dues). Never trust a client-resolved member list for this —
+   * resolveCommunicationRecipients() always calls resolvePtaTargetMemberIds()
+   * itself, server-side, from this rule spec. */
+  ptaRule?: PtaTargetingRule;
 };
 
 function emailEnabled(channel: CommunicationCampaignChannel) {
@@ -50,7 +57,23 @@ export async function resolveCommunicationRecipients(organizationId: string, fil
   const selector = filter.selector || "active_with_email";
   let where: Prisma.OrgMemberWhereInput = { organizationId };
 
-  if (selector === "manual") {
+  if (selector === "pta_target") {
+    // Server-side enforcement, not just a hidden UI control: PTA targeting
+    // is only ever resolved for a PTA-vertical organization, regardless of
+    // what selector a crafted request claims.
+    const organization = await prisma.organization.findUnique({ where: { id: organizationId }, select: { primaryVertical: true } });
+    if (organization?.primaryVertical !== "PTA") {
+      throw new ValidationError("PTA targeting is only available for PTA organizations.");
+    }
+    const parsed = ptaTargetingRuleSchema.safeParse(filter.ptaRule);
+    if (!parsed.success) throw new ValidationError("A valid PTA targeting rule is required for this selector.");
+    // Resolve server-side from the rule spec (never from a client-supplied
+    // id list), then fall through to the exact same organization-scoped
+    // "manual" lookup every other selector already goes through — no
+    // separate recipient-resolution path to duplicate or drift from.
+    const memberIds = await resolvePtaTargetMemberIds(organizationId, parsed.data);
+    where = { organizationId, id: { in: memberIds } };
+  } else if (selector === "manual") {
     where = { organizationId, id: { in: filter.memberIds ?? [] } };
   } else if (selector === "filtered" && filter.memberFilters) {
     where = buildMemberWhere(organizationId, parseMemberFilters(filter.memberFilters));

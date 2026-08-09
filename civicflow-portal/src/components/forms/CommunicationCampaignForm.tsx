@@ -9,6 +9,42 @@ type Option = { id: string; label: string };
 type WhatsAppTemplateVariable = { name: string; required: boolean; maxLength?: number };
 type WhatsAppTemplateOption = { key: string; category: string; variables: WhatsAppTemplateVariable[] };
 
+/** Only present for a PTA-vertical organization (see communications/new/page.tsx) — a Community/Union/HOA org always receives null and never sees any pta_* Recipients option. */
+type PtaTargetingOptions = {
+  schoolYear: string;
+  grades: Option[];
+  classrooms: Option[];
+  committees: Option[];
+  events: Option[];
+};
+
+const PTA_SELECTORS = ["pta_grade", "pta_classroom", "pta_committee", "pta_event_volunteers", "pta_unpaid"] as const;
+type PtaSelector = (typeof PTA_SELECTORS)[number];
+
+function isPtaSelector(selector: string): selector is PtaSelector {
+  return (PTA_SELECTORS as readonly string[]).includes(selector);
+}
+
+/** Builds the exact PtaTargetingRule shape resolvePtaTargetMemberIds() expects (src/lib/labs/pta/communications.ts) — kept in sync manually since this is a client component and can't import a server-only lib type at runtime. */
+function buildPtaRule(
+  selector: PtaSelector,
+  values: { gradeId: string; classroomId: string; committeeId: string; eventId: string },
+  schoolYear: string
+) {
+  switch (selector) {
+    case "pta_grade":
+      return { type: "grade" as const, gradeId: values.gradeId, schoolYear };
+    case "pta_classroom":
+      return { type: "classroom" as const, classroomId: values.classroomId, schoolYear };
+    case "pta_committee":
+      return { type: "committee" as const, committeeId: values.committeeId };
+    case "pta_event_volunteers":
+      return { type: "volunteers_for_event" as const, eventId: values.eventId };
+    case "pta_unpaid":
+      return { type: "unpaid" as const, schoolYear };
+  }
+}
+
 export function CommunicationCampaignForm({
   categories,
   initial,
@@ -16,6 +52,7 @@ export function CommunicationCampaignForm({
   emailCampaignsEnabled,
   whatsappEnabled,
   whatsappTemplates,
+  ptaTargeting,
 }: {
   categories: Option[];
   initial?: Partial<{
@@ -30,6 +67,7 @@ export function CommunicationCampaignForm({
   emailCampaignsEnabled: boolean;
   whatsappEnabled: boolean;
   whatsappTemplates: WhatsAppTemplateOption[];
+  ptaTargeting: PtaTargetingOptions | null;
 }) {
   const router = useRouter();
   const [form, setForm] = useState({
@@ -44,6 +82,10 @@ export function CommunicationCampaignForm({
     state: "",
     zipCode: "",
     county: "",
+    ptaGradeId: "",
+    ptaClassroomId: "",
+    ptaCommitteeId: "",
+    ptaEventId: "",
     attachmentKeys: "",
     pushEnabled: initial?.pushEnabled ?? false,
     deepLink: initial?.deepLink ?? "",
@@ -55,8 +97,53 @@ export function CommunicationCampaignForm({
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [previewCount, setPreviewCount] = useState<number | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
   const selectedTemplate = whatsappTemplates.find((template) => template.key === form.whatsappTemplateKey) ?? null;
+
+  function buildRecipientFilter() {
+    if (isPtaSelector(form.selector) && ptaTargeting) {
+      return {
+        selector: "pta_target",
+        ptaRule: buildPtaRule(
+          form.selector,
+          { gradeId: form.ptaGradeId, classroomId: form.ptaClassroomId, committeeId: form.ptaCommitteeId, eventId: form.ptaEventId },
+          ptaTargeting.schoolYear
+        ),
+      };
+    }
+    return {
+      selector: form.selector,
+      membershipCategoryId: form.membershipCategoryId || null,
+      city: form.city || null,
+      state: form.state || null,
+      zipCode: form.zipCode || null,
+      county: form.county || null,
+    };
+  }
+
+  async function previewRecipients() {
+    setPreviewing(true);
+    setPreviewError(null);
+    setPreviewCount(null);
+    try {
+      const response = await fetch("/api/communications/campaigns/preview-recipients", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recipientFilter: buildRecipientFilter(), channel: form.channel }),
+      });
+      const payload = (await response.json().catch(() => null)) as { ok?: boolean; error?: string; data?: { count: number } } | null;
+      if (!response.ok || !payload?.ok) {
+        setPreviewError(payload?.error || "Unable to preview recipients.");
+        return;
+      }
+      setPreviewCount(payload.data?.count ?? 0);
+    } finally {
+      setPreviewing(false);
+    }
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -71,14 +158,7 @@ export function CommunicationCampaignForm({
         channel: form.channel,
         subject: form.subject,
         body: form.body,
-        recipientFilter: {
-          selector: form.selector,
-          membershipCategoryId: form.membershipCategoryId || null,
-          city: form.city || null,
-          state: form.state || null,
-          zipCode: form.zipCode || null,
-          county: form.county || null,
-        },
+        recipientFilter: buildRecipientFilter(),
         attachmentKeys: form.attachmentKeys.split(/\r?\n/).map((line) => line.trim()).filter(Boolean),
         pushEnabled: form.pushEnabled,
         deepLink: form.deepLink || null,
@@ -129,8 +209,84 @@ export function CommunicationCampaignForm({
             </p>
           ) : null}
         </label>
-        <label className="space-y-2 text-sm font-medium text-slate-900"><span>Recipients</span><select className={fieldClassName} value={form.selector} onChange={(event) => setForm((current) => ({ ...current, selector: event.target.value }))}><option value="active_with_email">All active with email</option><option value="delinquent">Delinquent members</option><option value="outstanding_dues">Members with unpaid/partial dues</option><option value="category">By category/location</option></select></label>
+        <label className="space-y-2 text-sm font-medium text-slate-900">
+          <span>Recipients</span>
+          <select
+            className={fieldClassName}
+            value={form.selector}
+            onChange={(event) => {
+              const selector = event.target.value;
+              setForm((current) => ({ ...current, selector }));
+              setPreviewCount(null);
+              setPreviewError(null);
+            }}
+          >
+            <option value="active_with_email">All active with email</option>
+            <option value="delinquent">Delinquent members</option>
+            <option value="outstanding_dues">Members with unpaid/partial dues</option>
+            <option value="category">By category/location</option>
+            {ptaTargeting ? (
+              <>
+                <option value="pta_grade">By grade</option>
+                <option value="pta_classroom">By classroom</option>
+                <option value="pta_committee">By committee</option>
+                <option value="pta_event_volunteers">Event volunteers</option>
+                <option value="pta_unpaid">Households with unpaid dues</option>
+              </>
+            ) : null}
+          </select>
+        </label>
       </div>
+      {ptaTargeting && form.selector === "pta_grade" ? (
+        <label className="space-y-2 text-sm font-medium text-slate-900 md:w-64">
+          <span>Grade</span>
+          <select className={fieldClassName} value={form.ptaGradeId} onChange={(event) => setForm((current) => ({ ...current, ptaGradeId: event.target.value }))}>
+            <option value="">Select a grade…</option>
+            {ptaTargeting.grades.map((grade) => <option key={grade.id} value={grade.id}>{grade.label}</option>)}
+          </select>
+        </label>
+      ) : null}
+      {ptaTargeting && form.selector === "pta_classroom" ? (
+        <label className="space-y-2 text-sm font-medium text-slate-900 md:w-64">
+          <span>Classroom</span>
+          <select className={fieldClassName} value={form.ptaClassroomId} onChange={(event) => setForm((current) => ({ ...current, ptaClassroomId: event.target.value }))}>
+            <option value="">Select a classroom…</option>
+            {ptaTargeting.classrooms.map((classroom) => <option key={classroom.id} value={classroom.id}>{classroom.label}</option>)}
+          </select>
+        </label>
+      ) : null}
+      {ptaTargeting && form.selector === "pta_committee" ? (
+        <label className="space-y-2 text-sm font-medium text-slate-900 md:w-64">
+          <span>Committee</span>
+          <select className={fieldClassName} value={form.ptaCommitteeId} onChange={(event) => setForm((current) => ({ ...current, ptaCommitteeId: event.target.value }))}>
+            <option value="">Select a committee…</option>
+            {ptaTargeting.committees.map((committee) => <option key={committee.id} value={committee.id}>{committee.label}</option>)}
+          </select>
+        </label>
+      ) : null}
+      {ptaTargeting && form.selector === "pta_event_volunteers" ? (
+        <label className="space-y-2 text-sm font-medium text-slate-900 md:w-64">
+          <span>Event</span>
+          <select className={fieldClassName} value={form.ptaEventId} onChange={(event) => setForm((current) => ({ ...current, ptaEventId: event.target.value }))}>
+            <option value="">Select an event…</option>
+            {ptaTargeting.events.map((event) => <option key={event.id} value={event.id}>{event.label}</option>)}
+          </select>
+        </label>
+      ) : null}
+      {isPtaSelector(form.selector) ? (
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            disabled={previewing}
+            onClick={previewRecipients}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-60"
+          >
+            {previewing ? "Checking…" : "Preview recipient count"}
+          </button>
+          {previewCount !== null ? <span className="text-sm font-medium text-slate-700">{previewCount} recipient{previewCount === 1 ? "" : "s"}</span> : null}
+          {previewError ? <span className="text-sm text-red-700">{previewError}</span> : null}
+        </div>
+      ) : null}
       <div className="grid gap-4 md:grid-cols-4">
         <label className="space-y-2 text-sm font-medium text-slate-900"><span>Category</span><select className={fieldClassName} value={form.membershipCategoryId} onChange={(event) => setForm((current) => ({ ...current, membershipCategoryId: event.target.value }))}><option value="">Any</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.label}</option>)}</select></label>
         <label className="space-y-2 text-sm font-medium text-slate-900"><span>City</span><input className={fieldClassName} value={form.city} onChange={(event) => setForm((current) => ({ ...current, city: event.target.value }))} /></label>

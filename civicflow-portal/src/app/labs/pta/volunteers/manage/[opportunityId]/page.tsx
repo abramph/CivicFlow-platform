@@ -9,6 +9,8 @@ import { OpportunityStatusButtons } from "@/components/labs/pta/OpportunityStatu
 import { EditOpportunityForm } from "@/components/labs/pta/EditOpportunityForm";
 import { DuplicateOpportunityButton } from "@/components/labs/pta/DuplicateOpportunityButton";
 import { ShiftForm } from "@/components/labs/pta/ShiftForm";
+import { EditSlotForm } from "@/components/labs/pta/EditSlotForm";
+import { ConfirmActionButton } from "@/components/labs/pta/ConfirmActionButton";
 import { ManualAssignVolunteerForm } from "@/components/labs/pta/ManualAssignVolunteerForm";
 import { SignupAttendanceControls } from "@/components/labs/pta/SignupAttendanceControls";
 import { formatDateTime } from "@/lib/formatting";
@@ -112,6 +114,20 @@ export default async function PtaVolunteerOpportunityDetailPage({ params }: { pa
                     <StatusPill status={full ? "warning" : "healthy"} label={full ? "Full" : "Open seats"} />
                   </div>
 
+                  <div className="mb-3 flex flex-wrap items-center gap-2">
+                    <EditSlotForm
+                      slotId={slot.id}
+                      initialLabel={slot.label}
+                      initialCapacity={slot.capacity}
+                      initialMinNeeded={slot.minNeeded}
+                      initialLocationOverride={slot.locationOverride}
+                      claimedCount={slot.claimedCount}
+                    />
+                    {slot.claimedCount === 0 ? (
+                      <ConfirmActionButton label="Delete shift" confirmLabel="Delete" method="DELETE" url={`/api/labs/pta/volunteers/slots/${slot.id}`} />
+                    ) : null}
+                  </div>
+
                   {slot.signups.length === 0 ? (
                     <p className="mb-2 text-xs text-slate-500">No one signed up yet.</p>
                   ) : (
@@ -123,13 +139,24 @@ export default async function PtaVolunteerOpportunityDetailPage({ params }: { pa
                             <StatusPill status={SIGNUP_STATUS_TONE[s.status] ?? "unknown"} label={s.status.replace("_", " ")} />
                             {s.manuallyAssigned ? <span className="ml-2 text-xs text-slate-500">(assigned by officer)</span> : null}
                           </div>
-                          {canCheckIn && s.status !== "CANCELLED" ? (
-                            <SignupAttendanceControls
-                              signupId={s.id}
-                              checkInAt={s.attendance?.checkInAt?.toISOString() ?? null}
-                              checkOutAt={s.attendance?.checkOutAt?.toISOString() ?? null}
-                              attendanceStatus={s.attendance?.status ?? null}
-                            />
+                          {s.status !== "CANCELLED" ? (
+                            <div className="flex flex-wrap items-center gap-2">
+                              {canCheckIn ? (
+                                <SignupAttendanceControls
+                                  signupId={s.id}
+                                  checkInAt={s.attendance?.checkInAt?.toISOString() ?? null}
+                                  checkOutAt={s.attendance?.checkOutAt?.toISOString() ?? null}
+                                  attendanceStatus={s.attendance?.status ?? null}
+                                />
+                              ) : null}
+                              <ConfirmActionButton
+                                label="Remove"
+                                confirmLabel="Remove"
+                                method="POST"
+                                url={`/api/labs/pta/volunteers/slots/${slot.id}/officer-cancel`}
+                                body={{ householdAdultId: s.householdAdult.id }}
+                              />
+                            </div>
                           ) : null}
                         </li>
                       ))}

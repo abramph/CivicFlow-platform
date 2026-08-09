@@ -119,3 +119,56 @@ describe("listPtaCommittees / getPtaCommittee — include the co-chair relation"
     expect(findFirstCommittee).toHaveBeenCalledWith(expect.objectContaining({ include: expect.objectContaining({ chair: true, coChair: true }) }));
   });
 });
+
+describe("getCommitteeTargetMemberIds", () => {
+  it("throws PTA_COMMITTEE_NOT_FOUND for a cross-tenant or nonexistent committee id, rather than silently returning an empty list", async () => {
+    findFirstCommittee.mockResolvedValueOnce(null);
+    const { getCommitteeTargetMemberIds } = await import("../committees");
+    await expect(getCommitteeTargetMemberIds("org-b", "committee-belonging-to-org-a")).rejects.toMatchObject({ code: "PTA_COMMITTEE_NOT_FOUND" });
+  });
+
+  it("includes the chair and co-chair even when neither was separately added via addPtaCommitteeMember", async () => {
+    findFirstCommittee.mockResolvedValueOnce({
+      id: "committee-1",
+      organizationId: "org-a",
+      chair: { id: "adult-chair", household: { orgMemberId: "member-chair" } },
+      coChair: { id: "adult-cochair", household: { orgMemberId: "member-cochair" } },
+      members: [],
+    });
+    const { getCommitteeTargetMemberIds } = await import("../committees");
+    const ids = await getCommitteeTargetMemberIds("org-a", "committee-1");
+    expect(ids).toEqual(expect.arrayContaining(["member-chair", "member-cochair"]));
+    expect(ids).toHaveLength(2);
+  });
+
+  it("dedupes when the chair is also a regular member (or holds both chair and co-chair)", async () => {
+    findFirstCommittee.mockResolvedValueOnce({
+      id: "committee-1",
+      organizationId: "org-a",
+      chair: { id: "adult-chair", household: { orgMemberId: "member-chair" } },
+      coChair: null,
+      members: [{ householdAdult: { household: { orgMemberId: "member-chair" } } }, { householdAdult: { household: { orgMemberId: "member-2" } } }],
+    });
+    const { getCommitteeTargetMemberIds } = await import("../committees");
+    const ids = await getCommitteeTargetMemberIds("org-a", "committee-1");
+    expect(ids.sort()).toEqual(["member-chair", "member-2"].sort());
+  });
+
+  it("works for a committee with no chair, no co-chair, and no members set yet", async () => {
+    findFirstCommittee.mockResolvedValueOnce({ id: "committee-1", organizationId: "org-a", chair: null, coChair: null, members: [] });
+    const { getCommitteeTargetMemberIds } = await import("../committees");
+    await expect(getCommitteeTargetMemberIds("org-a", "committee-1")).resolves.toEqual([]);
+  });
+
+  it("filters out a household with no billing-identity orgMemberId yet, without crashing", async () => {
+    findFirstCommittee.mockResolvedValueOnce({
+      id: "committee-1",
+      organizationId: "org-a",
+      chair: null,
+      coChair: null,
+      members: [{ householdAdult: { household: { orgMemberId: null } } }, { householdAdult: { household: { orgMemberId: "member-2" } } }],
+    });
+    const { getCommitteeTargetMemberIds } = await import("../committees");
+    await expect(getCommitteeTargetMemberIds("org-a", "committee-1")).resolves.toEqual(["member-2"]);
+  });
+});

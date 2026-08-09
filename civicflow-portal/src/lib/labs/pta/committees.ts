@@ -74,12 +74,31 @@ export async function removePtaCommitteeMember(organizationId: string, committee
   await createAuditEvent({ organizationId, actorUserId, actorEmail: actorEmail ?? null, action: "pta.committee_member.removed", entityType: "pta_committee", entityId: committeeId, metadata: { householdAdultId } });
 }
 
-/** Every OrgMember id (billing identity) for a committee's members' households — used by committee-targeted communications. */
+/**
+ * Every OrgMember id (billing identity) for a committee's households — used
+ * by committee-targeted communications. Includes the chair and co-chair
+ * even if they were never separately added via addPtaCommitteeMember: those
+ * two roles live on PtaCommittee.chairAdultId/coChairAdultId, a field
+ * distinct from the PtaCommitteeMember join table (see the doc comment on
+ * setPtaCommitteeChair/setPtaCommitteeCoChair), and a chair who was set but
+ * never also added as a member would otherwise silently never receive
+ * committee communications despite being its chair.
+ */
 export async function getCommitteeTargetMemberIds(organizationId: string, committeeId: string): Promise<string[]> {
-  const members = await prisma.ptaCommitteeMember.findMany({
-    where: { organizationId, committeeId },
-    include: { householdAdult: { include: { household: { select: { orgMemberId: true } } } } },
+  const committee = await prisma.ptaCommittee.findFirst({
+    where: { id: committeeId, organizationId },
+    include: {
+      chair: { include: { household: { select: { orgMemberId: true } } } },
+      coChair: { include: { household: { select: { orgMemberId: true } } } },
+      members: { include: { householdAdult: { include: { household: { select: { orgMemberId: true } } } } } },
+    },
   });
-  const ids = members.map((m) => m.householdAdult.household.orgMemberId).filter((id): id is string => Boolean(id));
-  return Array.from(new Set(ids));
+  if (!committee) throw new PtaError("PTA_COMMITTEE_NOT_FOUND", "Committee not found in this organization.");
+
+  const ids = [
+    committee.chair?.household.orgMemberId,
+    committee.coChair?.household.orgMemberId,
+    ...committee.members.map((m) => m.householdAdult.household.orgMemberId),
+  ];
+  return Array.from(new Set(ids.filter((id): id is string => Boolean(id))));
 }
