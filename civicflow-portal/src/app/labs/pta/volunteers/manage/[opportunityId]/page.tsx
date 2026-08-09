@@ -14,6 +14,7 @@ import { ConfirmActionButton } from "@/components/labs/pta/ConfirmActionButton";
 import { ManualAssignVolunteerForm } from "@/components/labs/pta/ManualAssignVolunteerForm";
 import { SignupAttendanceControls } from "@/components/labs/pta/SignupAttendanceControls";
 import { formatDateTime } from "@/lib/formatting";
+import { canDeleteShift, canCancelShift, canRemoveSignup } from "@/lib/labs/pta/volunteer-ui-rules";
 
 const OPPORTUNITY_STATUS_TONE: Record<string, string> = {
   DRAFT: "unknown",
@@ -123,8 +124,17 @@ export default async function PtaVolunteerOpportunityDetailPage({ params }: { pa
                       initialLocationOverride={slot.locationOverride}
                       claimedCount={slot.claimedCount}
                     />
-                    {slot.claimedCount === 0 ? (
+                    {canDeleteShift(slot.signups.length) ? (
                       <ConfirmActionButton label="Delete shift" confirmLabel="Delete" method="DELETE" url={`/api/labs/pta/volunteers/slots/${slot.id}`} />
+                    ) : canCancelShift(slot.signups.length, slot.status) ? (
+                      <ConfirmActionButton
+                        label="Cancel shift"
+                        confirmLabel="Confirm cancel"
+                        method="PATCH"
+                        url={`/api/labs/pta/volunteers/slots/${slot.id}`}
+                        body={{ status: "CANCELLED" }}
+                        tone="neutral"
+                      />
                     ) : null}
                   </div>
 
@@ -149,13 +159,15 @@ export default async function PtaVolunteerOpportunityDetailPage({ params }: { pa
                                   attendanceStatus={s.attendance?.status ?? null}
                                 />
                               ) : null}
-                              <ConfirmActionButton
-                                label="Remove"
-                                confirmLabel="Remove"
-                                method="POST"
-                                url={`/api/labs/pta/volunteers/slots/${slot.id}/officer-cancel`}
-                                body={{ householdAdultId: s.householdAdult.id }}
-                              />
+                              {canRemoveSignup(s.status) ? (
+                                <ConfirmActionButton
+                                  label="Remove"
+                                  confirmLabel="Remove"
+                                  method="POST"
+                                  url={`/api/labs/pta/volunteers/slots/${slot.id}/officer-cancel`}
+                                  body={{ householdAdultId: s.householdAdult.id }}
+                                />
+                              ) : null}
                             </div>
                           ) : null}
                         </li>

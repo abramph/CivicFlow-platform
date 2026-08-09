@@ -4,7 +4,10 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 const NEXT_STATUS_LABEL: Record<string, { status: string; label: string }[]> = {
-  DRAFT: [{ status: "OPEN", label: "Publish (open for signups)" }, { status: "CANCELLED", label: "Cancel" }],
+  // Mirrors VALID_STATUS_TRANSITIONS in volunteers.ts exactly — DRAFT can
+  // also go straight to ARCHIVED there (e.g. a draft that's no longer
+  // needed and was never published), which this list previously omitted.
+  DRAFT: [{ status: "OPEN", label: "Publish (open for signups)" }, { status: "CANCELLED", label: "Cancel" }, { status: "ARCHIVED", label: "Archive" }],
   OPEN: [{ status: "CLOSED", label: "Close signups" }, { status: "CANCELLED", label: "Cancel" }],
   CLOSED: [{ status: "OPEN", label: "Reopen signups" }, { status: "COMPLETED", label: "Mark completed" }, { status: "CANCELLED", label: "Cancel" }],
   COMPLETED: [{ status: "ARCHIVED", label: "Archive" }],
