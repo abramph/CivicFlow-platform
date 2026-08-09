@@ -6,6 +6,10 @@ import { CommunicationCampaignForm } from "@/components/forms/CommunicationCampa
 import { getSmsEntitlement } from "@/lib/sms-entitlement";
 import { getOrganizationEntitlements } from "@/lib/plan-gate";
 import { getWhatsAppEntitlement } from "@/lib/whatsapp/entitlement";
+import { getVerticalCapabilities } from "@/lib/vertical-capabilities";
+import { getPtaProfile } from "@/lib/labs/pta/profile";
+import { listPtaGrades, listPtaClassrooms } from "@/lib/labs/pta/academic";
+import { listPtaCommittees } from "@/lib/labs/pta/committees";
 
 function getValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
@@ -19,6 +23,9 @@ export default async function NewCommunicationPage({
   const { organizationId } = await requirePermission("communications:write");
   const resolvedSearchParams = await searchParams;
   const isDuesReminderPreset = getValue(resolvedSearchParams.preset) === "dues_reminder";
+
+  const organization = await prisma.organization.findUnique({ where: { id: organizationId }, select: { primaryVertical: true } });
+  const isPtaOrganization = getVerticalCapabilities(organization?.primaryVertical ?? "COMMUNITY").ptaHouseholds;
 
   const [members, campaigns, events, categories, smsEntitlement, entitlements, whatsappEntitlement, whatsappTemplates] = await Promise.all([
     prisma.orgMember.findMany({
@@ -54,6 +61,29 @@ export default async function NewCommunicationPage({
     }),
   ]);
 
+  // PTA-only audience targeting (grade/classroom/committee/event volunteers/
+  // unpaid dues) — additive to the base form, never shown for a non-PTA
+  // organization. See resolvePtaTargetMemberIds (src/lib/labs/pta/
+  // communications.ts) for how the server actually resolves these.
+  const ptaTargeting = isPtaOrganization
+    ? await (async () => {
+        const profile = await getPtaProfile(organizationId);
+        const schoolYear = profile?.currentSchoolYear ?? "";
+        const [grades, classrooms, committees] = await Promise.all([
+          listPtaGrades(organizationId),
+          schoolYear ? listPtaClassrooms(organizationId, schoolYear) : Promise.resolve([]),
+          listPtaCommittees(organizationId),
+        ]);
+        return {
+          schoolYear,
+          grades: grades.map((grade) => ({ id: grade.id, label: grade.name })),
+          classrooms: classrooms.map((classroom) => ({ id: classroom.id, label: `${classroom.grade.name} — ${classroom.name}` })),
+          committees: committees.map((committee) => ({ id: committee.id, label: committee.name })),
+          events: events.map((event) => ({ id: event.id, label: event.title })),
+        };
+      })()
+    : null;
+
   return (
     <main className="space-y-6">
       <PageHeader
@@ -71,6 +101,7 @@ export default async function NewCommunicationPage({
           smsEnabled={smsEntitlement.allowed}
           emailCampaignsEnabled={entitlements.features.emailCampaigns}
           whatsappEnabled={whatsappEntitlement.allowed}
+          ptaTargeting={ptaTargeting}
           whatsappTemplates={whatsappTemplates.map((template) => ({
             key: template.key,
             category: template.category,

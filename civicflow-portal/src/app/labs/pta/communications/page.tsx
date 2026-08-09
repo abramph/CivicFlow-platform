@@ -35,13 +35,11 @@ export default async function PtaCommunicationsPage() {
         actions={[{ href: "/communications/campaigns", label: "Create a campaign", tone: "primary" }]}
       />
 
-      <div className="rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900">
-        <p className="font-semibold">PTA-specific targeting isn&apos;t wired in yet</p>
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-900">
+        <p className="font-semibold">PTA-specific recipient targeting is available</p>
         <p className="mt-1">
-          A targeting engine exists to resolve recipients by grade, classroom, committee, an event&apos;s volunteers, or unpaid dues
-          (<code>resolvePtaTargetMemberIds</code>), but the campaign creation form doesn&apos;t yet offer these as targeting options — it currently only
-          supports a manually-entered recipient list. Wiring this in is flagged as a follow-up rather than built in this sprint, since it
-          means adding an option to the base platform&apos;s campaign form, not just a PTA-only page.
+          When you create a campaign, the Recipients dropdown includes grade, classroom, committee, event volunteers, and unpaid-dues
+          targeting for this organization, in addition to the base platform&apos;s manual/category/delinquent/outstanding-dues options.
         </p>
       </div>
 
