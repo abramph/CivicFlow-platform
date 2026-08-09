@@ -98,27 +98,43 @@ export default async function PtaHouseholdDetailPage({ params }: { params: Promi
           <EmptyState title="No adults on file" />
         ) : (
           <ul className="mb-4 divide-y divide-slate-100">
-            {household.adults.map((a) => (
-              <li key={a.id} className="flex items-center justify-between py-2 text-sm">
-                <div>
-                  <span className="font-semibold text-slate-900">{a.name}</span>
-                  {a.relationshipLabel ? <span className="ml-2 text-slate-500">({a.relationshipLabel})</span> : null}
-                  {a.email ? <span className="ml-2 text-slate-500">{a.email}</span> : null}
-                  {a.userId ? <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">Has portal access</span> : null}
-                </div>
-                {can("pta:households:manage") ? (
-                  <ConfirmActionButton
-                    label="Remove"
-                    confirmLabel="Confirm remove"
-                    method="DELETE"
-                    url={`/api/labs/pta/households/${household.id}/adults/${a.id}`}
-                  />
-                ) : null}
-              </li>
-            ))}
+            {household.adults.map((a) => {
+              const isPrimaryContact = household.primaryContactAdultId === a.id;
+              return (
+                <li key={a.id} className="flex items-center justify-between py-2 text-sm">
+                  <div>
+                    <span className="font-semibold text-slate-900">{a.name}</span>
+                    {a.relationshipLabel ? <span className="ml-2 text-slate-500">({a.relationshipLabel})</span> : null}
+                    {a.email ? <span className="ml-2 text-slate-500">{a.email}</span> : null}
+                    {a.userId ? <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">Has portal access</span> : null}
+                    {isPrimaryContact ? <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-800">Primary contact</span> : null}
+                  </div>
+                  {can("pta:households:manage") ? (
+                    <div className="flex items-center gap-2">
+                      {!isPrimaryContact ? (
+                        <ConfirmActionButton
+                          label="Make primary contact"
+                          confirmLabel="Confirm"
+                          method="POST"
+                          url={`/api/labs/pta/households/${household.id}/primary-contact`}
+                          body={{ adultId: a.id }}
+                          tone="neutral"
+                        />
+                      ) : null}
+                      <ConfirmActionButton
+                        label="Remove"
+                        confirmLabel="Confirm remove"
+                        method="DELETE"
+                        url={`/api/labs/pta/households/${household.id}/adults/${a.id}`}
+                      />
+                    </div>
+                  ) : null}
+                </li>
+              );
+            })}
           </ul>
         )}
-        {can("pta:households:manage") ? <AddHouseholdAdultForm householdId={household.id} /> : null}
+        {can("pta:households:manage") ? <AddHouseholdAdultForm householdId={household.id} hasPrimaryContact={Boolean(household.primaryContactAdultId)} /> : null}
       </SectionCard>
 
       <SectionCard title="Students" description="Deliberately minimal — no academic, health, discipline, or custody records.">
