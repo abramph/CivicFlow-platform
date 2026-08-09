@@ -11,9 +11,33 @@ import { PtaError } from "./errors";
  * `orgMemberId` is the household's "billing identity": a normal OrgMember row
  * created so dues can run through the existing, unmodified dues/payments
  * pipeline (see dues.ts). It never carries a login of its own — its email
- * mirrors the primary contact adult's, and updating the primary contact
- * updates this row too (see setPrimaryContact()).
+ * is filled in (once, never overwritten — see syncHouseholdBillingContact())
+ * from the primary contact adult's, either at add-time (addPtaHouseholdAdult
+ * with makePrimaryContact) or later (setPtaHouseholdPrimaryContact).
  */
+
+/**
+ * Fills the billing-identity OrgMember's email/phone from a household's
+ * primary contact adult — but only fields that are currently empty. Never
+ * overwrites a non-empty value, whether it was set by a prior sync or a
+ * deliberate manual edit via the general member-edit form (updateMember() in
+ * member-mutations.ts, which every OrgMember — including this one — can be
+ * edited through). This is what actually preserves a manual override: there
+ * is no separate "manually set" flag, emptiness itself is the "not yet set"
+ * signal, so a real edit is indistinguishable from (and therefore safe from)
+ * a later sync attempt.
+ */
+async function syncHouseholdBillingContact(orgMemberId: string, email: string | null, phone: string | null) {
+  const member = await prisma.orgMember.findUnique({ where: { id: orgMemberId }, select: { email: true, phone: true } });
+  if (!member) return;
+
+  const data: { email?: string; phone?: string } = {};
+  if (!member.email && email) data.email = email;
+  if (!member.phone && phone) data.phone = phone;
+  if (Object.keys(data).length > 0) {
+    await prisma.orgMember.update({ where: { id: orgMemberId }, data });
+  }
+}
 
 export interface CreateHouseholdInput {
   organizationId: string;
@@ -244,11 +268,8 @@ export async function addPtaHouseholdAdult(input: AddHouseholdAdultInput) {
 
   if (input.makePrimaryContact) {
     await prisma.ptaHousehold.update({ where: { id: household.id }, data: { primaryContactAdultId: adult.id } });
-    if (household.orgMemberId && (input.email || input.phone)) {
-      await prisma.orgMember.update({
-        where: { id: household.orgMemberId },
-        data: { email: input.email ?? undefined, phone: input.phone ?? undefined },
-      });
+    if (household.orgMemberId) {
+      await syncHouseholdBillingContact(household.orgMemberId, input.email ?? null, input.phone ?? null);
     }
   }
 
@@ -263,6 +284,46 @@ export async function addPtaHouseholdAdult(input: AddHouseholdAdultInput) {
   });
 
   return adult;
+}
+
+/**
+ * Designates (or reassigns) a household's primary contact after it already
+ * exists — the function the module's own original doc comment always
+ * claimed existed ("see setPrimaryContact()") but that, until now, was never
+ * actually built: addPtaHouseholdAdult()'s makePrimaryContact flag only ever
+ * covered the moment an adult is first added, with no way to designate one
+ * later (e.g. for a household created before this existed, or to hand off
+ * primary-contact status to a second adult). Fixes the real production gap
+ * found via the PR #79 smoke test: the officer web UI's "Add adult" form
+ * never sent makePrimaryContact at all, so any household built through it
+ * (as opposed to CSV import, which always sets it) got a billing OrgMember
+ * with no email — silently invisible to every EMAIL-channel communication
+ * selector, PTA-specific or not.
+ */
+export async function setPtaHouseholdPrimaryContact(organizationId: string, householdId: string, adultId: string, actorUserId: string, actorEmail?: string | null) {
+  const household = await prisma.ptaHousehold.findFirst({ where: { id: householdId, organizationId } });
+  if (!household) throw new PtaError("PTA_HOUSEHOLD_NOT_FOUND", "Household not found in this organization.");
+
+  const adult = await prisma.ptaHouseholdAdult.findFirst({ where: { id: adultId, householdId, organizationId } });
+  if (!adult) throw new PtaError("PTA_NOT_A_HOUSEHOLD_MEMBER", "Household adult not found in this organization.");
+
+  const updated = await prisma.ptaHousehold.update({ where: { id: household.id }, data: { primaryContactAdultId: adult.id } });
+
+  if (household.orgMemberId) {
+    await syncHouseholdBillingContact(household.orgMemberId, adult.email, adult.phone);
+  }
+
+  await createAuditEvent({
+    organizationId,
+    actorUserId,
+    actorEmail: actorEmail ?? null,
+    action: "pta.household.primary_contact_set",
+    entityType: "pta_household",
+    entityId: household.id,
+    metadata: { adultId },
+  });
+
+  return updated;
 }
 
 export async function removePtaHouseholdAdult(organizationId: string, householdId: string, adultId: string, actorUserId: string, actorEmail?: string | null) {

@@ -3,12 +3,20 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-export function AddHouseholdAdultForm({ householdId }: { householdId: string }) {
+/**
+ * hasPrimaryContact controls the default (not a lock) of the "set as primary
+ * contact" checkbox — checked by default when the household doesn't have one
+ * yet, since without a primary contact its billing OrgMember never gets an
+ * email/phone (see syncHouseholdBillingContact in households.ts) and every
+ * EMAIL-channel communication selector silently skips it.
+ */
+export function AddHouseholdAdultForm({ householdId, hasPrimaryContact }: { householdId: string; hasPrimaryContact: boolean }) {
   const router = useRouter();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [relationshipLabel, setRelationshipLabel] = useState("");
+  const [makePrimaryContact, setMakePrimaryContact] = useState(!hasPrimaryContact);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
@@ -20,7 +28,7 @@ export function AddHouseholdAdultForm({ householdId }: { householdId: string }) 
       const res = await fetch(`/api/labs/pta/households/${householdId}/adults`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, email: email || null, phone: phone || null, relationshipLabel: relationshipLabel || null }),
+        body: JSON.stringify({ name, email: email || null, phone: phone || null, relationshipLabel: relationshipLabel || null, makePrimaryContact }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok) {
@@ -31,6 +39,7 @@ export function AddHouseholdAdultForm({ householdId }: { householdId: string }) 
       setEmail("");
       setPhone("");
       setRelationshipLabel("");
+      setMakePrimaryContact(false);
       setOpen(false);
       router.refresh();
     } catch {
@@ -68,6 +77,10 @@ export function AddHouseholdAdultForm({ householdId }: { householdId: string }) 
           <input value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
         </label>
       </div>
+      <label className="flex items-center gap-2 text-sm font-medium text-slate-900">
+        <input type="checkbox" checked={makePrimaryContact} onChange={(e) => setMakePrimaryContact(e.target.checked)} />
+        <span>Set as primary contact (used for billing and email communications)</span>
+      </label>
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
       <div className="flex gap-2">
         <button type="button" disabled={pending || !name.trim()} onClick={submit} className="rounded-lg bg-emerald-700 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-60">

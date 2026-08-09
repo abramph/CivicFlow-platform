@@ -13,11 +13,13 @@ const deleteAdult = vi.fn();
 const findFirstStudent = vi.fn();
 const createStudent = vi.fn();
 const updateStudent = vi.fn();
+const findUniqueOrgMember = vi.fn();
+const updateOrgMember = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     ptaHousehold: { findFirst: (...a: unknown[]) => findFirstHousehold(...a), create: (...a: unknown[]) => createHousehold(...a), update: (...a: unknown[]) => updateHousehold(...a), delete: (...a: unknown[]) => deleteHousehold(...a) },
-    orgMember: { create: (...a: unknown[]) => createOrgMember(...a), update: vi.fn() },
+    orgMember: { create: (...a: unknown[]) => createOrgMember(...a), findUnique: (...a: unknown[]) => findUniqueOrgMember(...a), update: (...a: unknown[]) => updateOrgMember(...a) },
     duesCharge: { count: (...a: unknown[]) => countDuesCharge(...a) },
     ptaHouseholdAdult: { findFirst: (...a: unknown[]) => findFirstAdult(...a), create: (...a: unknown[]) => createAdult(...a), update: (...a: unknown[]) => updateHouseholdAdult(...a), delete: (...a: unknown[]) => deleteAdult(...a) },
     ptaStudent: { findFirst: (...a: unknown[]) => findFirstStudent(...a), create: (...a: unknown[]) => createStudent(...a), update: (...a: unknown[]) => updateStudent(...a) },
@@ -130,6 +132,105 @@ describe("resolvePtaHouseholdAdultUserIds — push-notification fallback for the
     const { resolvePtaHouseholdAdultUserIds } = await import("../households");
     const result = await resolvePtaHouseholdAdultUserIds("org-a", "member-1");
     expect(result).toEqual([]);
+  });
+});
+
+describe("addPtaHouseholdAdult — billing-identity contact sync", () => {
+  it("fills the OrgMember's empty email/phone when makePrimaryContact is set", async () => {
+    findFirstHousehold.mockResolvedValueOnce({ id: "household-1", organizationId: "org-a", orgMemberId: "member-1" });
+    createAdult.mockResolvedValueOnce({ id: "adult-1" });
+    findUniqueOrgMember.mockResolvedValueOnce({ email: null, phone: null });
+
+    const { addPtaHouseholdAdult } = await import("../households");
+    await addPtaHouseholdAdult({
+      organizationId: "org-a",
+      householdId: "household-1",
+      name: "Jordan Parent",
+      email: "jordan@example.com",
+      phone: "555-0100",
+      makePrimaryContact: true,
+      actorUserId: "u1",
+    });
+
+    expect(updateHousehold).toHaveBeenCalledWith({ where: { id: "household-1" }, data: { primaryContactAdultId: "adult-1" } });
+    expect(updateOrgMember).toHaveBeenCalledWith({ where: { id: "member-1" }, data: { email: "jordan@example.com", phone: "555-0100" } });
+  });
+
+  it("never overwrites an OrgMember email/phone that's already set — the real production bug this fixes", async () => {
+    findFirstHousehold.mockResolvedValueOnce({ id: "household-1", organizationId: "org-a", orgMemberId: "member-1" });
+    createAdult.mockResolvedValueOnce({ id: "adult-1" });
+    // Simulates a household whose billing OrgMember already has a real (possibly
+    // manually-edited via the general member-edit form) email/phone.
+    findUniqueOrgMember.mockResolvedValueOnce({ email: "already-set@example.com", phone: "555-9999" });
+
+    const { addPtaHouseholdAdult } = await import("../households");
+    await addPtaHouseholdAdult({
+      organizationId: "org-a",
+      householdId: "household-1",
+      name: "Jordan Parent",
+      email: "jordan@example.com",
+      phone: "555-0100",
+      makePrimaryContact: true,
+      actorUserId: "u1",
+    });
+
+    expect(updateOrgMember).not.toHaveBeenCalled();
+  });
+
+  it("does not touch the billing OrgMember at all when makePrimaryContact is not set — the real production gap this PR closes on the UI side", async () => {
+    findFirstHousehold.mockResolvedValueOnce({ id: "household-1", organizationId: "org-a", orgMemberId: "member-1" });
+    createAdult.mockResolvedValueOnce({ id: "adult-1" });
+
+    const { addPtaHouseholdAdult } = await import("../households");
+    await addPtaHouseholdAdult({ organizationId: "org-a", householdId: "household-1", name: "Jordan Parent", email: "jordan@example.com", actorUserId: "u1" });
+
+    expect(updateHousehold).not.toHaveBeenCalled();
+    expect(findUniqueOrgMember).not.toHaveBeenCalled();
+    expect(updateOrgMember).not.toHaveBeenCalled();
+  });
+});
+
+describe("setPtaHouseholdPrimaryContact — designating/reassigning a primary contact after household creation", () => {
+  it("sets primaryContactAdultId and fills the OrgMember's empty email/phone from the adult", async () => {
+    findFirstHousehold.mockResolvedValueOnce({ id: "household-1", organizationId: "org-a", orgMemberId: "member-1" });
+    findFirstAdult.mockResolvedValueOnce({ id: "adult-2", email: "second-adult@example.com", phone: "555-0200" });
+    updateHousehold.mockResolvedValueOnce({ id: "household-1", primaryContactAdultId: "adult-2" });
+    findUniqueOrgMember.mockResolvedValueOnce({ email: null, phone: null });
+
+    const { setPtaHouseholdPrimaryContact } = await import("../households");
+    const result = await setPtaHouseholdPrimaryContact("org-a", "household-1", "adult-2", "u1");
+
+    expect(findFirstAdult).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "adult-2", householdId: "household-1", organizationId: "org-a" } }));
+    expect(updateHousehold).toHaveBeenCalledWith({ where: { id: "household-1" }, data: { primaryContactAdultId: "adult-2" } });
+    expect(updateOrgMember).toHaveBeenCalledWith({ where: { id: "member-1" }, data: { email: "second-adult@example.com", phone: "555-0200" } });
+    expect(result.primaryContactAdultId).toBe("adult-2");
+  });
+
+  it("never overwrites an OrgMember email/phone that's already set", async () => {
+    findFirstHousehold.mockResolvedValueOnce({ id: "household-1", organizationId: "org-a", orgMemberId: "member-1" });
+    findFirstAdult.mockResolvedValueOnce({ id: "adult-2", email: "second-adult@example.com", phone: "555-0200" });
+    updateHousehold.mockResolvedValueOnce({ id: "household-1", primaryContactAdultId: "adult-2" });
+    findUniqueOrgMember.mockResolvedValueOnce({ email: "already-on-file@example.com", phone: "555-9999" });
+
+    const { setPtaHouseholdPrimaryContact } = await import("../households");
+    await setPtaHouseholdPrimaryContact("org-a", "household-1", "adult-2", "u1");
+
+    expect(updateOrgMember).not.toHaveBeenCalled();
+  });
+
+  it("rejects reassigning primary contact on another organization's household", async () => {
+    findFirstHousehold.mockResolvedValueOnce(null);
+    const { setPtaHouseholdPrimaryContact } = await import("../households");
+    await expect(setPtaHouseholdPrimaryContact("org-b", "household-belonging-to-org-a", "adult-1", "u1")).rejects.toMatchObject({ code: "PTA_HOUSEHOLD_NOT_FOUND" });
+    expect(updateHousehold).not.toHaveBeenCalled();
+  });
+
+  it("rejects an adult id that doesn't belong to this household/organization", async () => {
+    findFirstHousehold.mockResolvedValueOnce({ id: "household-1", organizationId: "org-a", orgMemberId: "member-1" });
+    findFirstAdult.mockResolvedValueOnce(null);
+    const { setPtaHouseholdPrimaryContact } = await import("../households");
+    await expect(setPtaHouseholdPrimaryContact("org-a", "household-1", "adult-from-elsewhere", "u1")).rejects.toMatchObject({ code: "PTA_NOT_A_HOUSEHOLD_MEMBER" });
+    expect(updateHousehold).not.toHaveBeenCalled();
   });
 });
 
