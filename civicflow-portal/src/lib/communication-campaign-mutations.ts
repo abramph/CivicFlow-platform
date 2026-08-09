@@ -130,6 +130,21 @@ export async function createCommunicationCampaign(
     },
   });
 
+  // No PII — ids, counts, and flags only. Same convention as
+  // communication-campaigns.ts's resolveCommunicationRecipients()/
+  // finalizeCampaign() logs.
+  console.log(
+    JSON.stringify({
+      event: "communication_campaign_created",
+      organizationId,
+      campaignId: campaign.id,
+      channel: campaign.channel,
+      selector: recipientFilter.selector,
+      recipientCount: recipients.length,
+      sendNow: Boolean(input.sendNow),
+    })
+  );
+
   if (input.sendNow) {
     await sendCommunicationCampaign({ organizationId, campaignId: campaign.id, actorUserId: actor.userId, actorEmail: actor.userEmail });
   }
