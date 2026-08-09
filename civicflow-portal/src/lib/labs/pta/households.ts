@@ -10,10 +10,17 @@ import { PtaError } from "./errors";
  *
  * `orgMemberId` is the household's "billing identity": a normal OrgMember row
  * created so dues can run through the existing, unmodified dues/payments
- * pipeline (see dues.ts). It never carries a login of its own — its email
- * is filled in (once, never overwritten — see syncHouseholdBillingContact())
- * from the primary contact adult's, either at add-time (addPtaHouseholdAdult
- * with makePrimaryContact) or later (setPtaHouseholdPrimaryContact).
+ * pipeline (see dues.ts). It never carries a login of its own.
+ *
+ * Two independent sync rules keep it from drifting out of agreement with
+ * the household it represents (full rationale in
+ * docs/pta-communication-identity.md):
+ *   - email/phone: filled in ONCE, never overwritten (syncHouseholdBillingContact) —
+ *     a "preserve any real value, whether synced or manually edited" rule.
+ *   - membershipStatus: always kept in lockstep with PtaHousehold.status
+ *     (syncHouseholdMembershipStatus) — an "authoritative, unconditional"
+ *     rule, not a preference: the OrgMember only exists to represent this
+ *     household, so there's no competing manual edit to protect.
  */
 
 /**
@@ -37,6 +44,28 @@ async function syncHouseholdBillingContact(orgMemberId: string, email: string | 
   if (Object.keys(data).length > 0) {
     await prisma.orgMember.update({ where: { id: orgMemberId }, data });
   }
+}
+
+/**
+ * Unlike email/phone (fill-once, never overwrite — see
+ * syncHouseholdBillingContact above), a household's active/inactive state
+ * always propagates to its billing OrgMember unconditionally. This isn't a
+ * "preserve a manual edit" situation: PtaHousehold.status is authoritative
+ * over its own billing identity's lifecycle by construction (the OrgMember
+ * only exists to represent this household in the first place), so there is
+ * no competing manual edit to protect against.
+ *
+ * Without this, deactivating a household left its billing OrgMember's own
+ * membershipStatus untouched (still "active", the create-time default) —
+ * invisible to the PTA-specific targeting rules (which correctly query
+ * PtaHousehold.status directly), but a real, silent leak on the base
+ * platform selectors ("All active with email", "Delinquent members",
+ * "By category/location") that every PTA organization can also see and
+ * use, and which filter on OrgMember.membershipStatus instead.
+ */
+async function syncHouseholdMembershipStatus(orgMemberId: string, householdStatus: "ACTIVE" | "INACTIVE" | "PENDING") {
+  const membershipStatus = householdStatus === "ACTIVE" ? "active" : householdStatus === "PENDING" ? "pending" : "inactive";
+  await prisma.orgMember.update({ where: { id: orgMemberId }, data: { membershipStatus } });
 }
 
 export interface CreateHouseholdInput {
@@ -168,6 +197,10 @@ export async function updatePtaHousehold(input: UpdateHouseholdInput) {
     },
   });
 
+  if (input.status !== undefined && input.status !== existing.status && existing.orgMemberId) {
+    await syncHouseholdMembershipStatus(existing.orgMemberId, input.status);
+  }
+
   await createAuditEvent({
     organizationId: input.organizationId,
     actorUserId: input.actorUserId,
@@ -195,6 +228,10 @@ export async function deactivatePtaHousehold(organizationId: string, householdId
   if (!existing) throw new PtaError("PTA_HOUSEHOLD_NOT_FOUND", "Household not found in this organization.");
 
   const updated = await prisma.ptaHousehold.update({ where: { id: existing.id }, data: { status: "INACTIVE" } });
+
+  if (existing.orgMemberId) {
+    await syncHouseholdMembershipStatus(existing.orgMemberId, "INACTIVE");
+  }
 
   await createAuditEvent({
     organizationId,

@@ -106,6 +106,67 @@ describe("deletePtaHousehold — payment-history preservation", () => {
   });
 });
 
+describe("household status → billing OrgMember membershipStatus sync", () => {
+  it("deactivatePtaHousehold flips the billing OrgMember's membershipStatus to inactive — the real gap that let a deactivated household's billing identity keep appearing on the base 'All active with email' / 'Delinquent members' / 'By category' selectors, which read OrgMember.membershipStatus directly (unlike PTA's own targeting rules, which correctly query PtaHousehold.status)", async () => {
+    findFirstHousehold.mockResolvedValueOnce({ id: "household-1", organizationId: "org-a", orgMemberId: "member-1", status: "ACTIVE" });
+    updateHousehold.mockResolvedValueOnce({ id: "household-1", status: "INACTIVE" });
+
+    const { deactivatePtaHousehold } = await import("../households");
+    await deactivatePtaHousehold("org-a", "household-1", "u1");
+
+    expect(updateOrgMember).toHaveBeenCalledWith({ where: { id: "member-1" }, data: { membershipStatus: "inactive" } });
+  });
+
+  it("does not crash deactivating a household with no billing OrgMember at all", async () => {
+    findFirstHousehold.mockResolvedValueOnce({ id: "household-1", organizationId: "org-a", orgMemberId: null, status: "ACTIVE" });
+    updateHousehold.mockResolvedValueOnce({ id: "household-1", status: "INACTIVE" });
+
+    const { deactivatePtaHousehold } = await import("../households");
+    await expect(deactivatePtaHousehold("org-a", "household-1", "u1")).resolves.toBeDefined();
+    expect(updateOrgMember).not.toHaveBeenCalled();
+  });
+
+  it("updatePtaHousehold syncs membershipStatus only when status actually changes", async () => {
+    findFirstHousehold.mockResolvedValueOnce({ id: "household-1", organizationId: "org-a", orgMemberId: "member-1", status: "ACTIVE" });
+    updateHousehold.mockResolvedValueOnce({ id: "household-1", status: "PENDING" });
+
+    const { updatePtaHousehold } = await import("../households");
+    await updatePtaHousehold({ organizationId: "org-a", householdId: "household-1", status: "PENDING", actorUserId: "u1" });
+
+    expect(updateOrgMember).toHaveBeenCalledWith({ where: { id: "member-1" }, data: { membershipStatus: "pending" } });
+  });
+
+  it("updatePtaHousehold does not touch the billing OrgMember when status is unchanged", async () => {
+    findFirstHousehold.mockResolvedValueOnce({ id: "household-1", organizationId: "org-a", orgMemberId: "member-1", status: "ACTIVE" });
+    updateHousehold.mockResolvedValueOnce({ id: "household-1", displayName: "Renamed" });
+
+    const { updatePtaHousehold } = await import("../households");
+    await updatePtaHousehold({ organizationId: "org-a", householdId: "household-1", displayName: "Renamed", actorUserId: "u1" });
+
+    expect(updateOrgMember).not.toHaveBeenCalled();
+  });
+
+  it("updatePtaHousehold does not touch the billing OrgMember when status is set to the same value it already had", async () => {
+    findFirstHousehold.mockResolvedValueOnce({ id: "household-1", organizationId: "org-a", orgMemberId: "member-1", status: "ACTIVE" });
+    updateHousehold.mockResolvedValueOnce({ id: "household-1", status: "ACTIVE" });
+
+    const { updatePtaHousehold } = await import("../households");
+    await updatePtaHousehold({ organizationId: "org-a", householdId: "household-1", status: "ACTIVE", actorUserId: "u1" });
+
+    expect(updateOrgMember).not.toHaveBeenCalled();
+  });
+
+  it("reactivating a household (INACTIVE -> ACTIVE) restores membershipStatus to active", async () => {
+    findFirstHousehold.mockResolvedValueOnce({ id: "household-1", organizationId: "org-a", orgMemberId: "member-1", status: "INACTIVE" });
+    updateHousehold.mockResolvedValueOnce({ id: "household-1", status: "ACTIVE" });
+
+    const { updatePtaHousehold } = await import("../households");
+    await updatePtaHousehold({ organizationId: "org-a", householdId: "household-1", status: "ACTIVE", actorUserId: "u1" });
+
+    expect(updateOrgMember).toHaveBeenCalledWith({ where: { id: "member-1" }, data: { membershipStatus: "active" } });
+  });
+});
+
 describe("resolvePtaHouseholdAdultUserIds — push-notification fallback for the billing OrgMember", () => {
   it("returns every linked adult's userId, filtering out adults with no linked login", async () => {
     findFirstHousehold.mockResolvedValueOnce({
@@ -231,6 +292,28 @@ describe("setPtaHouseholdPrimaryContact — designating/reassigning a primary co
     const { setPtaHouseholdPrimaryContact } = await import("../households");
     await expect(setPtaHouseholdPrimaryContact("org-a", "household-1", "adult-from-elsewhere", "u1")).rejects.toMatchObject({ code: "PTA_NOT_A_HOUSEHOLD_MEMBER" });
     expect(updateHousehold).not.toHaveBeenCalled();
+  });
+
+  it("still works for an INACTIVE household — deliberately not blocked, so an officer can correct data on a household before archiving it", async () => {
+    findFirstHousehold.mockResolvedValueOnce({ id: "household-1", organizationId: "org-a", orgMemberId: "member-1", status: "INACTIVE" });
+    findFirstAdult.mockResolvedValueOnce({ id: "adult-1", email: "parent@example.com", phone: null });
+    updateHousehold.mockResolvedValueOnce({ id: "household-1", primaryContactAdultId: "adult-1" });
+    findUniqueOrgMember.mockResolvedValueOnce({ email: null, phone: null });
+
+    const { setPtaHouseholdPrimaryContact } = await import("../households");
+    await expect(setPtaHouseholdPrimaryContact("org-a", "household-1", "adult-1", "u1")).resolves.toMatchObject({ primaryContactAdultId: "adult-1" });
+    expect(updateOrgMember).toHaveBeenCalledWith({ where: { id: "member-1" }, data: { email: "parent@example.com" } });
+  });
+
+  it("sets primaryContactAdultId without touching any OrgMember when the household has no billing identity at all", async () => {
+    findFirstHousehold.mockResolvedValueOnce({ id: "household-1", organizationId: "org-a", orgMemberId: null });
+    findFirstAdult.mockResolvedValueOnce({ id: "adult-1", email: "parent@example.com", phone: null });
+    updateHousehold.mockResolvedValueOnce({ id: "household-1", primaryContactAdultId: "adult-1" });
+
+    const { setPtaHouseholdPrimaryContact } = await import("../households");
+    await expect(setPtaHouseholdPrimaryContact("org-a", "household-1", "adult-1", "u1")).resolves.toMatchObject({ primaryContactAdultId: "adult-1" });
+    expect(findUniqueOrgMember).not.toHaveBeenCalled();
+    expect(updateOrgMember).not.toHaveBeenCalled();
   });
 });
 
