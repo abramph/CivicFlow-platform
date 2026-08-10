@@ -171,14 +171,14 @@ describe("isWhatsAppConfigured / sendWhatsAppMessage", () => {
     expect(result.reason).toBe("Invalid To number");
   });
 
-  it("logs a structured failure event with the phone masked and no message body", async () => {
+  it("logs a structured failure event with no phone number or message body", async () => {
     getEffectiveWhatsAppSender.mockResolvedValue(sender());
     getPlatformWhatsAppSettings.mockResolvedValue(enabledSettings());
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue({ ok: false, status: 400, json: async () => ({ message: "Invalid To number" }) })
+      vi.fn().mockResolvedValue({ ok: false, status: 400, json: async () => ({ message: "Invalid To number", code: 21211 }) })
     );
 
     await sendWhatsAppMessage({ to: "+15551234567", body: "a private family message" });
@@ -187,8 +187,10 @@ describe("isWhatsAppConfigured / sendWhatsAppMessage", () => {
     const logged = JSON.parse(errorSpy.mock.calls[0][0] as string);
     expect(logged.event).toBe("whatsapp_send_failed");
     expect(logged.status).toBe(400);
-    expect(logged.to).not.toContain("5551234567");
-    expect(logged.to).toMatch(/4567$/);
+    expect(logged.providerCode).toBe(21211);
+    expect(logged.to).toBeUndefined();
+    expect(logged.providerMessage).toBeUndefined();
+    expect(JSON.stringify(logged)).not.toMatch(/5551234567|4567|Invalid To number/);
     expect(JSON.stringify(logged)).not.toMatch(/private family message/);
   });
 
@@ -205,6 +207,7 @@ describe("isWhatsAppConfigured / sendWhatsAppMessage", () => {
     expect(errorSpy).toHaveBeenCalledTimes(1);
     const logged = JSON.parse(errorSpy.mock.calls[0][0] as string);
     expect(logged.event).toBe("whatsapp_send_failed");
-    expect(logged.error).toBe("network unreachable");
+    expect(logged.errorName).toBe("Error");
+    expect(logged.error).toBeUndefined();
   });
 });

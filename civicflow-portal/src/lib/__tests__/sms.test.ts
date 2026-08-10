@@ -131,14 +131,14 @@ describe("isSmsConfigured / sendSms", () => {
     expect(body.get("From")).toBeNull();
   });
 
-  it("surfaces a Twilio API error instead of throwing, and logs it structurally with the phone masked", async () => {
+  it("surfaces a Twilio API error instead of throwing, and logs it structurally without phone/message PII", async () => {
     getEffectiveTwilioCredentials.mockResolvedValue(credentials());
     getPlatformSmsSettings.mockResolvedValue(enabledSettings());
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue({ ok: false, status: 400, json: async () => ({ message: "Invalid To number" }) })
+      vi.fn().mockResolvedValue({ ok: false, status: 400, json: async () => ({ message: "Invalid To number", code: 21211 }) })
     );
 
     const result = await sendSms({ to: "+15551234567", body: "your one-time code is 123456" });
@@ -150,9 +150,10 @@ describe("isSmsConfigured / sendSms", () => {
     const logged = JSON.parse(errorSpy.mock.calls[0][0] as string);
     expect(logged.event).toBe("sms_send_failed");
     expect(logged.status).toBe(400);
-    expect(logged.providerMessage).toBe("Invalid To number");
-    expect(logged.to).not.toContain("5551234567"); // masked, not the raw number
-    expect(logged.to).toMatch(/4567$/); // last 4 digits preserved for correlation
+    expect(logged.providerCode).toBe(21211);
+    expect(logged.to).toBeUndefined();
+    expect(logged.providerMessage).toBeUndefined();
+    expect(JSON.stringify(logged)).not.toMatch(/5551234567|4567|Invalid To number/);
     expect(JSON.stringify(logged)).not.toMatch(/your one-time code/); // never the message body
   });
 
@@ -170,7 +171,8 @@ describe("isSmsConfigured / sendSms", () => {
     expect(errorSpy).toHaveBeenCalledTimes(1);
     const logged = JSON.parse(errorSpy.mock.calls[0][0] as string);
     expect(logged.event).toBe("sms_send_failed");
-    expect(logged.error).toBe("network unreachable");
-    expect(logged.to).not.toContain("5551234567");
+    expect(logged.errorName).toBe("Error");
+    expect(logged.to).toBeUndefined();
+    expect(logged.error).toBeUndefined();
   });
 });
