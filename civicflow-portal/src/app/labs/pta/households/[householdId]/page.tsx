@@ -7,6 +7,7 @@ import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { Breadcrumbs, StatusPill, EmptyState } from "@/components/admin/OperationsUI";
 import { PtaLabsBadge } from "@/components/labs/pta/PtaLabsBadge";
 import { AddHouseholdAdultForm } from "@/components/labs/pta/AddHouseholdAdultForm";
+import { InvitePtaHouseholdAdultButton } from "@/components/labs/pta/InvitePtaHouseholdAdultButton";
 import { AddStudentForm } from "@/components/labs/pta/AddStudentForm";
 import { EnrollStudentForm } from "@/components/labs/pta/EnrollStudentForm";
 import { EditHouseholdForm } from "@/components/labs/pta/EditHouseholdForm";
@@ -111,6 +112,9 @@ export default async function PtaHouseholdDetailPage({ params }: { params: Promi
                   </div>
                   {can("pta:households:manage") ? (
                     <div className="flex items-center gap-2">
+                      {!a.userId && a.email ? (
+                        <InvitePtaHouseholdAdultButton householdId={household.id} adultId={a.id} />
+                      ) : null}
                       {!isPrimaryContact ? (
                         <ConfirmActionButton
                           label="Make primary contact"
