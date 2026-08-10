@@ -53,6 +53,7 @@ export async function acceptPtaHouseholdAdultInvite(
 
   const normalizedEmail = adult.email.trim().toLowerCase();
   let user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+  const isNewAccount = !user;
 
   if (!user) {
     const passwordHash = await bcrypt.hash(password, 12);
@@ -95,6 +96,17 @@ export async function acceptPtaHouseholdAdultInvite(
     entityId: adult.id,
     metadata: { inviteId },
   });
+
+  // No PII — ids and a new-vs-existing-account flag only.
+  console.log(
+    JSON.stringify({
+      event: "pta_household_adult_invite_accepted",
+      organizationId,
+      householdAdultId: adult.id,
+      inviteId,
+      newAccount: isNewAccount,
+    })
+  );
 
   return {
     ok: true,

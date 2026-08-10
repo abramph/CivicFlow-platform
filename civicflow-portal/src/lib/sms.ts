@@ -79,9 +79,17 @@ async function sendViaTwilio(
       body,
     });
 
-    const payload = (await response.json().catch(() => null)) as { sid?: string; message?: string } | null;
+    const payload = (await response.json().catch(() => null)) as { sid?: string; message?: string; code?: number } | null;
 
     if (!response.ok) {
+      // No PII — status/code only, never phone numbers or the message body.
+      console.error(
+        JSON.stringify({
+          event: "sms_send_failed",
+          status: response.status,
+          providerCode: payload?.code ?? null,
+        })
+      );
       return {
         sent: false,
         skipped: false,
@@ -92,6 +100,12 @@ async function sendViaTwilio(
 
     return { sent: true, skipped: false, to: input.to, providerMessageId: payload?.sid };
   } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: "sms_send_failed",
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      })
+    );
     return {
       sent: false,
       skipped: false,

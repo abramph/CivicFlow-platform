@@ -69,15 +69,33 @@ export async function consumePtaHouseholdAdultInvite(
   const tokenHash = hashToken(rawToken);
   const invite = await prisma.ptaHouseholdAdultInvite.findUnique({ where: { tokenHash } });
 
-  if (!invite) return { ok: false, error: "Invalid or expired invite link." };
-  if (invite.acceptedAt) return { ok: false, error: "This invite has already been used." };
-  if (invite.expiresAt < new Date()) return { ok: false, error: "This invite has expired. Ask your PTA to send a new one." };
+  // No PII, no token — a reason category only, so a support ticket like
+  // "my invite link doesn't work" is traceable via `doctl apps logs` without
+  // needing a database query, matching this module's other structured events.
+  const rejected = (reason: "not_found" | "already_used" | "expired" | "race_lost") =>
+    console.warn(JSON.stringify({ event: "pta_household_adult_invite_rejected", reason }));
+
+  if (!invite) {
+    rejected("not_found");
+    return { ok: false, error: "Invalid or expired invite link." };
+  }
+  if (invite.acceptedAt) {
+    rejected("already_used");
+    return { ok: false, error: "This invite has already been used." };
+  }
+  if (invite.expiresAt < new Date()) {
+    rejected("expired");
+    return { ok: false, error: "This invite has expired. Ask your PTA to send a new one." };
+  }
 
   const claim = await prisma.ptaHouseholdAdultInvite.updateMany({
     where: { id: invite.id, acceptedAt: null, expiresAt: { gt: new Date() } },
     data: { acceptedAt: new Date() },
   });
-  if (claim.count === 0) return { ok: false, error: "This invite has already been used." };
+  if (claim.count === 0) {
+    rejected("race_lost");
+    return { ok: false, error: "This invite has already been used." };
+  }
 
   return { ok: true, organizationId: invite.organizationId, householdAdultId: invite.householdAdultId, inviteId: invite.id };
 }
@@ -126,4 +144,9 @@ export async function sendPtaHouseholdAdultInviteEmail(params: {
       <p style="color:#6b7280;font-size:13px">This invite link expires in 7 days.</p>
     `.trim(),
   });
+
+  // No PII, no token — ids only.
+  console.log(
+    JSON.stringify({ event: "pta_household_adult_invited", organizationId: params.organizationId, householdAdultId: params.householdAdult.id })
+  );
 }

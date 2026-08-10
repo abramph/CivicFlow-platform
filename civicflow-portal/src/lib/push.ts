@@ -47,8 +47,16 @@ export async function sendPushToTokens(tokens: string[], notification: PushNotif
           }
         }
       });
-    } catch {
+    } catch (error) {
       failed += chunk.length;
+      // No PII — chunk size and error message only, never a token or device identifier.
+      console.error(
+        JSON.stringify({
+          event: "push_send_failed",
+          chunkSize: chunk.length,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      );
     }
   }
 

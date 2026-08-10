@@ -67,11 +67,15 @@ describe("claimPtaVolunteerSlot — atomic capacity enforcement", () => {
     findUniqueSignup.mockResolvedValueOnce(null);
     updateManySlot.mockResolvedValueOnce({ count: 1 });
     upsertSignup.mockResolvedValueOnce({ id: "signup-1" });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
     const { claimPtaVolunteerSlot } = await import("../volunteers");
     const result = await claimPtaVolunteerSlot("org-a", "slot-1", "adult-1", "u1");
     expect(result.id).toBe("signup-1");
     expect(updateManySlot).toHaveBeenCalledWith({ where: { id: "slot-1", claimedCount: { lt: 2 } }, data: { claimedCount: { increment: 1 } } });
+
+    const logged = JSON.parse(logSpy.mock.calls.at(-1)?.[0] as string);
+    expect(logged).toEqual({ event: "pta_volunteer_signup_claimed", organizationId: "org-a", slotId: "slot-1", signupId: "signup-1" });
   });
 
   it("rejects with PTA_SLOT_FULL when the conditional UPDATE loses the race (count === 0) — this is what actually prevents overbooking, not a prior read", async () => {
@@ -225,15 +229,43 @@ describe("createPtaVolunteerOpportunity — schoolYear regression (an opportunit
   });
 });
 
+describe("manuallyAssignPtaVolunteer — officer assignment logging", () => {
+  it("logs a structured event including whether capacity was overridden", async () => {
+    findFirstSlot.mockResolvedValueOnce({ id: "slot-1", organizationId: "org-a", capacity: 1 });
+    findFirstAdult.mockResolvedValueOnce({ id: "adult-1", organizationId: "org-a" });
+    findUniqueSignup.mockResolvedValueOnce(null);
+    updateManySlot.mockResolvedValueOnce({ count: 1 });
+    upsertSignup.mockResolvedValueOnce({ id: "signup-1" });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const { manuallyAssignPtaVolunteer } = await import("../volunteers");
+    await manuallyAssignPtaVolunteer("org-a", "slot-1", "adult-1", "officer-1", { overrideCapacity: true });
+
+    const logged = JSON.parse(logSpy.mock.calls.at(-1)?.[0] as string);
+    expect(logged).toEqual({
+      event: "pta_volunteer_signup_manually_assigned",
+      organizationId: "org-a",
+      slotId: "slot-1",
+      signupId: "signup-1",
+      capacityOverridden: true,
+    });
+  });
+});
+
 describe("cancelPtaVolunteerSignup — atomic release", () => {
   it("decrements claimedCount only when it is currently above zero, never going negative", async () => {
     findFirstSignup.mockResolvedValueOnce({ id: "signup-1", status: "SIGNED_UP", organizationId: "org-a", slot: { opportunity: { cancellationDeadline: null } } });
     updateSignup.mockResolvedValueOnce({ id: "signup-1", status: "CANCELLED" });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
     const { cancelPtaVolunteerSignup } = await import("../volunteers");
-    await cancelPtaVolunteerSignup("org-a", "slot-1", "adult-1", "u1");
+    await cancelPtaVolunteerSignup("org-a", "slot-1", "adult-1", "u1", { reason: "can't make it, family emergency" });
 
     expect(updateManySlot).toHaveBeenCalledWith({ where: { id: "slot-1", claimedCount: { gt: 0 } }, data: { claimedCount: { decrement: 1 } } });
+
+    const logged = JSON.parse(logSpy.mock.calls.at(-1)?.[0] as string);
+    expect(logged).toEqual({ event: "pta_volunteer_signup_cancelled", organizationId: "org-a", slotId: "slot-1", signupId: "signup-1", officerOverride: false });
+    expect(JSON.stringify(logged)).not.toMatch(/family emergency/); // free-text reason deliberately never logged
   });
 
   it("is a no-op (not an error) for a signup that's already cancelled", async () => {
@@ -251,10 +283,15 @@ describe("cancelPtaVolunteerSignup — atomic release", () => {
     expect(updateSignup).not.toHaveBeenCalled();
   });
 
-  it("allows a late cancellation when an officer explicitly overrides the deadline", async () => {
+  it("allows a late cancellation when an officer explicitly overrides the deadline, and logs officerOverride:true — operationally distinct from a member's own cancellation", async () => {
     findFirstSignup.mockResolvedValueOnce({ id: "signup-1", status: "SIGNED_UP", slot: { opportunity: { cancellationDeadline: new Date(Date.now() - 60_000) } } });
     updateSignup.mockResolvedValueOnce({ id: "signup-1", status: "CANCELLED" });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
     const { cancelPtaVolunteerSignup } = await import("../volunteers");
     await expect(cancelPtaVolunteerSignup("org-a", "slot-1", "adult-1", "officer-1", { officerOverride: true })).resolves.toMatchObject({ status: "CANCELLED" });
+
+    const logged = JSON.parse(logSpy.mock.calls.at(-1)?.[0] as string);
+    expect(logged.officerOverride).toBe(true);
   });
 });

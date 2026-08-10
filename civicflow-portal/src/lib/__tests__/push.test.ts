@@ -26,6 +26,7 @@ vi.mock("@/lib/labs/pta/households", () => ({
   resolvePtaHouseholdAdultUserIds: (...args: unknown[]) => resolvePtaHouseholdAdultUserIds(...args),
 }));
 
+let sendPushNotificationsAsyncImpl = async () => [] as unknown[];
 vi.mock("expo-server-sdk", () => ({
   Expo: class {
     static isExpoPushToken() {
@@ -34,13 +35,13 @@ vi.mock("expo-server-sdk", () => ({
     chunkPushNotifications(messages: unknown[]) {
       return [messages];
     }
-    async sendPushNotificationsAsync() {
-      return [];
+    async sendPushNotificationsAsync(...args: unknown[]) {
+      return sendPushNotificationsAsyncImpl(...(args as []));
     }
   },
 }));
 
-import { sendPushToMember } from "@/lib/push";
+import { sendPushToMember, sendPushToTokens } from "@/lib/push";
 
 describe("sendPushToMember opt-out gating", () => {
   beforeEach(() => {
@@ -48,6 +49,7 @@ describe("sendPushToMember opt-out gating", () => {
     findManyMobileDeviceToken.mockClear();
     createCommunicationLog.mockClear();
     resolvePtaHouseholdAdultUserIds.mockReset().mockResolvedValue([]);
+    sendPushNotificationsAsyncImpl = async () => [];
   });
 
   it("skips sending when the member has opted out of push entirely", async () => {
@@ -190,5 +192,34 @@ describe("sendPushToMember opt-out gating", () => {
 
       expect(resolvePtaHouseholdAdultUserIds).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("sendPushToTokens failure logging", () => {
+  it("logs a structured failure event when the Expo API call throws, without leaking the token", async () => {
+    sendPushNotificationsAsyncImpl = async () => {
+      throw new Error("Expo service unavailable");
+    };
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await sendPushToTokens(["ExponentPushToken[super-secret-device-id]"], { title: "Hi", body: "There" });
+
+    expect(result.failed).toBe(1);
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    const logged = JSON.parse(errorSpy.mock.calls[0][0] as string);
+    expect(logged.event).toBe("push_send_failed");
+    expect(logged.chunkSize).toBe(1);
+    expect(logged.error).toBe("Expo service unavailable");
+    expect(JSON.stringify(logged)).not.toMatch(/super-secret-device-id/);
+  });
+
+  it("does not log anything when every push in the chunk succeeds", async () => {
+    sendPushNotificationsAsyncImpl = async () => [{ status: "ok" }];
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await sendPushToTokens(["ExponentPushToken[abc]"], { title: "Hi", body: "There" });
+
+    expect(result.sent).toBe(1);
+    expect(errorSpy).not.toHaveBeenCalled();
   });
 });

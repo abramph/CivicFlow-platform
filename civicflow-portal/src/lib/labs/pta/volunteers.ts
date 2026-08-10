@@ -479,6 +479,9 @@ export async function claimPtaVolunteerSlot(organizationId: string, slotId: stri
     entityId: signup.id,
     metadata: { slotId },
   });
+  // No PII — ids only, never a household/volunteer name. Same convention as
+  // communication-campaigns.ts's structured event logs.
+  console.log(JSON.stringify({ event: "pta_volunteer_signup_claimed", organizationId, slotId, signupId: signup.id }));
 
   return signup;
 }
@@ -556,6 +559,9 @@ export async function manuallyAssignPtaVolunteer(
     entityId: signup.id,
     metadata: { slotId, capacityOverridden: Boolean(options.overrideCapacity) },
   });
+  console.log(
+    JSON.stringify({ event: "pta_volunteer_signup_manually_assigned", organizationId, slotId, signupId: signup.id, capacityOverridden: Boolean(options.overrideCapacity) })
+  );
 
   return signup;
 }
@@ -604,6 +610,12 @@ export async function cancelPtaVolunteerSignup(
     entityId: signup.id,
     metadata: { slotId, reason: options.reason ?? null, officerOverride: Boolean(options.officerOverride) },
   });
+  // Deliberately omits options.reason — free-text an officer writes could
+  // name the volunteer or household; the audit event above is the right
+  // place for that (admin-only, not shipped to broader log aggregation).
+  console.log(
+    JSON.stringify({ event: "pta_volunteer_signup_cancelled", organizationId, slotId, signupId: signup.id, officerOverride: Boolean(options.officerOverride) })
+  );
 
   return updated;
 }

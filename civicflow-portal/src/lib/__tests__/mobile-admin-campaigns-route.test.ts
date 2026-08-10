@@ -112,9 +112,11 @@ describe("POST /api/mobile/admin/campaigns", () => {
     expect(createCampaignPrisma).not.toHaveBeenCalled();
   });
 
-  it("creates a campaign using the same createCommunicationCampaign() service the web form uses", async () => {
+  it("creates a campaign using the same createCommunicationCampaign() service the web form uses, and logs a structured creation event with no recipient PII", async () => {
     resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "STAFF", adminCapabilities: ["manageCommunications"] });
     createCampaignPrisma.mockResolvedValueOnce({ id: "camp-new", organizationId: "org-a", title: "Newsletter", channel: "INTERNAL_LOG_ONLY" });
+    resolveCommunicationRecipients.mockResolvedValueOnce([{ email: "parent@example.test", memberId: "m1" }, { email: "parent2@example.test", memberId: "m2" }]);
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
     const response = await POST(
       createRequest({ organizationId: "org-a", title: "Newsletter", communicationType: "GENERAL", channel: "INTERNAL_LOG_ONLY", subject: "Hi", body: "Body text" })
@@ -123,6 +125,19 @@ describe("POST /api/mobile/admin/campaigns", () => {
 
     expect(response.status).toBe(201);
     expect(body.data.id).toBe("camp-new");
+
+    const events = logSpy.mock.calls.map((c) => JSON.parse(c[0] as string));
+    const created = events.find((e) => e.event === "communication_campaign_created");
+    expect(created).toEqual({
+      event: "communication_campaign_created",
+      organizationId: "org-a",
+      campaignId: "camp-new",
+      channel: "INTERNAL_LOG_ONLY",
+      selector: "active_with_email", // no recipientFilter passed in the request -> default selector
+      recipientCount: 2,
+      sendNow: false,
+    });
+    expect(JSON.stringify(created)).not.toMatch(/parent@example\.test|parent2@example\.test/);
   });
 
   it("does not send when sendNow is not set", async () => {

@@ -55,6 +55,7 @@ describe("acceptPtaHouseholdAdultInvite", () => {
   it("creates a new user when no account exists for the email, and links the adult", async () => {
     findUniqueUser.mockResolvedValueOnce(null);
     createUser.mockResolvedValueOnce({ id: "user-new", email: "jordan@example.com", displayName: "Jordan Lee", mobileTokenVersion: 0 });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
     const result = await acceptPtaHouseholdAdultInvite("raw-token", "a-strong-password");
 
@@ -66,17 +67,33 @@ describe("acceptPtaHouseholdAdultInvite", () => {
     // PtaHouseholdAdult.userId (see org-context.ts's synthetic-entry doc
     // comment); this flow has no reason to create one.
     expect(createAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "pta.household_adult.invite_accepted" }));
+
+    const events = logSpy.mock.calls.map((c) => JSON.parse(c[0] as string));
+    const accepted = events.find((e) => e.event === "pta_household_adult_invite_accepted");
+    expect(accepted).toEqual({
+      event: "pta_household_adult_invite_accepted",
+      organizationId: "org-a",
+      householdAdultId: "adult-1",
+      inviteId: "invite-1",
+      newAccount: true,
+    });
+    expect(JSON.stringify(accepted)).not.toMatch(/jordan@example\.com|Jordan Lee/);
   });
 
   it("links to an existing account when the submitted password matches it", async () => {
     const passwordHash = await bcrypt.hash("real-password", 12);
     findUniqueUser.mockResolvedValueOnce({ id: "user-existing", email: "jordan@example.com", displayName: "Jordan", passwordHash, mobileTokenVersion: 0 });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
     const result = await acceptPtaHouseholdAdultInvite("raw-token", "real-password");
 
     expect(result.ok).toBe(true);
     expect(createUser).not.toHaveBeenCalled();
     expect(updateAdult).toHaveBeenCalledWith({ where: { id: "adult-1" }, data: { userId: "user-existing" } });
+
+    const events = logSpy.mock.calls.map((c) => JSON.parse(c[0] as string));
+    const accepted = events.find((e) => e.event === "pta_household_adult_invite_accepted");
+    expect(accepted?.newAccount).toBe(false); // distinguishes "linked an existing account" from a brand-new signup
   });
 
   it("rejects linking to an existing account when the submitted password does not match — holding the invite email is not proof of account ownership", async () => {

@@ -389,4 +389,25 @@ describe("processScheduledCampaigns", () => {
       })
     );
   });
+
+  it("logs a structured per-campaign failure (ids + error, no recipient data) when a scheduled send throws, and still processes the rest of the batch", async () => {
+    findManyCampaign.mockResolvedValueOnce([{ id: "campaign-broken", organizationId: "org-broken" }]);
+    findFirstCampaign.mockRejectedValueOnce(new Error("unexpected send error"));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const result = await processScheduledCampaigns(50);
+
+    expect(result).toEqual({ processed: 1, sent: 0, failed: 1 });
+
+    const failureLog = errorSpy.mock.calls.map((c) => JSON.parse(c[0] as string)).find((l) => l.event === "communication_campaign_scheduled_send_failed");
+    expect(failureLog).toMatchObject({
+      organizationId: "org-broken",
+      campaignId: "campaign-broken",
+      error: "unexpected send error",
+    });
+
+    const summaryLog = logSpy.mock.calls.map((c) => JSON.parse(c[0] as string)).find((l) => l.event === "communication_campaigns_cron_completed");
+    expect(summaryLog).toEqual({ event: "communication_campaigns_cron_completed", processed: 1, sent: 0, failed: 1 });
+  });
 });
