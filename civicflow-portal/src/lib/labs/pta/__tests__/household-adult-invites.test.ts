@@ -4,6 +4,7 @@ const deleteMany = vi.fn().mockResolvedValue({ count: 0 });
 const create = vi.fn().mockResolvedValue({});
 const findUnique = vi.fn();
 const updateMany = vi.fn();
+const transaction = vi.fn((ops: unknown[]) => Promise.all(ops));
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -13,6 +14,7 @@ vi.mock("@/lib/prisma", () => ({
       findUnique: (...args: unknown[]) => findUnique(...args),
       updateMany: (...args: unknown[]) => updateMany(...args),
     },
+    $transaction: (ops: unknown[]) => transaction(ops),
   },
 }));
 
@@ -28,6 +30,7 @@ describe("createPtaHouseholdAdultInvite", () => {
   beforeEach(() => {
     deleteMany.mockReset().mockResolvedValue({ count: 0 });
     create.mockReset().mockResolvedValue({});
+    transaction.mockClear();
   });
 
   it("clears any prior unaccepted invite for the same adult before creating a new one", async () => {
@@ -37,6 +40,13 @@ describe("createPtaHouseholdAdultInvite", () => {
       where: { organizationId: "org-a", householdAdultId: "adult-1", acceptedAt: null },
     });
     expect(create).toHaveBeenCalled();
+  });
+
+  it("runs the clear-then-create as a single transaction, so two concurrent invite requests can never both leave a live token behind", async () => {
+    await createPtaHouseholdAdultInvite({ organizationId: "org-a", householdAdultId: "adult-1" });
+
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(transaction.mock.calls[0][0]).toHaveLength(2);
   });
 
   it("returns a raw token distinct from what gets persisted (only the hash is stored)", async () => {

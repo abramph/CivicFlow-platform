@@ -28,19 +28,26 @@ export async function createPtaHouseholdAdultInvite(params: {
 }): Promise<string> {
   const token = generateToken();
 
-  await prisma.ptaHouseholdAdultInvite.deleteMany({
-    where: { organizationId: params.organizationId, householdAdultId: params.householdAdultId, acceptedAt: null },
-  });
-
-  await prisma.ptaHouseholdAdultInvite.create({
-    data: {
-      organizationId: params.organizationId,
-      householdAdultId: params.householdAdultId,
-      tokenHash: hashToken(token),
-      expiresAt: new Date(Date.now() + INVITE_EXPIRY_MS),
-      createdByUserId: params.createdByUserId ?? null,
-    },
-  });
+  // Transactional so two near-simultaneous "Invite to app" clicks can never
+  // both leave a live invite behind: without this, an interleaved
+  // delete/delete/create/create ordering could leave two valid unaccepted
+  // tokens for the same adult (accept-time's adult.userId re-check still
+  // prevents any double-linking either way, but this closes the race at the
+  // source instead of relying on that backstop).
+  await prisma.$transaction([
+    prisma.ptaHouseholdAdultInvite.deleteMany({
+      where: { organizationId: params.organizationId, householdAdultId: params.householdAdultId, acceptedAt: null },
+    }),
+    prisma.ptaHouseholdAdultInvite.create({
+      data: {
+        organizationId: params.organizationId,
+        householdAdultId: params.householdAdultId,
+        tokenHash: hashToken(token),
+        expiresAt: new Date(Date.now() + INVITE_EXPIRY_MS),
+        createdByUserId: params.createdByUserId ?? null,
+      },
+    }),
+  ]);
 
   return token;
 }
