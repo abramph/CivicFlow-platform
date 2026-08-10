@@ -631,10 +631,21 @@ export async function processScheduledCampaigns(limit = 50) {
     try {
       const result = await sendCommunicationCampaign({ organizationId: campaign.organizationId, campaignId: campaign.id });
       if (result.complete) sent += 1;
-    } catch {
+    } catch (error) {
       failed += 1;
+      // No PII — ids and the error message only, never recipient data.
+      console.error(
+        JSON.stringify({
+          event: "communication_campaign_scheduled_send_failed",
+          organizationId: campaign.organizationId,
+          campaignId: campaign.id,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      );
     }
   }
+
+  console.log(JSON.stringify({ event: "communication_campaigns_cron_completed", processed: due.length, sent, failed }));
 
   return { processed: due.length, sent, failed };
 }

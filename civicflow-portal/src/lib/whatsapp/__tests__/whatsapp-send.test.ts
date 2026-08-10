@@ -170,4 +170,41 @@ describe("isWhatsAppConfigured / sendWhatsAppMessage", () => {
     expect(result.skipped).toBe(false);
     expect(result.reason).toBe("Invalid To number");
   });
+
+  it("logs a structured failure event with the phone masked and no message body", async () => {
+    getEffectiveWhatsAppSender.mockResolvedValue(sender());
+    getPlatformWhatsAppSettings.mockResolvedValue(enabledSettings());
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: false, status: 400, json: async () => ({ message: "Invalid To number" }) })
+    );
+
+    await sendWhatsAppMessage({ to: "+15551234567", body: "a private family message" });
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    const logged = JSON.parse(errorSpy.mock.calls[0][0] as string);
+    expect(logged.event).toBe("whatsapp_send_failed");
+    expect(logged.status).toBe(400);
+    expect(logged.to).not.toContain("5551234567");
+    expect(logged.to).toMatch(/4567$/);
+    expect(JSON.stringify(logged)).not.toMatch(/private family message/);
+  });
+
+  it("logs a structured failure event when the request itself throws", async () => {
+    getEffectiveWhatsAppSender.mockResolvedValue(sender());
+    getPlatformWhatsAppSettings.mockResolvedValue(enabledSettings());
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network unreachable")));
+
+    const result = await sendWhatsAppMessage({ to: "+15551234567", body: "hi" });
+    expect(result.sent).toBe(false);
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    const logged = JSON.parse(errorSpy.mock.calls[0][0] as string);
+    expect(logged.event).toBe("whatsapp_send_failed");
+    expect(logged.error).toBe("network unreachable");
+  });
 });

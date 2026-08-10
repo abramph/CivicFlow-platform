@@ -268,4 +268,61 @@ describe("Stripe platform webhook", () => {
     });
     expect(duesPaymentCreate).not.toHaveBeenCalled();
   });
+
+  it("logs a structured warning for invoice.payment_failed — no card/customer data, ids only", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const request = buildSignedRequest({
+      id: "evt_invoice_failed",
+      type: "invoice.payment_failed",
+      data: {
+        object: {
+          id: "in_test_1",
+          subscription: "sub_1",
+          amount_due: 4900,
+        },
+      },
+    });
+
+    const response = await POST(request);
+    expect(response.status).toBe(200);
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    const logged = JSON.parse(warnSpy.mock.calls[0][0] as string);
+    expect(logged).toEqual({
+      event: "stripe_invoice_payment_failed",
+      stripeSubscriptionId: "sub_1",
+      stripeInvoiceId: "in_test_1",
+      amountDue: 4900,
+    });
+  });
+
+  it("logs a structured error (event type/id + message, no raw payload) when webhook processing throws unexpectedly", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    upsertSubscription.mockRejectedValueOnce(new Error("unexpected DB error"));
+
+    const request = buildSignedRequest({
+      id: "evt_processing_failure",
+      type: "customer.subscription.updated",
+      data: {
+        object: {
+          id: "sub_1",
+          status: "active",
+          customer: "cus_1",
+          items: { data: [] },
+          metadata: { organizationId: "org_1" },
+        },
+      },
+    });
+
+    const response = await POST(request);
+    expect(response.status).toBe(500);
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    const logged = JSON.parse(errorSpy.mock.calls[0][0] as string);
+    expect(logged.event).toBe("stripe_webhook_processing_failed");
+    expect(logged.stripeEventType).toBe("customer.subscription.updated");
+    expect(logged.stripeEventId).toBe("evt_processing_failure");
+    expect(logged.error).toBe("unexpected DB error");
+  });
 });

@@ -1,5 +1,6 @@
 import { getEffectiveTwilioCredentials, getPlatformSmsSettings } from "@/lib/sms-credentials";
 import { getServerEnv } from "@/lib/env";
+import { maskPhone } from "@/lib/sms-otp";
 
 type SendSmsResult = {
   sent: boolean;
@@ -82,6 +83,15 @@ async function sendViaTwilio(
     const payload = (await response.json().catch(() => null)) as { sid?: string; message?: string } | null;
 
     if (!response.ok) {
+      // No PII — masked phone, provider status code/message only, never the message body.
+      console.error(
+        JSON.stringify({
+          event: "sms_send_failed",
+          to: maskPhone(input.to),
+          status: response.status,
+          providerMessage: payload?.message ?? null,
+        })
+      );
       return {
         sent: false,
         skipped: false,
@@ -92,6 +102,13 @@ async function sendViaTwilio(
 
     return { sent: true, skipped: false, to: input.to, providerMessageId: payload?.sid };
   } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: "sms_send_failed",
+        to: maskPhone(input.to),
+        error: error instanceof Error ? error.message : "Unknown SMS send error",
+      })
+    );
     return {
       sent: false,
       skipped: false,

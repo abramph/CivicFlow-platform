@@ -1,5 +1,6 @@
 import { getEffectiveWhatsAppSender, getPlatformWhatsAppSettings } from "@/lib/whatsapp/credentials";
 import { getServerEnv } from "@/lib/env";
+import { maskPhone } from "@/lib/sms-otp";
 
 type SendWhatsAppResult = {
   sent: boolean;
@@ -110,6 +111,15 @@ async function sendViaTwilio(
     const payload = (await response.json().catch(() => null)) as { sid?: string; message?: string } | null;
 
     if (!response.ok) {
+      // No PII — masked phone, provider status code/message only, never the message body/template variables.
+      console.error(
+        JSON.stringify({
+          event: "whatsapp_send_failed",
+          to: maskPhone(input.to),
+          status: response.status,
+          providerMessage: payload?.message ?? null,
+        })
+      );
       return {
         sent: false,
         skipped: false,
@@ -120,6 +130,13 @@ async function sendViaTwilio(
 
     return { sent: true, skipped: false, to: input.to, providerMessageId: payload?.sid };
   } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: "whatsapp_send_failed",
+        to: maskPhone(input.to),
+        error: error instanceof Error ? error.message : "Unknown WhatsApp send error",
+      })
+    );
     return {
       sent: false,
       skipped: false,

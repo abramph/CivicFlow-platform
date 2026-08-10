@@ -131,18 +131,46 @@ describe("isSmsConfigured / sendSms", () => {
     expect(body.get("From")).toBeNull();
   });
 
-  it("surfaces a Twilio API error instead of throwing", async () => {
+  it("surfaces a Twilio API error instead of throwing, and logs it structurally with the phone masked", async () => {
     getEffectiveTwilioCredentials.mockResolvedValue(credentials());
     getPlatformSmsSettings.mockResolvedValue(enabledSettings());
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({ ok: false, status: 400, json: async () => ({ message: "Invalid To number" }) })
     );
 
-    const result = await sendSms({ to: "bad-number", body: "hi" });
+    const result = await sendSms({ to: "+15551234567", body: "your one-time code is 123456" });
     expect(result.sent).toBe(false);
     expect(result.skipped).toBe(false);
     expect(result.reason).toBe("Invalid To number");
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    const logged = JSON.parse(errorSpy.mock.calls[0][0] as string);
+    expect(logged.event).toBe("sms_send_failed");
+    expect(logged.status).toBe(400);
+    expect(logged.providerMessage).toBe("Invalid To number");
+    expect(logged.to).not.toContain("5551234567"); // masked, not the raw number
+    expect(logged.to).toMatch(/4567$/); // last 4 digits preserved for correlation
+    expect(JSON.stringify(logged)).not.toMatch(/your one-time code/); // never the message body
+  });
+
+  it("logs a structured failure event when the Twilio request itself throws (network error)", async () => {
+    getEffectiveTwilioCredentials.mockResolvedValue(credentials());
+    getPlatformSmsSettings.mockResolvedValue(enabledSettings());
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network unreachable")));
+
+    const result = await sendSms({ to: "+15551234567", body: "hi" });
+    expect(result.sent).toBe(false);
+    expect(result.reason).toBe("network unreachable");
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    const logged = JSON.parse(errorSpy.mock.calls[0][0] as string);
+    expect(logged.event).toBe("sms_send_failed");
+    expect(logged.error).toBe("network unreachable");
+    expect(logged.to).not.toContain("5551234567");
   });
 });

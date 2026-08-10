@@ -327,6 +327,15 @@ export async function POST(request: Request) {
             where: { stripeSubscriptionId: subId },
             data: { status: "past_due" },
           });
+          // No PII — Stripe ids and cents only, never card/customer details.
+          console.warn(
+            JSON.stringify({
+              event: "stripe_invoice_payment_failed",
+              stripeSubscriptionId: subId,
+              stripeInvoiceId: invoice.id,
+              amountDue: invoice.amount_due,
+            })
+          );
         }
         break;
       }
@@ -349,7 +358,17 @@ export async function POST(request: Request) {
     }
 
     return Response.json({ ok: true });
-  } catch {
+  } catch (error) {
+    // No PII — Stripe's own event type/id and the error message only, never
+    // the raw event payload (which can carry customer/card details).
+    console.error(
+      JSON.stringify({
+        event: "stripe_webhook_processing_failed",
+        stripeEventType: event.type,
+        stripeEventId: event.id,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    );
     return Response.json({ ok: false, error: "Webhook processing failed" }, { status: 500 });
   }
 }

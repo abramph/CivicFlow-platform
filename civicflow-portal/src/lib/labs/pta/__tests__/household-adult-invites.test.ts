@@ -24,7 +24,12 @@ vi.mock("@/lib/env", () => ({ getMobileAppWebBaseUrl: () => "https://app.example
 import {
   consumePtaHouseholdAdultInvite,
   createPtaHouseholdAdultInvite,
+  sendPtaHouseholdAdultInviteEmail,
 } from "@/lib/labs/pta/household-adult-invites";
+
+function loggedEvents(spy: ReturnType<typeof vi.spyOn>) {
+  return spy.mock.calls.map((c) => JSON.parse(c[0] as string));
+}
 
 describe("createPtaHouseholdAdultInvite", () => {
   beforeEach(() => {
@@ -135,5 +140,48 @@ describe("consumePtaHouseholdAdultInvite", () => {
     const result = await consumePtaHouseholdAdultInvite("raced-token");
 
     expect(result.ok).toBe(false);
+  });
+
+  it("logs a structured rejection event with a reason category, never the token, for each failure branch", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    findUnique.mockResolvedValueOnce(null);
+    await consumePtaHouseholdAdultInvite("unknown-token-value");
+
+    findUnique.mockResolvedValueOnce({ id: "invite-1", acceptedAt: new Date(), expiresAt: new Date(Date.now() + 100_000), organizationId: "org-a", householdAdultId: "adult-1" });
+    await consumePtaHouseholdAdultInvite("used-token-value");
+
+    findUnique.mockResolvedValueOnce({ id: "invite-1", acceptedAt: null, expiresAt: new Date(Date.now() - 1), organizationId: "org-a", householdAdultId: "adult-1" });
+    await consumePtaHouseholdAdultInvite("expired-token-value");
+
+    const events = loggedEvents(warnSpy);
+    expect(events.map((e) => e.reason)).toEqual(["not_found", "already_used", "expired"]);
+    for (const e of events) {
+      expect(e.event).toBe("pta_household_adult_invite_rejected");
+      expect(Object.keys(e).sort()).toEqual(["event", "reason"]); // no token, no ids beyond what's needed
+    }
+    expect(JSON.stringify(events)).not.toMatch(/unknown-token-value|used-token-value|expired-token-value/);
+  });
+});
+
+describe("sendPtaHouseholdAdultInviteEmail", () => {
+  beforeEach(() => {
+    deleteMany.mockReset().mockResolvedValue({ count: 0 });
+    create.mockReset().mockResolvedValue({});
+  });
+
+  it("logs a structured invite-sent event with ids only, no email/name/token", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await sendPtaHouseholdAdultInviteEmail({
+      householdAdult: { id: "adult-1", email: "parent@example.test", name: "Jordan Lee" },
+      organizationId: "org-a",
+      organizationName: "Pine Grove PTA",
+    });
+
+    const events = loggedEvents(logSpy);
+    const invited = events.find((e) => e.event === "pta_household_adult_invited");
+    expect(invited).toEqual({ event: "pta_household_adult_invited", organizationId: "org-a", householdAdultId: "adult-1" });
+    expect(JSON.stringify(invited)).not.toMatch(/parent@example\.test|Jordan Lee/);
   });
 });
