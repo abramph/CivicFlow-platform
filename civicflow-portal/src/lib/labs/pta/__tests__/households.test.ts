@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const findFirstHousehold = vi.fn();
+const findManyHousehold = vi.fn();
 const createHousehold = vi.fn();
 const updateHousehold = vi.fn();
 const deleteHousehold = vi.fn();
@@ -18,7 +19,7 @@ const updateOrgMember = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    ptaHousehold: { findFirst: (...a: unknown[]) => findFirstHousehold(...a), create: (...a: unknown[]) => createHousehold(...a), update: (...a: unknown[]) => updateHousehold(...a), delete: (...a: unknown[]) => deleteHousehold(...a) },
+    ptaHousehold: { findFirst: (...a: unknown[]) => findFirstHousehold(...a), findMany: (...a: unknown[]) => findManyHousehold(...a), create: (...a: unknown[]) => createHousehold(...a), update: (...a: unknown[]) => updateHousehold(...a), delete: (...a: unknown[]) => deleteHousehold(...a) },
     orgMember: { create: (...a: unknown[]) => createOrgMember(...a), findUnique: (...a: unknown[]) => findUniqueOrgMember(...a), update: (...a: unknown[]) => updateOrgMember(...a) },
     duesCharge: { count: (...a: unknown[]) => countDuesCharge(...a) },
     ptaHouseholdAdult: { findFirst: (...a: unknown[]) => findFirstAdult(...a), create: (...a: unknown[]) => createAdult(...a), update: (...a: unknown[]) => updateHouseholdAdult(...a), delete: (...a: unknown[]) => deleteAdult(...a) },
@@ -314,6 +315,38 @@ describe("setPtaHouseholdPrimaryContact — designating/reassigning a primary co
     await expect(setPtaHouseholdPrimaryContact("org-a", "household-1", "adult-1", "u1")).resolves.toMatchObject({ primaryContactAdultId: "adult-1" });
     expect(findUniqueOrgMember).not.toHaveBeenCalled();
     expect(updateOrgMember).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolvePtaHouseholdAdultUserIdsBatch — bulk campaign push fallback", () => {
+  it("maps every requested billing OrgMember id to its household's linked adult userIds in one query", async () => {
+    findManyHousehold.mockResolvedValueOnce([
+      { orgMemberId: "member-1", adults: [{ userId: "adult-user-1" }, { userId: null }] },
+      { orgMemberId: "member-2", adults: [{ userId: "adult-user-2" }, { userId: "adult-user-3" }] },
+    ]);
+    const { resolvePtaHouseholdAdultUserIdsBatch } = await import("../households");
+    const result = await resolvePtaHouseholdAdultUserIdsBatch("org-a", ["member-1", "member-2", "member-3"]);
+
+    expect(findManyHousehold).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { organizationId: "org-a", orgMemberId: { in: ["member-1", "member-2", "member-3"] }, status: "ACTIVE" } })
+    );
+    expect(result.get("member-1")).toEqual(["adult-user-1"]);
+    expect(result.get("member-2")).toEqual(["adult-user-2", "adult-user-3"]);
+    expect(result.has("member-3")).toBe(false); // no matching household came back — not in the result map at all
+  });
+
+  it("returns an empty map without querying at all when given no ids", async () => {
+    const { resolvePtaHouseholdAdultUserIdsBatch } = await import("../households");
+    const result = await resolvePtaHouseholdAdultUserIdsBatch("org-a", []);
+    expect(result.size).toBe(0);
+    expect(findManyHousehold).not.toHaveBeenCalled();
+  });
+
+  it("omits a household from the map entirely when none of its adults have a linked login", async () => {
+    findManyHousehold.mockResolvedValueOnce([{ orgMemberId: "member-1", adults: [{ userId: null }] }]);
+    const { resolvePtaHouseholdAdultUserIdsBatch } = await import("../households");
+    const result = await resolvePtaHouseholdAdultUserIdsBatch("org-a", ["member-1"]);
+    expect(result.has("member-1")).toBe(false);
   });
 });
 
