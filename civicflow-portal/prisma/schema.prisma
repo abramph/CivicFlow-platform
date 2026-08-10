@@ -593,8 +593,8 @@ model Organization {
   communicationRecipients     CommunicationRecipient[]
   paymentImportBatches        PaymentImportBatch[]
   paymentImportItems          PaymentImportItem[]
-  importBatches                ImportBatch[]
-  importRows                   ImportRow[]
+  importBatches               ImportBatch[]
+  importRows                  ImportRow[]
   attendanceRecords           AttendanceRecord[]
   meetingAttendanceSessions   MeetingAttendanceSession[]
   memberTimelineEvents        MemberTimelineEvent[]
@@ -602,6 +602,7 @@ model Organization {
   emailReminderLogs           EmailReminderLog[]
   attachments                 Attachment[]
   memberInvites               MemberInvite[]
+  ptaHouseholdAdultInvites    PtaHouseholdAdultInvite[]
   mobileDeviceTokens          MobileDeviceToken[]
   paymentReports              PaymentReport[]
   paymentLinkOfflineReports   PaymentLinkOfflineReport[]
@@ -699,6 +700,7 @@ model User {
   uploadedAttachments               Attachment[]               @relation("AttachmentUploadedBy")
   memberProfiles                    OrgMember[]                @relation("OrgMemberLogin")
   sentMemberInvites                 MemberInvite[]             @relation("MemberInviteCreatedBy")
+  sentPtaHouseholdAdultInvites      PtaHouseholdAdultInvite[]  @relation("PtaHouseholdAdultInviteCreatedBy")
   mobileDeviceTokens                MobileDeviceToken[]
   reviewedPaymentReports            PaymentReport[]            @relation("PaymentReportReviewedBy")
   reviewedPaymentLinkOfflineReports PaymentLinkOfflineReport[] @relation("PaymentLinkOfflineReportReviewedBy")
@@ -1254,27 +1256,27 @@ model PaymentMethodConfig {
 }
 
 model PaymentImportBatch {
-  id               String                   @id @default(cuid())
-  organizationId   String
-  sourceType       PaymentImportSourceType
-  fileName         String?
-  status           PaymentImportBatchStatus @default(UPLOADED)
-  uploadedByUserId String?
-  uploadedAt       DateTime                 @default(now())
-  processedAt      DateTime?
-  notes            String?
+  id                 String                   @id @default(cuid())
+  organizationId     String
+  sourceType         PaymentImportSourceType
+  fileName           String?
+  status             PaymentImportBatchStatus @default(UPLOADED)
+  uploadedByUserId   String?
+  uploadedAt         DateTime                 @default(now())
+  processedAt        DateTime?
+  notes              String?
   /// Resumable Import Program (PR A) — sha256 of the uploaded CSV/text,
   /// shared with ImportBatch.fileHash so the "this file matches an earlier
   /// import" prompt (src/lib/imports/file-identity.ts) works uniformly
   /// across both model families. Nullable/backward-compatible: existing
   /// rows predate this column and simply never match on hash.
-  fileHash            String?
+  fileHash           String?
   /// Mirrors ImportBatch.retentionExpiresAt — no behavior change to this
   /// model's existing status machine or Payroll Checkoff's item-level
   /// idempotency, just the shared retention bookkeeping.
-  retentionExpiresAt  DateTime?
-  createdAt        DateTime                 @default(now())
-  updatedAt        DateTime                 @updatedAt
+  retentionExpiresAt DateTime?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
 
   organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   items        PaymentImportItem[]
@@ -1344,48 +1346,48 @@ model PaymentImportItem {
 /// process, not computed via COUNT on every read) since the batch-detail and
 /// history views render them on every request.
 model ImportBatch {
-  id                 String            @id @default(cuid())
-  organizationId     String
-  importKind         ImportKind
-  fileName           String
+  id                    String            @id @default(cuid())
+  organizationId        String
+  importKind            ImportKind
+  fileName              String
   /// sha256 hex of the raw uploaded file — the file-level "this looks like
   /// an earlier import" duplicate-file check (src/lib/imports/file-identity.ts).
-  fileHash           String
-  fileSizeBytes      Int
+  fileHash              String
+  fileSizeBytes         Int
   /// DO Spaces object key (src/lib/imports/storage.ts) — null once the
   /// retained source file has been deleted past retentionExpiresAt.
-  storageObjectKey   String?
+  storageObjectKey      String?
   /// {csvHeader: canonicalField} — same shape as the existing /api/import
   /// wizard's mapping (see src/lib/member-import.ts's buildFieldGetter doc
   /// comment for the exact direction).
-  columnMapping      Json
-  status             ImportBatchStatus @default(UPLOADED)
-  totalRows          Int               @default(0)
-  newCount           Int               @default(0)
-  duplicateCount     Int               @default(0)
-  updateCount        Int               @default(0)
-  invalidCount       Int               @default(0)
-  importedCount      Int               @default(0)
-  skippedCount       Int               @default(0)
-  blockedPlanLimitCount Int            @default(0)
+  columnMapping         Json
+  status                ImportBatchStatus @default(UPLOADED)
+  totalRows             Int               @default(0)
+  newCount              Int               @default(0)
+  duplicateCount        Int               @default(0)
+  updateCount           Int               @default(0)
+  invalidCount          Int               @default(0)
+  importedCount         Int               @default(0)
+  skippedCount          Int               @default(0)
+  blockedPlanLimitCount Int               @default(0)
   /// Atomic worker-claim column — see claimBatchForProcessing() in
   /// src/lib/imports/engine.ts, same conditional-updateMany-with-staleness-
   /// reclaim shape as MeetingIntelligenceJob.claimedAt.
-  claimedAt          DateTime?
+  claimedAt             DateTime?
   /// Recorded the moment capacity is exhausted mid-batch: { allowed, used,
   /// pending } at that instant — shown verbatim on the paused-batch UI
   /// (Phase 8's exact requirement), never trusted at resume time (resumeBatch()
   /// always rechecks capacity fresh).
-  planLimitSnapshot  Json?
-  uploadedByUserId   String?
-  uploadedAt         DateTime          @default(now())
-  analyzedAt         DateTime?
-  importStartedAt    DateTime?
-  pausedAt           DateTime?
-  completedAt        DateTime?
-  retentionExpiresAt DateTime?
-  createdAt          DateTime          @default(now())
-  updatedAt          DateTime          @updatedAt
+  planLimitSnapshot     Json?
+  uploadedByUserId      String?
+  uploadedAt            DateTime          @default(now())
+  analyzedAt            DateTime?
+  importStartedAt       DateTime?
+  pausedAt              DateTime?
+  completedAt           DateTime?
+  retentionExpiresAt    DateTime?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   rows         ImportRow[]
@@ -1403,40 +1405,40 @@ model ImportBatch {
 /// already-processed, the same idiom as src/lib/hoa/violations.ts's
 /// isUniqueConstraintViolation.
 model ImportRow {
-  id                String             @id @default(cuid())
-  batchId           String
-  organizationId    String
-  rowNumber         Int
+  id               String             @id @default(cuid())
+  batchId          String
+  organizationId   String
+  rowNumber        Int
   /// The original parsed cell values, keyed by source column header —
   /// preserved verbatim for the review UI and CSV re-export, never mutated.
-  rawData           Json
+  rawData          Json
   /// Canonical-field-keyed values after normalization (whitespace, case,
   /// email/phone/date formatting) — see src/lib/imports/row-normalization.ts.
-  normalizedData    Json
+  normalizedData   Json
   /// sha256 of the normalized identifying fields — computeRowFingerprint()
   /// in row-normalization.ts. Not currently unique-constrained across rows
   /// (that's PR B's matching-hierarchy job); stored now so PR B doesn't need
   /// a migration to start using it.
-  fingerprint       String
-  status            ImportRowStatus    @default(PENDING)
-  decision          ImportRowDecision?
+  fingerprint      String
+  status           ImportRowStatus    @default(PENDING)
+  decision         ImportRowDecision?
   /// The existing record this row was matched against, if any (e.g. an
   /// OrgMember.id on an UPDATE_AVAILABLE row). Not a typed relation — the
   /// target model varies by ImportKind (OrgMember today; PtaHousehold/
   /// Property once PR C wires those verticals), mirroring how
   /// PaymentImportItem.matchedMemberId is the only *typed* matched-record
   /// relation on that model and the rest are similarly loose.
-  matchedRecordId   String?
-  matchConfidence   Int?
-  errorMessage      String?
+  matchedRecordId  String?
+  matchConfidence  Int?
+  errorMessage     String?
   /// The OrgMember (or future PtaHousehold/Property) actually created or
   /// updated once this row reaches IMPORTED.
-  importedRecordId  String?
-  decidedByUserId   String?
-  decidedAt         DateTime?
-  processedAt       DateTime?
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
+  importedRecordId String?
+  decidedByUserId  String?
+  decidedAt        DateTime?
+  processedAt      DateTime?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
 
   batch        ImportBatch  @relation(fields: [batchId], references: [id], onDelete: Cascade)
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -3029,19 +3031,48 @@ model PtaHouseholdAdult {
   createdAt             DateTime                 @default(now())
   updatedAt             DateTime                 @updatedAt
 
-  organization         Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  household            PtaHousehold         @relation("PtaHouseholdAdults", fields: [householdId], references: [id], onDelete: Cascade)
-  user                 User?                @relation(fields: [userId], references: [id], onDelete: SetNull)
-  primaryContactFor    PtaHousehold[]       @relation("PtaHouseholdPrimaryContact")
-  secondaryContactFor  PtaHousehold[]       @relation("PtaHouseholdSecondaryContact")
+  organization         Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  household            PtaHousehold              @relation("PtaHouseholdAdults", fields: [householdId], references: [id], onDelete: Cascade)
+  user                 User?                     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  primaryContactFor    PtaHousehold[]            @relation("PtaHouseholdPrimaryContact")
+  secondaryContactFor  PtaHousehold[]            @relation("PtaHouseholdSecondaryContact")
   volunteerSignups     PtaVolunteerSignup[]
-  chairOfCommittees    PtaCommittee[]       @relation("PtaCommitteeChair")
-  coChairOfCommittees  PtaCommittee[]       @relation("PtaCommitteeCoChair")
+  chairOfCommittees    PtaCommittee[]            @relation("PtaCommitteeChair")
+  coChairOfCommittees  PtaCommittee[]            @relation("PtaCommitteeCoChair")
   committeeMemberships PtaCommitteeMember[]
+  invites              PtaHouseholdAdultInvite[]
 
   @@unique([organizationId, userId])
   @@index([organizationId])
   @@index([householdId])
+}
+
+/// Admin-initiated invite for a PtaHouseholdAdult to create Unestra mobile/web
+/// login credentials — the household-adult counterpart to MemberInvite above.
+/// Deliberately a separate model rather than reusing MemberInvite: a
+/// household adult is not an OrgMember (see docs/pta-communication-identity.md
+/// — the household billing OrgMember and its adults are different identities
+/// by design, validated in PR #80/#81), so MemberInvite's memberId FK simply
+/// doesn't fit. Keeping this parallel also means zero risk of regressing the
+/// existing, cross-vertical member-invite flow. Single-use, expiring, scoped
+/// to one household adult — never an open self-signup surface.
+model PtaHouseholdAdultInvite {
+  id               String    @id @default(cuid())
+  organizationId   String
+  householdAdultId String
+  tokenHash        String    @unique
+  expiresAt        DateTime
+  acceptedAt       DateTime?
+  createdByUserId  String?
+  createdAt        DateTime  @default(now())
+
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  householdAdult PtaHouseholdAdult @relation(fields: [householdAdultId], references: [id], onDelete: Cascade)
+  createdBy      User?             @relation("PtaHouseholdAdultInviteCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([householdAdultId])
+  @@index([expiresAt])
 }
 
 enum PtaStudentStatus {
