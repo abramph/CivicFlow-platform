@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { canSaveSlotCapacity } from "@/lib/labs/pta/volunteer-ui-rules";
 
 /**
  * The PATCH/DELETE routes for a slot (updatePtaVolunteerSlot/
@@ -90,7 +91,7 @@ export function EditSlotForm({
       {error ? <span className="text-sm text-red-700">{error}</span> : null}
       <button
         type="button"
-        disabled={pending || Number(capacity) < 1}
+        disabled={pending || !canSaveSlotCapacity(Number(capacity), claimedCount)}
         onClick={submit}
         className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-60"
       >

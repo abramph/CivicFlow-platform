@@ -7,6 +7,7 @@ import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { EmptyState, StatusPill } from "@/components/admin/OperationsUI";
 import { PtaLabsBadge } from "@/components/labs/pta/PtaLabsBadge";
 import { VolunteerSlotClaimButton } from "@/components/labs/pta/VolunteerSlotClaimButton";
+import { canClaimSlot, canCancelSignup } from "@/lib/labs/pta/volunteer-ui-rules";
 import { formatDateTime } from "@/lib/formatting";
 
 const COMMITMENT_STATUS_TONE: Record<string, string> = {
@@ -22,6 +23,14 @@ const COMMITMENT_STATUS_TONE: Record<string, string> = {
 
 function minutesToHours(minutes: number): string {
   return (minutes / 60).toFixed(1).replace(/\.0$/, "");
+}
+
+/** Date.now() is impure — React forbids calling it directly during render
+ * (react-hooks/purity). Isolated in a plain module-level helper (not itself
+ * a component or hook) so the deadline check stays a single, testable spot
+ * rather than an inline impure call in the component body. */
+function isPast(deadline: Date | null): boolean {
+  return Boolean(deadline && deadline.getTime() < Date.now());
 }
 
 export default async function PtaVolunteersPage() {
@@ -107,36 +116,54 @@ export default async function PtaVolunteersPage() {
       {opportunities.length === 0 ? (
         <EmptyState title="No open volunteer opportunities right now" />
       ) : (
-        opportunities.map((opp) => (
-          <SectionCard
-            key={opp.id}
-            title={opp.title}
-            description={opp.event ? `${opp.event.title}${opp.event.startAt ? ` — ${formatDateTime(opp.event.startAt)}` : ""}` : (opp.description ?? undefined)}
-          >
-            {opp.event && opp.description ? <p className="mb-3 text-sm text-slate-700">{opp.description}</p> : null}
-            {opp.supplyRequest ? <p className="mb-3 text-sm text-slate-700">Requested supplies: {opp.supplyRequest}</p> : null}
-            <div className="space-y-2">
-              {opp.slots.map((slot) => {
-                const claimed = slot.signups.length;
-                const full = claimed >= slot.capacity;
-                const alreadySignedUp = adult ? slot.signups.some((s) => s.householdAdultId === adult.id) : false;
-                return (
-                  <div key={slot.id} className="flex items-center justify-between rounded-lg border border-slate-200 px-4 py-3">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-900">{slot.label ?? "Time slot"}</p>
-                      <p className="text-xs text-slate-600">{claimed}/{slot.capacity} filled</p>
+        opportunities.map((opp) => {
+          const signupDeadlinePassed = isPast(opp.signupDeadline);
+          const cancellationDeadlinePassed = isPast(opp.cancellationDeadline);
+          return (
+            <SectionCard
+              key={opp.id}
+              title={opp.title}
+              description={opp.event ? `${opp.event.title}${opp.event.startAt ? ` — ${formatDateTime(opp.event.startAt)}` : ""}` : (opp.description ?? undefined)}
+            >
+              {opp.event && opp.description ? <p className="mb-3 text-sm text-slate-700">{opp.description}</p> : null}
+              {opp.supplyRequest ? <p className="mb-3 text-sm text-slate-700">Requested supplies: {opp.supplyRequest}</p> : null}
+              {opp.signupDeadline ? (
+                <p className="mb-3 text-xs text-slate-500">
+                  Signup deadline: {formatDateTime(opp.signupDeadline)}
+                  {signupDeadlinePassed ? " (passed)" : ""}
+                </p>
+              ) : null}
+              <div className="space-y-2">
+                {opp.slots.map((slot) => {
+                  const claimed = slot.signups.length;
+                  const full = claimed >= slot.capacity;
+                  const alreadySignedUp = adult ? slot.signups.some((s) => s.householdAdultId === adult.id) : false;
+                  const claimable = canClaimSlot({ slotStatus: slot.status, full, signupDeadlinePassed });
+                  const unavailableReason = claimable ? null : slot.status !== "OPEN" ? "closed" : signupDeadlinePassed ? "deadline_passed" : "full";
+                  return (
+                    <div key={slot.id} className="flex items-center justify-between rounded-lg border border-slate-200 px-4 py-3">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">{slot.label ?? "Time slot"}</p>
+                        <p className="text-xs text-slate-600">{claimed}/{slot.capacity} filled</p>
+                      </div>
+                      {adult ? (
+                        <VolunteerSlotClaimButton
+                          slotId={slot.id}
+                          alreadySignedUp={alreadySignedUp}
+                          claimable={claimable}
+                          unavailableReason={unavailableReason}
+                          cancellable={canCancelSignup(cancellationDeadlinePassed)}
+                        />
+                      ) : (
+                        <span className="text-xs text-slate-500">Link your account to a household to volunteer</span>
+                      )}
                     </div>
-                    {adult ? (
-                      <VolunteerSlotClaimButton slotId={slot.id} full={full} alreadySignedUp={alreadySignedUp} />
-                    ) : (
-                      <span className="text-xs text-slate-500">Link your account to a household to volunteer</span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </SectionCard>
-        ))
+                  );
+                })}
+              </div>
+            </SectionCard>
+          );
+        })
       )}
     </main>
   );

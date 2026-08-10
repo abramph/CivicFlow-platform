@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canDeleteShift, canCancelShift, canRemoveSignup } from "../volunteer-ui-rules";
+import { canDeleteShift, canCancelShift, canRemoveSignup, canSaveSlotCapacity, canClaimSlot, canCancelSignup } from "../volunteer-ui-rules";
 
 describe("canDeleteShift — must match deletePtaVolunteerSlot()'s guard exactly", () => {
   it("allows delete when the shift has no signup history at all", () => {
@@ -37,4 +37,52 @@ describe("canRemoveSignup — must match cancelPtaVolunteerSignup()'s silent-no-
       expect(canRemoveSignup(status)).toBe(false);
     }
   );
+});
+
+describe("canSaveSlotCapacity — must match updatePtaVolunteerSlot()'s guard exactly", () => {
+  it("allows a capacity at or above the number already assigned", () => {
+    expect(canSaveSlotCapacity(3, 3)).toBe(true);
+    expect(canSaveSlotCapacity(5, 3)).toBe(true);
+    expect(canSaveSlotCapacity(1, 0)).toBe(true);
+  });
+
+  it("refuses a capacity below the number already assigned — the real bug: the form's HTML `min` attribute was never enforced without a <form> submit", () => {
+    expect(canSaveSlotCapacity(2, 3)).toBe(false);
+  });
+
+  it("refuses non-positive or non-integer capacity", () => {
+    expect(canSaveSlotCapacity(0, 0)).toBe(false);
+    expect(canSaveSlotCapacity(-1, 0)).toBe(false);
+    expect(canSaveSlotCapacity(1.5, 0)).toBe(false);
+    expect(canSaveSlotCapacity(NaN, 0)).toBe(false);
+  });
+});
+
+describe("canClaimSlot — must match claimPtaVolunteerSlot()'s guards not already covered by the page-level OPEN-opportunity filter", () => {
+  it("allows claiming an open, unfilled slot before the signup deadline", () => {
+    expect(canClaimSlot({ slotStatus: "OPEN", full: false, signupDeadlinePassed: false })).toBe(true);
+  });
+
+  it("refuses when the individual slot is closed or cancelled, even though the parent opportunity is OPEN", () => {
+    expect(canClaimSlot({ slotStatus: "CLOSED", full: false, signupDeadlinePassed: false })).toBe(false);
+    expect(canClaimSlot({ slotStatus: "CANCELLED", full: false, signupDeadlinePassed: false })).toBe(false);
+  });
+
+  it("refuses once the signup deadline has passed, even with open seats", () => {
+    expect(canClaimSlot({ slotStatus: "OPEN", full: false, signupDeadlinePassed: true })).toBe(false);
+  });
+
+  it("refuses when full", () => {
+    expect(canClaimSlot({ slotStatus: "OPEN", full: true, signupDeadlinePassed: false })).toBe(false);
+  });
+});
+
+describe("canCancelSignup — must match cancelPtaVolunteerSignup()'s member-path cancellation-deadline guard", () => {
+  it("allows cancelling before the cancellation deadline", () => {
+    expect(canCancelSignup(false)).toBe(true);
+  });
+
+  it("refuses cancelling once the cancellation deadline has passed", () => {
+    expect(canCancelSignup(true)).toBe(false);
+  });
 });
