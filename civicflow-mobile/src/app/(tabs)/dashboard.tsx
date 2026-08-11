@@ -271,7 +271,7 @@ export default function DashboardScreen() {
         ) : null}
         <Pressable
           style={styles.actionButtonSecondary}
-          onPress={() => router.push(hasMemberIdentity ? '/report-payment' : '/pta-report-payment')}
+          onPress={() => router.push(hasPtaIdentity && !hasMemberIdentity ? '/pta-report-payment' : '/report-payment')}
           accessibilityRole="button"
           accessibilityLabel="Report a payment"
         >
