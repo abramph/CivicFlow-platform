@@ -51,6 +51,14 @@ function roster(signup: Partial<{ checkInAt: string | null; checkOutAt: string |
   };
 }
 
+function emptyRoster() {
+  return {
+    id: 'opp-1',
+    title: 'Picture Day Helpers',
+    slots: [],
+  };
+}
+
 describe('Volunteer check-in roster', () => {
   beforeEach(() => {
     mockGetPtaVolunteerRoster.mockReset();
@@ -94,5 +102,13 @@ describe('Volunteer check-in roster', () => {
     await waitFor(() => expect(screen.getByText('Checked out')).toBeTruthy());
 
     expect(screen.queryByLabelText('Mark Casey Kim attended')).toBeNull();
+  });
+
+  it('shows an explicit empty state when no volunteer shifts have been added', async () => {
+    mockGetPtaVolunteerRoster.mockResolvedValue(emptyRoster());
+
+    await render(<VolunteerCheckinRosterScreen />);
+
+    await waitFor(() => expect(screen.getByText('No volunteer shifts have been added yet.')).toBeTruthy());
   });
 });
