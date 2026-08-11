@@ -164,18 +164,22 @@ export default function VolunteerCheckinRosterScreen() {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <ThemedText type="title">{roster.title}</ThemedText>
-      {roster.slots.map((slot) => (
-        <ThemedView key={slot.id} style={styles.slotSection}>
-          <ThemedText type="smallBold">
-            {slot.label ?? 'Shift'} · {slot.claimedCount}/{slot.capacity}
-          </ThemedText>
-          {slot.signups.length === 0 ? (
-            <ThemedText type="small" themeColor="textSecondary">No one signed up.</ThemedText>
-          ) : (
-            slot.signups.map(renderSignup)
-          )}
-        </ThemedView>
-      ))}
+      {roster.slots.length === 0 ? (
+        <ThemedText type="small" themeColor="textSecondary">No volunteer shifts have been added yet.</ThemedText>
+      ) : (
+        roster.slots.map((slot) => (
+          <ThemedView key={slot.id} style={styles.slotSection}>
+            <ThemedText type="smallBold">
+              {slot.label ?? 'Shift'} · {slot.claimedCount}/{slot.capacity}
+            </ThemedText>
+            {slot.signups.length === 0 ? (
+              <ThemedText type="small" themeColor="textSecondary">No one signed up.</ThemedText>
+            ) : (
+              slot.signups.map(renderSignup)
+            )}
+          </ThemedView>
+        ))
+      )}
     </ScrollView>
   );
 }
