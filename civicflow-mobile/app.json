@@ -8,7 +8,7 @@
     "scheme": "unestra",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon",
+      "icon": "./assets/images/icon.png",
       "bundleIdentifier": "com.aphtechnologies.unestra",
       "supportsTablet": true,
       "associatedDomains": ["applinks:app.getunestra.com", "applinks:app.civicflowapp.com"],
