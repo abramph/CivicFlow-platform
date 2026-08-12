@@ -17,7 +17,7 @@ jest.mock('@/lib/unread-count', () => ({
 }));
 
 const mockGetAnnouncementsForIdentity = jest.fn();
-const mockGetEventsForIdentity = jest.fn();
+const mockGetEventsForOrganization = jest.fn();
 const mockGetDues = jest.fn();
 const mockGetPaymentHistory = jest.fn();
 const mockGetPtaDues = jest.fn();
@@ -25,7 +25,7 @@ const mockGetPtaVolunteerHours = jest.fn();
 const mockGetPtaVolunteerCommitments = jest.fn();
 jest.mock('@/lib/mobile-api', () => ({
   getAnnouncementsForIdentity: (...args: unknown[]) => mockGetAnnouncementsForIdentity(...args),
-  getEventsForIdentity: (...args: unknown[]) => mockGetEventsForIdentity(...args),
+  getEventsForOrganization: (...args: unknown[]) => mockGetEventsForOrganization(...args),
   getDues: (...args: unknown[]) => mockGetDues(...args),
   getPaymentHistory: (...args: unknown[]) => mockGetPaymentHistory(...args),
   getPtaDues: (...args: unknown[]) => mockGetPtaDues(...args),
@@ -41,7 +41,7 @@ jest.mock('@/lib/mobile-api', () => ({
  * available for this organization" guard). The destination must key off
  * the same `hasPtaIdentity && !hasMemberIdentity` condition used
  * everywhere else in this app (dues.tsx, event/[id].tsx,
- * getEventsForIdentity/getAnnouncementsForIdentity), never
+ * getEventsForOrganization/getAnnouncementsForIdentity), never
  * `hasMemberIdentity` alone.
  *
  * Follow-up: routing correctly to /report-payment still left staff-only
@@ -99,7 +99,7 @@ describe('Dashboard "Report a Payment" quick action', () => {
   beforeEach(() => {
     mockRouterPush.mockReset();
     mockGetAnnouncementsForIdentity.mockReset().mockResolvedValue([]);
-    mockGetEventsForIdentity.mockReset().mockResolvedValue([]);
+    mockGetEventsForOrganization.mockReset().mockResolvedValue([]);
     mockGetDues.mockReset().mockResolvedValue({ outstandingBalance: 0, isDelinquent: false, delinquentSince: null, charges: [] });
     mockGetPaymentHistory.mockReset().mockResolvedValue({ payments: [], reports: [] });
     mockGetPtaDues.mockReset().mockResolvedValue({

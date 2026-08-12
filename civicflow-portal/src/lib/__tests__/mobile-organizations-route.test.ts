@@ -438,3 +438,96 @@ describe("GET /api/mobile/organizations — PTA household routing wins over a li
     expect(body.data[0]).toEqual(expect.objectContaining({ memberId: "member-staff" }));
   });
 });
+
+/**
+ * Core Event RSVP — capability.rsvp is the explicit contract the mobile
+ * client keys ALL RSVP routing/UI off (mode by vertical, canRsvp by the
+ * caller's real identity), replacing the implicit `'myRsvp' in event` /
+ * memberId-presence discrimination.
+ */
+describe("GET /api/mobile/organizations — rsvp capability contract", () => {
+  async function fetchRows() {
+    const token = await signAccessToken("user-1", 0);
+    const response = await GET(new Request("https://portal.test/api/mobile/organizations", { headers: { Authorization: `Bearer ${token}` } }));
+    return (await response.json()).data;
+  }
+
+  it("Community member → individual mode, canRsvp true, no guest counts", async () => {
+    findManyMembership.mockResolvedValueOnce([
+      { organizationId: "org-a", organization: { id: "org-a", name: "Riverdale", logoUrl: null, primaryVertical: "COMMUNITY" }, joinedAt: new Date() },
+    ]);
+    findManyOrgMember.mockResolvedValueOnce([{ id: "member-1", organizationId: "org-a", firstName: "Jamie", lastName: "Lee", membershipStatus: "active", isDelinquent: false }]);
+
+    const rows = await fetchRows();
+    expect(rows[0].capability.rsvp).toEqual({ mode: "individual", guestCounts: false, canRsvp: true });
+  });
+
+  it("Union member → individual mode, canRsvp true", async () => {
+    findManyMembership.mockResolvedValueOnce([
+      { organizationId: "org-u", organization: { id: "org-u", name: "Local 408", logoUrl: null, primaryVertical: "UNION" }, joinedAt: new Date() },
+    ]);
+    findManyOrgMember.mockResolvedValueOnce([{ id: "member-u", organizationId: "org-u", firstName: "Pat", lastName: "Ng", membershipStatus: "active", isDelinquent: false }]);
+
+    const rows = await fetchRows();
+    expect(rows[0].capability.rsvp).toEqual({ mode: "individual", guestCounts: false, canRsvp: true });
+  });
+
+  it("PTA household adult → household mode with guest counts, canRsvp true", async () => {
+    findManyHouseholdAdult.mockResolvedValueOnce([
+      { id: "adult-1", organizationId: "org-pta", name: "Casey Kim", organization: { id: "org-pta", name: "Harris PTA", logoUrl: null, primaryVertical: "PTA" } },
+    ]);
+
+    const rows = await fetchRows();
+    expect(rows[0].capability.rsvp).toEqual({ mode: "household", guestCounts: true, canRsvp: true });
+  });
+
+  it("PTA officer WITHOUT a household link → household mode but canRsvp false, even with a linked OrgMember", async () => {
+    findManyMembership
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: "membership-1", organizationId: "org-pta", role: "STAFF", organization: { id: "org-pta", name: "Harris PTA", logoUrl: null, status: "active", primaryVertical: "PTA" } }]);
+    findManyOrgMember
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: "member-staff", organizationId: "org-pta", firstName: "Sam", lastName: "Reed", membershipStatus: "active", isDelinquent: false }]);
+    getEffectivePermissions.mockResolvedValueOnce(["pta:volunteers:checkin"]);
+
+    const rows = await fetchRows();
+    // The linked OrgMember resolves memberId for member-facing screens, but
+    // must NOT unlock RSVP — household identity is the only RSVP identity in
+    // a PTA org.
+    expect(rows[0]).toEqual(expect.objectContaining({ memberId: "member-staff" }));
+    expect(rows[0].capability.rsvp).toEqual({ mode: "household", guestCounts: true, canRsvp: false });
+  });
+
+  it("Community ORG_OWNER with a linked OrgMember → canRsvp true (dual identity)", async () => {
+    findManyMembership
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: "membership-1", organizationId: "org-a", role: "ORG_OWNER", organization: { id: "org-a", name: "Riverdale", logoUrl: null, status: "active", primaryVertical: "COMMUNITY" } }]);
+    findManyOrgMember
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: "member-owner", organizationId: "org-a", firstName: "Abram", lastName: "Harris", membershipStatus: "active", isDelinquent: false }]);
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "ORG_OWNER", adminCapabilities: ["adminDashboard"] });
+
+    const rows = await fetchRows();
+    expect(rows[0].capability.rsvp).toEqual({ mode: "individual", guestCounts: false, canRsvp: true });
+  });
+
+  it("Community ORG_OWNER without an OrgMember (staff-only) → individual mode but canRsvp false", async () => {
+    findManyMembership
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: "membership-1", organizationId: "org-a", role: "ORG_OWNER", organization: { id: "org-a", name: "Riverdale", logoUrl: null, status: "active", primaryVertical: "COMMUNITY" } }]);
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "ORG_OWNER", adminCapabilities: ["adminDashboard"] });
+
+    const rows = await fetchRows();
+    expect(rows[0].capability.rsvp).toEqual({ mode: "individual", guestCounts: false, canRsvp: false });
+  });
+
+  it("HOA org → mode none, canRsvp false regardless of identity", async () => {
+    findManyMembership.mockResolvedValueOnce([
+      { organizationId: "org-hoa", organization: { id: "org-hoa", name: "Oak Ridge HOA", logoUrl: null, primaryVertical: "HOA" }, joinedAt: new Date() },
+    ]);
+    findManyOrgMember.mockResolvedValueOnce([{ id: "member-h", organizationId: "org-hoa", firstName: "Ryan", lastName: "Ott", membershipStatus: "active", isDelinquent: false }]);
+
+    const rows = await fetchRows();
+    expect(rows[0].capability.rsvp).toEqual({ mode: "none", guestCounts: false, canRsvp: false });
+  });
+});

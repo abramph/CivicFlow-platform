@@ -4,6 +4,7 @@ import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { AttachmentManager } from "@/components/forms/AttachmentManager";
 import { CancelEventButton } from "@/components/forms/CancelEventButton";
 import { prisma } from "@/lib/prisma";
+import { getRsvpMode } from "@/lib/event-rsvp";
 import { EVENT_STATUS_LABELS, isCancelledEventStatus, normalizeEventStatus } from "@/lib/event-status";
 import {
   formatCurrency,
@@ -20,7 +21,7 @@ export default async function EventDetailPage({
   const { organizationId, can } = await requirePermission("events:read");
   const { id } = await params;
 
-  const [event, contributionSummary, contributions, attendance, volunteerOpportunities] = await Promise.all([
+  const [event, contributionSummary, contributions, attendance, volunteerOpportunities, organization] = await Promise.all([
     prisma.event.findFirst({
       where: { id, organizationId },
     }),
@@ -53,7 +54,23 @@ export default async function EventDetailPage({
       select: { id: true, title: true, status: true, slots: { select: { capacity: true, signups: { where: { status: { in: ["SIGNED_UP", "WAITLISTED"] } }, select: { id: true } } } } },
       orderBy: { createdAt: "desc" },
     }),
+    prisma.organization.findUnique({ where: { id: organizationId }, select: { primaryVertical: true } }),
   ]);
+
+  // Individual (per-member) RSVPs — Community/Union only. PTA events keep
+  // their household-level RSVP view on /labs/pta/events/[eventId] (a
+  // household row there can represent several attendees, so its counts are
+  // NOT comparable to these row-per-member counts); HOA is RSVP mode "none".
+  const rsvpMode = organization ? getRsvpMode(organization.primaryVertical) : "none";
+  const eventRsvps =
+    rsvpMode === "individual"
+      ? await prisma.eventRsvp.findMany({
+          where: { organizationId, eventId: id },
+          include: { orgMember: { select: { id: true, firstName: true, lastName: true } } },
+          orderBy: { updatedAt: "desc" },
+        })
+      : [];
+  const rsvpGoingCount = eventRsvps.filter((r) => r.status === "GOING").length;
 
   if (!event) {
     return (
@@ -103,6 +120,12 @@ export default async function EventDetailPage({
           helper={`${contributionSummary._count.id} contributions`}
         />
         <StatCard label="Attendance" value={attendance.length} helper={`${attendance.filter((row) => ["PRESENT", "VIRTUAL"].includes(row.attendanceStatus)).length} present / virtual`} />
+        {rsvpMode === "individual" ? (
+          // For individual RSVP one GOING row is exactly one expected
+          // attendee, so this count IS the attendee aggregate (PTA household
+          // RSVPs instead sum attendeeCount — see labs/pta/events.ts).
+          <StatCard label="RSVPs" value={rsvpGoingCount} helper={`${rsvpGoingCount} expected attendee${rsvpGoingCount === 1 ? "" : "s"} · ${eventRsvps.length} response${eventRsvps.length === 1 ? "" : "s"}`} />
+        ) : null}
       </div>
 
       <SectionCard title="Event Overview" description="Operational details for this event.">
@@ -140,6 +163,33 @@ export default async function EventDetailPage({
               );
             })}
           </ul>
+        </SectionCard>
+      ) : null}
+
+      {rsvpMode === "individual" ? (
+        <SectionCard title="Member RSVPs" description="Individual RSVP responses from members for this event. Each 'Going' response represents one expected attendee.">
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead className="bg-slate-50 text-left text-slate-700">
+                <tr><th className="px-4 py-3">Member</th><th className="px-4 py-3">Response</th><th className="px-4 py-3">Updated</th></tr>
+              </thead>
+              <tbody>
+                {eventRsvps.length === 0 ? (
+                  <tr><td colSpan={3} className="px-4 py-6 text-center text-slate-600">No members have responded to this event yet.</td></tr>
+                ) : eventRsvps.map((rsvp) => (
+                  <tr key={rsvp.id} className="border-t border-slate-100">
+                    <td className="px-4 py-3 text-slate-900">
+                      <Link href={`/members/${rsvp.orgMember.id}`} className="text-emerald-700 hover:underline">
+                        {rsvp.orgMember.lastName}, {rsvp.orgMember.firstName}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-3 text-slate-900">{formatEnumLabel(rsvp.status)}</td>
+                    <td className="px-4 py-3 text-slate-900">{formatDateTime(rsvp.updatedAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </SectionCard>
       ) : null}
 

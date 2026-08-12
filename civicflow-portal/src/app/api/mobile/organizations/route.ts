@@ -4,6 +4,7 @@ import { getEffectivePermissions } from "@/lib/role-permissions";
 import { resolveEffectiveVertical } from "@/lib/organization-experience";
 import { getVerticalTerminology, getQuickActions } from "@/lib/vertical-terminology";
 import { getVerticalCapabilities } from "@/lib/vertical-capabilities";
+import { resolveRsvpCapability, type RsvpCapability } from "@/lib/event-rsvp";
 import { resolveMobileAdminCapabilities, type AdminCapabilityFlag } from "@/lib/mobile-admin";
 import { prisma } from "@/lib/prisma";
 import { PERMISSIONS, type Role } from "@/lib/rbac";
@@ -65,13 +66,28 @@ interface OrgCapability {
    * simply ignore it. Never derive admin UI from role/permission strings
    * client-side -- this array is the sole authority. */
   adminCapabilities: AdminCapabilityFlag[];
+  /** Core Event RSVP program — the explicit RSVP contract (mode by vertical,
+   * canRsvp by the caller's actual identity in this org). The mobile client
+   * must key its RSVP routing/UI off this, never off `memberId` /
+   * `pta.householdAdultId` presence or off event response shapes (`'myRsvp'
+   * in event`) — that implicit discrimination is exactly what regressed in
+   * Build 9. Old app builds that don't know this field simply ignore it. */
+  rsvp: RsvpCapability;
 }
 
 /** `vertical` must already be the effective vertical (see
  * resolveEffectiveVertical) — resolved once per row by the caller, which
  * knows whether that check is even necessary (rows already confirmed PTA by
- * branches 2/3 below don't need a second Labs-access check). */
-function buildCapability(vertical: OrganizationVertical, hasPtaAccess: boolean, adminCapabilities: AdminCapabilityFlag[]) {
+ * branches 2/3 below don't need a second Labs-access check).
+ *
+ * `rsvpIdentity` must reflect the row AFTER the role-agnostic member
+ * resolution pass (branch 4) — canRsvp for individual mode depends on it. */
+function buildCapability(
+  vertical: OrganizationVertical,
+  hasPtaAccess: boolean,
+  adminCapabilities: AdminCapabilityFlag[],
+  rsvpIdentity: { hasHouseholdIdentity: boolean; hasMemberIdentity: boolean }
+) {
   const terminology = getVerticalTerminology(vertical);
   const supportedModules = ["dashboard", "inbox", "announcements", "dues", "events", "profile"];
   if (hasPtaAccess) supportedModules.push("volunteers");
@@ -88,6 +104,7 @@ function buildCapability(vertical: OrganizationVertical, hasPtaAccess: boolean, 
       propertyResidents: verticalCapabilities.propertyResidents,
     },
     adminCapabilities,
+    rsvp: resolveRsvpCapability(vertical, rsvpIdentity),
   };
 }
 
@@ -294,7 +311,19 @@ export async function GET(request: Request) {
           ? "PTA"
           : await resolveEffectiveVertical(row.organizationId, rawVerticalByOrgId.get(row.organizationId) ?? "COMMUNITY");
         const adminCapabilities = adminCapabilitiesByOrgId.get(row.organizationId) ?? [];
-        return { ...row, capability: buildCapability(vertical, row.pta !== null, adminCapabilities) };
+        // hasHouseholdIdentity is the actual household link, NOT `pta !== null`
+        // — a PTA officer row has pta.isOfficer=true with householdAdultId
+        // null, and such a caller cannot household-RSVP. memberId here is
+        // post-branch-4, so an owner/staff who is also a member gets
+        // canRsvp=true for individual mode; a PTA household adult's withheld
+        // memberId (see branch 4's comment) correctly never reaches this.
+        return {
+          ...row,
+          capability: buildCapability(vertical, row.pta !== null, adminCapabilities, {
+            hasHouseholdIdentity: Boolean(row.pta?.householdAdultId),
+            hasMemberIdentity: row.memberId !== null,
+          }),
+        };
       })
     );
 

@@ -105,6 +105,31 @@ export function markAnnouncementRead(organizationId: string, campaignId: string)
   });
 }
 
+// ── Event RSVP contract ──────────────────────────────────────────────────────
+// Mirrors civicflow-portal's src/lib/event-rsvp.ts. The organization's RSVP
+// capability (capability.rsvp on /api/mobile/organizations rows) and the
+// per-event `rsvp` block are the ONLY authorities for RSVP mode and identity —
+// never `'myRsvp' in event`, never memberId/householdAdultId presence (that
+// implicit discrimination is what regressed in Build 9).
+
+export type RsvpMode = 'household' | 'individual' | 'none';
+
+export type RsvpStatus = 'GOING' | 'NOT_GOING' | 'MAYBE';
+
+export interface RsvpCapability {
+  mode: RsvpMode;
+  guestCounts: boolean;
+  canRsvp: boolean;
+}
+
+export interface EventRsvpBlock {
+  mode: RsvpMode;
+  canRsvp: boolean;
+  guestCounts: boolean;
+  response: { status: RsvpStatus; attendeeCount: number } | null;
+  subject: { type: 'household' | 'member' | 'none'; id: string | null };
+}
+
 export interface MobileEvent {
   id: string;
   title: string;
@@ -113,10 +138,22 @@ export interface MobileEvent {
   startAt: string | null;
   endAt: string | null;
   status: string;
+  /** Optional only for compatibility with pre-RSVP server responses — the
+   * current server always sends it. Absent block ⇒ no RSVP UI. */
+  rsvp?: EventRsvpBlock;
 }
 
 export function getEvents(organizationId: string) {
   return apiFetch<MobileEvent[]>(`/api/mobile/events?organizationId=${encodeURIComponent(organizationId)}`);
+}
+
+/** Individual (per-member) RSVP for Community/Union events. The server
+ * resolves the member from the authenticated user — no member ID is sent. */
+export function setEventRsvp(organizationId: string, eventId: string, status: RsvpStatus) {
+  return apiFetch<EventRsvpBlock>(`/api/mobile/events/${encodeURIComponent(eventId)}/rsvp`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId, status }),
+  });
 }
 
 export interface ConversationParticipant {
@@ -511,7 +548,11 @@ export interface PtaEvent {
   startAt: string | null;
   endAt: string | null;
   status: string;
+  /** Deprecated — kept because the server still sends it for older builds;
+   * new code reads `rsvp` instead. */
   myRsvp: PtaEventRsvp | null;
+  /** Same normalized contract as MobileEvent.rsvp (mode "household" here). */
+  rsvp?: EventRsvpBlock;
   volunteerOpportunities: PtaEventVolunteerOpportunity[];
 }
 
@@ -1724,6 +1765,25 @@ export function markAnnouncementReadForIdentity(organizationId: string, campaign
     : markPtaAnnouncementRead(organizationId, campaignId);
 }
 
-export function getEventsForIdentity(organizationId: string, hasMemberIdentity: boolean): Promise<PtaEvent[] | MobileEvent[]> {
-  return hasMemberIdentity ? getEvents(organizationId) : getPtaEvents(organizationId);
+/**
+ * Capability-driven event routing (Core Event RSVP program). The PTA
+ * household events endpoint is used exactly when the org's RSVP capability
+ * says mode "household" AND this caller actually holds the household identity
+ * (canRsvp) — everyone else (Community/Union members, staff-only logins, HOA,
+ * PTA staff without a household link) reads the generic endpoint, whose
+ * per-event `rsvp` block says what, if anything, they can do. The legacy
+ * `hasMemberIdentity` two-way switch survives ONLY as the fallback for a
+ * cached organizations response predating the rsvp capability.
+ */
+export function getEventsForOrganization(
+  organizationId: string,
+  rsvpCapability: RsvpCapability | undefined,
+  legacyHasMemberIdentity: boolean
+): Promise<PtaEvent[] | MobileEvent[]> {
+  if (rsvpCapability) {
+    return rsvpCapability.mode === 'household' && rsvpCapability.canRsvp
+      ? getPtaEvents(organizationId)
+      : getEvents(organizationId);
+  }
+  return legacyHasMemberIdentity ? getEvents(organizationId) : getPtaEvents(organizationId);
 }

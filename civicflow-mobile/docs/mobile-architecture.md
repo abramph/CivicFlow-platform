@@ -49,7 +49,7 @@ Both throw `MobileForbiddenError` (403), handled uniformly by `withApiErrorHandl
 
 ## API client
 
-`src/lib/api-client.ts` (unchanged this branch) — a single `apiFetch<T>()` wrapper handling auth headers, automatic refresh-on-401, and error normalization into `ApiError`. `src/lib/mobile-api.ts` adds typed wrapper functions for the `/api/mobile/pta/*` surface (volunteers, then announcements/events/RSVP/dues/minutes/documents), following the exact same one-function-per-endpoint pattern already used for every other API area in this file, plus a small set of `*ForIdentity()` routing helpers (`getAnnouncementsForIdentity`, `markAnnouncementReadForIdentity`, `getEventsForIdentity`) that centralize the conventional-vs-PTA route choice so screens don't each re-derive it.
+`src/lib/api-client.ts` (unchanged this branch) — a single `apiFetch<T>()` wrapper handling auth headers, automatic refresh-on-401, and error normalization into `ApiError`. `src/lib/mobile-api.ts` adds typed wrapper functions for the `/api/mobile/pta/*` surface (volunteers, then announcements/events/RSVP/dues/minutes/documents), following the exact same one-function-per-endpoint pattern already used for every other API area in this file, plus a small set of routing helpers that centralize the conventional-vs-PTA route choice so screens don't each re-derive it: `getAnnouncementsForIdentity` / `markAnnouncementReadForIdentity` (still keyed on `hasMemberIdentity`), and `getEventsForOrganization` (Core Event RSVP program — keyed on the org's explicit `capability.rsvp` contract, with `hasMemberIdentity` kept only as the fallback for cached pre-RSVP responses; the former `getEventsForIdentity` is retired).
 
 ## Navigation
 

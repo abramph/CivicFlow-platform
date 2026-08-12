@@ -9,7 +9,7 @@ import {
   getCampaigns,
   getConversation,
   getConversations,
-  getEventsForIdentity,
+  getEventsForOrganization,
   getPaymentLinkSlug,
   getPaymentMethods,
   getPendingPtaHourEntries,
@@ -30,6 +30,7 @@ import {
   markPtaAnnouncementRead,
   reportPtaDuesPayment,
   sendConversationMessage,
+  setEventRsvp,
   setPtaEventRsvp,
   setPtaVolunteerAttendance,
   submitPaymentReport,
@@ -357,16 +358,48 @@ describe('mobile-api', () => {
       expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/announcements/campaign-1/read', expect.anything());
     });
 
-    it('getEventsForIdentity calls the conventional route when hasMemberIdentity is true', async () => {
+  });
+
+  describe('capability-driven event routing (Core Event RSVP)', () => {
+    it('uses the PTA household endpoint only when mode is household AND the caller can RSVP', async () => {
       mockApiFetch.mockResolvedValueOnce([]);
-      await getEventsForIdentity('org-1', true);
+      await getEventsForOrganization('org-1', { mode: 'household', guestCounts: true, canRsvp: true }, false);
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/events?organizationId=org-1');
+    });
+
+    it('routes a household-mode org WITHOUT household identity (PTA staff) to the generic endpoint', async () => {
+      mockApiFetch.mockResolvedValueOnce([]);
+      await getEventsForOrganization('org-1', { mode: 'household', guestCounts: true, canRsvp: false }, true);
       expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/events?organizationId=org-1');
     });
 
-    it('getEventsForIdentity calls the PTA bridge route when hasMemberIdentity is false', async () => {
+    it('routes individual and none modes to the generic endpoint', async () => {
       mockApiFetch.mockResolvedValueOnce([]);
-      await getEventsForIdentity('org-1', false);
+      await getEventsForOrganization('org-1', { mode: 'individual', guestCounts: false, canRsvp: true }, false);
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/events?organizationId=org-1');
+
+      mockApiFetch.mockResolvedValueOnce([]);
+      await getEventsForOrganization('org-hoa', { mode: 'none', guestCounts: false, canRsvp: false }, true);
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/events?organizationId=org-hoa');
+    });
+
+    it('falls back to the legacy hasMemberIdentity switch only when the rsvp capability is absent', async () => {
+      mockApiFetch.mockResolvedValueOnce([]);
+      await getEventsForOrganization('org-1', undefined, true);
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/events?organizationId=org-1');
+
+      mockApiFetch.mockResolvedValueOnce([]);
+      await getEventsForOrganization('org-1', undefined, false);
       expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/events?organizationId=org-1');
+    });
+
+    it('setEventRsvp posts only organizationId and status — the member is server-resolved', async () => {
+      mockApiFetch.mockResolvedValueOnce({ mode: 'individual', canRsvp: true, guestCounts: false, response: { status: 'GOING', attendeeCount: 1 }, subject: { type: 'member', id: 'member-1' } });
+      await setEventRsvp('org-1', 'event-1', 'GOING');
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/events/event-1/rsvp', {
+        method: 'POST',
+        body: JSON.stringify({ organizationId: 'org-1', status: 'GOING' }),
+      });
     });
   });
 });
