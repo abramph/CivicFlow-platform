@@ -21,10 +21,17 @@ jest.mock('@/lib/mobile-api', () => ({
   submitPaymentReport: (...args: unknown[]) => mockSubmitPaymentReport(...args),
 }));
 
+// memberId is required: the screen now redirects a caller with no constituent
+// identity to /dues (a staff/owner login would otherwise 403 on submit), so a
+// fixture without it never renders the org switcher these tests assert on.
 function authWith(organizationCount: number) {
   return {
     status: 'signedIn',
-    organizations: Array.from({ length: organizationCount }, (_, i) => ({ organizationId: `org-${i}`, organizationName: `Org ${i}` })),
+    organizations: Array.from({ length: organizationCount }, (_, i) => ({
+      organizationId: `org-${i}`,
+      organizationName: `Org ${i}`,
+      memberId: `member-${i}`,
+    })),
     selectedOrganizationId: 'org-0',
   };
 }

@@ -40,6 +40,34 @@ function ptaParentOrg() {
   };
 }
 
+/**
+ * A staff/owner login with no linked OrgMember. Distinct from an owner who IS
+ * also a member — that account resolves a real memberId (see the API's
+ * role-agnostic OrgMember lookup) and is indistinguishable here from any other
+ * member, which is the point: the client keys off identity, never off role.
+ */
+function staffOnlyOrg() {
+  return {
+    organizationId: 'org-aph',
+    organizationName: 'APH Technologies, LLC',
+    memberId: null,
+    firstName: null,
+    lastName: null,
+    pta: null,
+  };
+}
+
+function ownerMemberOrg() {
+  return {
+    organizationId: 'org-aph',
+    organizationName: 'APH Technologies, LLC',
+    memberId: 'member-owner',
+    firstName: 'Abram',
+    lastName: 'Harris',
+    pta: null,
+  };
+}
+
 describe('Dues screen', () => {
   beforeEach(() => {
     mockGetDues.mockReset();
@@ -110,5 +138,33 @@ describe('Dues screen', () => {
     await render(<DuesScreen />);
 
     await waitFor(() => expect(screen.getByText(/doesn't have a dues billing record yet/)).toBeTruthy());
+  });
+
+  it('shows a non-member state — not the member UI — for a staff/owner with no member identity', async () => {
+    mockUseAuth.mockReturnValue({ selectedOrganization: staffOnlyOrg(), selectedOrganizationId: 'org-aph' });
+
+    await render(<DuesScreen />);
+
+    expect(screen.getByText(/No personal dues or payment account is associated/)).toBeTruthy();
+    // Previously this account fell through to the conventional-member render,
+    // which offered three actions that each 403'd server-side.
+    expect(screen.queryByLabelText('Make a payment')).toBeNull();
+    expect(screen.queryByLabelText('Report a payment')).toBeNull();
+    expect(screen.queryByLabelText('View payment history')).toBeNull();
+    expect(screen.queryByText('Outstanding Balance')).toBeNull();
+    expect(mockGetDues).not.toHaveBeenCalled();
+    expect(mockGetPtaDues).not.toHaveBeenCalled();
+  });
+
+  it('shows the full member UI for an owner who also has a linked member identity', async () => {
+    mockUseAuth.mockReturnValue({ selectedOrganization: ownerMemberOrg(), selectedOrganizationId: 'org-aph' });
+    mockGetDues.mockResolvedValue({ outstandingBalance: 60, isDelinquent: false, charges: [] });
+
+    await render(<DuesScreen />);
+
+    await waitFor(() => expect(screen.getByText('$60.00')).toBeTruthy());
+    expect(screen.getByLabelText('Make a payment')).toBeTruthy();
+    expect(screen.getByLabelText('Report a payment')).toBeTruthy();
+    expect(mockGetDues).toHaveBeenCalledWith('org-aph');
   });
 });

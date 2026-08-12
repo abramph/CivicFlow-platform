@@ -222,10 +222,45 @@ export interface MobileMembership {
 }
 
 /**
- * Requires the caller to hold an active MEMBER-role OrganizationMembership for
- * the given organizationId, with a linked OrgMember record. The organizationId
- * is whatever the client asked for, but access is only granted if a matching
- * membership actually exists — never trusted on the client's say-so alone.
+ * Does this user hold SOME currently-active, legitimate tie to this
+ * organization — a MEMBER-role membership, a PTA household link, or a staff
+ * role? Says nothing about what they may then do; callers add their own
+ * requirement on top. Shared by `requireMobileMembership()` and
+ * `requireMobileOrgAccess()` so the two cannot drift apart.
+ */
+async function hasActiveOrgTie(userId: string, organizationId: string): Promise<boolean> {
+  const [membership, householdAdult, staffMembership] = await Promise.all([
+    prisma.organizationMembership.findFirst({
+      where: { userId, organizationId, role: "MEMBER", status: "active", organization: { status: "active" } },
+    }),
+    prisma.ptaHouseholdAdult.findFirst({
+      where: { organizationId, userId, organization: { status: "active" }, household: { status: "ACTIVE" } },
+    }),
+    prisma.organizationMembership.findFirst({
+      where: { userId, organizationId, role: { not: "MEMBER" }, status: "active", organization: { status: "active" } },
+    }),
+  ]);
+  return Boolean(membership || householdAdult || staffMembership);
+}
+
+/**
+ * Requires the caller to have an active tie to the organization AND a real
+ * `OrgMember` record linked to their login for it. The organizationId is
+ * whatever the client asked for, but access is only granted if both actually
+ * exist — never trusted on the client's say-so alone.
+ *
+ * Deliberately does NOT require `OrganizationMembership.role === "MEMBER"`.
+ * Administrative role and constituent identity are separate concepts: an
+ * ORG_OWNER/ORG_ADMIN/STAFF login may legitimately also be a dues-paying
+ * member (accept-invite.ts links the OrgMember while preserving the staff
+ * role). Keying member-only operations off the role rejected exactly those
+ * users, while the `OrgMember` lookup below is what actually establishes the
+ * identity these operations are scoped by. Same role-agnostic resolution
+ * org-context.ts already performs.
+ *
+ * Authorization is unchanged in substance: a staff/owner with NO linked
+ * OrgMember still fails, and this grants no administrative capability —
+ * callers receive a memberId and nothing else.
  */
 export async function requireMobileMembership(
   request: Request,
@@ -233,15 +268,9 @@ export async function requireMobileMembership(
 ): Promise<MobileMembership> {
   const session = await requireMobileAuth(request);
 
-  const membership = await prisma.organizationMembership.findFirst({
-    where: {
-      userId: session.userId,
-      organizationId,
-      role: "MEMBER",
-      organization: { status: "active" },
-    },
-  });
-  if (!membership) throw new MobileForbiddenError("No active membership for this organization");
+  if (!(await hasActiveOrgTie(session.userId, organizationId))) {
+    throw new MobileForbiddenError("No active membership for this organization");
+  }
 
   const member = await prisma.orgMember.findFirst({
     where: { userId: session.userId, organizationId },
@@ -317,25 +346,18 @@ export interface MobileOrgAccess {
 export async function requireMobileOrgAccess(request: Request, organizationId: string): Promise<MobileOrgAccess> {
   const session = await requireMobileAuth(request);
 
-  const [membership, householdAdult, staffMembership] = await Promise.all([
-    prisma.organizationMembership.findFirst({
-      where: { userId: session.userId, organizationId, role: "MEMBER", status: "active", organization: { status: "active" } },
-    }),
-    prisma.ptaHouseholdAdult.findFirst({
-      where: { organizationId, userId: session.userId, organization: { status: "active" }, household: { status: "ACTIVE" } },
-    }),
-    prisma.organizationMembership.findFirst({
-      where: { userId: session.userId, organizationId, role: { not: "MEMBER" }, status: "active", organization: { status: "active" } },
-    }),
-  ]);
-
-  if (!membership && !householdAdult && !staffMembership) {
+  if (!(await hasActiveOrgTie(session.userId, organizationId))) {
     throw new MobileForbiddenError("No active access to this organization");
   }
 
-  const member = membership
-    ? await prisma.orgMember.findFirst({ where: { userId: session.userId, organizationId }, select: { id: true } })
-    : null;
+  // Resolved role-agnostically: previously this only looked for an OrgMember
+  // when a MEMBER-role membership existed, so a staff/owner who genuinely had
+  // one still reported memberId: null. Presence of the OrgMember row is the
+  // thing that matters; the login's role is irrelevant to it.
+  const member = await prisma.orgMember.findFirst({
+    where: { userId: session.userId, organizationId },
+    select: { id: true },
+  });
 
   return { session, organizationId, memberId: member?.id ?? null };
 }

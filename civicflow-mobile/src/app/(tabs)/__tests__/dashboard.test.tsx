@@ -43,6 +43,12 @@ jest.mock('@/lib/mobile-api', () => ({
  * everywhere else in this app (dues.tsx, event/[id].tsx,
  * getEventsForIdentity/getAnnouncementsForIdentity), never
  * `hasMemberIdentity` alone.
+ *
+ * Follow-up: routing correctly to /report-payment still left staff-only
+ * accounts hitting requireMobileMembership's 403 ("No active membership
+ * for this organization"), because they hold OWNER rather than MEMBER.
+ * Such an account has no dues identity to report against, so the action
+ * is now gated on `hasAnyIdentity` and is not rendered at all.
  */
 
 function ptaParentOrg() {
@@ -75,6 +81,17 @@ function staffOnlyOrg() {
     firstName: null,
     lastName: null,
     pta: null,
+  };
+}
+
+function memberAndPtaOrg() {
+  return {
+    organizationId: 'org-both',
+    organizationName: 'Lakeside Union',
+    memberId: 'member-2',
+    firstName: 'Robin',
+    lastName: 'Diaz',
+    pta: { householdAdultId: 'adult-2', householdName: null, isOfficer: false, canCheckIn: false, canApproveHours: false },
   };
 }
 
@@ -118,14 +135,25 @@ describe('Dashboard "Report a Payment" quick action', () => {
     expect(mockRouterPush).toHaveBeenCalledWith('/report-payment');
   });
 
-  it('routes a staff/org-owner-only account (no MEMBER identity, no PTA identity) to /report-payment, not the PTA screen', async () => {
-    mockUseAuth.mockReturnValue({ selectedOrganization: staffOnlyOrg(), selectedOrganizationId: 'org-aph' });
+  it('routes an account holding both MEMBER and PTA identities to /report-payment', async () => {
+    mockUseAuth.mockReturnValue({ selectedOrganization: memberAndPtaOrg(), selectedOrganizationId: 'org-both' });
 
     await render(<DashboardScreen />);
+    await waitFor(() => expect(mockGetDues).toHaveBeenCalled());
 
     fireEvent.press(screen.getByLabelText('Report a payment'));
 
     expect(mockRouterPush).toHaveBeenCalledWith('/report-payment');
+    expect(mockRouterPush).not.toHaveBeenCalledWith('/pta-report-payment');
+  });
+
+  it('hides the action entirely for a staff/org-owner-only account (no MEMBER identity, no PTA identity)', async () => {
+    mockUseAuth.mockReturnValue({ selectedOrganization: staffOnlyOrg(), selectedOrganizationId: 'org-aph' });
+
+    await render(<DashboardScreen />);
+
+    expect(screen.queryByLabelText('Report a payment')).toBeNull();
+    expect(mockRouterPush).not.toHaveBeenCalledWith('/report-payment');
     expect(mockRouterPush).not.toHaveBeenCalledWith('/pta-report-payment');
     expect(mockGetPtaDues).not.toHaveBeenCalled();
   });

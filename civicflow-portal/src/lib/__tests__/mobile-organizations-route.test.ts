@@ -42,6 +42,13 @@ beforeEach(() => {
   resolveMobileAdminCapabilities.mockReset();
   resolveMobileAdminCapabilities.mockResolvedValue(NO_ADMIN_ACCESS);
   findUniqueUser.mockResolvedValue({ id: "user-1", email: "user@example.com", mobileTokenVersion: 0 });
+  // Fallbacks so a test only has to describe the calls it cares about. The
+  // route now makes a second orgMember.findMany — the role-agnostic pass that
+  // resolves a constituent identity for staff/owner rows — which would
+  // otherwise fall off the end of the mockResolvedValueOnce queue.
+  findManyMembership.mockResolvedValue([]);
+  findManyOrgMember.mockResolvedValue([]);
+  findManyHouseholdAdult.mockResolvedValue([]);
 });
 
 describe("GET /api/mobile/organizations", () => {
@@ -247,5 +254,111 @@ describe("GET /api/mobile/organizations", () => {
     expect(body.data[0].capability.adminCapabilities).toEqual([]);
     expect(body.data[0].capability.supportedModules).not.toContain("admin");
     expect(resolveMobileAdminCapabilities).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Administrative role and constituent identity are separate concepts, and a
+ * login may hold both. Because OrganizationMembership is unique per (user,
+ * org), that dual identity is necessarily expressed as a staff-role membership
+ * PLUS an OrgMember linked by userId — never two membership rows. The staff
+ * branch used to hardcode memberId: null, so such a user reported no member
+ * identity and every member-facing screen went dark for them.
+ */
+describe("GET /api/mobile/organizations — dual identity (staff/owner who is also a member)", () => {
+  const ownerMembership = {
+    id: "membership-owner",
+    organizationId: "org-a",
+    role: "ORG_OWNER",
+    organization: { id: "org-a", name: "APH Technologies, LLC", logoUrl: null, status: "active", primaryVertical: "COMMUNITY" },
+  };
+
+  it("resolves memberId for an ORG_OWNER who has a linked OrgMember", async () => {
+    findManyMembership.mockResolvedValueOnce([]).mockResolvedValueOnce([ownerMembership]);
+    findManyOrgMember
+      .mockResolvedValueOnce([]) // MEMBER-role branch finds nothing
+      .mockResolvedValueOnce([{ id: "member-owner", organizationId: "org-a", firstName: "Abram", lastName: "Harris", membershipStatus: "active", isDelinquent: false }]);
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "ORG_OWNER", adminCapabilities: ["adminDashboard"] });
+
+    const token = await signAccessToken("user-1", 0);
+    const response = await GET(new Request("https://portal.test/api/mobile/organizations", { headers: { Authorization: `Bearer ${token}` } }));
+    const body = await response.json();
+
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0]).toEqual(
+      expect.objectContaining({ organizationId: "org-a", memberId: "member-owner", firstName: "Abram", lastName: "Harris" })
+    );
+    // Administrative capability is unaffected — the two identities coexist.
+    expect(body.data[0].capability.adminCapabilities).toEqual(["adminDashboard"]);
+  });
+
+  it("resolves memberId for a STAFF login who has a linked OrgMember", async () => {
+    findManyMembership.mockResolvedValueOnce([]).mockResolvedValueOnce([{ ...ownerMembership, id: "membership-staff", role: "STAFF" }]);
+    findManyOrgMember
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: "member-staff", organizationId: "org-a", firstName: "Sam", lastName: "Reed", membershipStatus: "active", isDelinquent: false }]);
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "STAFF", adminCapabilities: ["adminDashboard"] });
+
+    const token = await signAccessToken("user-1", 0);
+    const response = await GET(new Request("https://portal.test/api/mobile/organizations", { headers: { Authorization: `Bearer ${token}` } }));
+    const body = await response.json();
+
+    expect(body.data[0]).toEqual(expect.objectContaining({ memberId: "member-staff", firstName: "Sam" }));
+  });
+
+  it("leaves memberId null for a staff/owner with no linked OrgMember", async () => {
+    findManyMembership.mockResolvedValueOnce([]).mockResolvedValueOnce([ownerMembership]);
+    findManyOrgMember.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "ORG_OWNER", adminCapabilities: ["adminDashboard"] });
+
+    const token = await signAccessToken("user-1", 0);
+    const response = await GET(new Request("https://portal.test/api/mobile/organizations", { headers: { Authorization: `Bearer ${token}` } }));
+    const body = await response.json();
+
+    expect(body.data[0]).toEqual(expect.objectContaining({ organizationId: "org-a", memberId: null }));
+  });
+
+  it("keeps a conventional MEMBER's memberId resolved by the original branch, not the fallback pass", async () => {
+    findManyMembership
+      .mockResolvedValueOnce([{ id: "membership-1", organizationId: "org-b", role: "MEMBER", joinedAt: new Date(0), organization: { id: "org-b", name: "Riverdale", logoUrl: null, primaryVertical: "COMMUNITY" } }])
+      .mockResolvedValueOnce([]);
+    findManyOrgMember.mockResolvedValueOnce([
+      { id: "member-1", organizationId: "org-b", firstName: "Jamie", lastName: "Lee", membershipStatus: "active", isDelinquent: false },
+    ]);
+
+    const token = await signAccessToken("user-1", 0);
+    const response = await GET(new Request("https://portal.test/api/mobile/organizations", { headers: { Authorization: `Bearer ${token}` } }));
+    const body = await response.json();
+
+    expect(body.data[0]).toEqual(expect.objectContaining({ memberId: "member-1" }));
+    // Nothing was left unresolved, so the second lookup never runs.
+    expect(findManyOrgMember).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives a PTA officer who is also a household adult BOTH identities, without clobbering the adult's own name", async () => {
+    findManyMembership
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: "membership-1", organizationId: "org-pta", role: "ORG_OWNER", organization: { id: "org-pta", name: "Pine Grove School PTA", logoUrl: null, status: "active", primaryVertical: "PTA" } }]);
+    findManyHouseholdAdult.mockResolvedValueOnce([
+      { id: "adult-1", organizationId: "org-pta", name: "Alex Morgan", organization: { id: "org-pta", name: "Pine Grove School PTA", logoUrl: null, primaryVertical: "PTA" } },
+    ]);
+    findManyOrgMember
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: "member-officer", organizationId: "org-pta", firstName: "Alexandra", lastName: "Morgan-Smith", membershipStatus: "active", isDelinquent: false }]);
+    getEffectivePermissions.mockResolvedValueOnce(["pta:volunteers:checkin", "pta:volunteer-hours:approve"]);
+
+    const token = await signAccessToken("user-1", 0);
+    const response = await GET(new Request("https://portal.test/api/mobile/organizations", { headers: { Authorization: `Bearer ${token}` } }));
+    const body = await response.json();
+
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0]).toEqual(
+      expect.objectContaining({
+        memberId: "member-officer",
+        // The household adult's own display name wins over the constituent record's.
+        firstName: "Alex",
+        pta: expect.objectContaining({ householdAdultId: "adult-1", isOfficer: true, canCheckIn: true }),
+      })
+    );
   });
 });

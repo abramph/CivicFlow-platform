@@ -17,7 +17,7 @@ const STATUS_LABEL: Record<AttendanceHistoryRow['attendanceStatus'], string> = {
 };
 
 export default function AttendanceHistoryScreen() {
-  const { status, selectedOrganizationId } = useAuth();
+  const { status, selectedOrganization, selectedOrganizationId } = useAuth();
   const [rows, setRows] = useState<AttendanceHistoryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -46,6 +46,12 @@ export default function AttendanceHistoryScreen() {
 
   if (status === 'signedOut') {
     return <Redirect href={{ pathname: '/login', params: { redirectTo: '/attendance-history' } }} />;
+  }
+  // Direct-route defense: attendance history is scoped by an OrgMember
+  // identity a staff/owner login may not hold. Reachable by deep link even
+  // though the Profile entry point gates on it.
+  if (status === 'signedIn' && selectedOrganization && !selectedOrganization.memberId) {
+    return <Redirect href="/dues" />;
   }
 
   return (

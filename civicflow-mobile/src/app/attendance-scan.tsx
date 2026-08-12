@@ -24,7 +24,7 @@ function extractToken(scannedValue: string): string | null {
 type ScreenState = { kind: 'scanning' } | { kind: 'processing' } | { kind: 'success'; result: AttendanceCheckInResult } | { kind: 'error'; message: string };
 
 export default function AttendanceScanScreen() {
-  const { status } = useAuth();
+  const { status, selectedOrganization } = useAuth();
   const [permission, requestPermission] = useCameraPermissions();
   const [state, setState] = useState<ScreenState>({ kind: 'scanning' });
   const processingRef = useRef(false);
@@ -61,6 +61,13 @@ export default function AttendanceScanScreen() {
 
   if (status === 'signedOut') {
     return <Redirect href={{ pathname: '/login', params: { redirectTo: '/attendance-scan' } }} />;
+  }
+  // Direct-route defense: check-in is recorded against an OrgMember identity a
+  // staff/owner login may not hold. The organization is derived server-side
+  // from the scanned QR, not from the client, so this only avoids a doomed
+  // scan — it does not weaken that guard.
+  if (status === 'signedIn' && selectedOrganization && !selectedOrganization.memberId) {
+    return <Redirect href="/dues" />;
   }
 
   if (!permission) {
