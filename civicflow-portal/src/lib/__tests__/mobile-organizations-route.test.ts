@@ -335,16 +335,13 @@ describe("GET /api/mobile/organizations — dual identity (staff/owner who is al
     expect(findManyOrgMember).toHaveBeenCalledTimes(1);
   });
 
-  it("gives a PTA officer who is also a household adult BOTH identities, without clobbering the adult's own name", async () => {
+  it("gives a PTA officer who is also a household adult their PTA identity, and preserves officer capability", async () => {
     findManyMembership
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ id: "membership-1", organizationId: "org-pta", role: "ORG_OWNER", organization: { id: "org-pta", name: "Pine Grove School PTA", logoUrl: null, status: "active", primaryVertical: "PTA" } }]);
     findManyHouseholdAdult.mockResolvedValueOnce([
       { id: "adult-1", organizationId: "org-pta", name: "Alex Morgan", organization: { id: "org-pta", name: "Pine Grove School PTA", logoUrl: null, primaryVertical: "PTA" } },
     ]);
-    findManyOrgMember
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ id: "member-officer", organizationId: "org-pta", firstName: "Alexandra", lastName: "Morgan-Smith", membershipStatus: "active", isDelinquent: false }]);
     getEffectivePermissions.mockResolvedValueOnce(["pta:volunteers:checkin", "pta:volunteer-hours:approve"]);
 
     const token = await signAccessToken("user-1", 0);
@@ -354,11 +351,90 @@ describe("GET /api/mobile/organizations — dual identity (staff/owner who is al
     expect(body.data).toHaveLength(1);
     expect(body.data[0]).toEqual(
       expect.objectContaining({
-        memberId: "member-officer",
-        // The household adult's own display name wins over the constituent record's.
+        organizationId: "org-pta",
         firstName: "Alex",
         pta: expect.objectContaining({ householdAdultId: "adult-1", isOfficer: true, canCheckIn: true }),
       })
     );
+  });
+});
+
+/**
+ * The mobile client's identity-sensitive reads are two-way switches with no
+ * third branch (`hasMemberIdentity ? conventional : PTA`), so memberId doubles
+ * as "is NOT a PTA parent" there. A household adult who also holds an
+ * OrgMember must therefore keep memberId null for routing purposes, or the
+ * client silently switches to conventional endpoints — which return
+ * MobileEvent instead of PtaEvent, so isPtaEvent() fails and the RSVP control
+ * disappears. Regression shipped in Build 9 and caught on device.
+ */
+describe("GET /api/mobile/organizations — PTA household routing wins over a linked OrgMember", () => {
+  const ptaAdult = {
+    id: "adult-1",
+    organizationId: "org-pta",
+    name: "Casey Kim",
+    organization: { id: "org-pta", name: "Harris PTA", logoUrl: null, primaryVertical: "PTA" },
+  };
+
+  it("keeps memberId null for a PTA household adult who also has a linked OrgMember", async () => {
+    findManyHouseholdAdult.mockResolvedValueOnce([ptaAdult]);
+    // A real linked OrgMember exists for this user in this org — it is simply
+    // not used for mobile identity routing, and is untouched in the database.
+    findManyOrgMember.mockResolvedValue([
+      { id: "member-linked", organizationId: "org-pta", firstName: "Casey", lastName: "Kim", membershipStatus: "active", isDelinquent: false },
+    ]);
+
+    const token = await signAccessToken("user-1", 0);
+    const response = await GET(new Request("https://portal.test/api/mobile/organizations", { headers: { Authorization: `Bearer ${token}` } }));
+    const body = await response.json();
+
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0]).toEqual(
+      expect.objectContaining({
+        organizationId: "org-pta",
+        memberId: null,
+        pta: expect.objectContaining({ householdAdultId: "adult-1" }),
+      })
+    );
+  });
+
+  it("keeps memberId null for a PTA officer who is also a household adult, without dropping officer capability", async () => {
+    findManyMembership
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: "membership-1", organizationId: "org-pta", role: "ORG_OWNER", organization: { id: "org-pta", name: "Harris PTA", logoUrl: null, status: "active", primaryVertical: "PTA" } }]);
+    findManyHouseholdAdult.mockResolvedValueOnce([ptaAdult]);
+    findManyOrgMember.mockResolvedValue([
+      { id: "member-linked", organizationId: "org-pta", firstName: "Casey", lastName: "Kim", membershipStatus: "active", isDelinquent: false },
+    ]);
+    getEffectivePermissions.mockResolvedValueOnce(["pta:volunteers:checkin", "pta:volunteer-hours:approve"]);
+
+    const token = await signAccessToken("user-1", 0);
+    const response = await GET(new Request("https://portal.test/api/mobile/organizations", { headers: { Authorization: `Bearer ${token}` } }));
+    const body = await response.json();
+
+    expect(body.data[0]).toEqual(
+      expect.objectContaining({
+        memberId: null,
+        pta: expect.objectContaining({ householdAdultId: "adult-1", isOfficer: true, canCheckIn: true, canApproveHours: true }),
+      })
+    );
+  });
+
+  it("still resolves memberId for a staff/owner in a PTA org who is NOT a household adult", async () => {
+    findManyMembership
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: "membership-1", organizationId: "org-pta", role: "STAFF", organization: { id: "org-pta", name: "Harris PTA", logoUrl: null, status: "active", primaryVertical: "PTA" } }]);
+    findManyHouseholdAdult.mockResolvedValueOnce([]); // no household link
+    findManyOrgMember
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: "member-staff", organizationId: "org-pta", firstName: "Sam", lastName: "Reed", membershipStatus: "active", isDelinquent: false }]);
+    getEffectivePermissions.mockResolvedValueOnce([]); // no PTA officer signal
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "STAFF", adminCapabilities: ["adminDashboard"] });
+
+    const token = await signAccessToken("user-1", 0);
+    const response = await GET(new Request("https://portal.test/api/mobile/organizations", { headers: { Authorization: `Bearer ${token}` } }));
+    const body = await response.json();
+
+    expect(body.data[0]).toEqual(expect.objectContaining({ memberId: "member-staff" }));
   });
 });
