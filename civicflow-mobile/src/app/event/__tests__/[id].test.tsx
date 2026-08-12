@@ -60,7 +60,7 @@ describe('Event detail RSVP — capability-driven (the rsvp block, never event s
     mockSetEventRsvp.mockReset();
   });
 
-  it('PTA household: shows the radio group, current selection, and the household guest-count line', async () => {
+  it('PTA household GOING: shows the radio group, current selection, and the head-count stepper', async () => {
     useAuthAs({ memberId: null, pta: { householdAdultId: 'adult-1' }, capability: { rsvp: { mode: 'household', guestCounts: true, canRsvp: true } } });
     mockGetEventsForOrganization.mockResolvedValue([
       eventWithRsvp(householdBlock({ status: 'GOING', attendeeCount: 2 }), { myRsvp: { status: 'GOING', attendeeCount: 2 }, volunteerOpportunities: [] }),
@@ -71,7 +71,25 @@ describe('Event detail RSVP — capability-driven (the rsvp block, never event s
     await waitFor(() => expect(screen.getByText('Family Movie Night')).toBeTruthy());
     expect(screen.getByLabelText('Going').props.accessibilityState?.selected).toBe(true);
     expect(screen.getByLabelText('Maybe').props.accessibilityState?.selected).toBe(false);
-    expect(screen.getByText(/2 attendees from your household/)).toBeTruthy();
+    expect(screen.getByText(/How many people from your household/)).toBeTruthy();
+    expect(screen.getByLabelText('2 attendees')).toBeTruthy();
+  });
+
+  it('PTA household GOING: the stepper submits the new count with the current status, and minus is disabled at 1', async () => {
+    useAuthAs({ memberId: null, pta: { householdAdultId: 'adult-1' }, capability: { rsvp: { mode: 'household', guestCounts: true, canRsvp: true } } });
+    mockGetEventsForOrganization.mockResolvedValue([
+      eventWithRsvp(householdBlock({ status: 'GOING', attendeeCount: 1 }), { myRsvp: { status: 'GOING', attendeeCount: 1 }, volunteerOpportunities: [] }),
+    ]);
+    mockSetPtaEventRsvp.mockResolvedValue({ status: 'GOING', attendeeCount: 2 });
+
+    await render(<EventDetailScreen />);
+    await waitFor(() => expect(screen.getByText(/How many people from your household/)).toBeTruthy());
+
+    expect(screen.getByLabelText('Decrease attendee count').props.accessibilityState?.disabled).toBe(true);
+
+    await fireEvent.press(screen.getByLabelText('Increase attendee count'));
+
+    expect(mockSetPtaEventRsvp).toHaveBeenCalledWith('org-1', 'event-1', 'GOING', 2);
   });
 
   it('PTA household: a status change goes to the household endpoint and PRESERVES the existing attendee count', async () => {

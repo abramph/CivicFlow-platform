@@ -288,6 +288,9 @@ export default function DashboardScreen() {
         <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/events')} accessibilityRole="button" accessibilityLabel="Events">
           <ThemedText style={styles.actionButtonSecondaryText}>Events</ThemedText>
         </Pressable>
+        <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/meetings')} accessibilityRole="button" accessibilityLabel="Meetings">
+          <ThemedText style={styles.actionButtonSecondaryText}>Meetings</ThemedText>
+        </Pressable>
         <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/minutes')} accessibilityRole="button" accessibilityLabel="Meeting minutes">
           <ThemedText style={styles.actionButtonSecondaryText}>Meeting Minutes</ThemedText>
         </Pressable>

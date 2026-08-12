@@ -52,6 +52,8 @@ export default function RootLayout() {
           <Stack.Screen name="accept-invite" options={{ headerShown: false }} />
           <Stack.Screen name="payments" options={{ headerShown: false }} />
           <Stack.Screen name="organization/[organizationId]" options={{ headerShown: false }} />
+          <Stack.Screen name="meetings" options={{ headerTitle: 'Meetings' }} />
+          <Stack.Screen name="meeting/[id]" options={{ headerTitle: 'Meeting' }} />
           <Stack.Screen name="volunteer-opportunity/[id]" options={{ headerTitle: 'Volunteer Opportunity' }} />
           <Stack.Screen name="volunteer-checkin" options={{ headerTitle: 'Event-Day Check-In' }} />
           <Stack.Screen name="volunteer-checkin/[opportunityId]" options={{ headerTitle: 'Roster' }} />

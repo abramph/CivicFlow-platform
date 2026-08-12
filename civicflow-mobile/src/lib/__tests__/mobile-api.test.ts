@@ -10,6 +10,7 @@ import {
   getConversation,
   getConversations,
   getEventsForOrganization,
+  getMeetingsForOrganization,
   getPaymentLinkSlug,
   getPaymentMethods,
   getPendingPtaHourEntries,
@@ -31,7 +32,9 @@ import {
   reportPtaDuesPayment,
   sendConversationMessage,
   setEventRsvp,
+  setMeetingRsvp,
   setPtaEventRsvp,
+  setPtaMeetingRsvp,
   setPtaVolunteerAttendance,
   submitPaymentReport,
   updateProfile,
@@ -399,6 +402,51 @@ describe('mobile-api', () => {
       expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/events/event-1/rsvp', {
         method: 'POST',
         body: JSON.stringify({ organizationId: 'org-1', status: 'GOING' }),
+      });
+    });
+  });
+
+  describe('capability-driven meeting routing (Core Meeting RSVP)', () => {
+    it('routes household mode with household identity to the PTA meetings endpoint, everything else generic', async () => {
+      mockApiFetch.mockResolvedValueOnce([]);
+      await getMeetingsForOrganization('org-1', { mode: 'household', guestCounts: true, canRsvp: true }, false);
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/meetings?organizationId=org-1');
+
+      mockApiFetch.mockResolvedValueOnce([]);
+      await getMeetingsForOrganization('org-1', { mode: 'household', guestCounts: true, canRsvp: false }, true);
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/meetings?organizationId=org-1');
+
+      mockApiFetch.mockResolvedValueOnce([]);
+      await getMeetingsForOrganization('org-1', { mode: 'individual', guestCounts: false, canRsvp: true }, false);
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/meetings?organizationId=org-1');
+    });
+
+    it('falls back to the legacy hasMemberIdentity switch only without a capability', async () => {
+      mockApiFetch.mockResolvedValueOnce([]);
+      await getMeetingsForOrganization('org-1', undefined, false);
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/meetings?organizationId=org-1');
+    });
+
+    it('setMeetingRsvp posts only organizationId and status; setPtaMeetingRsvp forwards attendeeCount defaulting to 1', async () => {
+      mockApiFetch.mockResolvedValueOnce({});
+      await setMeetingRsvp('org-1', 'meeting-1', 'GOING');
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/meetings/meeting-1/rsvp', {
+        method: 'POST',
+        body: JSON.stringify({ organizationId: 'org-1', status: 'GOING' }),
+      });
+
+      mockApiFetch.mockResolvedValueOnce({ status: 'GOING', attendeeCount: 3 });
+      await setPtaMeetingRsvp('org-1', 'meeting-1', 'GOING', 3);
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/meetings/meeting-1/rsvp', {
+        method: 'POST',
+        body: JSON.stringify({ organizationId: 'org-1', status: 'GOING', attendeeCount: 3 }),
+      });
+
+      mockApiFetch.mockResolvedValueOnce({ status: 'GOING', attendeeCount: 1 });
+      await setPtaMeetingRsvp('org-1', 'meeting-1', 'GOING');
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/meetings/meeting-1/rsvp', {
+        method: 'POST',
+        body: JSON.stringify({ organizationId: 'org-1', status: 'GOING', attendeeCount: 1 }),
       });
     });
   });

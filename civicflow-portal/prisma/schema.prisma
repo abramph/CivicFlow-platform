@@ -577,6 +577,8 @@ model Organization {
   campaigns                   Campaign[]
   events                      Event[]
   eventRsvps                  EventRsvp[]
+  meetingRsvps                MeetingRsvp[]
+  ptaMeetingRsvps             PtaMeetingRsvp[]
   meetings                    Meeting[]
   expenditures                Expenditure[]
   categories                  Category[]
@@ -1087,6 +1089,7 @@ model OrgMember {
   violationReminderLogs          ViolationReminderLog[]
   architecturalRequestsSubmitted ArchitecturalRequest[]
   eventRsvps                     EventRsvp[]
+  meetingRsvps                   MeetingRsvp[]
 
   @@unique([organizationId, userId])
   @@unique([organizationId, memberNumber])
@@ -2377,10 +2380,68 @@ model Meeting {
   meetingTranscripts      MeetingTranscript[]
   meetingMinutesDrafts    MeetingMinutesDraft[]
   meetingMinutes          MeetingMinutes[]
+  meetingRsvps            MeetingRsvp[]
+  ptaMeetingRsvps         PtaMeetingRsvp[]
 
   @@index([organizationId])
   @@index([meetingDate])
   @@index([createdByUserId])
+}
+
+enum MeetingRsvpStatus {
+  GOING
+  NOT_GOING
+  MAYBE
+}
+
+/// Individual (per-OrgMember) RSVP for Meetings — the Meeting counterpart of
+/// EventRsvp, deliberately a PARALLEL model rather than a polymorphic
+/// generalization of it (Event RSVP is live in production; reshaping its
+/// persistence to share a table was judged higher-risk than this mirror).
+/// RSVP is intent, AttendanceRecord is fact — the two are never mixed, so
+/// RSVP rows can't pollute attendance counts or the QR check-in uniqueness
+/// rules. Same capability contract as events (src/lib/event-rsvp.ts):
+/// Community/Union individual, PTA household (PtaMeetingRsvp below), HOA none.
+model MeetingRsvp {
+  id             String            @id @default(cuid())
+  organizationId String
+  meetingId      String
+  orgMemberId    String
+  status         MeetingRsvpStatus @default(GOING)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  meeting      Meeting      @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  orgMember    OrgMember    @relation(fields: [orgMemberId], references: [id], onDelete: Cascade)
+
+  @@unique([meetingId, orgMemberId])
+  @@index([organizationId])
+  @@index([meetingId])
+  @@index([orgMemberId])
+}
+
+/// Household-level Meeting RSVP for PTA — mirrors PtaEventRsvp (one row per
+/// household, attendeeCount for the whole household, PtaRsvpStatus reused
+/// from the PTA family). Parallel to MeetingRsvp above exactly as
+/// PtaEventRsvp is parallel to EventRsvp.
+model PtaMeetingRsvp {
+  id             String        @id @default(cuid())
+  organizationId String
+  meetingId      String
+  householdId    String
+  attendeeCount  Int           @default(1)
+  status         PtaRsvpStatus @default(GOING)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  meeting      Meeting      @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  household    PtaHousehold @relation(fields: [householdId], references: [id], onDelete: Cascade)
+
+  @@unique([meetingId, householdId])
+  @@index([organizationId])
+  @@index([meetingId])
 }
 
 // ─── Meeting Minutes Approval (general availability, all organizations) ──────
@@ -3028,6 +3089,7 @@ model PtaHousehold {
   adults           PtaHouseholdAdult[] @relation("PtaHouseholdAdults")
   students         PtaStudent[]
   eventRsvps       PtaEventRsvp[]
+  meetingRsvps     PtaMeetingRsvp[]
 
   @@unique([organizationId, displayName, schoolYear])
   @@index([organizationId])

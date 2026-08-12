@@ -25,10 +25,17 @@ vi.mock("@/lib/labs/pta/events", () => ({
   setPtaEventRsvp: (...args: unknown[]) => setPtaEventRsvp(...args),
 }));
 
+const setPtaMeetingRsvp = vi.fn();
+vi.mock("@/lib/labs/pta/meetings", () => ({
+  setPtaMeetingRsvp: (...args: unknown[]) => setPtaMeetingRsvp(...args),
+}));
+
 const findManyEvent = vi.fn();
+const findManyMeeting = vi.fn();
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     event: { findMany: (...args: unknown[]) => findManyEvent(...args) },
+    meeting: { findMany: (...args: unknown[]) => findManyMeeting(...args) },
   },
 }));
 
@@ -43,6 +50,8 @@ import { GET as duesGET } from "@/app/api/mobile/pta/dues/route";
 import { POST as reportPaymentPOST } from "@/app/api/mobile/pta/dues/report-payment/route";
 import { GET as eventsGET } from "@/app/api/mobile/pta/events/route";
 import { POST as rsvpPOST } from "@/app/api/mobile/pta/events/[eventId]/rsvp/route";
+import { GET as meetingsGET } from "@/app/api/mobile/pta/meetings/route";
+import { POST as meetingRsvpPOST } from "@/app/api/mobile/pta/meetings/[id]/rsvp/route";
 import { GET as announcementsGET } from "@/app/api/mobile/pta/announcements/route";
 
 function jsonRequest(url: string, body: unknown) {
@@ -55,8 +64,66 @@ beforeEach(() => {
   getPtaParentDuesSummary.mockReset();
   reportPtaDuesPayment.mockReset();
   setPtaEventRsvp.mockReset();
+  setPtaMeetingRsvp.mockReset();
   findManyEvent.mockReset();
+  findManyMeeting.mockReset();
   listAnnouncementsForMember.mockReset();
+});
+
+describe("GET /api/mobile/pta/meetings (Core Meeting RSVP)", () => {
+  it("scopes household RSVP to the caller's own household and attaches the normalized block", async () => {
+    requireMobilePtaHouseholdAccess.mockResolvedValueOnce({
+      organizationId: "org-a",
+      session: { userId: "user-1", email: "parent@example.com" },
+      adult: { id: "adult-1", householdId: "household-1", billingMemberId: "member-1" },
+    });
+    findManyMeeting.mockResolvedValueOnce([
+      {
+        id: "meeting-1",
+        title: "General PTA Meeting",
+        meetingType: "General",
+        meetingDate: new Date("2026-09-01T18:00:00Z"),
+        location: "Library",
+        description: null,
+        ptaMeetingRsvps: [{ status: "GOING", attendeeCount: 3 }],
+      },
+    ]);
+
+    const response = await meetingsGET(new Request("https://portal.test/api/mobile/pta/meetings?organizationId=org-a"));
+    const body = await response.json();
+
+    expect(findManyMeeting).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({ ptaMeetingRsvps: { where: { householdId: "household-1" }, select: { status: true, attendeeCount: true } } }),
+      })
+    );
+    expect(body.data[0].rsvp).toEqual({
+      mode: "household",
+      canRsvp: true,
+      guestCounts: true,
+      response: { status: "GOING", attendeeCount: 3 },
+      subject: { type: "household", id: "household-1" },
+    });
+  });
+});
+
+describe("POST /api/mobile/pta/meetings/[id]/rsvp", () => {
+  it("sets RSVP for the caller's own household, never a client-supplied householdId", async () => {
+    requireMobilePtaHouseholdAccess.mockResolvedValueOnce({
+      organizationId: "org-a",
+      session: { userId: "user-1", email: "parent@example.com" },
+      adult: { id: "adult-1", householdId: "household-1", billingMemberId: "member-1" },
+    });
+    setPtaMeetingRsvp.mockResolvedValueOnce({ id: "rsvp-1", status: "GOING", attendeeCount: 2 });
+
+    const response = await meetingRsvpPOST(
+      jsonRequest("https://portal.test/api/mobile/pta/meetings/meeting-1/rsvp", { organizationId: "org-a", status: "GOING", attendeeCount: 2, householdId: "household-forged" }),
+      { params: Promise.resolve({ id: "meeting-1" }) }
+    );
+
+    expect(response.status).toBe(200);
+    expect(setPtaMeetingRsvp).toHaveBeenCalledWith("org-a", "meeting-1", "household-1", { status: "GOING", attendeeCount: 2 }, "user-1", "parent@example.com");
+  });
 });
 
 describe("GET /api/mobile/pta/dues", () => {

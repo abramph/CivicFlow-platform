@@ -156,6 +156,47 @@ export function setEventRsvp(organizationId: string, eventId: string, status: Rs
   });
 }
 
+// ── Meetings (Core Meeting RSVP) ─────────────────────────────────────────────
+// Same normalized rsvp contract as events — one block shape, one capability
+// authority, parallel endpoints.
+
+export interface MobileMeeting {
+  id: string;
+  title: string;
+  meetingType: string | null;
+  meetingDate: string;
+  location: string | null;
+  description: string | null;
+  rsvp?: EventRsvpBlock;
+}
+
+export function getMeetings(organizationId: string) {
+  return apiFetch<MobileMeeting[]>(`/api/mobile/meetings?organizationId=${encodeURIComponent(organizationId)}`);
+}
+
+export function getPtaMeetings(organizationId: string) {
+  return apiFetch<MobileMeeting[]>(`/api/mobile/pta/meetings?organizationId=${encodeURIComponent(organizationId)}`);
+}
+
+export function setMeetingRsvp(organizationId: string, meetingId: string, status: RsvpStatus) {
+  return apiFetch<EventRsvpBlock>(`/api/mobile/meetings/${encodeURIComponent(meetingId)}/rsvp`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId, status }),
+  });
+}
+
+export function setPtaMeetingRsvp(
+  organizationId: string,
+  meetingId: string,
+  status: RsvpStatus,
+  attendeeCount?: number
+) {
+  return apiFetch<{ status: RsvpStatus; attendeeCount: number }>(`/api/mobile/pta/meetings/${encodeURIComponent(meetingId)}/rsvp`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId, status, attendeeCount: attendeeCount ?? 1 }),
+  });
+}
+
 export interface ConversationParticipant {
   userId: string;
   displayName: string;
@@ -1786,4 +1827,19 @@ export function getEventsForOrganization(
       : getEvents(organizationId);
   }
   return legacyHasMemberIdentity ? getEvents(organizationId) : getPtaEvents(organizationId);
+}
+
+/** Meeting counterpart of getEventsForOrganization — same routing rule, same
+ * fallback semantics. */
+export function getMeetingsForOrganization(
+  organizationId: string,
+  rsvpCapability: RsvpCapability | undefined,
+  legacyHasMemberIdentity: boolean
+): Promise<MobileMeeting[]> {
+  if (rsvpCapability) {
+    return rsvpCapability.mode === 'household' && rsvpCapability.canRsvp
+      ? getPtaMeetings(organizationId)
+      : getMeetings(organizationId);
+  }
+  return legacyHasMemberIdentity ? getMeetings(organizationId) : getPtaMeetings(organizationId);
 }

@@ -17,8 +17,15 @@ export async function setPtaEventRsvp(
   const household = await prisma.ptaHousehold.findFirst({ where: { id: householdId, organizationId } });
   if (!household) throw new PtaError("PTA_HOUSEHOLD_NOT_FOUND", "Household not found in this organization.");
 
-  const attendeeCount = input.attendeeCount ?? 1;
-  if (!Number.isInteger(attendeeCount) || attendeeCount < 1) throw new PtaError("PTA_VALIDATION_ERROR", "Attendee count must be a positive integer.");
+  // Head-count semantics (PTA RSVP head-count requirement): NOT_GOING always
+  // records 0 expected attendees, regardless of any submitted count — old
+  // mobile builds unconditionally send attendeeCount 1, which must not read
+  // as "one attendee from a household that said no". GOING/MAYBE keep the
+  // household-supplied count (>= 1, defaulting to 1).
+  const attendeeCount = input.status === "NOT_GOING" ? 0 : (input.attendeeCount ?? 1);
+  if (input.status !== "NOT_GOING" && (!Number.isInteger(attendeeCount) || attendeeCount < 1)) {
+    throw new PtaError("PTA_VALIDATION_ERROR", "Attendee count must be a positive integer.");
+  }
 
   const rsvp = await prisma.ptaEventRsvp.upsert({
     where: { eventId_householdId: { eventId, householdId } },
