@@ -230,7 +230,7 @@ export default function DashboardScreen() {
 
       {nextEvent ? (
         <Pressable
-          onPress={() => router.push(`/event/${nextEvent.id}`)}
+          onPress={() => router.navigate(`/event/${nextEvent.id}`)}
           accessibilityRole="button"
           accessibilityLabel={`Next upcoming event, ${nextEvent.title}${nextEvent.startAt ? `, ${new Date(nextEvent.startAt).toLocaleString()}` : ''}${nextEvent.rsvp?.response ? `, you're ${nextEvent.rsvp.response.status.replace('_', ' ').toLowerCase()}` : ''}`}
         >
@@ -313,7 +313,7 @@ export default function DashboardScreen() {
         announcements.map((item) => (
           <Pressable
             key={item.id}
-            onPress={() => router.push(`/announcement/${item.id}`)}
+            onPress={() => router.navigate(`/announcement/${item.id}`)}
             accessibilityRole="button"
             accessibilityLabel={`${item.isRead ? '' : 'Unread, '}${item.subject || item.title}`}
           >
@@ -331,7 +331,7 @@ export default function DashboardScreen() {
         events.map((item) => (
           <Pressable
             key={item.id}
-            onPress={() => router.push(`/event/${item.id}`)}
+            onPress={() => router.navigate(`/event/${item.id}`)}
             accessibilityRole="button"
             accessibilityLabel={`${item.title}${item.startAt ? `, ${new Date(item.startAt).toLocaleString()}` : ''}`}
           >

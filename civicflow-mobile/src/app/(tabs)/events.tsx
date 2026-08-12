@@ -67,7 +67,7 @@ export default function EventsScreen() {
         contentContainerStyle={styles.list}
         renderItem={({ item }) => (
           <Pressable
-            onPress={() => router.push(`/event/${item.id}`)}
+            onPress={() => router.navigate(`/event/${item.id}`)}
             accessibilityRole="button"
             accessibilityLabel={`${item.title}, ${item.startAt ? new Date(item.startAt).toLocaleString() : 'date TBD'}${item.location ? `, ${item.location}` : ''}${item.rsvp?.response ? `, you're ${item.rsvp.response.status.replace('_', ' ').toLowerCase()}` : ''}`}
           >

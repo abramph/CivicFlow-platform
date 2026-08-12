@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react-nativ
 import AnnouncementsScreen from '../announcements';
 
 jest.mock('expo-router', () => ({
-  router: { push: jest.fn() },
+  router: { push: jest.fn(), navigate: jest.fn() },
 }));
 
 const mockUseAuth = jest.fn();

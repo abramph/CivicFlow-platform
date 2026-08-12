@@ -4,7 +4,7 @@ import DashboardScreen from '../dashboard';
 
 const mockRouterPush = jest.fn();
 jest.mock('expo-router', () => ({
-  router: { push: (...args: unknown[]) => mockRouterPush(...args) },
+  router: { push: (...args: unknown[]) => mockRouterPush(...args), navigate: jest.fn() },
 }));
 
 const mockUseAuth = jest.fn();
