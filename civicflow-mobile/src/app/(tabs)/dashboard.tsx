@@ -13,7 +13,7 @@ import { useAuth } from '@/lib/auth-context';
 import {
   getAnnouncementsForIdentity,
   getDues,
-  getEventsForIdentity,
+  getEventsForOrganization,
   getPaymentHistory,
   getPtaDues,
   getPtaVolunteerCommitments,
@@ -69,7 +69,7 @@ export default function DashboardScreen() {
     try {
       const [announcementsData, eventsData] = await Promise.all([
         getAnnouncementsForIdentity(selectedOrganizationId, hasMemberIdentity),
-        getEventsForIdentity(selectedOrganizationId, hasMemberIdentity),
+        getEventsForOrganization(selectedOrganizationId, selectedOrganization?.capability?.rsvp, hasMemberIdentity),
       ]);
       setAnnouncements(announcementsData.slice(0, 3));
       setEvents(eventsData.slice(0, 3));
@@ -96,7 +96,7 @@ export default function DashboardScreen() {
     } catch {
       setLoadError('Unable to load your dashboard. Check your connection and try again.');
     }
-  }, [selectedOrganizationId, hasAnyIdentity, hasMemberIdentity, hasPtaIdentity, pta?.householdAdultId]);
+  }, [selectedOrganizationId, hasAnyIdentity, hasMemberIdentity, hasPtaIdentity, pta?.householdAdultId, selectedOrganization?.capability?.rsvp]);
 
   useEffect(() => {
     (async () => {
@@ -232,7 +232,7 @@ export default function DashboardScreen() {
         <Pressable
           onPress={() => router.push(`/event/${nextEvent.id}`)}
           accessibilityRole="button"
-          accessibilityLabel={`Next upcoming event, ${nextEvent.title}${nextEvent.startAt ? `, ${new Date(nextEvent.startAt).toLocaleString()}` : ''}${'myRsvp' in nextEvent && nextEvent.myRsvp ? `, you're ${nextEvent.myRsvp.status.replace('_', ' ').toLowerCase()}` : ''}`}
+          accessibilityLabel={`Next upcoming event, ${nextEvent.title}${nextEvent.startAt ? `, ${new Date(nextEvent.startAt).toLocaleString()}` : ''}${nextEvent.rsvp?.response ? `, you're ${nextEvent.rsvp.response.status.replace('_', ' ').toLowerCase()}` : ''}`}
         >
           <ThemedView type="backgroundElement" style={styles.card}>
             <ThemedText type="small" themeColor="textSecondary">Next Upcoming Event</ThemedText>
@@ -240,8 +240,8 @@ export default function DashboardScreen() {
             {nextEvent.startAt ? (
               <ThemedText type="small" themeColor="textSecondary">{new Date(nextEvent.startAt).toLocaleString()}</ThemedText>
             ) : null}
-            {'myRsvp' in nextEvent && nextEvent.myRsvp ? (
-              <ThemedText type="small" style={styles.rsvpBadge}>You&apos;re {nextEvent.myRsvp.status.replace('_', ' ').toLowerCase()}</ThemedText>
+            {nextEvent.rsvp?.response ? (
+              <ThemedText type="small" style={styles.rsvpBadge}>You&apos;re {nextEvent.rsvp.response.status.replace('_', ' ').toLowerCase()}</ThemedText>
             ) : null}
           </ThemedView>
         </Pressable>

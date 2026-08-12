@@ -1,5 +1,6 @@
 import { withApiErrorHandling } from "@/lib/api-route";
 import { requireMobilePtaHouseholdAccess } from "@/lib/mobile-auth";
+import { buildHouseholdRsvpBlock } from "@/lib/event-rsvp";
 import { prisma } from "@/lib/prisma";
 import { ValidationError } from "@/lib/validation";
 
@@ -36,17 +37,26 @@ export async function GET(request: Request) {
       take: 100,
     });
 
-    const data = events.map((event) => ({
-      id: event.id,
-      title: event.title,
-      description: event.description,
-      location: event.location,
-      startAt: event.startAt,
-      endAt: event.endAt,
-      status: event.status,
-      myRsvp: event.ptaEventRsvps[0] ? { status: event.ptaEventRsvps[0].status, attendeeCount: event.ptaEventRsvps[0].attendeeCount } : null,
-      volunteerOpportunities: event.ptaVolunteerOpportunities.map((o) => ({ id: o.id, title: o.title })),
-    }));
+    const data = events.map((event) => {
+      const myRsvp = event.ptaEventRsvps[0]
+        ? { status: event.ptaEventRsvps[0].status, attendeeCount: event.ptaEventRsvps[0].attendeeCount }
+        : null;
+      return {
+        id: event.id,
+        title: event.title,
+        description: event.description,
+        location: event.location,
+        startAt: event.startAt,
+        endAt: event.endAt,
+        status: event.status,
+        /** Deprecated in favor of `rsvp` — kept only so old app builds that
+         * still read `myRsvp` (and use its presence as the PTA-event
+         * discriminator) keep working. New client code must read `rsvp`. */
+        myRsvp,
+        rsvp: buildHouseholdRsvpBlock(adult.householdId, myRsvp),
+        volunteerOpportunities: event.ptaVolunteerOpportunities.map((o) => ({ id: o.id, title: o.title })),
+      };
+    });
 
     return Response.json({ ok: true, data });
   });

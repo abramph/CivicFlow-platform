@@ -6,6 +6,7 @@ import { PlanFeatureError, PlanLimitError } from "@/lib/plan-gate";
 import { LabFeatureError } from "@/lib/labs/access";
 import { MeetingIntelligenceError } from "@/lib/labs/meeting-intelligence/errors";
 import { PtaError } from "@/lib/labs/pta/errors";
+import { EventRsvpError } from "@/lib/event-rsvp";
 import { HoaError } from "@/lib/hoa/errors";
 import { ImportError } from "@/lib/imports/errors";
 import { MemberLifecycleError } from "@/lib/member-lifecycle-errors";
@@ -50,6 +51,9 @@ export async function withApiErrorHandling(
         );
       }
       if (error instanceof PtaError) {
+        return Response.json({ ok: false, error: error.message, code: error.code }, { status: error.status });
+      }
+      if (error instanceof EventRsvpError) {
         return Response.json({ ok: false, error: error.message, code: error.code }, { status: error.status });
       }
       if (error instanceof HoaError) {

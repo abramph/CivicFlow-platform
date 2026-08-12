@@ -134,6 +134,41 @@ describe("GET /api/mobile/pta/events", () => {
     );
     expect(body.data[0].myRsvp).toEqual({ status: "GOING", attendeeCount: 2 });
   });
+
+  it("also carries the normalized rsvp block (Core Event RSVP) without dropping the legacy myRsvp field old builds read", async () => {
+    requireMobilePtaHouseholdAccess.mockResolvedValueOnce({
+      organizationId: "org-a",
+      session: { userId: "user-1", email: "parent@example.com" },
+      adult: { id: "adult-1", householdId: "household-1", billingMemberId: "member-1" },
+    });
+    findManyEvent.mockResolvedValueOnce([
+      {
+        id: "event-1",
+        title: "Book Fair",
+        description: null,
+        location: null,
+        startAt: null,
+        endAt: null,
+        status: "upcoming",
+        ptaVolunteerOpportunities: [],
+        ptaEventRsvps: [{ status: "GOING", attendeeCount: 2 }],
+      },
+    ]);
+
+    const response = await eventsGET(new Request("https://portal.test/api/mobile/pta/events?organizationId=org-a"));
+    const body = await response.json();
+
+    expect(body.data[0].rsvp).toEqual({
+      mode: "household",
+      canRsvp: true,
+      guestCounts: true,
+      response: { status: "GOING", attendeeCount: 2 },
+      subject: { type: "household", id: "household-1" },
+    });
+    // Backward compatibility: the deprecated field must not disappear while
+    // old app builds still discriminate on it.
+    expect(body.data[0].myRsvp).toEqual({ status: "GOING", attendeeCount: 2 });
+  });
 });
 
 describe("POST /api/mobile/pta/events/[eventId]/rsvp", () => {

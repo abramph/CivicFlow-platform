@@ -576,6 +576,7 @@ model Organization {
   members                     OrgMember[]
   campaigns                   Campaign[]
   events                      Event[]
+  eventRsvps                  EventRsvp[]
   meetings                    Meeting[]
   expenditures                Expenditure[]
   categories                  Category[]
@@ -1085,6 +1086,7 @@ model OrgMember {
   hoaPropertyResidencies         PropertyResident[]       @relation("PropertyResidentMember")
   violationReminderLogs          ViolationReminderLog[]
   architecturalRequestsSubmitted ArchitecturalRequest[]
+  eventRsvps                     EventRsvp[]
 
   @@unique([organizationId, userId])
   @@unique([organizationId, memberNumber])
@@ -1150,9 +1152,45 @@ model Event {
   paymentLinks              PaymentLink[]
   ptaVolunteerOpportunities PtaVolunteerOpportunity[]
   ptaEventRsvps             PtaEventRsvp[]
+  eventRsvps                EventRsvp[]
 
   @@index([organizationId])
   @@index([organizationId, startAt])
+}
+
+enum EventRsvpStatus {
+  GOING
+  NOT_GOING
+  MAYBE
+}
+
+/// Individual (per-OrgMember) RSVP for the Core verticals — Community and
+/// Union in this phase. Deliberately additive alongside PtaEventRsvp, never a
+/// replacement for it: PTA RSVPs stay household-level (one row per
+/// PtaHousehold, with attendeeCount), while this model is one row per member
+/// with no guest count at all — one RSVP represents exactly one attendee.
+/// Which model an event uses is decided by the organization's RSVP capability
+/// (mode: household | individual | none — see src/lib/event-rsvp.ts), never
+/// by inspecting response shapes client-side. HOA is mode "none" for now
+/// (resident-vs-property RSVP semantics are an open product decision), so no
+/// HOA rows are expected here yet.
+model EventRsvp {
+  id             String          @id @default(cuid())
+  organizationId String
+  eventId        String
+  orgMemberId    String
+  status         EventRsvpStatus @default(GOING)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  event        Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  orgMember    OrgMember    @relation(fields: [orgMemberId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, orgMemberId])
+  @@index([organizationId])
+  @@index([eventId])
+  @@index([orgMemberId])
 }
 
 /// Expenditure record, scoped to an org.

@@ -8,25 +8,29 @@ import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { useScreenTopPadding } from '@/hooks/use-screen-top-padding';
 import { useAuth } from '@/lib/auth-context';
-import { getEventsForIdentity, type MobileEvent, type PtaEvent } from '@/lib/mobile-api';
+import { getEventsForOrganization, type MobileEvent, type PtaEvent } from '@/lib/mobile-api';
 
 export default function EventsScreen() {
   const { selectedOrganization, selectedOrganizationId } = useAuth();
   const hasMemberIdentity = Boolean(selectedOrganization?.memberId);
-  const hasPtaIdentity = Boolean(selectedOrganization?.pta?.householdAdultId);
   const [events, setEvents] = useState<(MobileEvent | PtaEvent)[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  // Events are readable with ANY active org tie (the server's
+  // requireMobileOrgAccess) — including a staff-only login with no member or
+  // household identity, who simply gets rsvp.canRsvp=false on every event.
   const load = useCallback(async () => {
-    if (!selectedOrganizationId || (!hasMemberIdentity && !hasPtaIdentity)) return;
+    if (!selectedOrganizationId) return;
     try {
-      setEvents(await getEventsForIdentity(selectedOrganizationId, hasMemberIdentity));
+      setEvents(
+        await getEventsForOrganization(selectedOrganizationId, selectedOrganization?.capability?.rsvp, hasMemberIdentity)
+      );
       setLoadError(null);
     } catch {
       setLoadError('Unable to load events. Check your connection and try again.');
     }
-  }, [selectedOrganizationId, hasMemberIdentity, hasPtaIdentity]);
+  }, [selectedOrganizationId, selectedOrganization?.capability?.rsvp, hasMemberIdentity]);
 
   useEffect(() => {
     (async () => {
@@ -65,7 +69,7 @@ export default function EventsScreen() {
           <Pressable
             onPress={() => router.push(`/event/${item.id}`)}
             accessibilityRole="button"
-            accessibilityLabel={`${item.title}, ${item.startAt ? new Date(item.startAt).toLocaleString() : 'date TBD'}${item.location ? `, ${item.location}` : ''}${'myRsvp' in item && item.myRsvp ? `, you're ${item.myRsvp.status.replace('_', ' ').toLowerCase()}` : ''}`}
+            accessibilityLabel={`${item.title}, ${item.startAt ? new Date(item.startAt).toLocaleString() : 'date TBD'}${item.location ? `, ${item.location}` : ''}${item.rsvp?.response ? `, you're ${item.rsvp.response.status.replace('_', ' ').toLowerCase()}` : ''}`}
           >
             <ThemedView type="backgroundElement" style={styles.row}>
               <ThemedText type="smallBold">{item.title}</ThemedText>
@@ -76,8 +80,8 @@ export default function EventsScreen() {
               {item.description ? (
                 <ThemedText type="default" numberOfLines={2} style={styles.body}>{item.description}</ThemedText>
               ) : null}
-              {'myRsvp' in item && item.myRsvp ? (
-                <ThemedText type="small" style={styles.rsvpBadge}>You&apos;re {item.myRsvp.status.replace('_', ' ').toLowerCase()}</ThemedText>
+              {item.rsvp?.response ? (
+                <ThemedText type="small" style={styles.rsvpBadge}>You&apos;re {item.rsvp.response.status.replace('_', ' ').toLowerCase()}</ThemedText>
               ) : null}
             </ThemedView>
           </Pressable>

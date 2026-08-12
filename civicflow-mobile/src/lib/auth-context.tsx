@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import { API_BASE_URL, apiFetch, ApiError, fetchOrThrow, registerSessionExpiredHandler, setAccessToken } from '@/lib/api-client';
+import type { RsvpCapability } from '@/lib/mobile-api';
 import { registerDeviceToken, unregisterDeviceToken } from '@/lib/push-registration';
 import { secureStorage } from '@/lib/secure-storage';
 
@@ -49,6 +50,12 @@ export interface MobileOrganizationCapability {
    * on this client — this array is the sole authority, and it's already
    * been filtered server-side down to only what the caller holds. */
   adminCapabilities: string[];
+  /** Core Event RSVP contract — the sole authority for RSVP mode and whether
+   * this caller can RSVP in this org. Optional for the same
+   * older-cached-response reason as the parent object; when absent, event
+   * routing falls back to the legacy memberId switch (see
+   * getEventsForOrganization in mobile-api.ts). */
+  rsvp?: RsvpCapability;
 }
 
 export interface MobileOrganization {
