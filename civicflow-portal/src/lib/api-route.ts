@@ -7,6 +7,7 @@ import { LabFeatureError } from "@/lib/labs/access";
 import { MeetingIntelligenceError } from "@/lib/labs/meeting-intelligence/errors";
 import { PtaError } from "@/lib/labs/pta/errors";
 import { EventRsvpError } from "@/lib/event-rsvp";
+import { MeetingRsvpError } from "@/lib/meeting-rsvp";
 import { HoaError } from "@/lib/hoa/errors";
 import { ImportError } from "@/lib/imports/errors";
 import { MemberLifecycleError } from "@/lib/member-lifecycle-errors";
@@ -54,6 +55,9 @@ export async function withApiErrorHandling(
         return Response.json({ ok: false, error: error.message, code: error.code }, { status: error.status });
       }
       if (error instanceof EventRsvpError) {
+        return Response.json({ ok: false, error: error.message, code: error.code }, { status: error.status });
+      }
+      if (error instanceof MeetingRsvpError) {
         return Response.json({ ok: false, error: error.message, code: error.code }, { status: error.status });
       }
       if (error instanceof HoaError) {

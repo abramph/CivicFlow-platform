@@ -8,31 +8,30 @@ import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/lib/auth-context';
 import {
-  getEventsForOrganization,
-  setEventRsvp,
-  setPtaEventRsvp,
+  getMeetingsForOrganization,
+  setMeetingRsvp,
+  setPtaMeetingRsvp,
   type EventRsvpBlock,
-  type MobileEvent,
-  type PtaEvent,
+  type MobileMeeting,
   type RsvpStatus,
 } from '@/lib/mobile-api';
 
-export default function EventDetailScreen() {
+export default function MeetingDetailScreen() {
   const { selectedOrganization, selectedOrganizationId } = useAuth();
   const hasMemberIdentity = Boolean(selectedOrganization?.memberId);
   const { id } = useLocalSearchParams<{ id: string }>();
-  const [event, setEvent] = useState<MobileEvent | PtaEvent | null>(null);
+  const [meeting, setMeeting] = useState<MobileMeeting | null>(null);
   const [loading, setLoading] = useState(true);
   const [rsvpSubmitting, setRsvpSubmitting] = useState(false);
 
   const load = useCallback(async () => {
     if (!selectedOrganizationId || !id) return;
-    const all = await getEventsForOrganization(
+    const all = await getMeetingsForOrganization(
       selectedOrganizationId,
       selectedOrganization?.capability?.rsvp,
       hasMemberIdentity
     );
-    setEvent(all.find((item) => item.id === id) ?? null);
+    setMeeting(all.find((item) => item.id === id) ?? null);
   }, [selectedOrganizationId, id, selectedOrganization?.capability?.rsvp, hasMemberIdentity]);
 
   useEffect(() => {
@@ -46,10 +45,9 @@ export default function EventDetailScreen() {
     })();
   }, [load]);
 
-  // The event's own rsvp block is the sole authority for what RSVP UI to show
-  // and which endpoint a response goes to — never the event object's shape
-  // ('myRsvp' in event) and never the caller's identity fields.
-  const rsvp: EventRsvpBlock | null = event?.rsvp ?? null;
+  // The meeting's own rsvp block is the sole authority for the RSVP UI and
+  // endpoint choice — same contract as event detail.
+  const rsvp: EventRsvpBlock | null = meeting?.rsvp ?? null;
 
   async function handleRsvp(status: RsvpStatus) {
     if (!selectedOrganizationId || !id || rsvpSubmitting || !rsvp?.canRsvp) return;
@@ -58,14 +56,13 @@ export default function EventDetailScreen() {
       let nextBlock: EventRsvpBlock;
       if (rsvp.mode === 'household') {
         // Preserve the household's existing head count on a status change
-        // (min 1 — a household coming back from Not Going starts at 1; the
-        // server records 0 for Not Going regardless of what is sent).
-        const saved = await setPtaEventRsvp(selectedOrganizationId, id, status, Math.max(1, rsvp.response?.attendeeCount ?? 1));
+        // (min 1; the server records 0 for Not Going regardless).
+        const saved = await setPtaMeetingRsvp(selectedOrganizationId, id, status, Math.max(1, rsvp.response?.attendeeCount ?? 1));
         nextBlock = { ...rsvp, response: { status: saved.status, attendeeCount: saved.attendeeCount } };
       } else {
-        nextBlock = await setEventRsvp(selectedOrganizationId, id, status);
+        nextBlock = await setMeetingRsvp(selectedOrganizationId, id, status);
       }
-      setEvent((current) => (current ? { ...current, rsvp: nextBlock } : current));
+      setMeeting((current) => (current ? { ...current, rsvp: nextBlock } : current));
     } finally {
       setRsvpSubmitting(false);
     }
@@ -75,8 +72,8 @@ export default function EventDetailScreen() {
     if (!selectedOrganizationId || !id || rsvpSubmitting || !rsvp?.canRsvp || rsvp.mode !== 'household' || count < 1) return;
     setRsvpSubmitting(true);
     try {
-      const saved = await setPtaEventRsvp(selectedOrganizationId, id, rsvp.response?.status ?? 'GOING', count);
-      setEvent((current) =>
+      const saved = await setPtaMeetingRsvp(selectedOrganizationId, id, rsvp.response?.status ?? 'GOING', count);
+      setMeeting((current) =>
         current ? { ...current, rsvp: { ...rsvp, response: { status: saved.status, attendeeCount: saved.attendeeCount } } } : current
       );
     } finally {
@@ -86,46 +83,40 @@ export default function EventDetailScreen() {
 
   if (loading) {
     return (
-      <ThemedView style={styles.loadingContainer} accessibilityRole="progressbar" accessibilityLabel="Loading event">
+      <ThemedView style={styles.loadingContainer} accessibilityRole="progressbar" accessibilityLabel="Loading meeting">
         <ActivityIndicator />
       </ThemedView>
     );
   }
 
-  if (!event) {
+  if (!meeting) {
     return (
       <ThemedView style={styles.container}>
-        <ThemedText type="title">Event</ThemedText>
+        <ThemedText type="title">Meeting</ThemedText>
         <ThemedText type="small" themeColor="textSecondary" accessibilityRole="alert" accessibilityLiveRegion="assertive">
-          This event isn&apos;t available.
+          This meeting isn&apos;t available.
         </ThemedText>
       </ThemedView>
     );
   }
 
-  const volunteerOpportunities = 'volunteerOpportunities' in event ? event.volunteerOpportunities : [];
-
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <ThemedText type="title">{event.title}</ThemedText>
+      <ThemedText type="title">{meeting.title}</ThemedText>
       <ThemedText type="small" themeColor="textSecondary">
-        {event.startAt ? new Date(event.startAt).toLocaleString() : 'Date TBD'}
-        {event.endAt ? ` – ${new Date(event.endAt).toLocaleString()}` : ''}
+        {new Date(meeting.meetingDate).toLocaleString()}
       </ThemedText>
-      {event.location ? (
-        <ThemedText type="small" themeColor="textSecondary">{event.location}</ThemedText>
+      {meeting.location ? (
+        <ThemedText type="small" themeColor="textSecondary">{meeting.location}</ThemedText>
       ) : null}
-      {event.description ? (
-        <ThemedText type="default" style={styles.body}>{event.description}</ThemedText>
+      {meeting.meetingType ? (
+        <ThemedText type="small" themeColor="textSecondary">{meeting.meetingType}</ThemedText>
+      ) : null}
+      {meeting.description ? (
+        <ThemedText type="default" style={styles.body}>{meeting.description}</ThemedText>
       ) : null}
 
-      <RsvpCard rsvp={rsvp} submitting={rsvpSubmitting} onSelect={handleRsvp} onChangeCount={handleCountChange}>
-        {volunteerOpportunities.length > 0 ? (
-          <ThemedText type="small" themeColor="textSecondary" style={styles.volunteerNote}>
-            Volunteer opportunities are available for this event — see the Volunteer tab.
-          </ThemedText>
-        ) : null}
-      </RsvpCard>
+      <RsvpCard rsvp={rsvp} submitting={rsvpSubmitting} onSelect={handleRsvp} onChangeCount={handleCountChange} />
     </ScrollView>
   );
 }
@@ -142,8 +133,5 @@ const styles = StyleSheet.create({
   },
   body: {
     marginTop: Spacing.two,
-  },
-  volunteerNote: {
-    marginTop: Spacing.one,
   },
 });

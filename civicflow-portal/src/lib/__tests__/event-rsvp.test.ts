@@ -107,7 +107,7 @@ describe("normalized RSVP block builders", () => {
     });
   });
 
-  it("individual block pins attendeeCount to 1 and derives canRsvp from member presence", () => {
+  it("individual block reports 1 attendee when going/maybe and 0 when not going, deriving canRsvp from member presence", () => {
     expect(buildIndividualRsvpBlock("member-1", { status: "MAYBE" })).toEqual({
       mode: "individual",
       canRsvp: true,
@@ -115,6 +115,9 @@ describe("normalized RSVP block builders", () => {
       response: { status: "MAYBE", attendeeCount: 1 },
       subject: { type: "member", id: "member-1" },
     });
+    expect(buildIndividualRsvpBlock("member-1", { status: "NOT_GOING" })).toEqual(
+      expect.objectContaining({ response: { status: "NOT_GOING", attendeeCount: 0 } })
+    );
     expect(buildIndividualRsvpBlock(null, null)).toEqual({
       mode: "individual",
       canRsvp: false,

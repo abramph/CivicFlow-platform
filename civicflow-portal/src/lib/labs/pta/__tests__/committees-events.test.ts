@@ -59,3 +59,34 @@ describe("tenant isolation — event RSVPs (fundraiser/event scoping)", () => {
     await expect(setPtaEventRsvp("org-a", "event-1", "household-1", { status: "GOING", attendeeCount: 0 }, "u1")).rejects.toMatchObject({ code: "PTA_VALIDATION_ERROR" });
   });
 });
+
+describe("household head-count semantics (PTA RSVP head-count requirement)", () => {
+  it("NOT_GOING records 0 attendees even when a count is submitted (old builds always send 1)", async () => {
+    findFirstEvent.mockResolvedValueOnce({ id: "event-1", organizationId: "org-a" });
+    findFirstHousehold.mockResolvedValueOnce({ id: "household-1", organizationId: "org-a" });
+    upsertRsvp.mockResolvedValueOnce({ id: "rsvp-1", status: "NOT_GOING", attendeeCount: 0 });
+    const { setPtaEventRsvp } = await import("../events");
+
+    await setPtaEventRsvp("org-a", "event-1", "household-1", { status: "NOT_GOING", attendeeCount: 3 }, "u1");
+
+    expect(upsertRsvp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ status: "NOT_GOING", attendeeCount: 0 }),
+        update: { status: "NOT_GOING", attendeeCount: 0 },
+      })
+    );
+  });
+
+  it("a household coming back from Not Going provides a fresh count with GOING", async () => {
+    findFirstEvent.mockResolvedValueOnce({ id: "event-1", organizationId: "org-a" });
+    findFirstHousehold.mockResolvedValueOnce({ id: "household-1", organizationId: "org-a" });
+    upsertRsvp.mockResolvedValueOnce({ id: "rsvp-1", status: "GOING", attendeeCount: 5 });
+    const { setPtaEventRsvp } = await import("../events");
+
+    await setPtaEventRsvp("org-a", "event-1", "household-1", { status: "GOING", attendeeCount: 5 }, "u1");
+
+    expect(upsertRsvp).toHaveBeenCalledWith(
+      expect.objectContaining({ update: { status: "GOING", attendeeCount: 5 } })
+    );
+  });
+});

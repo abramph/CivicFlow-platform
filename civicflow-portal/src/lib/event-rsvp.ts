@@ -105,8 +105,10 @@ export function buildIndividualRsvpBlock(
     mode: "individual",
     canRsvp: orgMemberId !== null,
     guestCounts: false,
-    // One individual RSVP always represents exactly one attendee.
-    response: response ? { status: response.status, attendeeCount: 1 } : null,
+    // An individual response represents exactly one expected attendee when
+    // going (or maybe), and zero when not going — so officer-facing expected
+    // attendance can sum attendeeCount uniformly across both RSVP families.
+    response: response ? { status: response.status, attendeeCount: response.status === "NOT_GOING" ? 0 : 1 } : null,
     subject: orgMemberId ? { type: "member", id: orgMemberId } : { type: "none", id: null },
   };
 }
