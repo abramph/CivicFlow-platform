@@ -255,7 +255,21 @@ export async function GET(request: Request) {
     // Only fills rows still lacking a memberId, so branch 1 is untouched, and
     // only for orgs the caller already earned a row in — this grants no new
     // organization access, purely a fuller identity for orgs already visible.
-    const unresolved = Array.from(rows.values()).filter((row) => row.memberId === null);
+    //
+    // Deliberately skips rows carrying a PTA household identity. The mobile
+    // client's identity-sensitive reads are two-way switches with no third
+    // branch (`hasMemberIdentity ? conventional : PTA` — see
+    // getEventsForIdentity/getAnnouncementsForIdentity in mobile-api.ts, whose
+    // own comment notes "hasMemberIdentity always wins"), so memberId doubles
+    // as "is NOT a PTA parent" there. Populating it for a household adult who
+    // also happens to hold an OrgMember flips them onto the conventional
+    // endpoints, which return MobileEvent rather than PtaEvent — isPtaEvent()
+    // then fails and the RSVP control disappears. Their OrgMember row is
+    // untouched in the database; this only withholds it from mobile identity
+    // routing, where the household link is the authoritative identity.
+    const unresolved = Array.from(rows.values()).filter(
+      (row) => row.memberId === null && !row.pta?.householdAdultId
+    );
     if (unresolved.length > 0) {
       const linkedMembers = await prisma.orgMember.findMany({
         where: { userId, organizationId: { in: unresolved.map((row) => row.organizationId) } },
