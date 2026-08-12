@@ -62,6 +62,15 @@ export default function ReportPaymentScreen() {
 
   const selectedOrg = organizations.find((org) => org.organizationId === selectedOrganizationId);
 
+  // Direct-route defense. This screen submits against an OrgMember identity
+  // the caller may not hold (a staff/owner login with no linked member
+  // record). Entry points already hide the action, but deep links, saved
+  // routes and notification taps bypass those — degrade to the Payments tab's
+  // non-member state rather than letting the server's raw 403 text surface.
+  if (status === 'signedIn' && selectedOrg && !selectedOrg.memberId) {
+    return <Redirect href="/dues" />;
+  }
+
   async function pickReceipt() {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) return;

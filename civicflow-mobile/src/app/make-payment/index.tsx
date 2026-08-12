@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { Redirect, router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet } from 'react-native';
 
@@ -13,19 +13,26 @@ function formatCurrency(value: string | number) {
 }
 
 export default function MakePaymentScreen() {
-  const { selectedOrganizationId } = useAuth();
+  const { status, selectedOrganization, selectedOrganizationId } = useAuth();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [events, setEvents] = useState<MobileEvent[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
     if (!selectedOrganizationId) return;
-    const [campaignsData, eventsData] = await Promise.all([
-      getCampaigns(selectedOrganizationId),
-      getEvents(selectedOrganizationId),
-    ]);
-    setCampaigns(campaignsData);
-    setEvents(eventsData);
+    // Both endpoints are member-scoped. Previously an unhandled rejection on
+    // failure — the screen threw rather than rendering anything.
+    try {
+      const [campaignsData, eventsData] = await Promise.all([
+        getCampaigns(selectedOrganizationId),
+        getEvents(selectedOrganizationId),
+      ]);
+      setCampaigns(campaignsData);
+      setEvents(eventsData);
+    } catch {
+      setCampaigns([]);
+      setEvents([]);
+    }
   }, [selectedOrganizationId]);
 
   useEffect(() => {
@@ -38,6 +45,12 @@ export default function MakePaymentScreen() {
     setRefreshing(true);
     await load();
     setRefreshing(false);
+  }
+
+  // Direct-route defense: campaigns and events here are member-scoped, so a
+  // staff/owner login with no linked member record would 403 on mount.
+  if (status === 'signedIn' && selectedOrganization && !selectedOrganization.memberId) {
+    return <Redirect href="/dues" />;
   }
 
   return (

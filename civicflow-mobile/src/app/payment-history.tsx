@@ -64,7 +64,7 @@ function matchesFilter(row: Row, filter: StatusFilter): boolean {
 }
 
 export default function PaymentHistoryScreen() {
-  const { status, selectedOrganizationId } = useAuth();
+  const { status, selectedOrganization, selectedOrganizationId } = useAuth();
   const [rows, setRows] = useState<Row[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<StatusFilter>('All');
@@ -85,6 +85,12 @@ export default function PaymentHistoryScreen() {
 
   if (status === 'signedOut') {
     return <Redirect href={{ pathname: '/login', params: { redirectTo: '/payment-history' } }} />;
+  }
+  // Direct-route defense: history is scoped by an OrgMember identity a
+  // staff/owner login may not hold. Reachable by deep link even though every
+  // in-app entry point gates on it.
+  if (status === 'signedIn' && selectedOrganization && !selectedOrganization.memberId) {
+    return <Redirect href="/dues" />;
   }
 
   async function handleRefresh() {

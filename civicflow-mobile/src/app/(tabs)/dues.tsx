@@ -188,6 +188,22 @@ export default function DuesScreen() {
     );
   }
 
+  // Neither a constituent (OrgMember) identity nor a PTA household identity in
+  // this org — e.g. a staff/owner login with no linked member record. Such an
+  // account has no personal dues, and every action below is scoped by an
+  // identity it doesn't have, so each would 403 server-side. Show the state
+  // plainly instead of falling through to the member UI with doomed buttons.
+  if (!hasMemberIdentity && !hasPtaIdentity) {
+    return (
+      <ThemedView style={[styles.container, topPadding]}>
+        <ThemedText type="title">Dues Status</ThemedText>
+        <ThemedText type="small" themeColor="textSecondary" style={styles.empty}>
+          No personal dues or payment account is associated with this organization.
+        </ThemedText>
+      </ThemedView>
+    );
+  }
+
   return (
     <ThemedView style={[styles.container, topPadding]}>
       <ThemedText type="title">Dues Status</ThemedText>

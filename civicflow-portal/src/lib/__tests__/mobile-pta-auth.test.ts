@@ -233,12 +233,27 @@ describe("requireMobileOrgAccess — the loosest guard, for userId-scoped featur
     findUniqueUser.mockResolvedValueOnce({ id: "parent-1", email: "parent@example.com", mobileTokenVersion: 0 });
     findFirstMembership.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
     findFirstHouseholdAdult.mockResolvedValueOnce({ id: "adult-1" });
+    findFirstOrgMember.mockResolvedValueOnce(null);
 
     const token = await signAccessToken("parent-1", 0);
     const result = await requireMobileOrgAccess(requestWithToken(token), "org-a");
 
     expect(result.memberId).toBeNull();
-    expect(findFirstOrgMember).not.toHaveBeenCalled();
+  });
+
+  it("resolves memberId for a household adult who ALSO has a personal OrgMember — the lookup is role-agnostic", async () => {
+    // Previously the OrgMember lookup only ran when a MEMBER-role membership
+    // existed, so this user reported memberId: null despite having a real
+    // constituent record. Same asymmetry that hid owner-members.
+    findUniqueUser.mockResolvedValueOnce({ id: "parent-2", email: "parent2@example.com", mobileTokenVersion: 0 });
+    findFirstMembership.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+    findFirstHouseholdAdult.mockResolvedValueOnce({ id: "adult-2" });
+    findFirstOrgMember.mockResolvedValueOnce({ id: "member-2" });
+
+    const token = await signAccessToken("parent-2", 0);
+    const result = await requireMobileOrgAccess(requestWithToken(token), "org-a");
+
+    expect(result.memberId).toBe("member-2");
   });
 
   it("grants access via a staff-role membership alone (an officer with no household link and no MEMBER row)", async () => {

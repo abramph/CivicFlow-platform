@@ -269,14 +269,16 @@ export default function DashboardScreen() {
             <ThemedText style={styles.actionButtonSecondaryText}>Scan Attendance Code</ThemedText>
           </Pressable>
         ) : null}
-        <Pressable
-          style={styles.actionButtonSecondary}
-          onPress={() => router.push(hasPtaIdentity && !hasMemberIdentity ? '/pta-report-payment' : '/report-payment')}
-          accessibilityRole="button"
-          accessibilityLabel="Report a payment"
-        >
-          <ThemedText style={styles.actionButtonSecondaryText}>Report a Payment</ThemedText>
-        </Pressable>
+        {hasAnyIdentity ? (
+          <Pressable
+            style={styles.actionButtonSecondary}
+            onPress={() => router.push(hasPtaIdentity && !hasMemberIdentity ? '/pta-report-payment' : '/report-payment')}
+            accessibilityRole="button"
+            accessibilityLabel="Report a payment"
+          >
+            <ThemedText style={styles.actionButtonSecondaryText}>Report a Payment</ThemedText>
+          </Pressable>
+        ) : null}
         <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/inbox')} accessibilityRole="button" accessibilityLabel="Inbox">
           <ThemedText style={styles.actionButtonSecondaryText}>Inbox</ThemedText>
         </Pressable>

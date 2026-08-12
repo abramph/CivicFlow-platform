@@ -242,6 +242,38 @@ export async function GET(request: Request) {
       }
     }
 
+    // ── 4. Role-agnostic constituent (OrgMember) resolution ─────────────
+    // Administrative role and constituent identity are separate concepts: an
+    // ORG_OWNER/ORG_ADMIN/STAFF login may legitimately ALSO be a dues-paying
+    // member, linked by OrgMember.userId (accept-invite.ts preserves the staff
+    // role rather than downgrading it). Branch 1 only matches role: "MEMBER",
+    // so without this pass such a user reports memberId: null and every
+    // member-facing mobile screen goes dark for them. This mirrors the
+    // role-agnostic lookup org-context.ts already performs, whose own doc
+    // comment names "staff who are also dues-paying members" as the case.
+    //
+    // Only fills rows still lacking a memberId, so branch 1 is untouched, and
+    // only for orgs the caller already earned a row in — this grants no new
+    // organization access, purely a fuller identity for orgs already visible.
+    const unresolved = Array.from(rows.values()).filter((row) => row.memberId === null);
+    if (unresolved.length > 0) {
+      const linkedMembers = await prisma.orgMember.findMany({
+        where: { userId, organizationId: { in: unresolved.map((row) => row.organizationId) } },
+        select: { id: true, organizationId: true, firstName: true, lastName: true, membershipStatus: true, isDelinquent: true },
+      });
+      for (const member of linkedMembers) {
+        const row = rows.get(member.organizationId);
+        if (!row) continue;
+        row.memberId = member.id;
+        // A PTA household adult row already carries the adult's own name;
+        // don't clobber it with the constituent record's.
+        row.firstName = row.firstName ?? member.firstName;
+        row.lastName = row.lastName ?? member.lastName;
+        row.membershipStatus = row.membershipStatus ?? member.membershipStatus;
+        row.isDelinquent = row.isDelinquent || member.isDelinquent;
+      }
+    }
+
     const data: (OrgRow & { capability: OrgCapability })[] = await Promise.all(
       Array.from(rows.values()).map(async (row) => {
         const vertical = confirmedPtaOrgIds.has(row.organizationId)
