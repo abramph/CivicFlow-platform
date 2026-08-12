@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react-native';
 import MeetingsScreen from '../meetings';
 
 jest.mock('expo-router', () => ({
-  router: { push: jest.fn() },
+  router: { push: jest.fn(), navigate: jest.fn() },
 }));
 
 const mockUseAuth = jest.fn();

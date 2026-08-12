@@ -53,7 +53,7 @@ export default function AnnouncementsScreen() {
         contentContainerStyle={styles.list}
         renderItem={({ item }) => (
           <Pressable
-            onPress={() => router.push(`/announcement/${item.id}`)}
+            onPress={() => router.navigate(`/announcement/${item.id}`)}
             accessibilityRole="button"
             accessibilityLabel={`${item.isRead ? '' : 'Unread, '}${item.subject || item.title}${item.sentAt ? `, ${new Date(item.sentAt).toLocaleDateString()}` : ''}`}
           >

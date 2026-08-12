@@ -53,7 +53,7 @@ export default function MeetingsScreen() {
         contentContainerStyle={styles.list}
         renderItem={({ item }) => (
           <Pressable
-            onPress={() => router.push(`/meeting/${item.id}`)}
+            onPress={() => router.navigate(`/meeting/${item.id}`)}
             accessibilityRole="button"
             accessibilityLabel={`${item.title}, ${new Date(item.meetingDate).toLocaleString()}${item.location ? `, ${item.location}` : ''}${item.rsvp?.response ? `, you're ${item.rsvp.response.status.replace('_', ' ').toLowerCase()}` : ''}`}
           >

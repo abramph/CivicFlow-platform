@@ -1,12 +1,11 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import * as Notifications from 'expo-notifications';
-import { useEffect } from 'react';
 import { useColorScheme } from 'react-native';
 
 import { AuthProvider } from '@/lib/auth-context';
 import { Colors } from '@/constants/theme';
-import { navigateToDeepLink } from '@/lib/deep-links';
+import { useNotificationDeepLinks } from '@/lib/use-notification-deep-links';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -17,25 +16,22 @@ Notifications.setNotificationHandler({
   }),
 });
 
+/** Must render INSIDE AuthProvider — the deep-link gate reads auth state.
+ * See use-notification-deep-links.ts for why taps are held until the app is
+ * ready to navigate (the fix for the dead-back-arrow-after-notification bug). */
+function NotificationDeepLinks() {
+  useNotificationDeepLinks();
+  return null;
+}
+
 export default function RootLayout() {
   const colorScheme = useColorScheme();
   const theme = colorScheme === 'dark' ? Colors.dark : Colors.light;
 
-  useEffect(() => {
-    // Tapping a notification (dues reminder, announcement, payment
-    // confirmation, etc.) opens its deep link, validated against the
-    // allow-list — never trusted blindly, even though it came from our own
-    // push payload.
-    const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
-      const deepLink = response.notification.request.content.data?.deepLink;
-      if (typeof deepLink === 'string') navigateToDeepLink(deepLink);
-    });
-    return () => subscription.remove();
-  }, []);
-
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <AuthProvider>
+        <NotificationDeepLinks />
         <Stack
           screenOptions={{
             headerShown: true,
