@@ -1,4 +1,5 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { toWinAnsiSafe } from "@/lib/pdf-text";
 import { withApiErrorHandling } from "@/lib/api-route";
 import { createAuditEvent } from "@/lib/audit";
 import { requirePtaVertical } from "@/lib/labs/pta/guard";
@@ -32,10 +33,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ tra
     let page = pdf.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
     let y = PAGE_HEIGHT - MARGIN;
 
-    function writeLine(text: string, options: { size?: number; useBold?: boolean; gray?: boolean } = {}) {
+    function writeLine(rawText: string, options: { size?: number; useBold?: boolean; gray?: boolean } = {}) {
       const size = options.size ?? 10;
       const usedFont = options.useBold ? bold : font;
-      const words = text.split(/\s+/);
+      const words = toWinAnsiSafe(rawText).split(/\s+/);
       const maxWidth = PAGE_WIDTH - MARGIN * 2;
       let current = "";
       const lines: string[] = [];
