@@ -647,6 +647,9 @@ model Organization {
   ptaSchoolYears              PtaSchoolYear[]
   ptaBoardPositions           PtaBoardPosition[]
   ptaOfficerAssignments       PtaOfficerAssignment[]
+  meetingAgendaItems          MeetingAgendaItem[]
+  meetingMotions              MeetingMotion[]
+  meetingActionItems          MeetingActionItem[]
 
   hoaProperties             Property[]
   hoaPropertyResidents      PropertyResident[]
@@ -708,6 +711,8 @@ model User {
   sentMemberInvites                 MemberInvite[]             @relation("MemberInviteCreatedBy")
   sentPtaHouseholdAdultInvites      PtaHouseholdAdultInvite[]  @relation("PtaHouseholdAdultInviteCreatedBy")
   ptaOfficerAssignmentsCreated      PtaOfficerAssignment[]     @relation("PtaOfficerAssignmentCreatedBy")
+  meetingMotionsCreated             MeetingMotion[]            @relation("MeetingMotionCreatedBy")
+  meetingActionItemsCreated         MeetingActionItem[]        @relation("MeetingActionItemCreatedBy")
   mobileDeviceTokens                MobileDeviceToken[]
   reviewedPaymentReports            PaymentReport[]            @relation("PaymentReportReviewedBy")
   reviewedPaymentLinkOfflineReports PaymentLinkOfflineReport[] @relation("PaymentLinkOfflineReportReviewedBy")
@@ -2362,6 +2367,17 @@ model AttendanceRecord {
   @@index([attendanceSessionId])
 }
 
+/// PTA Vertical 2.0, PR PTA-C — meeting lifecycle. SCHEDULED is the default
+/// so every pre-existing row keeps exactly its old behavior; DRAFT is opt-in
+/// for meetings still being planned.
+enum MeetingStatus {
+  DRAFT
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
 model Meeting {
   id              String   @id @default(cuid())
   organizationId  String
@@ -2369,8 +2385,14 @@ model Meeting {
   meetingType     String?
   meetingDate     DateTime
   location        String?
+  /// PTA-C: link for hybrid/virtual meetings — display-only, never fetched.
+  virtualMeetingUrl String?
   description     String?
   notes           String?
+  status          MeetingStatus @default(SCHEDULED)
+  /// PTA-C: informational quorum threshold — the attendance page compares
+  /// present-count against it; nothing is ever hard-blocked by it.
+  quorumRequired  Int?
   createdByUserId String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -2386,10 +2408,129 @@ model Meeting {
   meetingMinutes          MeetingMinutes[]
   meetingRsvps            MeetingRsvp[]
   ptaMeetingRsvps         PtaMeetingRsvp[]
+  agendaItems             MeetingAgendaItem[]
+  motions                 MeetingMotion[]
+  actionItems             MeetingActionItem[]
 
   @@index([organizationId])
   @@index([meetingDate])
   @@index([createdByUserId])
+  @@index([organizationId, status])
+}
+
+/// PTA-C agenda: ordered items for one meeting. Core (all verticals run
+/// agendas), deliberately simple — an item is a row, not a document.
+model MeetingAgendaItem {
+  id              String   @id @default(cuid())
+  organizationId  String
+  meetingId       String
+  title           String
+  description     String?
+  presenterName   String?
+  durationMinutes Int?
+  sortOrder       Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  meeting      Meeting      @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([meetingId])
+}
+
+enum MeetingMotionStatus {
+  PROPOSED
+  SECONDED
+  PASSED
+  FAILED
+  TABLED
+  WITHDRAWN
+}
+
+/// PTA-C motions & the organizational Decision Register. Core model (every
+/// vertical passes motions). Mover/seconder are recorded by name — a
+/// governance record cites people, not accounts. `decisionNumber`
+/// ("2026-014") is allocated transactionally when a motion PASSES and is
+/// unique per organization forever — the searchable Decision Register is
+/// simply PASSED motions ordered by number. organizationId/meetingId are
+/// onDelete: Restrict (MeetingMinutes precedent): a recorded decision must
+/// never be cascade-deleted.
+model MeetingMotion {
+  id              String              @id @default(cuid())
+  organizationId  String
+  meetingId       String
+  text            String
+  moverName       String?
+  seconderName    String?
+  discussionNotes String?
+  voteMethod      String?
+  votesYes        Int?
+  votesNo         Int?
+  votesAbstain    Int?
+  status          MeetingMotionStatus @default(PROPOSED)
+  decisionNumber  String?
+  decidedAt       DateTime?
+  createdByUserId String?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  meeting      Meeting      @relation(fields: [meetingId], references: [id], onDelete: Restrict)
+  createdBy    User?        @relation("MeetingMotionCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, decisionNumber])
+  @@index([organizationId])
+  @@index([meetingId])
+  @@index([organizationId, status])
+}
+
+enum ActionItemPriority {
+  LOW
+  NORMAL
+  HIGH
+}
+
+enum ActionItemStatus {
+  OPEN
+  IN_PROGRESS
+  BLOCKED
+  COMPLETED
+  CANCELLED
+}
+
+/// PTA-C action items: the work a meeting decision creates. Core model;
+/// `committeeId` is an optional PTA-vertical linkage (SetNull, invisible to
+/// other verticals) so PTA committees can own follow-ups — see
+/// docs/pta-vertical-2.md. Owner is a recorded name (same rationale as
+/// MeetingMotion.moverName). meetingId is SetNull, not Cascade: an action
+/// item outlives its meeting.
+model MeetingActionItem {
+  id              String             @id @default(cuid())
+  organizationId  String
+  meetingId       String?
+  committeeId     String?
+  title           String
+  description     String?
+  ownerName       String?
+  dueDate         DateTime?
+  priority        ActionItemPriority @default(NORMAL)
+  status          ActionItemStatus   @default(OPEN)
+  completedAt     DateTime?
+  createdByUserId String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  meeting      Meeting?      @relation(fields: [meetingId], references: [id], onDelete: SetNull)
+  committee    PtaCommittee? @relation(fields: [committeeId], references: [id], onDelete: SetNull)
+  createdBy    User?         @relation("MeetingActionItemCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([organizationId, dueDate])
+  @@index([meetingId])
+  @@index([committeeId])
 }
 
 enum MeetingRsvpStatus {
@@ -3612,6 +3753,7 @@ model PtaCommittee {
   schoolYearRef          PtaSchoolYear?            @relation(fields: [schoolYearId], references: [id], onDelete: SetNull)
   members                PtaCommitteeMember[]
   volunteerOpportunities PtaVolunteerOpportunity[]
+  actionItems            MeetingActionItem[]
 
   @@unique([organizationId, name])
   @@index([organizationId])

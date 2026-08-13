@@ -12,6 +12,10 @@ const updateMeetingSchema = z.object({
   location: optionalText(255),
   description: optionalText(4000),
   notes: optionalText(4000),
+  // PTA-C additions — display-only URL for hybrid meetings and an
+  // informational quorum threshold (never a hard block).
+  virtualMeetingUrl: optionalText(500),
+  quorumRequired: z.number().int().min(1).max(100000).nullable().optional(),
 });
 
 function text(value: string | null | undefined) {
@@ -47,6 +51,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         ...(input.location !== undefined ? { location: text(input.location) } : {}),
         ...(input.description !== undefined ? { description: text(input.description) } : {}),
         ...(input.notes !== undefined ? { notes: text(input.notes) } : {}),
+        ...(input.virtualMeetingUrl !== undefined ? { virtualMeetingUrl: text(input.virtualMeetingUrl) } : {}),
+        ...(input.quorumRequired !== undefined ? { quorumRequired: input.quorumRequired } : {}),
       },
     });
     await createAuditEvent({ organizationId, actorUserId: session.userId, actorEmail: session.userEmail, action: "update", entityType: "meeting", entityId: updated.id, metadata: { before: existing, after: updated } });
