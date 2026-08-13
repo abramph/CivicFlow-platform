@@ -3588,6 +3588,9 @@ model PtaVolunteerSignup {
   status           PtaVolunteerSignupStatus @default(SIGNED_UP)
   source           PtaVolunteerSignupSource @default(SELF)
   hoursLogged      Float?
+  /// PTA-G reminder dedup: stamped when the pre-shift reminder email goes
+  /// out, so neither the cron sweep nor the officer button double-sends.
+  reminderSentAt   DateTime?
   signedUpAt       DateTime                 @default(now())
   cancelledAt      DateTime?
   cancelReason     String?
