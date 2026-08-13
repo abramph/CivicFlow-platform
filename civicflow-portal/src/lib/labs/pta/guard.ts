@@ -99,6 +99,53 @@ export async function requirePtaHouseholdSelfAccess() {
   return { organizationId, session, adult };
 }
 
+/**
+ * PTA Vertical 2.0, PR PTA-B — committee-scoped chair authorization.
+ * A committee chair/co-chair gets management access to THEIR OWN committee
+ * without holding pta:committees:manage (and typically without any staff
+ * role at all) — linkage-based like requirePtaHouseholdSelfAccess above,
+ * never a Permission grant, so it can't leak into any other surface.
+ *
+ * Resolution order: real permission first (officers keep full authority over
+ * every committee), then chair/co-chair linkage pinned to this one
+ * committeeId. `isChairOnly` tells the route to hold the caller to the
+ * chair-scoped field whitelist (updatePtaCommitteeAsChair) rather than the
+ * full update surface.
+ */
+export async function requireCommitteeManageOrChair(committeeId: string) {
+  const { organizationId, session, can } = await requireOrganization();
+  await requirePtaVertical(organizationId);
+
+  if (can("pta:committees:manage")) {
+    const committee = await prisma.ptaCommittee.findFirst({ where: { id: committeeId, organizationId }, select: { id: true } });
+    if (!committee) throw new PtaError("PTA_COMMITTEE_NOT_FOUND", "Committee not found in this organization.");
+    return { organizationId, session, isChairOnly: false as const };
+  }
+
+  const chairedCommittee = await prisma.ptaCommittee.findFirst({
+    where: {
+      id: committeeId,
+      organizationId,
+      OR: [{ chair: { userId: session.userId } }, { coChair: { userId: session.userId } }],
+    },
+    select: { id: true },
+  });
+  if (!chairedCommittee) {
+    throw new PtaError("PTA_NOT_A_HOUSEHOLD_MEMBER", "Only this committee's chair or co-chair (or an officer) can manage it.");
+  }
+  return { organizationId, session, isChairOnly: true as const };
+}
+
+/** Non-throwing chair check for page rendering — is this signed-in user the
+ * chair or co-chair of this committee? */
+export async function isCommitteeChair(organizationId: string, userId: string, committeeId: string): Promise<boolean> {
+  const committee = await prisma.ptaCommittee.findFirst({
+    where: { id: committeeId, organizationId, OR: [{ chair: { userId } }, { coChair: { userId } }] },
+    select: { id: true },
+  });
+  return Boolean(committee);
+}
+
 export interface PtaOrganizationAccessContext {
   organizationId: string;
   /** The raw stored Organization.primaryVertical — not reconciled against

@@ -3149,6 +3149,7 @@ model PtaHouseholdAdult {
   volunteerSignups     PtaVolunteerSignup[]
   chairOfCommittees    PtaCommittee[]            @relation("PtaCommitteeChair")
   coChairOfCommittees  PtaCommittee[]            @relation("PtaCommitteeCoChair")
+  liaisonOfCommittees  PtaCommittee[]            @relation("PtaCommitteeBoardLiaison")
   committeeMemberships PtaCommitteeMember[]
   invites              PtaHouseholdAdultInvite[]
   officerAssignments   PtaOfficerAssignment[]
@@ -3574,6 +3575,16 @@ model PtaVolunteerRequirement {
   @@index([organizationId])
 }
 
+/// PTA Vertical 2.0, PR PTA-B — lifecycle status. A committee is never hard
+/// deleted; COMPLETED/ARCHIVED retire it from active lists while its
+/// membership, volunteer, and (future) document history stays reachable.
+enum PtaCommitteeStatus {
+  PLANNING
+  ACTIVE
+  COMPLETED
+  ARCHIVED
+}
+
 model PtaCommittee {
   id             String   @id @default(cuid())
   organizationId String
@@ -3581,17 +3592,31 @@ model PtaCommittee {
   description    String?
   chairAdultId   String?
   coChairAdultId String?
+  /// PTA-B: board liaison — the board's contact for this committee, distinct
+  /// from chair/co-chair (who run it).
+  boardLiaisonAdultId String?
+  status         PtaCommitteeStatus @default(ACTIVE)
+  /// PTA-B school-year association, same dual label+FK convention as
+  /// PtaHousehold (label stays readable even if the year row goes away).
+  schoolYear     String?
+  schoolYearId   String?
+  goals          String?
+  meetingSchedule String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
   organization           Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   chair                  PtaHouseholdAdult?        @relation("PtaCommitteeChair", fields: [chairAdultId], references: [id], onDelete: SetNull)
   coChair                PtaHouseholdAdult?        @relation("PtaCommitteeCoChair", fields: [coChairAdultId], references: [id], onDelete: SetNull)
+  boardLiaison           PtaHouseholdAdult?        @relation("PtaCommitteeBoardLiaison", fields: [boardLiaisonAdultId], references: [id], onDelete: SetNull)
+  schoolYearRef          PtaSchoolYear?            @relation(fields: [schoolYearId], references: [id], onDelete: SetNull)
   members                PtaCommitteeMember[]
   volunteerOpportunities PtaVolunteerOpportunity[]
 
   @@unique([organizationId, name])
   @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([schoolYearId])
 }
 
 model PtaCommitteeMember {
@@ -3666,6 +3691,7 @@ model PtaSchoolYear {
   studentEnrollments     PtaStudentEnrollment[]
   volunteerOpportunities PtaVolunteerOpportunity[]
   officerAssignments     PtaOfficerAssignment[]
+  committees             PtaCommittee[]
 
   @@unique([organizationId, label])
   @@index([organizationId])

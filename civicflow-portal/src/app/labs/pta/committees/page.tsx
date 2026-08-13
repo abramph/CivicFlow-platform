@@ -35,6 +35,12 @@ export default async function PtaCommitteesPage() {
                   <Link href={`/labs/pta/committees/${c.id}`} className="font-semibold text-emerald-700 hover:underline">
                     {c.name}
                   </Link>
+                  {c.status !== "ACTIVE" ? (
+                    <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">
+                      {c.status === "PLANNING" ? "Planning" : c.status === "COMPLETED" ? "Completed" : "Archived"}
+                    </span>
+                  ) : null}
+                  {c.schoolYear ? <span className="ml-2 text-xs text-slate-500">{c.schoolYear}</span> : null}
                   {c.description ? <p className="text-slate-600">{c.description}</p> : null}
                 </div>
                 <div className="text-right text-slate-600">
