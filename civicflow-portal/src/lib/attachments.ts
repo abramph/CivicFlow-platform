@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 
 export const attachmentEntityTypes = [
   "ORGANIZATION",
+  "ORGANIZATION_DOCUMENT",
   "MEMBER",
   "CAMPAIGN",
   "EVENT",
@@ -23,6 +24,9 @@ export const maxAttachmentBytes = 15 * 1024 * 1024;
 
 const readPermissions: Record<AttachmentEntityType, Permission> = {
   ORGANIZATION: "org_settings:read",
+  // PTA-D Document Center — the org-owned document repository (entityId is
+  // the organizationId; `purpose` is the folder/category slug).
+  ORGANIZATION_DOCUMENT: "documents:read",
   MEMBER: "members:read",
   CAMPAIGN: "campaigns:read",
   EVENT: "events:read",
@@ -47,6 +51,7 @@ const readPermissions: Record<AttachmentEntityType, Permission> = {
 
 const writePermissions: Record<AttachmentEntityType, Permission> = {
   ORGANIZATION: "org_settings:write",
+  ORGANIZATION_DOCUMENT: "documents:write",
   MEMBER: "members:write",
   CAMPAIGN: "campaigns:write",
   EVENT: "events:write",
@@ -74,6 +79,7 @@ export async function verifyAttachmentEntity(organizationId: string, entityType:
   if (!entityId) return false;
   switch (entityType) {
     case "ORGANIZATION":
+    case "ORGANIZATION_DOCUMENT":
       return entityId === organizationId && Boolean(await prisma.organization.findFirst({ where: { id: organizationId }, select: { id: true } }));
     case "MEMBER":
       return Boolean(await prisma.orgMember.findFirst({ where: { id: entityId, organizationId }, select: { id: true } }));

@@ -420,6 +420,10 @@ enum CommunicationDeliveryStatus {
 
 enum AttachmentEntityType {
   ORGANIZATION
+  /// PTA-D Document Center: general organization-owned files (entityId is the
+  /// organizationId; `purpose` carries the folder/category slug). Rides the
+  /// existing upload/signed-download/soft-delete pipeline unchanged.
+  ORGANIZATION_DOCUMENT
   MEMBER
   CAMPAIGN
   EVENT
@@ -650,6 +654,7 @@ model Organization {
   meetingAgendaItems          MeetingAgendaItem[]
   meetingMotions              MeetingMotion[]
   meetingActionItems          MeetingActionItem[]
+  governanceDocuments         GovernanceDocument[]
 
   hoaProperties             Property[]
   hoaPropertyResidents      PropertyResident[]
@@ -713,6 +718,7 @@ model User {
   ptaOfficerAssignmentsCreated      PtaOfficerAssignment[]     @relation("PtaOfficerAssignmentCreatedBy")
   meetingMotionsCreated             MeetingMotion[]            @relation("MeetingMotionCreatedBy")
   meetingActionItemsCreated         MeetingActionItem[]        @relation("MeetingActionItemCreatedBy")
+  governanceDocumentsUploaded       GovernanceDocument[]       @relation("GovernanceDocumentUploadedBy")
   mobileDeviceTokens                MobileDeviceToken[]
   reviewedPaymentReports            PaymentReport[]            @relation("PaymentReportReviewedBy")
   reviewedPaymentLinkOfflineReports PaymentLinkOfflineReport[] @relation("PaymentLinkOfflineReportReviewedBy")
@@ -3802,6 +3808,72 @@ model PtaEventRsvp {
   @@unique([eventId, householdId])
   @@index([organizationId])
   @@index([eventId])
+}
+
+// ─── PTA Vertical 2.0, PR PTA-D: governance library (core) ───────────────────
+// Bylaws, standing rules, policies — versioned, never destroyed. Core model
+// (every vertical has governing documents); PTA presentation lives in the
+// PTA vertical. See docs/pta-vertical-2.md §10.
+
+enum GovernanceDocumentType {
+  BYLAWS
+  STANDING_RULES
+  POLICY
+  PROCEDURE
+  CONFLICT_OF_INTEREST
+  FINANCIAL_PROCEDURES
+  ELECTION_RULES
+  CODE_OF_CONDUCT
+  RESOLUTION
+  OTHER
+}
+
+enum GovernanceDocumentStatus {
+  DRAFT
+  CURRENT
+  SUPERSEDED
+  ARCHIVED
+}
+
+/// One VERSION of a governing document. Versions of the same document share a
+/// group: v1's group key is its own id; later versions carry
+/// rootDocumentId = that id. Marking a version CURRENT supersedes the group's
+/// previous CURRENT (transactionally, in governance-documents.ts) — rows are
+/// never deleted or rewritten, so the full amendment history is permanent.
+/// organizationId is onDelete: Restrict (MeetingMinutes precedent): governance
+/// records must never cascade away. The file itself is optional — a policy can
+/// be tracked (dates/status) before its file is uploaded.
+model GovernanceDocument {
+  id               String                   @id @default(cuid())
+  organizationId   String
+  rootDocumentId   String?
+  title            String
+  docType          GovernanceDocumentType   @default(OTHER)
+  version          Int                      @default(1)
+  status           GovernanceDocumentStatus @default(DRAFT)
+  effectiveDate    DateTime?
+  approvedDate     DateTime?
+  /// When this document is due for its next review — feeds the compliance
+  /// calendar in PTA-I.
+  reviewDate       DateTime?
+  notes            String?
+  fileName         String?
+  contentType      String?
+  byteSize         Int?
+  objectKey        String?
+  uploadedByUserId String?
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+
+  organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  root         GovernanceDocument?  @relation("GovernanceDocumentVersions", fields: [rootDocumentId], references: [id], onDelete: Restrict)
+  versions     GovernanceDocument[] @relation("GovernanceDocumentVersions")
+  uploadedBy   User?                @relation("GovernanceDocumentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([organizationId, docType])
+  @@index([organizationId, status])
+  @@index([rootDocumentId])
 }
 
 // ─── PTA Vertical 2.0, PR PTA-A: school years + board foundation ─────────────

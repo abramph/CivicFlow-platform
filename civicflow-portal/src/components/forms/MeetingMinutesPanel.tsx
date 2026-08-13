@@ -113,6 +113,14 @@ export function MeetingMinutesPanel({
           {latest.status === "APPROVED" && latest.approvedAt ? (
             <span className="text-slate-600">· Approved {new Date(latest.approvedAt).toLocaleDateString()}</span>
           ) : null}
+          {latest.status === "APPROVED" || latest.status === "SUPERSEDED" ? (
+            <a
+              href={`/api/meetings/${meetingId}/minutes/${latest.id}/pdf`}
+              className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-900 hover:bg-slate-50"
+            >
+              Download PDF
+            </a>
+          ) : null}
         </div>
       ) : (
         <p className="text-sm text-slate-600">No minutes have been drafted for this meeting yet.</p>
