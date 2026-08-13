@@ -14,6 +14,7 @@ import { MemberLifecycleError } from "@/lib/member-lifecycle-errors";
 import { SupportAssistantError } from "@/lib/support-assistant/errors";
 import { MeetingMinutesError, meetingMinutesErrorResponse } from "@/lib/meeting-minutes";
 import { MeetingOperationError } from "@/lib/meeting-operations";
+import { GovernanceDocumentError } from "@/lib/governance-documents";
 
 export async function withApiErrorHandling(
   fn: () => Promise<Response>
@@ -77,6 +78,9 @@ export async function withApiErrorHandling(
         return meetingMinutesErrorResponse(error);
       }
       if (error instanceof MeetingOperationError) {
+        return jsonError(error.message, error.status);
+      }
+      if (error instanceof GovernanceDocumentError) {
         return jsonError(error.message, error.status);
       }
       if (error instanceof MobileAuthError || error instanceof MobileForbiddenError) {

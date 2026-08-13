@@ -131,6 +131,16 @@ export const PERMISSIONS = {
   // SMS consent audit
   SMS_CONSENT_READ: "sms_consent:read",
 
+  // PTA Vertical 2.0, PR PTA-D — core Document Center + Governance Library
+  // (see docs/pta-vertical-2.md §10-11). Core permissions, not pta:* —
+  // every vertical owns documents and governing rules. Governance write is
+  // deliberately NOT granted to STAFF: publishing or superseding bylaws is
+  // board-level authority, same reasoning as MEETINGS_MINUTES_APPROVE.
+  DOCUMENTS_READ:   "documents:read",
+  DOCUMENTS_WRITE:  "documents:write",
+  GOVERNANCE_READ:  "governance:read",
+  GOVERNANCE_WRITE: "governance:write",
+
   // Unestra Labs (organization-facing, read-only today — see docs/unestra-labs.md)
   LABS_READ: "labs:read",
 
@@ -330,6 +340,10 @@ const ORG_OWNER_PERMISSIONS: Permission[] = [
   PERMISSIONS.PTA_BOARD_VIEW,
   PERMISSIONS.PTA_BOARD_MANAGE,
   PERMISSIONS.PTA_SCHOOL_YEARS_MANAGE,
+  PERMISSIONS.DOCUMENTS_READ,
+  PERMISSIONS.DOCUMENTS_WRITE,
+  PERMISSIONS.GOVERNANCE_READ,
+  PERMISSIONS.GOVERNANCE_WRITE,
   PERMISSIONS.HOA_PROPERTIES_READ,
   PERMISSIONS.HOA_PROPERTIES_WRITE,
   PERMISSIONS.HOA_RESIDENTS_READ,
@@ -417,6 +431,10 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.PTA_BOARD_VIEW,
     PERMISSIONS.PTA_BOARD_MANAGE,
     PERMISSIONS.PTA_SCHOOL_YEARS_MANAGE,
+    PERMISSIONS.DOCUMENTS_READ,
+    PERMISSIONS.DOCUMENTS_WRITE,
+    PERMISSIONS.GOVERNANCE_READ,
+    PERMISSIONS.GOVERNANCE_WRITE,
     PERMISSIONS.HOA_PROPERTIES_READ,
     PERMISSIONS.HOA_PROPERTIES_WRITE,
     PERMISSIONS.HOA_RESIDENTS_READ,
@@ -470,6 +488,9 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     // Treasurer must see who the board is (and was) — managing it is not a
     // financial function.
     PERMISSIONS.PTA_BOARD_VIEW,
+    PERMISSIONS.DOCUMENTS_READ,
+    PERMISSIONS.DOCUMENTS_WRITE,
+    PERMISSIONS.GOVERNANCE_READ,
     // Treasurer needs to see which property/owner an assessment charge
     // belongs to, but property/resident record-keeping itself is a board
     // administrative function, not a financial one -- read-only.
@@ -520,6 +541,10 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     // and reshaping positions stays ORG_OWNER/ORG_ADMIN (board authority) —
     // same reasoning as MEETINGS_MINUTES_APPROVE being withheld above.
     PERMISSIONS.PTA_BOARD_VIEW,
+    PERMISSIONS.DOCUMENTS_READ,
+    PERMISSIONS.DOCUMENTS_WRITE,
+    // Governance READ only — publishing/superseding bylaws is board authority.
+    PERMISSIONS.GOVERNANCE_READ,
     PERMISSIONS.HOA_PROPERTIES_READ,
     PERMISSIONS.HOA_PROPERTIES_WRITE,
     PERMISSIONS.HOA_RESIDENTS_READ,
@@ -570,6 +595,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.PTA_DIRECTORY_READ,
     PERMISSIONS.PTA_ANALYTICS_READ,
     PERMISSIONS.PTA_BOARD_VIEW,
+    PERMISSIONS.DOCUMENTS_READ,
+    PERMISSIONS.GOVERNANCE_READ,
     PERMISSIONS.HOA_PROPERTIES_READ,
     PERMISSIONS.HOA_RESIDENTS_READ,
     PERMISSIONS.HOA_VIOLATIONS_READ,

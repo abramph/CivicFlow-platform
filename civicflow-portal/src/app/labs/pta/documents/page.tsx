@@ -1,17 +1,15 @@
 import { getPtaPageGate } from "@/lib/labs/pta/guard";
-import { PageHeader } from "@/components/app/PageChrome";
-import { EmptyState } from "@/components/admin/OperationsUI";
+import { PageHeader, SectionCard } from "@/components/app/PageChrome";
 import { PtaLabsBadge } from "@/components/labs/pta/PtaLabsBadge";
+import { PtaDocumentCenter } from "@/components/labs/pta/PtaDocumentCenter";
 
 /**
- * No PTA-specific document model or API exists (bylaws, budget PDFs, permission
- * slips, etc.) — this is an honest placeholder per the UI integration sprint's
- * explicit instruction not to invent document management that doesn't exist
- * on the backend. Meeting minutes already have their own page/API (see
- * minutes.ts) and are not duplicated here.
+ * PTA Vertical 2.0, PR PTA-D — the Document Center replaces the honest
+ * placeholder this page used to be. Bylaws & Policies (versioned governing
+ * documents) have their own dedicated page; this is the general repository.
  */
 export default async function PtaDocumentsPage() {
-  const { access } = await getPtaPageGate("pta:documents:manage");
+  const { organizationId, access, can } = await getPtaPageGate("documents:read");
 
   if (!access.available) {
     return (
@@ -24,11 +22,13 @@ export default async function PtaDocumentsPage() {
   return (
     <main className="space-y-6">
       <PtaLabsBadge />
-      <PageHeader title="Documents" description="Shared files for your PTA — bylaws, budgets, permission slips, and the like." />
-      <EmptyState
-        title="Not built yet"
-        description="Document storage doesn't exist in this vertical yet — this page is a placeholder marking a planned feature, not a hidden or broken one. Approved meeting minutes already have their own page; everything else (bylaws, budgets, forms) will land here in a future phase."
+      <PageHeader
+        title="Documents"
+        description="Your PTA's shared files, organized by folder. Files belong to the organization — they stay when officers change. Bylaws and policies live in Bylaws & Policies."
       />
+      <SectionCard title="Document Center">
+        <PtaDocumentCenter organizationId={organizationId} canWrite={can("documents:write")} />
+      </SectionCard>
     </main>
   );
 }
