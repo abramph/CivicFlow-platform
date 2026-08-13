@@ -47,6 +47,9 @@ export const PTA_ERROR_CODES = [
    * restricted content is never confirmed to unauthorized viewers. */
   "PTA_CONCERN_NOT_FOUND",
   "PTA_CONCERN_FORBIDDEN",
+  // PTA Vertical 2.0, PR PTA-F — board transition center.
+  "PTA_TRANSITION_NOT_FOUND",
+  "PTA_HANDOFF_NOT_FOUND",
 ] as const;
 
 export type PtaErrorCode = (typeof PTA_ERROR_CODES)[number];
@@ -86,6 +89,8 @@ const STATUS_FOR_CODE: Record<PtaErrorCode, number> = {
   PTA_CONCERNS_DISABLED: 403,
   PTA_CONCERN_NOT_FOUND: 404,
   PTA_CONCERN_FORBIDDEN: 403,
+  PTA_TRANSITION_NOT_FOUND: 404,
+  PTA_HANDOFF_NOT_FOUND: 404,
 };
 
 export class PtaError extends Error {
