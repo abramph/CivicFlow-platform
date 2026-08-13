@@ -37,6 +37,7 @@ export default async function PtaLayout({ children }: { children: ReactNode }) {
   const officerTabs: PtaTab[] = [
     { href: "/labs/pta/dashboard", label: "Dashboard", visible: can("pta:analytics:read") },
     { href: "/labs/pta/board", label: "Board", visible: can("pta:board:view") },
+    { href: "/labs/pta/transition", label: "Transition", visible: can("pta:board:view") },
     { href: "/labs/pta/households", label: "Households", visible: can("pta:directory:read") },
     { href: "/labs/pta/academic", label: "Academic", visible: can("pta:directory:read") },
     { href: "/labs/pta/committees", label: "Committees", visible: can("pta:directory:read") },

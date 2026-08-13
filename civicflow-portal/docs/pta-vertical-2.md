@@ -257,3 +257,42 @@ no other vertical sees any of it.
   assignment → review → resolve — plus redaction content-leak assertions,
   404-not-403, last-assignee protection, tenant isolation, audit-metadata
   hygiene.
+
+## PR PTA-F — Board Transition Center (this PR)
+
+**The signature feature** (brief §12–§15). PTA-namespaced end to end (§42:
+"board transition" is PTA workflow, not core) — built entirely on PTA-A's
+board/school-year machinery instead of new parallel structures.
+
+- **PtaBoardTransition**: one per (org, fromYear → toYear) pair, workflow
+  PREPARING → READY_FOR_HANDOFF → HANDOFF_IN_PROGRESS → ACCEPTED → COMPLETED.
+  Restrict org FK — a transition is a governance record.
+- **PtaOfficerHandoff**: one per position in the transition; links the
+  outgoing ACTIVE assignment and an INCOMING assignment (both SetNull —
+  handoffs survive roster edits); NOT_STARTED → IN_PROGRESS → READY →
+  ACCEPTED (requires an incoming officer + all required checklist items).
+- **PtaHandoffChecklistItem**: position-specific templates seeded at creation
+  (President/Treasurer/Secretary/Committee-Chair/default heuristics on the
+  position name), plus custom items. **Credentials are a checklist line
+  ("confirm access transferred outside Unestra") — never stored** (§13).
+- **Readiness score**: computed, never stored — per-handoff points (incoming
+  identified, required checklist complete, accepted) + org-level checks
+  (CURRENT bylaws exist, approved minutes archived for the outgoing year),
+  rendered as the brief's "78% — completed / missing" breakdown.
+- **COMPLETED is the ceremony**: activates every linked INCOMING assignment
+  (the existing activate primitive ENDs the outgoing holder — historical
+  board preserved, §36), flips the current school year to the incoming year
+  (setCurrentSchoolYear keeps the profile label in lockstep), stamps
+  completedAt. Requires every handoff ACCEPTED first.
+- **Transition packet** (pdf-lib, `pta:board:manage`, audited): org info,
+  outgoing/incoming board, committee roster, governance index
+  (titles/versions only), recent decisions, open action items, upcoming
+  events, outgoing-year meeting history. **Concerns are never auto-included**
+  — at most a count of open non-restricted cases, and only when the caller
+  holds `pta:concerns:view` (§14).
+- **Permissions**: rides `pta:board:view` (see) / `pta:board:manage` (run) —
+  transition IS board management; no new permission surface.
+- **Deferred deliberately**: incoming-officer *self-service* onboarding
+  (guided §15 flow in the member/mobile experience) belongs to PTA-J — this
+  PR records acceptance through board managers, which is how most PTAs run a
+  handoff meeting anyway.

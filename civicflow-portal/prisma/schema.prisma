@@ -658,6 +658,9 @@ model Organization {
   ptaConcerns                 PtaConcern[]
   ptaConcernAssignees         PtaConcernAssignee[]
   ptaConcernNotes             PtaConcernNote[]
+  ptaBoardTransitions         PtaBoardTransition[]
+  ptaOfficerHandoffs          PtaOfficerHandoff[]
+  ptaHandoffChecklistItems    PtaHandoffChecklistItem[]
 
   hoaProperties             Property[]
   hoaPropertyResidents      PropertyResident[]
@@ -726,6 +729,8 @@ model User {
   ptaConcernAssignments             PtaConcernAssignee[]       @relation("PtaConcernAssigneeUser")
   ptaConcernAssignmentsMade         PtaConcernAssignee[]       @relation("PtaConcernAssigneeAssignedBy")
   ptaConcernNotesAuthored           PtaConcernNote[]           @relation("PtaConcernNoteAuthor")
+  ptaTransitionsStarted             PtaBoardTransition[]       @relation("PtaTransitionStartedBy")
+  ptaHandoffChecklistCompletions    PtaHandoffChecklistItem[]  @relation("PtaHandoffChecklistCompletedBy")
   mobileDeviceTokens                MobileDeviceToken[]
   reviewedPaymentReports            PaymentReport[]            @relation("PaymentReportReviewedBy")
   reviewedPaymentLinkOfflineReports PaymentLinkOfflineReport[] @relation("PaymentLinkOfflineReportReviewedBy")
@@ -3918,6 +3923,8 @@ model PtaSchoolYear {
   studentEnrollments     PtaStudentEnrollment[]
   volunteerOpportunities PtaVolunteerOpportunity[]
   officerAssignments     PtaOfficerAssignment[]
+  transitionsFrom        PtaBoardTransition[]      @relation("PtaTransitionFromYear")
+  transitionsTo          PtaBoardTransition[]      @relation("PtaTransitionToYear")
   committees             PtaCommittee[]
 
   @@unique([organizationId, label])
@@ -3951,6 +3958,7 @@ model PtaBoardPosition {
 
   organization Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   assignments  PtaOfficerAssignment[]
+  handoffs     PtaOfficerHandoff[]
 
   @@unique([organizationId, name])
   @@index([organizationId])
@@ -3992,6 +4000,8 @@ model PtaOfficerAssignment {
   schoolYear     PtaSchoolYear?     @relation(fields: [schoolYearId], references: [id], onDelete: Restrict)
   householdAdult PtaHouseholdAdult? @relation(fields: [householdAdultId], references: [id], onDelete: SetNull)
   createdBy      User?              @relation("PtaOfficerAssignmentCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  handoffsAsOutgoing PtaOfficerHandoff[] @relation("PtaHandoffOutgoing")
+  handoffsAsIncoming PtaOfficerHandoff[] @relation("PtaHandoffIncoming")
 
   @@index([organizationId])
   @@index([positionId])
@@ -4124,6 +4134,105 @@ model PtaConcernNote {
 
   @@index([organizationId])
   @@index([concernId])
+}
+
+// ─── PTA Vertical 2.0, PR PTA-F: Board Transition Center ─────────────────────
+// The signature feature (docs/pta-vertical-2.md PTA-F): a structured handoff
+// from one school year's board to the next, built ON TOP of PTA-A's
+// PtaBoardPosition/PtaOfficerAssignment history — completing a transition
+// activates INCOMING assignments through the same primitive the Board page
+// uses, so leadership history stays in one place.
+
+enum PtaTransitionStatus {
+  PREPARING
+  READY_FOR_HANDOFF
+  HANDOFF_IN_PROGRESS
+  ACCEPTED
+  COMPLETED
+}
+
+enum PtaHandoffStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  READY
+  ACCEPTED
+}
+
+/// One board turnover: fromYear → toYear. Restrict org FK — a transition is
+/// a governance record (MeetingMinutes precedent). Restrict on both year FKs:
+/// a school year that anchors a transition can't be silently removed.
+model PtaBoardTransition {
+  id               String              @id @default(cuid())
+  organizationId   String
+  fromSchoolYearId String
+  toSchoolYearId   String
+  status           PtaTransitionStatus @default(PREPARING)
+  notes            String?
+  startedByUserId  String?
+  completedAt      DateTime?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  fromSchoolYear PtaSchoolYear       @relation("PtaTransitionFromYear", fields: [fromSchoolYearId], references: [id], onDelete: Restrict)
+  toSchoolYear   PtaSchoolYear       @relation("PtaTransitionToYear", fields: [toSchoolYearId], references: [id], onDelete: Restrict)
+  startedBy      User?               @relation("PtaTransitionStartedBy", fields: [startedByUserId], references: [id], onDelete: SetNull)
+  handoffs       PtaOfficerHandoff[]
+
+  @@unique([organizationId, fromSchoolYearId, toSchoolYearId])
+  @@index([organizationId])
+  @@index([organizationId, status])
+}
+
+/// One position's handoff within a transition. Assignment links are SetNull —
+/// a handoff record survives roster edits. ACCEPTED requires an incoming
+/// officer plus every required checklist item (enforced in the lib).
+model PtaOfficerHandoff {
+  id                   String           @id @default(cuid())
+  organizationId       String
+  transitionId         String
+  positionId           String
+  outgoingAssignmentId String?
+  incomingAssignmentId String?
+  status               PtaHandoffStatus @default(NOT_STARTED)
+  notes                String?
+  acceptedAt           DateTime?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  organization       Organization              @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  transition         PtaBoardTransition        @relation(fields: [transitionId], references: [id], onDelete: Cascade)
+  position           PtaBoardPosition          @relation(fields: [positionId], references: [id], onDelete: Restrict)
+  outgoingAssignment PtaOfficerAssignment?     @relation("PtaHandoffOutgoing", fields: [outgoingAssignmentId], references: [id], onDelete: SetNull)
+  incomingAssignment PtaOfficerAssignment?     @relation("PtaHandoffIncoming", fields: [incomingAssignmentId], references: [id], onDelete: SetNull)
+  checklistItems     PtaHandoffChecklistItem[]
+
+  @@unique([transitionId, positionId])
+  @@index([organizationId])
+}
+
+/// Position-specific handoff checklist (§13). Credentials are a CHECKLIST
+/// LINE ("access transferred outside Unestra") — passwords/secrets are never
+/// stored anywhere in Unestra.
+model PtaHandoffChecklistItem {
+  id                String    @id @default(cuid())
+  organizationId    String
+  handoffId         String
+  title             String
+  description       String?
+  isRequired        Boolean   @default(true)
+  sortOrder         Int       @default(0)
+  completedAt       DateTime?
+  completedByUserId String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  handoff      PtaOfficerHandoff @relation(fields: [handoffId], references: [id], onDelete: Cascade)
+  completedBy  User?             @relation("PtaHandoffChecklistCompletedBy", fields: [completedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([handoffId])
 }
 
 // ─── HOA vertical (PR #43) ────────────────────────────────────────────────

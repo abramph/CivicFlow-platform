@@ -104,6 +104,7 @@ const NAVIGATION: Record<OrganizationVertical, NavItem[]> = {
   PTA: [
     { href: "/labs/pta/dashboard", label: "PTA Dashboard" },
     { href: "/labs/pta/board", label: "Board", permission: "pta:board:view" },
+    { href: "/labs/pta/transition", label: "Transition Center", permission: "pta:board:view" },
     { href: "/labs/pta/households", label: "Households" },
     { href: "/labs/pta/academic", label: "Academics" },
     { href: "/labs/pta/committees", label: "Committees" },
