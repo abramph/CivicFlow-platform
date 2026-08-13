@@ -12,6 +12,7 @@ export const attachmentEntityTypes = [
   "COMMUNICATION_CAMPAIGN",
   "RECEIPT",
   "REPORT_EXPORT",
+  "REIMBURSEMENT",
   "EXPENDITURE",
   "CONTRIBUTION",
   "PAYMENT_REPORT",
@@ -34,6 +35,11 @@ const readPermissions: Record<AttachmentEntityType, Permission> = {
   COMMUNICATION_CAMPAIGN: "communications:read",
   RECEIPT: "receipts:read",
   REPORT_EXPORT: "reports:read",
+  // PTA-H: receipts on a reimbursement request. Submit-level on purpose —
+  // the submitting officer must be able to attach and re-open their own
+  // receipts; reimbursement receipts are ordinary org financial records,
+  // not confidential documents.
+  REIMBURSEMENT: "reimbursements:submit",
   EXPENDITURE: "expenditures:read",
   CONTRIBUTION: "contributions:read",
   PAYMENT_REPORT: "dues:read",
@@ -59,6 +65,7 @@ const writePermissions: Record<AttachmentEntityType, Permission> = {
   COMMUNICATION_CAMPAIGN: "communications:write",
   RECEIPT: "receipts:write",
   REPORT_EXPORT: "reports:export",
+  REIMBURSEMENT: "reimbursements:submit",
   EXPENDITURE: "expenditures:write",
   CONTRIBUTION: "contributions:write",
   PAYMENT_REPORT: "dues:write",
@@ -97,6 +104,8 @@ export async function verifyAttachmentEntity(organizationId: string, entityType:
       return Boolean(await prisma.reportExport.findFirst({ where: { id: entityId, organizationId }, select: { id: true } }));
     case "EXPENDITURE":
       return Boolean(await prisma.expenditure.findFirst({ where: { id: entityId, organizationId }, select: { id: true } }));
+    case "REIMBURSEMENT":
+      return Boolean(await prisma.reimbursementRequest.findFirst({ where: { id: entityId, organizationId }, select: { id: true } }));
     case "CONTRIBUTION":
       return Boolean(await prisma.contribution.findFirst({ where: { id: entityId, organizationId }, select: { id: true } }));
     case "PAYMENT_REPORT":

@@ -111,6 +111,7 @@ const NAVIGATION: Record<OrganizationVertical, NavItem[]> = {
     { href: "/labs/pta/volunteers", label: "Volunteers" },
     { href: "/labs/pta/membership", label: "Membership" },
     { href: "/labs/pta/dues", label: "Dues & Payments" },
+    { href: "/labs/pta/finance", label: "Treasurer", permission: "budget:read" },
     { href: "/labs/pta/events", label: "Events" },
     { href: "/meetings", label: "Meetings & Minutes", permission: "meetings:read" },
     { href: "/labs/pta/communications", label: "Announcements" },

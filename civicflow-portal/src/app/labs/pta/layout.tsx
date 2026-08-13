@@ -45,6 +45,7 @@ export default async function PtaLayout({ children }: { children: ReactNode }) {
     { href: "/labs/pta/volunteers/approvals", label: "Hour Approvals", visible: can("pta:volunteer-hours:approve") },
     { href: "/labs/pta/volunteers/reports", label: "Volunteer Reports", visible: can("pta:volunteers:manage") },
     { href: "/labs/pta/dues", label: "Dues & Payments", visible: can("pta:dues:manage") },
+    { href: "/labs/pta/finance", label: "Treasurer", visible: can("budget:read") },
     { href: "/labs/pta/events", label: "Events", visible: can("pta:events:manage") },
     { href: "/labs/pta/communications", label: "Communications", visible: can("pta:announcements:publish") },
     { href: "/labs/pta/documents", label: "Documents", visible: can("documents:read") },
