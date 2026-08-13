@@ -16,7 +16,7 @@ export default async function MeetingsPage() {
   const now = new Date();
   return (
     <main className="space-y-6">
-      <PageHeader title="Meetings" description="Create meetings and manage bulk attendance." actions={[{ href: "/meetings/new", label: "New Meeting", tone: "primary" }, { href: "/dashboard", label: "Back to Dashboard" }]} />
+      <PageHeader title="Meetings" description="Create meetings and manage bulk attendance." actions={[{ href: "/meetings/new", label: "New Meeting", tone: "primary" }, { href: "/meetings/decisions", label: "Decision Register" }, { href: "/dashboard", label: "Back to Dashboard" }]} />
       <div className="grid gap-4 md:grid-cols-3">
         <StatCard label="Meetings" value={rows.length} />
         <StatCard label="Upcoming" value={rows.filter((row) => row.meetingDate >= now).length} />

@@ -144,3 +144,33 @@ Shipped on top of PTA-A (merged as PR #95):
   the over-grant §4 of the program brief prohibits.
 - Tests: `committees-chair-scope.test.ts` (tenant isolation, chair pinning to
   their own committee, field whitelist, cross-org liaison/year rejection).
+
+## PR PTA-C — Meetings 2.0 (this PR)
+
+**Core, not PTA-namespaced** (brief §42): every vertical runs meetings and
+passes motions, so `MeetingStatus`/`MeetingAgendaItem`/`MeetingMotion`/
+`MeetingActionItem` live on the core Meeting surface; the only PTA linkage is
+the optional `committeeId` on action items (SetNull, invisible elsewhere).
+
+- **Lifecycle**: `Meeting.status` (DRAFT/SCHEDULED/IN_PROGRESS/COMPLETED/
+  CANCELLED, default SCHEDULED so existing rows are untouched), validated
+  transitions (COMPLETED terminal, CANCELLED re-schedulable). Plus
+  `virtualMeetingUrl` (display-only) and `quorumRequired` (informational —
+  attendance page shows met/not-met, never blocks).
+- **Agenda**: ordered items (title/presenter/duration) on the meeting page.
+- **Motions & Decision Register**: motion → seconded → passed/failed/tabled/
+  withdrawn with vote counts; PASSED allocates a permanent per-org decision
+  number ("2026-014") transactionally with unique-collision retry; decided
+  motions are final (revisit = new motion). `/meetings/decisions` is the
+  searchable register plus the open-action-item feed. Motions restrict-delete
+  like minutes: a recorded decision can't be cascaded away.
+- **Action items**: owner/due/priority/status (OPEN→…→COMPLETED with
+  completedAt stamping), optional meeting + PTA-committee linkage; overdue
+  surfaced on the Decisions page now, wired into Dashboard 2.0 in PTA-K.
+- **Untouched by design**: QR attendance, the attendance worksheet, and the
+  immutable minutes workflow (already exactly the §6 model). Structured
+  minutes *sections* are deliberately a template/prefill concern on the
+  existing single-body model — not a new persistence format — to keep the
+  approved-version immutability machinery byte-identical; PDF export of
+  minutes lands with the Document Center in PTA-D where file generation
+  belongs.

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { AttachmentManager } from "@/components/forms/AttachmentManager";
 import { MeetingMinutesPanel } from "@/components/forms/MeetingMinutesPanel";
+import { MeetingOperationsPanel } from "@/components/forms/MeetingOperationsPanel";
 import { formatDateTime, formatEnumLabel, formatText } from "@/lib/formatting";
 import { getOrganizationLabAccess } from "@/lib/labs/access";
 import { getMeetingMinutesVersions } from "@/lib/meeting-minutes";
@@ -14,7 +15,12 @@ export default async function MeetingDetailPage({ params }: { params: Promise<{ 
   const { id } = await params;
   const meeting = await prisma.meeting.findFirst({
     where: { id, organizationId },
-    include: { attendanceRecords: { include: { member: true }, orderBy: { attendanceStatus: "asc" } } },
+    include: {
+      attendanceRecords: { include: { member: true }, orderBy: { attendanceStatus: "asc" } },
+      agendaItems: { orderBy: { sortOrder: "asc" } },
+      motions: { orderBy: { createdAt: "asc" } },
+      actionItems: { orderBy: [{ status: "asc" }, { dueDate: { sort: "asc", nulls: "last" } }] },
+    },
   });
   if (!meeting) return <main className="space-y-6"><PageHeader title="Meeting not found" description="The requested meeting is unavailable." actions={[{ href: "/meetings", label: "Back to Meetings" }]} /></main>;
 
@@ -68,9 +74,14 @@ export default async function MeetingDetailPage({ params }: { params: Promise<{ 
       <PageHeader title={meeting.title} description="Meeting details and attendance summary." actions={actions} />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Date" value={formatDateTime(meeting.meetingDate)} />
+        <StatCard label="Status" value={formatEnumLabel(meeting.status)} />
         <StatCard label="Type" value={formatText(meeting.meetingType, "Not set")} />
         <StatCard label="Location" value={formatText(meeting.location, "No location")} />
-        <StatCard label="Attendance" value={meeting.attendanceRecords.length} />
+        <StatCard
+          label="Attendance"
+          value={meeting.attendanceRecords.length}
+          helper={meeting.quorumRequired ? `Quorum: ${meeting.quorumRequired} · ${meeting.attendanceRecords.length >= meeting.quorumRequired ? "met" : "not met"}` : undefined}
+        />
         {rsvpMode !== "none" ? (
           <StatCard
             label="Expected Attendees"
@@ -83,6 +94,41 @@ export default async function MeetingDetailPage({ params }: { params: Promise<{ 
           />
         ) : null}
       </div>
+      <SectionCard
+        title="Agenda, motions & action items"
+        description={`Run the meeting from here: the agenda, motions with recorded votes (passed motions receive a permanent decision number in the Decision Register), and the follow-up work this meeting creates.${meeting.virtualMeetingUrl ? ` Virtual meeting link: ${meeting.virtualMeetingUrl}` : ""}`}
+      >
+        <MeetingOperationsPanel
+          meetingId={meeting.id}
+          status={meeting.status}
+          agendaItems={meeting.agendaItems.map((item) => ({
+            id: item.id,
+            title: item.title,
+            presenterName: item.presenterName,
+            durationMinutes: item.durationMinutes,
+          }))}
+          motions={meeting.motions.map((motion) => ({
+            id: motion.id,
+            text: motion.text,
+            moverName: motion.moverName,
+            seconderName: motion.seconderName,
+            status: motion.status,
+            decisionNumber: motion.decisionNumber,
+            votesYes: motion.votesYes,
+            votesNo: motion.votesNo,
+            votesAbstain: motion.votesAbstain,
+          }))}
+          actionItems={meeting.actionItems.map((item) => ({
+            id: item.id,
+            title: item.title,
+            ownerName: item.ownerName,
+            dueDate: item.dueDate?.toISOString() ?? null,
+            status: item.status,
+            priority: item.priority,
+          }))}
+          canWrite={can("meetings:write")}
+        />
+      </SectionCard>
       {rsvpMode === "individual" ? (
         <SectionCard title="Member RSVPs" description="Individual RSVP responses for this meeting. Each 'Going' response represents one expected attendee. RSVPs are intent — recorded attendance below remains the factual record.">
           <div className="overflow-x-auto">
