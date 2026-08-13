@@ -22,8 +22,13 @@ export async function GET(request: Request) {
       return Response.json({ ok: false, error: "Attachment entity not found in organization." }, { status: 404 });
     }
 
+    // Optional purpose filter (PTA-D follow-up): the Document Center shows
+    // one entityId across many folder tabs, so listing must be able to
+    // scope to a folder. Only applied when the caller asks — existing
+    // single-purpose surfaces keep seeing every row for their entity.
+    const purpose = searchParams.get("purpose");
     const rows = await prisma.attachment.findMany({
-      where: { organizationId, entityType, entityId, deletedAt: null },
+      where: { organizationId, entityType, entityId, deletedAt: null, ...(purpose ? { purpose } : {}) },
       orderBy: [{ uploadedAt: "desc" }],
       take: 200,
     });

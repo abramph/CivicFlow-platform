@@ -174,3 +174,86 @@ the optional `committeeId` on action items (SetNull, invisible elsewhere).
   approved-version immutability machinery byte-identical; PDF export of
   minutes lands with the Document Center in PTA-D where file generation
   belongs.
+
+## PR PTA-D — Governance Library & Document Center (shipped)
+
+**Core, not PTA-namespaced** (brief §42): every vertical has governing
+documents and shared files, so `GovernanceDocument` and the
+`ORGANIZATION_DOCUMENT` attachment entity live in core with their own
+`governance:read/write` + `documents:read/write` permissions (STAFF gets
+documents r/w but governance read-only). The PTA pages are the vertical skin.
+
+- **Governance Library** ("Bylaws & Policies"): versioned document groups via
+  `rootDocumentId`; publishing a version CURRENT transactionally supersedes
+  the group's previous CURRENT (never any other document); SUPERSEDED can
+  never be set manually; nothing is ever deleted (Restrict org FK, ARCHIVED
+  for retirement). Optional file per version via the existing storage layer
+  (private bucket, signed 5-minute download URLs, audited downloads).
+- **Document Center**: rides the existing Attachment pipeline (soft delete,
+  15 MB cap, audit) with `entityId = organizationId` and the folder stored as
+  the attachment `purpose`. Follow-up fix shipped with PTA-E: attachment
+  listing accepts an optional `purpose` filter (opt-in `filterByPurpose` prop)
+  so folder tabs actually scope their contents — single-purpose surfaces are
+  unchanged.
+- **Minutes PDF** (deferred from PTA-C): `/api/meetings/[id]/minutes/[minutesId]/pdf`
+  via pdf-lib, APPROVED/SUPERSEDED versions only — a draft can never leave
+  the building as a PDF.
+- **Prod-verified** on Demo PTA: bylaws v1→v2 amendment auto-supersede with
+  intact history, Document Center upload + signed-URL download byte-identical,
+  minutes draft→IN_REVIEW→APPROVED→PDF (`%PDF-` magic, application/pdf).
+
+## PR PTA-E — Concerns & Grievances (this PR)
+
+The vertical's most sensitive records (brief §9, §36): a confidential case
+register for formal concerns brought to the board. PTA-namespaced end to end —
+no other vertical sees any of it.
+
+### Security model (dedicated review — see below)
+- **Five dedicated permissions** (`pta:concerns:view/manage/assign/resolve/export`)
+  granted ONLY to ORG_OWNER and the ORG_ADMIN bundle. STAFF/FINANCE/READ_ONLY
+  get nothing; MEMBER is structurally empty. No pre-existing permission was
+  reused, so no role inherits access by accident; orgs can still delegate via
+  OrgRolePermissionSet deliberately.
+- **Restricted cases**: `isRestricted` cases are readable/writable ONLY by
+  their explicitly assigned officers (`PtaConcernAssignee` rows) — no
+  permission bypasses the wall (enforced in `canReadConcernContent`, the one
+  access decision). Unassigned `assign`-holders see a REDACTED stub (case
+  number, category, status — never title/people/narrative) purely so
+  reassignment stays possible; everyone else sees nothing, and direct GETs
+  answer 404, never 403, so restricted content existence is not confirmed.
+  A restricted case auto-assigns its creator (never born unreachable) and
+  must always keep ≥1 assignee.
+- **Audit everything**: creation, every detail view, updates, assignment and
+  removal, status changes, resolution — all via createAuditEvent. Audit
+  metadata carries case number/status facts only, never narrative, reporter,
+  subject, or note bodies (test-asserted).
+- **Data minimization**: reporter/subject are plain optional strings — no FK
+  to members/students, so a case never enriches itself from the directory.
+  The case log is append-only (no update/delete surface). No file
+  attachments in this PR — deliberately deferred rather than widening the
+  generic attachment API to restricted content.
+- **No member/mobile exposure**: officer-entered cases only; nothing under
+  /api/mobile or any member-facing surface. Member self-submission is a
+  future PR with its own review.
+- **Feature switch**: `PtaProfile.concernsEnabled` (+ `concernsLabel` rename,
+  e.g. "Member Feedback") — held to `pta:concerns:manage` even inside the
+  general profile PUT; disabling hides nav + page + APIs (403
+  PTA_CONCERNS_DISABLED) without deleting data.
+
+### Mechanics
+- Case numbers "C-2026-001": per-org per-year, allocated transactionally with
+  P2002 unique-collision retry (Decision Register pattern). `@@unique([organizationId, caseNumber])`.
+- Statuses: SUBMITTED → UNDER_REVIEW → INFORMAL_RESOLUTION / FORMAL_REVIEW /
+  AWAITING_RESPONSE → RESOLVED / DISMISSED (require `resolve` permission + a
+  resolution summary; stamp resolvedAt) → APPEALED / CLOSED. Category enum in
+  PTA language (bylaws concern, officer conduct, election concern, …).
+- Optional linkage: assigned committee (SetNull) and the governing document
+  that applies (SetNull) — a grievance can cite the bylaws version it's about.
+- Migration 20260813190000 purely additive (3 enums, 3 tables, 2 nullable
+  PtaProfile columns with defaults). Restrict org FK on PtaConcern (never
+  cascade a grievance away); Restrict user FK on assignees (deleting a User
+  can't erase who was assigned).
+- 21 new tests (`concerns.test.ts`): the §36 workflow — submit → restricted
+  assignment → review → resolve — plus redaction content-leak assertions,
+  404-not-403, last-assignee protection, tenant isolation, audit-metadata
+  hygiene.

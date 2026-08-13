@@ -655,6 +655,9 @@ model Organization {
   meetingMotions              MeetingMotion[]
   meetingActionItems          MeetingActionItem[]
   governanceDocuments         GovernanceDocument[]
+  ptaConcerns                 PtaConcern[]
+  ptaConcernAssignees         PtaConcernAssignee[]
+  ptaConcernNotes             PtaConcernNote[]
 
   hoaProperties             Property[]
   hoaPropertyResidents      PropertyResident[]
@@ -719,6 +722,10 @@ model User {
   meetingMotionsCreated             MeetingMotion[]            @relation("MeetingMotionCreatedBy")
   meetingActionItemsCreated         MeetingActionItem[]        @relation("MeetingActionItemCreatedBy")
   governanceDocumentsUploaded       GovernanceDocument[]       @relation("GovernanceDocumentUploadedBy")
+  ptaConcernsCreated                PtaConcern[]               @relation("PtaConcernCreatedBy")
+  ptaConcernAssignments             PtaConcernAssignee[]       @relation("PtaConcernAssigneeUser")
+  ptaConcernAssignmentsMade         PtaConcernAssignee[]       @relation("PtaConcernAssigneeAssignedBy")
+  ptaConcernNotesAuthored           PtaConcernNote[]           @relation("PtaConcernNoteAuthor")
   mobileDeviceTokens                MobileDeviceToken[]
   reviewedPaymentReports            PaymentReport[]            @relation("PaymentReportReviewedBy")
   reviewedPaymentLinkOfflineReports PaymentLinkOfflineReport[] @relation("PaymentLinkOfflineReportReviewedBy")
@@ -3200,6 +3207,10 @@ model PtaProfile {
   membershipModel        PtaMembershipModel @default(HOUSEHOLD)
   defaultDuesAmountCents Int?
   gradesServed           String[]           @default([])
+  /// PTA-E: the Concerns & Grievances feature is org-disableable and
+  /// renameable ("Concerns", "Member Issues", ...). Label null = default.
+  concernsEnabled        Boolean            @default(true)
+  concernsLabel          String?
   createdAt              DateTime           @default(now())
   updatedAt              DateTime           @updatedAt
 
@@ -3760,6 +3771,7 @@ model PtaCommittee {
   members                PtaCommitteeMember[]
   volunteerOpportunities PtaVolunteerOpportunity[]
   actionItems            MeetingActionItem[]
+  concerns               PtaConcern[]
 
   @@unique([organizationId, name])
   @@index([organizationId])
@@ -3869,6 +3881,7 @@ model GovernanceDocument {
   root         GovernanceDocument?  @relation("GovernanceDocumentVersions", fields: [rootDocumentId], references: [id], onDelete: Restrict)
   versions     GovernanceDocument[] @relation("GovernanceDocumentVersions")
   uploadedBy   User?                @relation("GovernanceDocumentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+  concerns     PtaConcern[]
 
   @@index([organizationId])
   @@index([organizationId, docType])
@@ -3985,6 +3998,132 @@ model PtaOfficerAssignment {
   @@index([organizationId, status])
   @@index([schoolYearId])
   @@index([householdAdultId])
+}
+
+// ─── PTA Vertical 2.0, PR PTA-E: Concerns & Grievances ───────────────────────
+// PTA-specific case management (see docs/pta-vertical-2.md §9). SECURITY
+// MODEL: cases are NEVER visible merely through PTA administration — access
+// requires the dedicated pta:concerns:* permissions, and a case marked
+// isRestricted is readable ONLY by its explicitly assigned officers
+// (PtaConcernAssignee rows); permission holders without an assignment see a
+// redacted stub at most. Every read of a case detail, edit, assignment,
+// status change, and resolution is audited. No mobile/member API touches
+// these tables.
+
+enum PtaConcernCategory {
+  BYLAWS_CONCERN
+  OFFICER_CONDUCT
+  MEMBER_CONDUCT
+  ELECTION_CONCERN
+  FINANCIAL_CONCERN
+  VOLUNTEER_CONCERN
+  EVENT_ISSUE
+  POLICY_VIOLATION
+  CONFLICT_OF_INTEREST
+  MEMBERSHIP_DISPUTE
+  OTHER
+}
+
+enum PtaConcernStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  INFORMAL_RESOLUTION
+  FORMAL_REVIEW
+  AWAITING_RESPONSE
+  RESOLVED
+  DISMISSED
+  APPEALED
+  CLOSED
+}
+
+/// One case. caseNumber ("C-2026-001") is allocated transactionally per org
+/// per year and never reused. organizationId is onDelete: Restrict — a
+/// grievance record must never be cascade-deleted. Reporter/subject are
+/// recorded as names (data minimization; a case cites people, it does not
+/// link accounts). applicableGovernanceDocumentId ties a case to the exact
+/// bylaws/policy version it concerns (§10 cross-reference).
+model PtaConcern {
+  id                             String             @id @default(cuid())
+  organizationId                 String
+  caseNumber                     String
+  title                          String
+  description                    String
+  category                       PtaConcernCategory @default(OTHER)
+  status                         PtaConcernStatus   @default(SUBMITTED)
+  isRestricted                   Boolean            @default(false)
+  reporterName                   String?
+  reporterContact                String?
+  subjectName                    String?
+  incidentDate                   DateTime?
+  submittedAt                    DateTime           @default(now())
+  responseDeadline               DateTime?
+  assignedCommitteeId            String?
+  applicableGovernanceDocumentId String?
+  resolution                     String?
+  resolvedAt                     DateTime?
+  appealNotes                    String?
+  createdByUserId                String?
+  createdAt                      DateTime           @default(now())
+  updatedAt                      DateTime           @updatedAt
+
+  organization         Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  assignedCommittee    PtaCommittee?        @relation(fields: [assignedCommitteeId], references: [id], onDelete: SetNull)
+  applicableGovernance GovernanceDocument?  @relation(fields: [applicableGovernanceDocumentId], references: [id], onDelete: SetNull)
+  createdBy            User?                @relation("PtaConcernCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  assignees            PtaConcernAssignee[]
+  notes                PtaConcernNote[]
+
+  @@unique([organizationId, caseNumber])
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([organizationId, isRestricted])
+}
+
+/// An explicitly assigned officer — the ONLY identities allowed to read a
+/// restricted case's content. Cascade on concern (assignments are part of
+/// the case); Restrict on user — deleting a User must not silently erase who
+/// was assigned to a restricted case.
+model PtaConcernAssignee {
+  id               String   @id @default(cuid())
+  organizationId   String
+  concernId        String
+  userId           String
+  assignedByUserId String?
+  createdAt        DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  concern      PtaConcern   @relation(fields: [concernId], references: [id], onDelete: Cascade)
+  user         User         @relation("PtaConcernAssigneeUser", fields: [userId], references: [id], onDelete: Restrict)
+  assignedBy   User?        @relation("PtaConcernAssigneeAssignedBy", fields: [assignedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([concernId, userId])
+  @@index([organizationId])
+  @@index([userId])
+}
+
+enum PtaConcernNoteKind {
+  NOTE
+  COMMUNICATION
+  ACTION
+}
+
+/// The case log: internal notes, communications had, and actions taken.
+/// Append-only in practice (no update/delete surface is exposed).
+model PtaConcernNote {
+  id             String             @id @default(cuid())
+  organizationId String
+  concernId      String
+  kind           PtaConcernNoteKind @default(NOTE)
+  body           String
+  authorUserId   String?
+  createdAt      DateTime           @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  concern      PtaConcern   @relation(fields: [concernId], references: [id], onDelete: Cascade)
+  author       User?        @relation("PtaConcernNoteAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([concernId])
 }
 
 // ─── HOA vertical (PR #43) ────────────────────────────────────────────────

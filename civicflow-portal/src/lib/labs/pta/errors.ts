@@ -40,6 +40,13 @@ export const PTA_ERROR_CODES = [
   "PTA_SCHOOL_YEAR_NOT_FOUND",
   "PTA_BOARD_POSITION_NOT_FOUND",
   "PTA_OFFICER_ASSIGNMENT_NOT_FOUND",
+  // PTA Vertical 2.0, PR PTA-E — concerns & grievances.
+  /** Feature switched off via PtaProfile.concernsEnabled. */
+  "PTA_CONCERNS_DISABLED",
+  /** Also used for restricted cases the caller may not read — existence of
+   * restricted content is never confirmed to unauthorized viewers. */
+  "PTA_CONCERN_NOT_FOUND",
+  "PTA_CONCERN_FORBIDDEN",
 ] as const;
 
 export type PtaErrorCode = (typeof PTA_ERROR_CODES)[number];
@@ -76,6 +83,9 @@ const STATUS_FOR_CODE: Record<PtaErrorCode, number> = {
   PTA_SCHOOL_YEAR_NOT_FOUND: 404,
   PTA_BOARD_POSITION_NOT_FOUND: 404,
   PTA_OFFICER_ASSIGNMENT_NOT_FOUND: 404,
+  PTA_CONCERNS_DISABLED: 403,
+  PTA_CONCERN_NOT_FOUND: 404,
+  PTA_CONCERN_FORBIDDEN: 403,
 };
 
 export class PtaError extends Error {
