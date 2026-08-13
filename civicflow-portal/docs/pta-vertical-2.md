@@ -326,3 +326,38 @@ three audited gaps and touches nothing else:
   existing undated-DRAFT "Duplicate" template copy is preserved unchanged.
   UI: "Repeat weekly ×N" beside Duplicate on the opportunity page. Full
   RRULE recurrence deliberately rejected as over-engineering (§41).
+
+## PR PTA-H — Finance Lite (this PR)
+
+**Core, not PTA-namespaced** (§42): budgets and reimbursements exist in every
+vertical, so `BudgetLine`/`ReimbursementRequest` join Expenditure in core
+with their own permissions; `/labs/pta/finance` is the PTA treasurer skin.
+Explicitly NOT QuickBooks (§20): no ledger, no bank connections, no stored
+bank credentials — ever.
+
+- **Budget**: `BudgetLine` per (org, fiscalYear, name) — planned amount plus
+  an optional link to an EXPENDITURE `Category`. Actuals are never stored:
+  they're computed live from non-void Expenditures in the line's category
+  within the fiscal-year window ("2026-2027" → Jul 1 2026–Jun 30 2027,
+  "2026" → calendar year, unparseable → all-time), so variance is always
+  Budget − Actual with no sync job. Category names are org-defined (§22's
+  "don't hard-code" rule applies to budgets too) — the §20 list is seed
+  suggestions in the UI, not schema.
+- **Reimbursements**: SUBMITTED → UNDER_REVIEW → APPROVED → PAID, REJECTED
+  from any pre-PAID state; PAID and REJECTED terminal (resubmit = new
+  request). Approval threshold configurable per org
+  (`OrgSettings.reimbursementApprovalThreshold`): requests above it START in
+  UNDER_REVIEW (flagged for review), at-or-below start SUBMITTED. **Approver
+  must differ from submitter** (self-approval forbidden — volunteer-hours
+  precedent). **PAID books a real Expenditure row transactionally**
+  (payee/category/event carried, reference REIMB-…) and links it — so paid
+  reimbursements flow into budget actuals and the existing expenditure
+  ledger with zero double-entry. Receipts ride the Attachment pipeline via
+  new entity type REIMBURSEMENT.
+- **Permissions**: new core `reimbursements:submit` (STAFF+ — chairs and
+  officers file their own), `reimbursements:manage` + `budget:read`/
+  `budget:manage` (FINANCE/ORG_ADMIN/OWNER; READ_ONLY gets budget:read).
+  Submitters see exactly their own requests; managers see all.
+- **Treasurer dashboard** (`/labs/pta/finance`, PTA language): income vs
+  spend summary, budget-vs-actual table with variance, reimbursement queue
+  with inline approve/pay/reject, submit form for officers.

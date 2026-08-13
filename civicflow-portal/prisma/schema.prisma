@@ -431,6 +431,9 @@ enum AttachmentEntityType {
   COMMUNICATION_CAMPAIGN
   RECEIPT
   REPORT_EXPORT
+  /// PTA-H Finance Lite: receipts on a ReimbursementRequest (entityId is the
+  /// request id; requires reimbursements:submit).
+  REIMBURSEMENT
   EXPENDITURE
   CONTRIBUTION
   PAYMENT_REPORT
@@ -661,6 +664,8 @@ model Organization {
   ptaBoardTransitions         PtaBoardTransition[]
   ptaOfficerHandoffs          PtaOfficerHandoff[]
   ptaHandoffChecklistItems    PtaHandoffChecklistItem[]
+  budgetLines                 BudgetLine[]
+  reimbursementRequests       ReimbursementRequest[]
 
   hoaProperties             Property[]
   hoaPropertyResidents      PropertyResident[]
@@ -731,6 +736,10 @@ model User {
   ptaConcernNotesAuthored           PtaConcernNote[]           @relation("PtaConcernNoteAuthor")
   ptaTransitionsStarted             PtaBoardTransition[]       @relation("PtaTransitionStartedBy")
   ptaHandoffChecklistCompletions    PtaHandoffChecklistItem[]  @relation("PtaHandoffChecklistCompletedBy")
+  reimbursementsSubmitted           ReimbursementRequest[]     @relation("ReimbursementSubmittedBy")
+  reimbursementsApproved            ReimbursementRequest[]     @relation("ReimbursementApprovedBy")
+  reimbursementsPaid                ReimbursementRequest[]     @relation("ReimbursementPaidBy")
+  reimbursementsRejected            ReimbursementRequest[]     @relation("ReimbursementRejectedBy")
   mobileDeviceTokens                MobileDeviceToken[]
   reviewedPaymentReports            PaymentReport[]            @relation("PaymentReportReviewedBy")
   reviewedPaymentLinkOfflineReports PaymentLinkOfflineReport[] @relation("PaymentLinkOfflineReportReviewedBy")
@@ -1183,6 +1192,7 @@ model Event {
   ptaVolunteerOpportunities PtaVolunteerOpportunity[]
   ptaEventRsvps             PtaEventRsvp[]
   eventRsvps                EventRsvp[]
+  reimbursements            ReimbursementRequest[]
 
   @@index([organizationId])
   @@index([organizationId, startAt])
@@ -1257,6 +1267,7 @@ model Expenditure {
   paymentMethodConfig PaymentMethodConfig? @relation(fields: [paymentMethodId], references: [id], onDelete: SetNull)
   campaign            Campaign?            @relation(fields: [campaignId], references: [id], onDelete: SetNull)
   event               Event?               @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  reimbursement       ReimbursementRequest?
 
   @@index([organizationId])
   @@index([organizationId, date])
@@ -1292,12 +1303,96 @@ model Category {
   members              OrgMember[]   @relation("MemberMembershipCategory")
   duesAccounts         DuesAccount[] @relation("DuesAccountCategory")
   expenditures         Expenditure[] @relation("ExpenditureCategory")
+  budgetLines          BudgetLine[]  @relation("BudgetLineCategory")
+  reimbursements       ReimbursementRequest[] @relation("ReimbursementCategory")
 
   @@unique([organizationId, name, type])
   @@index([organizationId])
   @@index([organizationId, type, isActive])
   @@index([standardDuesCategoryId])
   @@index([organizationId, type, autoAssignByAge, priority])
+}
+
+// ─── PTA Vertical 2.0, PR PTA-H: Finance Lite (core) ─────────────────────────
+// Budget-vs-actual and reimbursement workflow for every vertical
+// (docs/pta-vertical-2.md PTA-H). Explicitly NOT an accounting system: no
+// ledger, no bank connections, and no bank credentials are ever stored.
+
+/// One planned line of the organization's expense budget for a fiscal year
+/// ("2026-2027" school-year labels for PTAs; any label works). Actuals are
+/// never stored — computed live from non-void Expenditures in `category`
+/// within the fiscal-year window (OrgSettings.fiscalYearStart anchors it).
+model BudgetLine {
+  id             String   @id @default(cuid())
+  organizationId String
+  fiscalYear     String
+  name           String
+  categoryId     String?
+  plannedAmount  Decimal  @db.Decimal(12, 2)
+  notes          String?
+  sortOrder      Int      @default(0)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  category     Category?    @relation("BudgetLineCategory", fields: [categoryId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, fiscalYear, name])
+  @@index([organizationId])
+  @@index([organizationId, fiscalYear])
+  @@index([categoryId])
+}
+
+enum ReimbursementStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  PAID
+  REJECTED
+}
+
+/// A request to be paid back for out-of-pocket spend. PAID transactionally
+/// books a real Expenditure row (linked below) so paid reimbursements flow
+/// into budget actuals and the expenditure ledger with no double entry.
+/// Approver must differ from submitter (enforced in lib/reimbursements.ts).
+model ReimbursementRequest {
+  id                String              @id @default(cuid())
+  organizationId    String
+  submittedByUserId String?
+  payeeName         String
+  description       String
+  amount            Decimal             @db.Decimal(12, 2)
+  categoryId        String?
+  eventId           String?
+  committeeId       String?
+  status            ReimbursementStatus @default(SUBMITTED)
+  reviewNotes       String?
+  approvedByUserId  String?
+  approvedAt        DateTime?
+  paidByUserId      String?
+  paidAt            DateTime?
+  paymentReference  String?
+  rejectedByUserId  String?
+  rejectedAt        DateTime?
+  rejectionReason   String?
+  expenditureId     String?             @unique
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  submittedBy  User?         @relation("ReimbursementSubmittedBy", fields: [submittedByUserId], references: [id], onDelete: SetNull)
+  category     Category?     @relation("ReimbursementCategory", fields: [categoryId], references: [id], onDelete: SetNull)
+  event        Event?        @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  committee    PtaCommittee? @relation(fields: [committeeId], references: [id], onDelete: SetNull)
+  approvedBy   User?         @relation("ReimbursementApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  paidBy       User?         @relation("ReimbursementPaidBy", fields: [paidByUserId], references: [id], onDelete: SetNull)
+  rejectedBy   User?         @relation("ReimbursementRejectedBy", fields: [rejectedByUserId], references: [id], onDelete: SetNull)
+  expenditure  Expenditure?  @relation(fields: [expenditureId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([submittedByUserId])
 }
 
 model PaymentMethodConfig {
@@ -1547,6 +1642,11 @@ model OrgSettings {
   reminderFrequencyDays          Int?
   openingBalanceCents            Int           @default(0)
   openingBalanceDate             DateTime?
+  /// PTA-H Finance Lite: reimbursement requests ABOVE this amount start in
+  /// UNDER_REVIEW (flagged for extra scrutiny) instead of SUBMITTED. Null =
+  /// no auto-flagging. Approval itself is always required and always by a
+  /// different person than the submitter, regardless of amount.
+  reimbursementApprovalThreshold Decimal?      @db.Decimal(12, 2)
   updatedAt                      DateTime      @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -3780,6 +3880,7 @@ model PtaCommittee {
   volunteerOpportunities PtaVolunteerOpportunity[]
   actionItems            MeetingActionItem[]
   concerns               PtaConcern[]
+  reimbursements         ReimbursementRequest[]
 
   @@unique([organizationId, name])
   @@index([organizationId])
