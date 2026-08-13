@@ -247,6 +247,85 @@ export async function duplicatePtaVolunteerOpportunity(organizationId: string, o
   return clone;
 }
 
+/**
+ * PTA Vertical 2.0, PR PTA-G — weekly-style recurrence (brief §16). Creates
+ * `count` dated repeats of an opportunity, each shifted `offsetDays` further
+ * out, carrying slots WITH their times (unlike duplicatePtaVolunteerOpportunity
+ * above, which is the undated "use as template" copy). Repeats are created
+ * OPEN — a scheduled recurring shift is real, not a draft. Signups and
+ * counters never carry over.
+ */
+export async function repeatPtaVolunteerOpportunity(
+  organizationId: string,
+  opportunityId: string,
+  options: { offsetDays: number; count: number },
+  actorUserId: string,
+  actorEmail?: string | null
+) {
+  if (!Number.isInteger(options.offsetDays) || options.offsetDays < 1 || options.offsetDays > 90) {
+    throw new PtaError("PTA_VALIDATION_ERROR", "Repeat interval must be between 1 and 90 days.");
+  }
+  if (!Number.isInteger(options.count) || options.count < 1 || options.count > 12) {
+    throw new PtaError("PTA_VALIDATION_ERROR", "Repeat count must be between 1 and 12.");
+  }
+  const source = await prisma.ptaVolunteerOpportunity.findFirst({ where: { id: opportunityId, organizationId }, include: { slots: true } });
+  if (!source) throw new PtaError("PTA_OPPORTUNITY_NOT_FOUND", "Volunteer opportunity not found in this organization.");
+
+  const shift = (value: Date | null, days: number) => (value ? new Date(value.getTime() + days * 24 * 60 * 60 * 1000) : null);
+  const created = [];
+  for (let index = 1; index <= options.count; index++) {
+    const days = index * options.offsetDays;
+    const clone = await prisma.ptaVolunteerOpportunity.create({
+      data: {
+        organizationId,
+        title: source.title,
+        eventId: null,
+        committeeId: source.committeeId,
+        description: source.description,
+        instructions: source.instructions,
+        schoolYear: source.schoolYear,
+        schoolYearId: source.schoolYearId ?? (await resolveSchoolYearId(organizationId, source.schoolYear)),
+        coordinatorUserId: source.coordinatorUserId,
+        supplyRequest: source.supplyRequest,
+        startAt: shift(source.startAt, days),
+        endAt: shift(source.endAt, days),
+        signupDeadline: shift(source.signupDeadline, days),
+        cancellationDeadline: shift(source.cancellationDeadline, days),
+        status: "OPEN",
+      },
+    });
+    for (const slot of source.slots) {
+      if (slot.status === "CANCELLED") continue;
+      await prisma.ptaVolunteerSlot.create({
+        data: {
+          organizationId,
+          opportunityId: clone.id,
+          label: slot.label,
+          startAt: shift(slot.startAt, days),
+          endAt: shift(slot.endAt, days),
+          capacity: slot.capacity,
+          minNeeded: slot.minNeeded,
+          defaultCreditedMinutes: slot.defaultCreditedMinutes,
+          locationOverride: slot.locationOverride,
+          sortOrder: slot.sortOrder,
+        },
+      });
+    }
+    created.push(clone);
+  }
+
+  await createAuditEvent({
+    organizationId,
+    actorUserId,
+    actorEmail: actorEmail ?? null,
+    action: "pta.volunteer_opportunity.repeated",
+    entityType: "pta_volunteer_opportunity",
+    entityId: opportunityId,
+    metadata: { offsetDays: options.offsetDays, count: options.count },
+  });
+  return created;
+}
+
 export async function listPtaVolunteerOpportunities(organizationId: string, filters: { status?: string; schoolYear?: string } = {}) {
   return prisma.ptaVolunteerOpportunity.findMany({
     where: {

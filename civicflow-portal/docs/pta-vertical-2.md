@@ -296,3 +296,33 @@ board/school-year machinery instead of new parallel structures.
   (guided §15 flow in the member/mobile experience) belongs to PTA-J — this
   PR records acceptance through board managers, which is how most PTAs run a
   handoff meeting anyway.
+
+## PR PTA-G — Volunteer 2.0 (this PR, small)
+
+The audit found volunteering already strong (opportunities, atomic slot
+claims, waitlist statuses, check-in/out, hour ledger + adjustments +
+approvals, requirements, committee/event linkage) — PTA-G fills exactly the
+three audited gaps and touches nothing else:
+
+- **Reports** (§16's list): approved-hours totals, hours by event, hours by
+  committee, most active volunteers, unfilled opportunities (live open-spot
+  math from slot capacity vs. claims), participation by month. Aggregated
+  from the APPROVED hour ledger only. Officer page
+  `/labs/pta/volunteers/reports` behind `pta:volunteers:manage` — the
+  most-active list is a coordination tool, **never a public ranking** (§16's
+  explicit rule). Per-section CSV export, built client-side from the same
+  data already on screen.
+- **Reminders**: email to every SIGNED_UP volunteer whose shift starts
+  within 48h, deduped via new `PtaVolunteerSignup.reminderSentAt` (the whole
+  migration is that one nullable column). Two triggers, one lib:
+  `/api/cron/volunteer-reminders` (CRON_SECRET pattern, all orgs, safe to
+  re-run) and an officer "Send shift reminders now" button (org-scoped,
+  audited). Email-only by design: most household adults have no linked
+  portal account, so push would silently miss them; adults with no email are
+  counted and reported, never silently skipped. Failures leave the stamp
+  null so the next run retries.
+- **Recurrence**: `repeatPtaVolunteerOpportunity` — N dated OPEN repeats
+  (interval × count, capped 12) carrying slots WITH shifted times; the
+  existing undated-DRAFT "Duplicate" template copy is preserved unchanged.
+  UI: "Repeat weekly ×N" beside Duplicate on the opportunity page. Full
+  RRULE recurrence deliberately rejected as over-engineering (§41).
