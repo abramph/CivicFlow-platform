@@ -45,6 +45,8 @@ vi.mock("@/lib/prisma", () => ({
     },
     event: { findFirst: (...a: unknown[]) => findFirstEvent(...a) },
     ptaProfile: { findUnique: (...a: unknown[]) => findUniqueProfile(...a) },
+    // PTA-A dual-write: create paths resolve the schoolYearId FK twin of the label.
+    ptaSchoolYear: { upsert: async () => ({ id: "school-year-mock" }) },
   },
 }));
 vi.mock("@/lib/audit", () => ({ createAuditEvent: vi.fn().mockResolvedValue(undefined) }));

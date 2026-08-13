@@ -644,6 +644,9 @@ model Organization {
   ptaCommitteeMembers         PtaCommitteeMember[]
   ptaEventRsvps               PtaEventRsvp[]
   ptaHouseholdAdults          PtaHouseholdAdult[]
+  ptaSchoolYears              PtaSchoolYear[]
+  ptaBoardPositions           PtaBoardPosition[]
+  ptaOfficerAssignments       PtaOfficerAssignment[]
 
   hoaProperties             Property[]
   hoaPropertyResidents      PropertyResident[]
@@ -704,6 +707,7 @@ model User {
   memberProfiles                    OrgMember[]                @relation("OrgMemberLogin")
   sentMemberInvites                 MemberInvite[]             @relation("MemberInviteCreatedBy")
   sentPtaHouseholdAdultInvites      PtaHouseholdAdultInvite[]  @relation("PtaHouseholdAdultInviteCreatedBy")
+  ptaOfficerAssignmentsCreated      PtaOfficerAssignment[]     @relation("PtaOfficerAssignmentCreatedBy")
   mobileDeviceTokens                MobileDeviceToken[]
   reviewedPaymentReports            PaymentReport[]            @relation("PaymentReportReviewedBy")
   reviewedPaymentLinkOfflineReports PaymentLinkOfflineReport[] @relation("PaymentLinkOfflineReportReviewedBy")
@@ -3074,6 +3078,10 @@ model PtaHousehold {
   displayName             String
   status                  PtaHouseholdStatus @default(ACTIVE)
   schoolYear              String // the school year this membership record applies to
+  /// PTA-A school-year normalization: FK twin of the `schoolYear` label above.
+  /// Nullable for pre-normalization rows; backfilled by label join, dual-written
+  /// on create. Reads still key off the string until a later PR flips them.
+  schoolYearId            String?
   orgMemberId             String?            @unique
   primaryContactAdultId   String?
   secondaryContactAdultId String?
@@ -3083,6 +3091,7 @@ model PtaHousehold {
   updatedAt               DateTime           @updatedAt
 
   organization     Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  schoolYearRef    PtaSchoolYear?      @relation(fields: [schoolYearId], references: [id], onDelete: SetNull)
   orgMember        OrgMember?          @relation(fields: [orgMemberId], references: [id], onDelete: SetNull)
   primaryContact   PtaHouseholdAdult?  @relation("PtaHouseholdPrimaryContact", fields: [primaryContactAdultId], references: [id], onDelete: SetNull)
   secondaryContact PtaHouseholdAdult?  @relation("PtaHouseholdSecondaryContact", fields: [secondaryContactAdultId], references: [id], onDelete: SetNull)
@@ -3095,6 +3104,7 @@ model PtaHousehold {
   @@index([organizationId])
   @@index([organizationId, status])
   @@index([organizationId, schoolYear])
+  @@index([schoolYearId])
 }
 
 enum PtaBackgroundCheckStatus {
@@ -3141,6 +3151,7 @@ model PtaHouseholdAdult {
   coChairOfCommittees  PtaCommittee[]            @relation("PtaCommitteeCoChair")
   committeeMemberships PtaCommitteeMember[]
   invites              PtaHouseholdAdultInvite[]
+  officerAssignments   PtaOfficerAssignment[]
 
   @@unique([organizationId, userId])
   @@index([organizationId])
@@ -3242,17 +3253,21 @@ model PtaClassroom {
   teacherId      String?
   name           String
   schoolYear     String
+  /// PTA-A school-year normalization — see PtaHousehold.schoolYearId.
+  schoolYearId   String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  grade        PtaGrade               @relation(fields: [gradeId], references: [id], onDelete: Restrict)
-  teacher      PtaTeacher?            @relation(fields: [teacherId], references: [id], onDelete: SetNull)
-  enrollments  PtaStudentEnrollment[]
+  organization  Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  schoolYearRef PtaSchoolYear?         @relation(fields: [schoolYearId], references: [id], onDelete: SetNull)
+  grade         PtaGrade               @relation(fields: [gradeId], references: [id], onDelete: Restrict)
+  teacher       PtaTeacher?            @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+  enrollments   PtaStudentEnrollment[]
 
   @@unique([organizationId, gradeId, name, schoolYear])
   @@index([organizationId])
   @@index([organizationId, schoolYear])
+  @@index([schoolYearId])
 }
 
 enum PtaEnrollmentStatus {
@@ -3269,17 +3284,21 @@ model PtaStudentEnrollment {
   studentId      String
   classroomId    String
   schoolYear     String
+  /// PTA-A school-year normalization — see PtaHousehold.schoolYearId.
+  schoolYearId   String?
   status         PtaEnrollmentStatus @default(ACTIVE)
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  student      PtaStudent   @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  classroom    PtaClassroom @relation(fields: [classroomId], references: [id], onDelete: Restrict)
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  schoolYearRef PtaSchoolYear? @relation(fields: [schoolYearId], references: [id], onDelete: SetNull)
+  student       PtaStudent     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  classroom     PtaClassroom   @relation(fields: [classroomId], references: [id], onDelete: Restrict)
 
   @@unique([studentId, schoolYear])
   @@index([organizationId])
   @@index([classroomId])
+  @@index([schoolYearId])
 }
 
 enum PtaVolunteerOpportunityStatus {
@@ -3303,6 +3322,8 @@ model PtaVolunteerOpportunity {
   /// existed — new opportunities are always created with the org's current
   /// school year (see createPtaVolunteerOpportunity()).
   schoolYear           String?
+  /// PTA-A school-year normalization — see PtaHousehold.schoolYearId.
+  schoolYearId         String?
   /// Plain string, no formal relation — same convention as
   /// DuesAdjustment.approvedByUserId (a coordinator is a User via
   /// OrganizationMembership, not necessarily a PtaHouseholdAdult).
@@ -3316,14 +3337,16 @@ model PtaVolunteerOpportunity {
   createdAt            DateTime                      @default(now())
   updatedAt            DateTime                      @updatedAt
 
-  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  event        Event?             @relation(fields: [eventId], references: [id], onDelete: SetNull)
-  committee    PtaCommittee?      @relation(fields: [committeeId], references: [id], onDelete: SetNull)
-  slots        PtaVolunteerSlot[]
+  organization  Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  schoolYearRef PtaSchoolYear?     @relation(fields: [schoolYearId], references: [id], onDelete: SetNull)
+  event         Event?             @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  committee     PtaCommittee?      @relation(fields: [committeeId], references: [id], onDelete: SetNull)
+  slots         PtaVolunteerSlot[]
 
   @@index([organizationId])
   @@index([organizationId, status])
   @@index([organizationId, schoolYear])
+  @@index([schoolYearId])
   @@index([committeeId])
 }
 
@@ -3612,6 +3635,116 @@ model PtaEventRsvp {
   @@unique([eventId, householdId])
   @@index([organizationId])
   @@index([eventId])
+}
+
+// ─── PTA Vertical 2.0, PR PTA-A: school years + board foundation ─────────────
+// See docs/pta-vertical-2.md. School year becomes a first-class entity; the
+// existing free-text `schoolYear` labels remain authoritative for reads until
+// a later PR flips them (dual-write starts in PTA-A). Board positions are
+// org-configurable (never hard-coded titles); officer assignments are
+// append-only history — assigning a successor ENDs the predecessor's row,
+// never rewrites or deletes it.
+
+/// One operating year ("2026-2027") for a PTA organization. Exactly one row
+/// per org has isCurrent=true (enforced transactionally in
+/// src/lib/labs/pta/school-years.ts, never by trigger). Upcoming years can be
+/// created and populated ahead of time without changing the active year.
+model PtaSchoolYear {
+  id             String    @id @default(cuid())
+  organizationId String
+  /// Canonical "YYYY-YYYY" label, matching the historical free-text values.
+  label          String
+  startsOn       DateTime?
+  endsOn         DateTime?
+  isCurrent      Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization           Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  households             PtaHousehold[]
+  classrooms             PtaClassroom[]
+  studentEnrollments     PtaStudentEnrollment[]
+  volunteerOpportunities PtaVolunteerOpportunity[]
+  officerAssignments     PtaOfficerAssignment[]
+
+  @@unique([organizationId, label])
+  @@index([organizationId])
+  @@index([organizationId, isCurrent])
+}
+
+enum PtaBoardClassification {
+  OFFICER
+  BOARD_MEMBER
+}
+
+/// A configurable board/officer position (President, Treasurer, ..., or any
+/// custom title). Positions are definitions; who holds one (and when) lives in
+/// PtaOfficerAssignment. Deactivating a position (isActive=false) retires it
+/// from assignment pickers without touching its history.
+model PtaBoardPosition {
+  id               String                 @id @default(cuid())
+  organizationId   String
+  name             String
+  description      String?
+  responsibilities String?
+  classification   PtaBoardClassification @default(OFFICER)
+  isVoting         Boolean                @default(true)
+  sortOrder        Int                    @default(0)
+  /// Informational default (months) used to suggest end dates — never enforced.
+  termLengthMonths Int?
+  isActive         Boolean                @default(true)
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  organization Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assignments  PtaOfficerAssignment[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@index([organizationId, isActive])
+}
+
+enum PtaOfficerAssignmentStatus {
+  INCOMING
+  ACTIVE
+  ENDED
+}
+
+/// One person holding one position for some period — the append-only officer
+/// history ("2025-26 Person A, 2026-27 Person B, ..."). Holder identity is
+/// EITHER a linked PtaHouseholdAdult (preferred; adult.name wins for display)
+/// OR bare personName for officers who predate the system / have no adult
+/// row. schoolYearLabel is a denormalized snapshot so history stays readable
+/// even if the year row is later removed. organizationId/positionId are
+/// onDelete: Restrict (MeetingMinutes precedent): leadership history is a
+/// governance record and must never be silently cascaded away.
+model PtaOfficerAssignment {
+  id               String                     @id @default(cuid())
+  organizationId   String
+  positionId       String
+  schoolYearId     String?
+  schoolYearLabel  String?
+  householdAdultId String?
+  personName       String?
+  status           PtaOfficerAssignmentStatus @default(ACTIVE)
+  startDate        DateTime?
+  endDate          DateTime?
+  notes            String?
+  createdByUserId  String?
+  createdAt        DateTime                   @default(now())
+  updatedAt        DateTime                   @updatedAt
+
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  position       PtaBoardPosition   @relation(fields: [positionId], references: [id], onDelete: Restrict)
+  schoolYear     PtaSchoolYear?     @relation(fields: [schoolYearId], references: [id], onDelete: Restrict)
+  householdAdult PtaHouseholdAdult? @relation(fields: [householdAdultId], references: [id], onDelete: SetNull)
+  createdBy      User?              @relation("PtaOfficerAssignmentCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([positionId])
+  @@index([organizationId, status])
+  @@index([schoolYearId])
+  @@index([householdAdultId])
 }
 
 // ─── HOA vertical (PR #43) ────────────────────────────────────────────────

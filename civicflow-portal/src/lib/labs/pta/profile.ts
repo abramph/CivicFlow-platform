@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { createAuditEvent } from "@/lib/audit";
 import { PtaError } from "./errors";
+import { resolveSchoolYearId } from "./school-years";
 
 export async function getPtaProfile(organizationId: string) {
   return prisma.ptaProfile.findUnique({ where: { organizationId } });
@@ -46,6 +47,21 @@ export async function upsertPtaProfile(input: UpsertPtaProfileInput) {
     create: { organizationId: input.organizationId, ...data },
     update: data,
   });
+
+  // PTA-A school-year normalization: the profile label and the PtaSchoolYear
+  // entity must never disagree about which year is current. Whichever side is
+  // edited, the other follows — school-years.ts's setCurrentSchoolYear()
+  // writes this label; here the label write flips the entity.
+  const currentYearId = await resolveSchoolYearId(input.organizationId, input.currentSchoolYear);
+  if (currentYearId) {
+    await prisma.$transaction([
+      prisma.ptaSchoolYear.updateMany({
+        where: { organizationId: input.organizationId, isCurrent: true, id: { not: currentYearId } },
+        data: { isCurrent: false },
+      }),
+      prisma.ptaSchoolYear.update({ where: { id: currentYearId }, data: { isCurrent: true } }),
+    ]);
+  }
 
   await createAuditEvent({
     organizationId: input.organizationId,
