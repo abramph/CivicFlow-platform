@@ -103,6 +103,7 @@ const NAVIGATION: Record<OrganizationVertical, NavItem[]> = {
   // this list replaces the shared one entirely rather than adding to it.
   PTA: [
     { href: "/labs/pta/dashboard", label: "PTA Dashboard" },
+    { href: "/labs/pta/board", label: "Board", permission: "pta:board:view" },
     { href: "/labs/pta/households", label: "Households" },
     { href: "/labs/pta/academic", label: "Academics" },
     { href: "/labs/pta/committees", label: "Committees" },

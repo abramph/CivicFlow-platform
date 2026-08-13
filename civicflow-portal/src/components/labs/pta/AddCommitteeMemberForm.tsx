@@ -22,17 +22,16 @@ export function AddCommitteeMemberForm({ committeeId }: { committeeId: string })
     setSearching(true);
     setError(null);
     try {
-      const res = await fetch(`/api/labs/pta/households?search=${encodeURIComponent(query)}`);
+      // PTA-B: committee-scoped, names-only search — works for officers and
+      // for this committee's own chair/co-chair (who hold no directory
+      // permission and should never receive contact data here).
+      const res = await fetch(`/api/labs/pta/committees/${committeeId}/adult-search?search=${encodeURIComponent(query)}`);
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok) {
         setError("Unable to search households.");
         return;
       }
-      type HouseholdRow = { displayName: string; adults: { id: string; name: string }[] };
-      const adults: HouseholdAdultResult[] = (data.data as HouseholdRow[]).flatMap((h) =>
-        h.adults.map((a) => ({ id: a.id, name: a.name, householdName: h.displayName }))
-      );
-      setResults(adults);
+      setResults(data.data as HouseholdAdultResult[]);
     } finally {
       setSearching(false);
     }

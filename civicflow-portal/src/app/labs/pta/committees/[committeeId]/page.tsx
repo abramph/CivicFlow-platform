@@ -1,29 +1,38 @@
-import Link from "next/link";
-import { getPtaPageGate } from "@/lib/labs/pta/guard";
+import { requireOrganization } from "@/lib/auth-guards";
+import { checkPtaVerticalAvailable, isCommitteeChair } from "@/lib/labs/pta/guard";
 import { getPtaCommittee } from "@/lib/labs/pta/committees";
+import { getSchoolYearContext } from "@/lib/labs/pta/school-years";
+import { prisma } from "@/lib/prisma";
 import { PageHeader, SectionCard } from "@/components/app/PageChrome";
 import { Breadcrumbs, EmptyState } from "@/components/admin/OperationsUI";
 import { PtaLabsBadge } from "@/components/labs/pta/PtaLabsBadge";
 import { AddCommitteeMemberForm } from "@/components/labs/pta/AddCommitteeMemberForm";
 import { SetCommitteeChairForm } from "@/components/labs/pta/SetCommitteeChairForm";
 import { ConfirmActionButton } from "@/components/labs/pta/ConfirmActionButton";
+import { PtaCommitteeDetailsForm } from "@/components/labs/pta/PtaCommitteeDetailsForm";
 
-/** STAFF already holds events:write + pta:events:manage + pta:volunteers:manage
- * (see rbac.ts) -- rather than building a separate committee-scoped
- * permission mechanism, a chair/co-chair gets real write access by being
- * invited as an officer through the existing, already-tested Users & Roles
- * flow. This link just pre-fills that form; it grants nothing itself. */
-function inviteAsOfficerHref(adult: { name: string; email: string | null }) {
-  const params = new URLSearchParams({ displayName: adult.name, role: "STAFF" });
-  if (adult.email) params.set("email", adult.email);
-  return `/settings/users?${params.toString()}`;
-}
+const STATUS_LABELS: Record<string, string> = {
+  PLANNING: "Planning",
+  ACTIVE: "Active",
+  COMPLETED: "Completed",
+  ARCHIVED: "Archived",
+};
 
+/**
+ * PTA Vertical 2.0, PR PTA-B — accessible to officers (pta:directory:read)
+ * AND to this committee's own chair/co-chair via linkage (no staff role
+ * required), matching requireCommitteeManageOrChair on the API side. A
+ * chair sees and manages their own committee — description/goals/schedule
+ * and the member list — without gaining any org-wide authority.
+ */
 export default async function PtaCommitteeDetailPage({ params }: { params: Promise<{ committeeId: string }> }) {
   const { committeeId } = await params;
-  const { organizationId, access, can } = await getPtaPageGate("pta:directory:read");
+  const { organizationId, session, can } = await requireOrganization();
+  const { available } = await checkPtaVerticalAvailable(organizationId);
+  const chairOfThis = available ? await isCommitteeChair(organizationId, session.userId, committeeId) : false;
+  const canView = available && (can("pta:directory:read") || chairOfThis);
 
-  if (!access.available) {
+  if (!canView) {
     return (
       <main className="space-y-6">
         <PageHeader title="Committee" description="Not available for this organization." />
@@ -33,16 +42,73 @@ export default async function PtaCommitteeDetailPage({ params }: { params: Promi
 
   const committee = await getPtaCommittee(organizationId, committeeId);
   const canManage = can("pta:committees:manage");
-  const canInviteOfficers = can("users:manage");
+  const canEditDetails = canManage || chairOfThis;
   const memberOptions = committee.members.map((m) => ({ householdAdultId: m.householdAdultId, name: m.householdAdult.name }));
+
+  const [years, adults] = canManage
+    ? await Promise.all([
+        getSchoolYearContext(organizationId),
+        prisma.ptaHouseholdAdult.findMany({ where: { organizationId }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+      ])
+    : [null, null];
+
+  const liaison = committee.boardLiaisonAdultId
+    ? await prisma.ptaHouseholdAdult.findFirst({ where: { id: committee.boardLiaisonAdultId, organizationId }, select: { name: true } })
+    : null;
 
   return (
     <main className="space-y-6">
       <PtaLabsBadge />
       <Breadcrumbs items={[{ href: "/labs/pta/committees", label: "Committees" }, { label: committee.name }]} />
-      <PageHeader title={committee.name} description={committee.description ?? undefined} />
+      <PageHeader
+        title={committee.name}
+        description={[
+          STATUS_LABELS[committee.status] ?? committee.status,
+          committee.schoolYear ?? null,
+          liaison ? `Board liaison: ${liaison.name}` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")}
+      />
 
-      <SectionCard title="Chair & co-chair" description="A chair or co-chair only gains real event/volunteer-opportunity access once invited as an officer below — being marked chair here is a directory role, not a permission grant.">
+      {canEditDetails ? (
+        <SectionCard
+          title="About this committee"
+          description={
+            canManage
+              ? "Description, goals, meeting schedule, lifecycle status, school year, and board liaison."
+              : "As chair, you can keep the description, goals, and meeting schedule up to date. Renaming, status changes, and leadership assignments are done by the board."
+          }
+        >
+          <PtaCommitteeDetailsForm
+            committeeId={committee.id}
+            mode={canManage ? "manage" : "chair"}
+            initial={{
+              description: committee.description,
+              goals: committee.goals,
+              meetingSchedule: committee.meetingSchedule,
+              status: committee.status,
+              schoolYearId: committee.schoolYearId,
+              boardLiaisonAdultId: committee.boardLiaisonAdultId,
+            }}
+            years={years ? years.years.map((year) => ({ id: year.id, label: year.label, isCurrent: year.isCurrent })) : []}
+            adults={adults ?? []}
+          />
+        </SectionCard>
+      ) : (
+        <SectionCard title="About this committee">
+          <div className="space-y-2 text-sm text-slate-700">
+            <p>{committee.description ?? "No description yet."}</p>
+            {committee.goals ? <p><span className="font-semibold">Goals:</span> {committee.goals}</p> : null}
+            {committee.meetingSchedule ? <p><span className="font-semibold">Meets:</span> {committee.meetingSchedule}</p> : null}
+          </div>
+        </SectionCard>
+      )}
+
+      <SectionCard
+        title="Chair & co-chair"
+        description="The chair and co-chair can manage this committee's own details and member list here — scoped to this committee only, with no broader administrative access."
+      >
         <div className="space-y-4">
           <div>
             <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Chair</p>
@@ -51,11 +117,6 @@ export default async function PtaCommitteeDetailPage({ params }: { params: Promi
             ) : (
               <p className="text-sm text-slate-700">{committee.chair?.name ?? "None set"}</p>
             )}
-            {canInviteOfficers && committee.chair ? (
-              <Link href={inviteAsOfficerHref(committee.chair)} className="mt-1 inline-block text-xs font-semibold text-emerald-700 hover:underline">
-                Invite {committee.chair.name} as a STAFF officer →
-              </Link>
-            ) : null}
           </div>
           <div>
             <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Co-chair</p>
@@ -64,18 +125,13 @@ export default async function PtaCommitteeDetailPage({ params }: { params: Promi
             ) : (
               <p className="text-sm text-slate-700">{committee.coChair?.name ?? "None set"}</p>
             )}
-            {canInviteOfficers && committee.coChair ? (
-              <Link href={inviteAsOfficerHref(committee.coChair)} className="mt-1 inline-block text-xs font-semibold text-emerald-700 hover:underline">
-                Invite {committee.coChair.name} as a STAFF officer →
-              </Link>
-            ) : null}
           </div>
         </div>
       </SectionCard>
 
       <SectionCard title="Members" description={`${committee.members.length} member(s).`}>
         {committee.members.length === 0 ? (
-          <EmptyState title="No members yet" description={canManage ? "Search for a parent below to add them." : undefined} />
+          <EmptyState title="No members yet" description={canEditDetails ? "Search for a parent below to add them." : undefined} />
         ) : (
           <ul className="mb-4 divide-y divide-slate-100">
             {committee.members.map((m) => (
@@ -85,7 +141,7 @@ export default async function PtaCommitteeDetailPage({ params }: { params: Promi
                   {committee.chairAdultId === m.householdAdultId ? <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">Chair</span> : null}
                   {committee.coChairAdultId === m.householdAdultId ? <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">Co-chair</span> : null}
                 </span>
-                {canManage ? (
+                {canEditDetails ? (
                   <ConfirmActionButton
                     label="Remove"
                     confirmLabel="Confirm remove"
@@ -97,7 +153,7 @@ export default async function PtaCommitteeDetailPage({ params }: { params: Promi
             ))}
           </ul>
         )}
-        {canManage ? <AddCommitteeMemberForm committeeId={committee.id} /> : null}
+        {canEditDetails ? <AddCommitteeMemberForm committeeId={committee.id} /> : null}
       </SectionCard>
     </main>
   );

@@ -116,3 +116,31 @@ permission editor automatically.
 
 Board UI pages (PTA-B), committee changes (PTA-B), any navigation additions
 beyond the Settings school-year section.
+
+## PR PTA-B — Board & Committees (this PR)
+
+Shipped on top of PTA-A (merged as PR #95):
+
+- **Board Officers page** (`/labs/pta/board`, nav-gated by `pta:board:view`):
+  roster with current holders, history-preserving assign/replace/end,
+  incoming-officer prep, per-position leadership history, position management
+  (add custom, retire, one-click standard set). PTA language throughout.
+- **Committee upgrade** (`PtaCommittee` — additive migration
+  `20260813130000_pta_b_committee_upgrade`): lifecycle `status`
+  (PLANNING/ACTIVE/COMPLETED/ARCHIVED — retire, never delete), school-year
+  association (label+FK dual convention, backfilled from the org's current
+  year), `boardLiaisonAdultId`, `goals`, `meetingSchedule`. New committees are
+  stamped with the current year on create.
+- **Scoped chair permissions** — `requireCommitteeManageOrChair(committeeId)`:
+  linkage-based (chair/co-chair `userId` on THIS committee), never a
+  Permission grant, mirroring the parent self-service convention. Chairs can
+  manage their own committee's member list and edit
+  description/goals/meeting-schedule (server-side whitelist — the
+  authorization boundary, not just UI hiding); rename/status/year/leadership
+  stay officer authority. The committee detail page is now reachable by its
+  chair, and adult search for roster-building goes through a committee-scoped,
+  names-only endpoint (no contact data exposure to chairs). This supersedes
+  the earlier "invite the chair as org-wide STAFF" guidance, which is exactly
+  the over-grant §4 of the program brief prohibits.
+- Tests: `committees-chair-scope.test.ts` (tenant isolation, chair pinning to
+  their own committee, field whitelist, cross-org liaison/year rejection).
