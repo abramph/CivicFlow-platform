@@ -10,6 +10,7 @@ const findManyEvents = vi.fn();
 const findManyMeetings = vi.fn();
 const findUniqueProfile = vi.fn();
 const countConcerns = vi.fn();
+const findManyContacts = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -23,6 +24,7 @@ vi.mock("@/lib/prisma", () => ({
     meeting: { findMany: (...a: unknown[]) => findManyMeetings(...a) },
     ptaProfile: { findUnique: (...a: unknown[]) => findUniqueProfile(...a) },
     ptaConcern: { count: (...a: unknown[]) => countConcerns(...a) },
+    organizationContact: { findMany: (...a: unknown[]) => findManyContacts(...a) },
   },
 }));
 vi.mock("@/lib/audit", () => ({ createAuditEvent: vi.fn().mockResolvedValue(undefined) }));
@@ -56,6 +58,7 @@ beforeEach(() => {
   findManyMeetings.mockResolvedValue([]);
   findUniqueProfile.mockResolvedValue({ schoolOrPtaName: "Demo PTA", designation: "PTA", contactEmail: null });
   countConcerns.mockResolvedValue(3);
+  findManyContacts.mockResolvedValue([]);
 });
 
 describe("transition packet confidentiality (§14)", () => {

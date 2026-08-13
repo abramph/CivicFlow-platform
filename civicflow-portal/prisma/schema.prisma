@@ -434,6 +434,12 @@ enum AttachmentEntityType {
   /// PTA-H Finance Lite: receipts on a ReimbursementRequest (entityId is the
   /// request id; requires reimbursements:submit).
   REIMBURSEMENT
+  /// PTA-I: contracts and documents on an OrganizationContact (vendors,
+  /// insurance, venues …). Requires contacts:read/write.
+  ORGANIZATION_CONTACT
+  /// PTA-I: documentation on a PtaComplianceRequirement (filed reports,
+  /// renewal certificates …). Rides pta:board:view/manage.
+  COMPLIANCE_REQUIREMENT
   EXPENDITURE
   CONTRIBUTION
   PAYMENT_REPORT
@@ -666,6 +672,8 @@ model Organization {
   ptaHandoffChecklistItems    PtaHandoffChecklistItem[]
   budgetLines                 BudgetLine[]
   reimbursementRequests       ReimbursementRequest[]
+  ptaComplianceRequirements   PtaComplianceRequirement[]
+  organizationContacts        OrganizationContact[]
 
   hoaProperties             Property[]
   hoaPropertyResidents      PropertyResident[]
@@ -4337,6 +4345,79 @@ model PtaHandoffChecklistItem {
 
   @@index([organizationId])
   @@index([handoffId])
+}
+
+// ─── PTA Vertical 2.0, PR PTA-I: Compliance calendar (PTA) ───────────────────
+
+enum PtaComplianceRecurrence {
+  NONE
+  MONTHLY
+  QUARTERLY
+  ANNUAL
+}
+
+/// One tracked obligation (§22): bylaws review, insurance renewal, tax
+/// filing, state reporting, … — all org-configured rows, never hard-coded
+/// rules. Display status (COMPLIANT/DUE_SOON/OVERDUE/NOT_APPLICABLE) is
+/// DERIVED from isApplicable + dueDate at read time — see
+/// labs/pta/compliance.ts — so the dashboard can never go stale.
+model PtaComplianceRequirement {
+  id              String                  @id @default(cuid())
+  organizationId  String
+  title           String
+  description     String?
+  /// PTA language, free text ("Treasurer", "Membership Chair") — an
+  /// obligation belongs to a seat, not a login.
+  ownerName       String?
+  dueDate         DateTime?
+  recurrence      PtaComplianceRecurrence @default(NONE)
+  isApplicable    Boolean                 @default(true)
+  lastCompletedAt DateTime?
+  notes           String?
+  sortOrder       Int                     @default(0)
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, title])
+  @@index([organizationId])
+  @@index([organizationId, dueDate])
+}
+
+// ─── PTA Vertical 2.0, PR PTA-I: Contact directory & vendors (core) ──────────
+
+/// Institutional contacts (§23) and vendors (§24) in one model — the
+/// directory that belongs to the ORGANIZATION, not to whichever officer
+/// happens to know the phone number. Category is deliberately free text
+/// (UI suggests; schema never enumerates). Vendor spend/event history is
+/// computed from Expenditures by name match — never entered by hand.
+model OrganizationContact {
+  id             String    @id @default(cuid())
+  organizationId String
+  /// Company or organization name ("Main Street Printing", "District 12").
+  name           String
+  contactPerson  String?
+  role           String?
+  phone          String?
+  email          String?
+  website        String?
+  category       String?
+  notes          String?
+  isVendor       Boolean   @default(false)
+  /// Internal officer assessment, 1–5. Never public.
+  rating         Int?
+  isActive       Boolean   @default(true)
+  lastReviewedAt DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@index([organizationId, isVendor])
+  @@index([organizationId, isActive])
 }
 
 // ─── HOA vertical (PR #43) ────────────────────────────────────────────────

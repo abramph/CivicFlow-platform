@@ -117,6 +117,8 @@ const NAVIGATION: Record<OrganizationVertical, NavItem[]> = {
     { href: "/labs/pta/communications", label: "Announcements" },
     { href: "/labs/pta/documents", label: "Documents", permission: "documents:read" },
     { href: "/labs/pta/governance", label: "Bylaws & Policies", permission: "governance:read" },
+    { href: "/labs/pta/compliance", label: "Compliance", permission: "pta:board:view" },
+    { href: "/labs/pta/contacts", label: "Contacts & Vendors", permission: "contacts:read" },
     // PTA-E: permission-gated here (this list is static); the in-vertical tab
     // bar and the page itself additionally honor PtaProfile.concernsEnabled —
     // holders of pta:concerns:view are exactly the admins who can re-enable
