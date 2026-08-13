@@ -24,6 +24,8 @@ vi.mock("@/lib/prisma", () => ({
     duesCharge: { count: (...a: unknown[]) => countDuesCharge(...a) },
     ptaHouseholdAdult: { findFirst: (...a: unknown[]) => findFirstAdult(...a), create: (...a: unknown[]) => createAdult(...a), update: (...a: unknown[]) => updateHouseholdAdult(...a), delete: (...a: unknown[]) => deleteAdult(...a) },
     ptaStudent: { findFirst: (...a: unknown[]) => findFirstStudent(...a), create: (...a: unknown[]) => createStudent(...a), update: (...a: unknown[]) => updateStudent(...a) },
+    // PTA-A dual-write: create paths resolve the schoolYearId FK twin of the label.
+    ptaSchoolYear: { upsert: async () => ({ id: "school-year-mock" }) },
   },
 }));
 vi.mock("@/lib/audit", () => ({ createAuditEvent: vi.fn().mockResolvedValue(undefined) }));

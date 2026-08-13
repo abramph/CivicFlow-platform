@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { createAuditEvent } from "@/lib/audit";
 import { PtaError } from "./errors";
 import { getPtaProfile } from "./profile";
+import { resolveSchoolYearId } from "./school-years";
 
 /**
  * Volunteer opportunities, shifts ("slots"), assignments ("signups"),
@@ -74,6 +75,7 @@ export async function createPtaVolunteerOpportunity(input: CreateOpportunityInpu
       description: input.description ?? null,
       instructions: input.instructions ?? null,
       schoolYear,
+      schoolYearId: await resolveSchoolYearId(input.organizationId, schoolYear),
       coordinatorUserId: input.coordinatorUserId ?? null,
       startAt: input.startAt ?? null,
       endAt: input.endAt ?? null,
@@ -210,6 +212,7 @@ export async function duplicatePtaVolunteerOpportunity(organizationId: string, o
       description: source.description,
       instructions: source.instructions,
       schoolYear: source.schoolYear,
+      schoolYearId: source.schoolYearId ?? (await resolveSchoolYearId(organizationId, source.schoolYear)),
       coordinatorUserId: source.coordinatorUserId,
       supplyRequest: source.supplyRequest,
       status: "DRAFT",

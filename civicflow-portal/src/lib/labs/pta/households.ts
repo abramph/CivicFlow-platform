@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { createAuditEvent } from "@/lib/audit";
 import { PtaError } from "./errors";
+import { resolveSchoolYearId } from "./school-years";
 
 /**
  * Household/family membership — the primary PTA membership entity. Every
@@ -101,6 +102,7 @@ export async function createPtaHousehold(input: CreateHouseholdInput) {
       organizationId: input.organizationId,
       displayName: input.displayName,
       schoolYear: input.schoolYear,
+      schoolYearId: await resolveSchoolYearId(input.organizationId, input.schoolYear),
       status: input.status ?? "ACTIVE",
       volunteerInterests: input.volunteerInterests ?? [],
       notes: input.notes ?? null,

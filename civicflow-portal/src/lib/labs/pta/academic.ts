@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { createAuditEvent } from "@/lib/audit";
 import { PtaError } from "./errors";
+import { resolveSchoolYearId } from "./school-years";
 
 /** Grades, classrooms, teachers, and year-scoped student enrollment. Teacher records carry no `userId` at all — they are never authenticated accounts and never automatically receive household/payment access. */
 
@@ -47,7 +48,14 @@ export async function createPtaClassroom(input: CreateClassroomInput) {
   }
 
   const classroom = await prisma.ptaClassroom.create({
-    data: { organizationId: input.organizationId, gradeId: grade.id, name: input.name, schoolYear: input.schoolYear, teacherId: input.teacherId ?? null },
+    data: {
+      organizationId: input.organizationId,
+      gradeId: grade.id,
+      name: input.name,
+      schoolYear: input.schoolYear,
+      schoolYearId: await resolveSchoolYearId(input.organizationId, input.schoolYear),
+      teacherId: input.teacherId ?? null,
+    },
   });
 
   await createAuditEvent({
@@ -85,7 +93,7 @@ export async function enrollPtaStudent(organizationId: string, studentId: string
 
   const enrollment = await prisma.ptaStudentEnrollment.upsert({
     where: { studentId_schoolYear: { studentId, schoolYear } },
-    create: { organizationId, studentId, classroomId, schoolYear },
+    create: { organizationId, studentId, classroomId, schoolYear, schoolYearId: await resolveSchoolYearId(organizationId, schoolYear) },
     update: { classroomId },
   });
 

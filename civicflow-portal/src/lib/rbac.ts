@@ -173,6 +173,16 @@ export const PERMISSIONS = {
   PTA_MINUTES_REVIEW:     "pta:minutes:review",
   PTA_MINUTES_APPROVE:    "pta:minutes:approve",
   PTA_ANALYTICS_READ:     "pta:analytics:read",
+  // PTA Vertical 2.0, PR PTA-A (see docs/pta-vertical-2.md): board & school-year
+  // foundation. view/manage split so a treasurer or secretary can always SEE
+  // the board roster and leadership history, while changing positions or
+  // assigning officers stays board-level authority. School-year management
+  // (creating the next year, flipping the current one) is its own permission —
+  // it re-scopes what "current" means for households/volunteers/classrooms
+  // org-wide, which is bigger than any single feature's manage right.
+  PTA_BOARD_VIEW:          "pta:board:view",
+  PTA_BOARD_MANAGE:        "pta:board:manage",
+  PTA_SCHOOL_YEARS_MANAGE: "pta:school-years:manage",
 
   // Unestra for HOA — Property/Resident foundation (PR #43, see
   // docs/hoa-domain-model.md and docs/hoa-navigation-proposal.md). Gated
@@ -317,6 +327,9 @@ const ORG_OWNER_PERMISSIONS: Permission[] = [
   PERMISSIONS.PTA_MINUTES_REVIEW,
   PERMISSIONS.PTA_MINUTES_APPROVE,
   PERMISSIONS.PTA_ANALYTICS_READ,
+  PERMISSIONS.PTA_BOARD_VIEW,
+  PERMISSIONS.PTA_BOARD_MANAGE,
+  PERMISSIONS.PTA_SCHOOL_YEARS_MANAGE,
   PERMISSIONS.HOA_PROPERTIES_READ,
   PERMISSIONS.HOA_PROPERTIES_WRITE,
   PERMISSIONS.HOA_RESIDENTS_READ,
@@ -401,6 +414,9 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.PTA_MINUTES_REVIEW,
     PERMISSIONS.PTA_MINUTES_APPROVE,
     PERMISSIONS.PTA_ANALYTICS_READ,
+    PERMISSIONS.PTA_BOARD_VIEW,
+    PERMISSIONS.PTA_BOARD_MANAGE,
+    PERMISSIONS.PTA_SCHOOL_YEARS_MANAGE,
     PERMISSIONS.HOA_PROPERTIES_READ,
     PERMISSIONS.HOA_PROPERTIES_WRITE,
     PERMISSIONS.HOA_RESIDENTS_READ,
@@ -451,6 +467,9 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.PTA_DUES_MANAGE,
     PERMISSIONS.PTA_FUNDRAISING_MANAGE,
     PERMISSIONS.PTA_ANALYTICS_READ,
+    // Treasurer must see who the board is (and was) — managing it is not a
+    // financial function.
+    PERMISSIONS.PTA_BOARD_VIEW,
     // Treasurer needs to see which property/owner an assessment charge
     // belongs to, but property/resident record-keeping itself is a board
     // administrative function, not a financial one -- read-only.
@@ -497,6 +516,10 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.PTA_ANNOUNCEMENTS_PUBLISH,
     PERMISSIONS.PTA_DOCUMENTS_MANAGE,
     PERMISSIONS.PTA_MINUTES_REVIEW,
+    // Secretary/coordinator-shaped roles see the roster; assigning officers
+    // and reshaping positions stays ORG_OWNER/ORG_ADMIN (board authority) —
+    // same reasoning as MEETINGS_MINUTES_APPROVE being withheld above.
+    PERMISSIONS.PTA_BOARD_VIEW,
     PERMISSIONS.HOA_PROPERTIES_READ,
     PERMISSIONS.HOA_PROPERTIES_WRITE,
     PERMISSIONS.HOA_RESIDENTS_READ,
@@ -546,6 +569,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.AUDIT_LOGS_READ,
     PERMISSIONS.PTA_DIRECTORY_READ,
     PERMISSIONS.PTA_ANALYTICS_READ,
+    PERMISSIONS.PTA_BOARD_VIEW,
     PERMISSIONS.HOA_PROPERTIES_READ,
     PERMISSIONS.HOA_RESIDENTS_READ,
     PERMISSIONS.HOA_VIOLATIONS_READ,
