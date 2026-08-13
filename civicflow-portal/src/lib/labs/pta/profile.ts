@@ -19,6 +19,11 @@ export interface UpsertPtaProfileInput {
   membershipModel?: "INDIVIDUAL" | "HOUSEHOLD" | "FAMILY";
   defaultDuesAmountCents?: number | null;
   gradesServed?: string[];
+  /** PTA-E: feature switch + display name for Concerns & Grievances. Only
+   * applied when explicitly provided — an unrelated profile save must never
+   * silently re-enable a disabled concerns module. */
+  concernsEnabled?: boolean;
+  concernsLabel?: string | null;
   actorUserId: string;
   actorEmail?: string | null;
 }
@@ -39,6 +44,8 @@ export async function upsertPtaProfile(input: UpsertPtaProfileInput) {
     membershipModel: input.membershipModel ?? "HOUSEHOLD",
     defaultDuesAmountCents: input.defaultDuesAmountCents ?? null,
     gradesServed: input.gradesServed ?? [],
+    ...(input.concernsEnabled !== undefined ? { concernsEnabled: input.concernsEnabled } : {}),
+    ...(input.concernsLabel !== undefined ? { concernsLabel: input.concernsLabel?.trim() || null } : {}),
   } as const;
 
   const existing = await prisma.ptaProfile.findUnique({ where: { organizationId: input.organizationId } });

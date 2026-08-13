@@ -29,6 +29,11 @@ export default async function PtaLayout({ children }: { children: ReactNode }) {
     return <>{children}</>;
   }
 
+  const profile = await prisma.ptaProfile.findUnique({
+    where: { organizationId },
+    select: { concernsEnabled: true, concernsLabel: true },
+  });
+
   const officerTabs: PtaTab[] = [
     { href: "/labs/pta/dashboard", label: "Dashboard", visible: can("pta:analytics:read") },
     { href: "/labs/pta/board", label: "Board", visible: can("pta:board:view") },
@@ -42,6 +47,13 @@ export default async function PtaLayout({ children }: { children: ReactNode }) {
     { href: "/labs/pta/communications", label: "Communications", visible: can("pta:announcements:publish") },
     { href: "/labs/pta/documents", label: "Documents", visible: can("documents:read") },
     { href: "/labs/pta/governance", label: "Bylaws & Policies", visible: can("governance:read") },
+    {
+      href: "/labs/pta/concerns",
+      label: profile?.concernsLabel?.trim() || "Concerns",
+      // PTA-E: permission AND feature switch — the tab disappears entirely
+      // when the module is turned off in PTA Setup.
+      visible: can("pta:concerns:view") && profile?.concernsEnabled !== false,
+    },
     { href: "/labs/pta/onboarding", label: "Onboarding", visible: can("pta:households:manage") },
     { href: "/labs/pta/settings", label: "Settings", visible: can("pta:households:manage") },
   ];

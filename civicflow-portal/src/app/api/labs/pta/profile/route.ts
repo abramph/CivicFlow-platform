@@ -22,12 +22,19 @@ const bodySchema = z.object({
   membershipModel: z.enum(["INDIVIDUAL", "HOUSEHOLD", "FAMILY"]).optional(),
   defaultDuesAmountCents: z.number().int().nullable().optional(),
   gradesServed: z.array(z.string()).optional(),
+  concernsEnabled: z.boolean().optional(),
+  concernsLabel: z.string().max(80).nullable().optional(),
 });
 
 export async function PUT(request: Request) {
   return withApiErrorHandling(async () => {
     const { organizationId, session } = await requirePtaAccess("pta:households:manage");
     const input = await parseJsonBody(request, bodySchema);
+    // PTA-E: the concerns feature switch/label is governance surface — held
+    // to pta:concerns:manage (ORG_ADMIN+), not general profile editing.
+    if (input.concernsEnabled !== undefined || input.concernsLabel !== undefined) {
+      await requirePtaAccess("pta:concerns:manage");
+    }
     const profile = await upsertPtaProfile({ organizationId, actorUserId: session.userId, actorEmail: session.userEmail, ...input });
     return Response.json({ ok: true, data: profile });
   });

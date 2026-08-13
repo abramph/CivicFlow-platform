@@ -193,6 +193,16 @@ export const PERMISSIONS = {
   PTA_BOARD_VIEW:          "pta:board:view",
   PTA_BOARD_MANAGE:        "pta:board:manage",
   PTA_SCHOOL_YEARS_MANAGE: "pta:school-years:manage",
+  // PTA Vertical 2.0, PR PTA-E — Concerns & Grievances. Deliberately granted
+  // to NO role bundle below ORG_ADMIN: a case must never be visible merely
+  // because someone helps run events or finances. Even holders of these
+  // permissions cannot read a case marked restricted unless they are
+  // explicitly assigned to it (see src/lib/labs/pta/concerns.ts).
+  PTA_CONCERNS_VIEW:    "pta:concerns:view",
+  PTA_CONCERNS_MANAGE:  "pta:concerns:manage",
+  PTA_CONCERNS_ASSIGN:  "pta:concerns:assign",
+  PTA_CONCERNS_RESOLVE: "pta:concerns:resolve",
+  PTA_CONCERNS_EXPORT:  "pta:concerns:export",
 
   // Unestra for HOA — Property/Resident foundation (PR #43, see
   // docs/hoa-domain-model.md and docs/hoa-navigation-proposal.md). Gated
@@ -340,6 +350,11 @@ const ORG_OWNER_PERMISSIONS: Permission[] = [
   PERMISSIONS.PTA_BOARD_VIEW,
   PERMISSIONS.PTA_BOARD_MANAGE,
   PERMISSIONS.PTA_SCHOOL_YEARS_MANAGE,
+  PERMISSIONS.PTA_CONCERNS_VIEW,
+  PERMISSIONS.PTA_CONCERNS_MANAGE,
+  PERMISSIONS.PTA_CONCERNS_ASSIGN,
+  PERMISSIONS.PTA_CONCERNS_RESOLVE,
+  PERMISSIONS.PTA_CONCERNS_EXPORT,
   PERMISSIONS.DOCUMENTS_READ,
   PERMISSIONS.DOCUMENTS_WRITE,
   PERMISSIONS.GOVERNANCE_READ,
@@ -431,6 +446,11 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.PTA_BOARD_VIEW,
     PERMISSIONS.PTA_BOARD_MANAGE,
     PERMISSIONS.PTA_SCHOOL_YEARS_MANAGE,
+    PERMISSIONS.PTA_CONCERNS_VIEW,
+    PERMISSIONS.PTA_CONCERNS_MANAGE,
+    PERMISSIONS.PTA_CONCERNS_ASSIGN,
+    PERMISSIONS.PTA_CONCERNS_RESOLVE,
+    PERMISSIONS.PTA_CONCERNS_EXPORT,
     PERMISSIONS.DOCUMENTS_READ,
     PERMISSIONS.DOCUMENTS_WRITE,
     PERMISSIONS.GOVERNANCE_READ,

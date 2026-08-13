@@ -115,6 +115,11 @@ const NAVIGATION: Record<OrganizationVertical, NavItem[]> = {
     { href: "/labs/pta/communications", label: "Announcements" },
     { href: "/labs/pta/documents", label: "Documents", permission: "documents:read" },
     { href: "/labs/pta/governance", label: "Bylaws & Policies", permission: "governance:read" },
+    // PTA-E: permission-gated here (this list is static); the in-vertical tab
+    // bar and the page itself additionally honor PtaProfile.concernsEnabled —
+    // holders of pta:concerns:view are exactly the admins who can re-enable
+    // the module, so the item never dead-ends for anyone who can see it.
+    { href: "/labs/pta/concerns", label: "Concerns", permission: "pta:concerns:view" },
     { href: "/reports", label: "Reports" },
     { href: "/labs/pta/settings", label: "PTA Setup" },
     { href: "/settings", label: "Account Settings" },

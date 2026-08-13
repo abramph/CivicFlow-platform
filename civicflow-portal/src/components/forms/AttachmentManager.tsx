@@ -26,12 +26,17 @@ export function AttachmentManager({
   entityType,
   entityId,
   purpose,
+  filterByPurpose = false,
   canWrite,
   titleLabel = "File title",
 }: {
   entityType: string;
   entityId: string;
   purpose?: string;
+  /** List only rows matching `purpose` (PTA-D Document Center folders). Off
+   * by default: single-purpose surfaces may hold legacy rows whose purpose
+   * was stamped differently, and must keep showing everything. */
+  filterByPurpose?: boolean;
   canWrite: boolean;
   titleLabel?: string;
 }) {
@@ -49,6 +54,7 @@ export function AttachmentManager({
     setLoading(true);
     setError(null);
     const params = new URLSearchParams({ entityType, entityId });
+    if (filterByPurpose && purpose) params.set("purpose", purpose);
     const response = await fetch(`/api/attachments?${params.toString()}`);
     const payload = (await response.json().catch(() => null)) as { ok?: boolean; error?: string; data?: AttachmentRow[] } | null;
     if (!response.ok || !payload?.ok) {
@@ -62,7 +68,8 @@ export function AttachmentManager({
 
   useEffect(() => {
     void loadRows();
-  }, [entityType, entityId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entityType, entityId, purpose, filterByPurpose]);
 
   async function handleUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

@@ -55,6 +55,30 @@ export async function requirePtaAccess(permission: Permission) {
   return { organizationId, session, role };
 }
 
+/**
+ * PTA Vertical 2.0, PR PTA-E — the concerns guard. Entry requires
+ * pta:concerns:view (nothing below ORG_ADMIN holds it by default), and the
+ * returned viewer carries every concern capability the concerns lib needs to
+ * make its per-case decisions — including the restricted-case assignment
+ * check, which NO permission can bypass (see labs/pta/concerns.ts).
+ */
+export async function requireConcernAccess() {
+  const { organizationId, session, can } = await requirePermission("pta:concerns:view", "throw");
+  await requirePtaVertical(organizationId);
+  return {
+    organizationId,
+    session,
+    viewer: {
+      userId: session.userId,
+      userEmail: session.userEmail,
+      canView: true,
+      canManage: can("pta:concerns:manage"),
+      canAssign: can("pta:concerns:assign"),
+      canResolve: can("pta:concerns:resolve"),
+    },
+  };
+}
+
 /** Page-component variant (redirect mode) — pages should render their own
  * "not available" messaging on denial, not throw an unhandled error. */
 export async function getPtaPageGate(permission: Permission) {
