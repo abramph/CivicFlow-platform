@@ -63,6 +63,13 @@ export async function collectTransitionPacketData(
     prisma.ptaProfile.findUnique({ where: { organizationId }, select: { schoolOrPtaName: true, designation: true, contactEmail: true } }),
   ]);
 
+  // PTA-I (§23): the institutional directory is part of the transition.
+  const directory = await prisma.organizationContact.findMany({
+    where: { organizationId, isActive: true },
+    orderBy: [{ isVendor: "asc" }, { name: "asc" }],
+    take: 100,
+  });
+
   const sections: PacketSection[] = [];
 
   sections.push({
@@ -136,6 +143,29 @@ export async function collectTransitionPacketData(
       ),
       ...(upcomingMeetings.length === 0 && upcomingEvents.length === 0 ? ["Nothing scheduled in the next 90 days."] : []),
     ],
+  });
+
+  const keyContacts = directory.filter((contact) => !contact.isVendor);
+  const vendors = directory.filter((contact) => contact.isVendor);
+  sections.push({
+    title: "Key contacts",
+    lines:
+      keyContacts.length === 0
+        ? ["No institutional contacts on record — add them under Contacts & Vendors."]
+        : keyContacts.map(
+            (contact) =>
+              `${contact.name}${contact.role ? ` (${contact.role})` : ""}${contact.contactPerson ? ` — ${contact.contactPerson}` : ""}${contact.phone ? `, ${contact.phone}` : ""}${contact.email ? `, ${contact.email}` : ""}`
+          ),
+  });
+  sections.push({
+    title: "Vendors",
+    lines:
+      vendors.length === 0
+        ? ["No vendors on record."]
+        : vendors.map(
+            (vendor) =>
+              `${vendor.name}${vendor.contactPerson ? ` — ${vendor.contactPerson}` : ""}${vendor.phone ? `, ${vendor.phone}` : ""}${vendor.rating ? ` — rated ${vendor.rating}/5` : ""}`
+          ),
   });
 
   // §14: never include grievance content. Count of open NON-restricted cases

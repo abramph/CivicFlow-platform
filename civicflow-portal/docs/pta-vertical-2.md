@@ -361,3 +361,36 @@ bank credentials — ever.
 - **Treasurer dashboard** (`/labs/pta/finance`, PTA language): income vs
   spend summary, budget-vs-actual table with variance, reimbursement queue
   with inline approve/pay/reject, submit form for officers.
+
+## PR PTA-I — Compliance & Institutional Memory (this PR)
+
+Three §22–§24 capabilities that make the org own its knowledge instead of
+its officers:
+
+- **Compliance calendar** (PTA-namespaced per §42's "PTA compliance"):
+  `PtaComplianceRequirement` — title, owner (free text, PTA language:
+  "Treasurer"), due date, recurrence (NONE/MONTHLY/QUARTERLY/ANNUAL),
+  applicability. Display status is DERIVED, never stored: NOT_APPLICABLE if
+  switched off, OVERDUE past due, DUE_SOON within 30 days, else COMPLIANT —
+  so the dashboard can't go stale. "Mark complete" stamps lastCompletedAt
+  and auto-advances the due date by the recurrence interval. The §22
+  requirement list (bylaws review, insurance renewal, audit, tax filing,
+  state reporting, …) ships as SUGGESTIONS applied by a button — never
+  hard-coded as universal (§22's explicit rule); state/local items are just
+  rows. Documentation attaches via the Attachment pipeline
+  (COMPLIANCE_REQUIREMENT entity type). Rides pta:board:view/manage — 
+  compliance is board operations, same authority as the Transition Center.
+- **Contact directory + vendor history** (core — every vertical has
+  institutional contacts): one `OrganizationContact` model covering both
+  §23 and §24 — company/name, person, role, phone/email/website, free-text
+  category (UI suggests Principal/District/State PTA/Accountant/Insurance/
+  Venue/…, never an enum), notes, active flag, lastReviewedAt, and for
+  vendors: isVendor + internal 1–5 rating. **Vendor spend and event history
+  are computed, not entered**: non-void Expenditures matching the contact by
+  name (case-insensitive) — "historical spend where available" (§24) with
+  zero double-entry; paid reimbursements flow in automatically because
+  PTA-H books them as Expenditures with the payee as vendor. Contracts/
+  documents attach via ORGANIZATION_CONTACT entity type. New core perms
+  contacts:read/write (STAFF+ write, READ_ONLY read).
+- **Transition packet**: gains "Key contacts" and "Vendors" sections (§23:
+  "this becomes part of board transition").
