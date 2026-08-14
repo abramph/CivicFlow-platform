@@ -20,6 +20,8 @@ const putSchema = z.object({
   householdGivingPrivacyMode: z
     .enum(["INDIVIDUAL_PRIVATE", "HOUSEHOLD_STATEMENT_ONLY", "HOUSEHOLD_SHARED"])
     .optional(),
+  publicGivingEnabled: z.boolean().optional(),
+  publicGivingMessage: z.string().max(600).nullable().optional(),
 });
 
 /** PUT — enable/disable the module and set terminology. Deliberately held to
