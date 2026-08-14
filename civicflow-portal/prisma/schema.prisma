@@ -725,6 +725,8 @@ model Organization {
   households                  Household[]
   orgGroups                   OrgGroup[]
   contributionAdjustments     ContributionAdjustment[]
+  stripeAccount               OrganizationStripeAccount?
+  memberStripeCustomers       OrganizationMemberStripeCustomer[]
   ptaElections                PtaElection[]
   ptaElectionContests         PtaElectionContest[]
   ptaElectionCandidates       PtaElectionCandidate[]
@@ -801,6 +803,7 @@ model User {
   ptaTransitionsStarted             PtaBoardTransition[]       @relation("PtaTransitionStartedBy")
   ptaHandoffChecklistCompletions    PtaHandoffChecklistItem[]  @relation("PtaHandoffChecklistCompletedBy")
   contributionsGiven                Contribution[]             @relation("ContributionContributorUser")
+  memberStripeCustomers             OrganizationMemberStripeCustomer[]
   givingCustomers                   GivingCustomer[]
   recurringSchedules                RecurringContributionSchedule[] @relation("RecurringScheduleContributor")
   pledges                           Pledge[]                   @relation("PledgeContributor")
@@ -2283,6 +2286,11 @@ model Contribution {
   /// CORE-GIVE-K (§35): provider dispute state, mirrored — disputed rows
   /// are never hidden or removed.
   providerDisputeStatus          String?
+  /// CONNECT-A (§56): IMMUTABLE provider-account attribution. Refunds,
+  /// disputes, and reconciliation resolve the Stripe account from the ROW,
+  /// never from current organization settings.
+  stripeConnectedAccountId       String?
+  providerAccountContext         ProviderAccountContext?
   statementEligible              Boolean                        @default(true)
   taxDeductibilityClassification TaxDeductibilityClassification @default(DEDUCTIBILITY_NOT_CONFIGURED)
   /// §32 goods/services value received (gala ticket, merchandise) — the
@@ -2398,6 +2406,76 @@ enum RecurringScheduleStatus {
 /// CORE-GIVE-C: the MEMBER-level Stripe Customer for giving. Deliberately a
 /// separate table from Subscription (which holds the ORGANIZATION's SaaS
 /// customer) — the two domains can never resolve each other's customers.
+/// CONNECT-A (docs/stripe-connect-architecture.md §3): which Stripe account
+/// context owns a payment row. LEGACY_PLATFORM_PAYMENT = pre-Connect rows on
+/// the platform account (read-only history, never migrated); new charges get
+/// CONNECTED_ACCOUNT_PAYMENT once each flow moves (CONNECT-C/D/E).
+enum ProviderAccountContext {
+  LEGACY_PLATFORM_PAYMENT
+  CONNECTED_ACCOUNT_PAYMENT
+}
+
+enum StripeAccountStatus {
+  ONBOARDING_STARTED
+  ACTION_REQUIRED
+  CONNECTED
+  PAYMENTS_ENABLED
+  RESTRICTED
+  DISABLED
+}
+
+/// CONNECT-A (§4): one organization ↔ one Stripe Standard connected account.
+/// `stripeAccountId` (acct_…) is an identifier, never a secret; NO Stripe
+/// credentials are ever stored. Absence of a row = NOT_CONNECTED. Rows are
+/// never deleted — disconnection is `DISABLED` + `disabledAt` (§26), because
+/// historical charges permanently reference this account.
+model OrganizationStripeAccount {
+  id                             String              @id @default(cuid())
+  organizationId                 String              @unique
+  stripeAccountId                String              @unique
+  /// "test" | "live" — Stripe mode of the connected account.
+  accountMode                    String              @default("live")
+  onboardingStatus               StripeAccountStatus @default(ONBOARDING_STARTED)
+  chargesEnabled                 Boolean             @default(false)
+  payoutsEnabled                 Boolean             @default(false)
+  detailsSubmitted               Boolean             @default(false)
+  requirementsCurrentlyDueCount  Int                 @default(0)
+  requirementsEventuallyDueCount Int                 @default(0)
+  country                        String?
+  defaultCurrency                String?
+  connectedAt                    DateTime?
+  lastSyncedAt                   DateTime?
+  disabledAt                     DateTime?
+  createdAt                      DateTime            @default(now())
+  updatedAt                      DateTime            @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@index([onboardingStatus])
+}
+
+/// CONNECT-A (§11): a member's Stripe Customer WITHIN one connected account.
+/// Customers never cross connected accounts; one user may hold one customer
+/// per (organization, connected account). GivingCustomer remains the LEGACY
+/// platform-context record (CONNECT-D stops writing it).
+model OrganizationMemberStripeCustomer {
+  id                       String   @id @default(cuid())
+  organizationId           String
+  userId                   String
+  memberId                 String?
+  stripeConnectedAccountId String
+  stripeCustomerId         String
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, userId, stripeConnectedAccountId])
+  @@unique([stripeConnectedAccountId, stripeCustomerId])
+  @@index([organizationId])
+}
+
 model GivingCustomer {
   id               String   @id @default(cuid())
   organizationId   String
@@ -2436,6 +2514,9 @@ model RecurringContributionSchedule {
   endDate                      DateTime?
   status                       RecurringScheduleStatus @default(PENDING_SETUP)
   providerCustomerId           String?
+  /// CONNECT-A (§56): immutable account attribution (see Contribution).
+  stripeConnectedAccountId     String?
+  providerAccountContext       ProviderAccountContext?
   providerSubscriptionId       String?                 @unique
   providerPaymentMethodId      String?
   /// Safe display only ("Visa •••• 4242") — never raw card data (§8).
