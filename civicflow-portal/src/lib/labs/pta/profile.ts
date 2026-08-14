@@ -24,6 +24,8 @@ export interface UpsertPtaProfileInput {
    * silently re-enable a disabled concerns module. */
   concernsEnabled?: boolean;
   concernsLabel?: string | null;
+  /** PTA-L: elections stay dark until deliberately enabled (default false). */
+  electionsEnabled?: boolean;
   actorUserId: string;
   actorEmail?: string | null;
 }
@@ -46,6 +48,7 @@ export async function upsertPtaProfile(input: UpsertPtaProfileInput) {
     gradesServed: input.gradesServed ?? [],
     ...(input.concernsEnabled !== undefined ? { concernsEnabled: input.concernsEnabled } : {}),
     ...(input.concernsLabel !== undefined ? { concernsLabel: input.concernsLabel?.trim() || null } : {}),
+    ...(input.electionsEnabled !== undefined ? { electionsEnabled: input.electionsEnabled } : {}),
   } as const;
 
   const existing = await prisma.ptaProfile.findUnique({ where: { organizationId: input.organizationId } });

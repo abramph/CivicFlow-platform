@@ -6,7 +6,7 @@
     "dev": "next dev",
     "dev:clean": "node ./scripts/dev-clean.js",
     "dev:clean:kill": "node ./scripts/dev-clean.js --kill",
-    "build": "node ./scripts/prebuild-clean.mjs && next build --webpack",
+    "build": "node ./scripts/prebuild-clean.mjs && node --max-old-space-size=6144 node_modules/next/dist/bin/next build --webpack",
     "start": "next start",
     "lint": "eslint",
     "db:generate": "prisma generate",

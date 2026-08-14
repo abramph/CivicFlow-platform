@@ -16,13 +16,22 @@ interface PtaProfileLike {
   gradesServed: string[];
   concernsEnabled?: boolean;
   concernsLabel?: string | null;
+  electionsEnabled?: boolean;
 }
 
 /** `canManageConcerns` — PTA-E: the concerns feature switch is governance
  * surface held to pta:concerns:manage (ORG_ADMIN+). When false, the fields
  * are hidden AND omitted from the payload so a staff-level profile save can
  * never touch (or be rejected because of) them. */
-export function PtaProfileForm({ initialProfile, canManageConcerns = false }: { initialProfile: PtaProfileLike | null; canManageConcerns?: boolean }) {
+export function PtaProfileForm({
+  initialProfile,
+  canManageConcerns = false,
+  canManageElections = false,
+}: {
+  initialProfile: PtaProfileLike | null;
+  canManageConcerns?: boolean;
+  canManageElections?: boolean;
+}) {
   const router = useRouter();
   const [schoolOrPtaName, setSchoolOrPtaName] = useState(initialProfile?.schoolOrPtaName ?? "");
   const [designation, setDesignation] = useState<"PTA" | "PTO">(initialProfile?.designation ?? "PTA");
@@ -36,6 +45,7 @@ export function PtaProfileForm({ initialProfile, canManageConcerns = false }: { 
   const [gradesServed, setGradesServed] = useState(initialProfile?.gradesServed?.join(", ") ?? "");
   const [concernsEnabled, setConcernsEnabled] = useState(initialProfile?.concernsEnabled ?? true);
   const [concernsLabel, setConcernsLabel] = useState(initialProfile?.concernsLabel ?? "");
+  const [electionsEnabled, setElectionsEnabled] = useState(initialProfile?.electionsEnabled ?? false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -60,6 +70,7 @@ export function PtaProfileForm({ initialProfile, canManageConcerns = false }: { 
           defaultDuesAmountCents: defaultDuesAmount ? Math.round(Number(defaultDuesAmount) * 100) : null,
           gradesServed: gradesServed.split(",").map((g) => g.trim()).filter(Boolean),
           ...(canManageConcerns ? { concernsEnabled, concernsLabel: concernsLabel.trim() || null } : {}),
+          ...(canManageElections ? { electionsEnabled } : {}),
         }),
       });
       const data = await res.json().catch(() => null);
@@ -146,6 +157,19 @@ export function PtaProfileForm({ initialProfile, canManageConcerns = false }: { 
               Shown in navigation and page titles — e.g. &quot;Member Feedback&quot; or &quot;Grievances&quot;. Turning the module off hides it everywhere; no case data is deleted.
             </span>
           </label>
+        </div>
+      ) : null}
+      {canManageElections ? (
+        <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <h3 className="text-sm font-semibold text-slate-900">Elections</h3>
+          <label className="flex items-center gap-2 text-sm font-medium text-slate-900">
+            <input type="checkbox" checked={electionsEnabled} onChange={(e) => setElectionsEnabled(e.target.checked)} className="h-4 w-4" />
+            <span>Enable elections for this PTA</span>
+          </label>
+          <p className="text-xs font-normal text-slate-500">
+            Off by default. Unestra elections are a tool for your own process — secret ballots are protected from ordinary
+            administrator access, but Unestra makes no legal election-compliance claims. Follow your bylaws and state rules.
+          </p>
         </div>
       ) : null}
       {error ? <p className="text-sm text-red-700">{error}</p> : null}

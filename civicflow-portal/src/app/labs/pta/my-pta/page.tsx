@@ -2,6 +2,8 @@ import { requireOrganization } from "@/lib/auth-guards";
 import { requirePtaVertical, getPtaOrganizationAccessContext } from "@/lib/labs/pta/guard";
 import { getBoardRoster } from "@/lib/labs/pta/board";
 import { getMyIncomingHandoff } from "@/lib/labs/pta/transitions";
+import { getElectionResults, getMyElections } from "@/lib/labs/pta/elections";
+import { PtaMyElections } from "@/components/labs/pta/PtaMyElections";
 import { prisma } from "@/lib/prisma";
 import { PageHeader, SectionCard } from "@/components/app/PageChrome";
 import { PtaLabsBadge } from "@/components/labs/pta/PtaLabsBadge";
@@ -64,6 +66,23 @@ export default async function PtaMyPtaPage() {
     getMyIncomingHandoff(organizationId, session.userId),
   ]);
 
+  // PTA-L: the member's elections — open ballots and certified results.
+  const adultRow = await prisma.ptaHouseholdAdult.findFirst({ where: { organizationId, userId: session.userId }, select: { id: true } });
+  const myElections = adultRow ? await getMyElections(organizationId, adultRow.id) : { open: [], certified: [] };
+  const certifiedResults = [];
+  for (const electionId of myElections.certified) {
+    const results = await getElectionResults(organizationId, electionId, "CERTIFIED");
+    certifiedResults.push({
+      electionId,
+      title: results.title,
+      contests: results.contests.map((contest) => ({
+        title: contest.title,
+        seats: contest.seats,
+        candidates: contest.candidates.map((candidate) => ({ name: candidate.name, votes: candidate.votes })),
+      })),
+    });
+  }
+
   return (
     <main className="space-y-6">
       <PtaLabsBadge />
@@ -71,6 +90,23 @@ export default async function PtaMyPtaPage() {
         title={`My PTA${profile?.schoolOrPtaName ? ` — ${profile.schoolOrPtaName}` : ""}`}
         description={`Documents, governing rules, your board, and what's coming up${profile?.currentSchoolYear ? ` in ${profile.currentSchoolYear}` : ""}.`}
       />
+      {myElections.open.length > 0 || certifiedResults.length > 0 ? (
+        <SectionCard title="Elections" description="Your ballot and certified results.">
+          <PtaMyElections
+            open={myElections.open.map((election) => ({
+              electionId: election.electionId,
+              title: election.title,
+              description: election.description,
+              mode: election.mode,
+              eligibilityNote: election.eligibilityNote,
+              votingClosesAt: election.votingClosesAt?.toISOString() ?? null,
+              hasVoted: election.hasVoted,
+              contests: election.contests,
+            }))}
+            certified={certifiedResults}
+          />
+        </SectionCard>
+      ) : null}
       <SectionCard title="Your PTA at a glance" description="Everything here is shared with members deliberately by your officers.">
         <PtaMyPta
           contactEmail={profile?.contactEmail ?? null}

@@ -451,3 +451,60 @@ everything A–J built; NO migration, no new mutations.
 - The existing metrics grid (membership/volunteers/payments/fundraising/
   governance) stays below — Dashboard 2.0 is the actionable layer on top,
   not a rewrite.
+
+## PR PTA-L — Elections (this PR, feature-gated)
+
+§21, implemented deliberately last and behind a DEFAULT-OFF org flag
+(`PtaProfile.electionsEnabled` — unlike concerns, no org has elections until
+an admin turns them on). The §21 gating requirement is satisfied two ways:
+the dedicated security review below is part of this PR, and the flag keeps
+the surface dark in production until each org opts in.
+
+### Security review (dedicated, §21)
+
+**Threat model**: protect ballot secrecy against ORDINARY ADMINISTRATORS —
+anyone using the application, its APIs, or routine database reads. A hostile
+platform operator with write-ahead-log or backup-diff access is explicitly
+OUT of scope (that is a hosting-trust boundary, not an application one) and
+the UI says so plainly.
+
+- **Ballot content and voter identity live in disconnected tables.**
+  `PtaElectionVoter` is the §21 eligibility snapshot + participation record
+  (who MAY vote, who HAS voted — participation is legitimately public in an
+  assembly). `PtaBallotChoice` rows carry NO voter column at all — not
+  nullable, ABSENT — plus:
+  - **random UUID ids** (cuid encodes creation time; uuid4 does not),
+  - **no createdAt/updatedAt columns** (insert-only), so timestamp
+    correlation against `votedAt` is impossible from the schema itself,
+  - **no ballot grouping** — one row per (contest, candidate) pick, so even
+    a full table dump cannot reconstruct an individual's complete ballot.
+- **Double voting is blocked by the voter row, not the ballot**: casting is
+  one transaction — validate snapshot eligibility + `hasVoted=false`,
+  insert choices, set `hasVoted`. A concurrent double-cast loses on the
+  voter-row update inside the transaction.
+- **OPEN mode** (roll-call votes, e.g. motions requiring attribution)
+  stamps `openVoterName` on choices; the lib hard-forbids that field in
+  SECRET_BALLOT mode and a test asserts secret inserts carry no identity.
+- **Eligibility snapshot at VOTING-open** (§21): all adults of ACTIVE
+  households, frozen transactionally; later joiners don't vote; the
+  election stores a human-readable `eligibilityNote` for local rules.
+- **Audit** records election lifecycle, candidate changes, certification,
+  and vote PARTICIPATION (never choices).
+- **Voting is linkage-gated** (household adult), never a Permission;
+  officer administration requires new dedicated `pta:elections:view/manage`
+  granted only to ORG_OWNER/ORG_ADMIN bundles.
+- **No compliance claims**: UI copy states results are tools for the org's
+  own process — Unestra claims no legal election certification (§21).
+- **Deliberately absent v1**: write-in candidates, weighted/household
+  voting, delegation, and result publication before CERTIFIED.
+
+### Mechanics
+- `PtaElection` DRAFT → NOMINATIONS → VOTING → CLOSED → CERTIFIED
+  (CANCELLED from any pre-CLOSED state). Contests optionally link a real
+  `PtaBoardPosition`; candidates are PTA-language rows (name + statement,
+  optional adult link), editable until VOTING; multi-seat contests allow up
+  to `seats` picks.
+- Results (tally + turnout) visible to managers once CLOSED; members see
+  them after CERTIFIED through their voting surface.
+- Member voting UI lives in My PTA; officer surface at /labs/pta/elections
+  (nav gated on permission AND the org flag — no dead tabs).

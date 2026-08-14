@@ -52,6 +52,11 @@ export const PTA_ERROR_CODES = [
   "PTA_HANDOFF_NOT_FOUND",
   // PTA Vertical 2.0, PR PTA-I — compliance calendar.
   "PTA_COMPLIANCE_NOT_FOUND",
+  // PTA Vertical 2.0, PR PTA-L — elections.
+  "PTA_ELECTIONS_DISABLED",
+  "PTA_ELECTION_NOT_FOUND",
+  "PTA_NOT_ELIGIBLE_VOTER",
+  "PTA_ALREADY_VOTED",
 ] as const;
 
 export type PtaErrorCode = (typeof PTA_ERROR_CODES)[number];
@@ -94,6 +99,10 @@ const STATUS_FOR_CODE: Record<PtaErrorCode, number> = {
   PTA_TRANSITION_NOT_FOUND: 404,
   PTA_HANDOFF_NOT_FOUND: 404,
   PTA_COMPLIANCE_NOT_FOUND: 404,
+  PTA_ELECTIONS_DISABLED: 403,
+  PTA_ELECTION_NOT_FOUND: 404,
+  PTA_NOT_ELIGIBLE_VOTER: 403,
+  PTA_ALREADY_VOTED: 409,
 };
 
 export class PtaError extends Error {

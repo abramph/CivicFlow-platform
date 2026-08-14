@@ -674,6 +674,11 @@ model Organization {
   reimbursementRequests       ReimbursementRequest[]
   ptaComplianceRequirements   PtaComplianceRequirement[]
   organizationContacts        OrganizationContact[]
+  ptaElections                PtaElection[]
+  ptaElectionContests         PtaElectionContest[]
+  ptaElectionCandidates       PtaElectionCandidate[]
+  ptaElectionVoters           PtaElectionVoter[]
+  ptaBallotChoices            PtaBallotChoice[]
 
   hoaProperties             Property[]
   hoaPropertyResidents      PropertyResident[]
@@ -744,6 +749,8 @@ model User {
   ptaConcernNotesAuthored           PtaConcernNote[]           @relation("PtaConcernNoteAuthor")
   ptaTransitionsStarted             PtaBoardTransition[]       @relation("PtaTransitionStartedBy")
   ptaHandoffChecklistCompletions    PtaHandoffChecklistItem[]  @relation("PtaHandoffChecklistCompletedBy")
+  ptaElectionsCreated               PtaElection[]              @relation("PtaElectionCreatedBy")
+  ptaElectionsCertified             PtaElection[]              @relation("PtaElectionCertifiedBy")
   reimbursementsSubmitted           ReimbursementRequest[]     @relation("ReimbursementSubmittedBy")
   reimbursementsApproved            ReimbursementRequest[]     @relation("ReimbursementApprovedBy")
   reimbursementsPaid                ReimbursementRequest[]     @relation("ReimbursementPaidBy")
@@ -3329,6 +3336,9 @@ model PtaProfile {
   /// renameable ("Concerns", "Member Issues", ...). Label null = default.
   concernsEnabled        Boolean            @default(true)
   concernsLabel          String?
+  /// PTA-L: elections stay DARK until an admin deliberately enables them —
+  /// the §21 feature gate. Default false, unlike concerns.
+  electionsEnabled       Boolean            @default(false)
   createdAt              DateTime           @default(now())
   updatedAt              DateTime           @updatedAt
 
@@ -3429,6 +3439,8 @@ model PtaHouseholdAdult {
   committeeMemberships PtaCommitteeMember[]
   invites              PtaHouseholdAdultInvite[]
   officerAssignments   PtaOfficerAssignment[]
+  electionCandidacies  PtaElectionCandidate[]
+  electionVoterRows    PtaElectionVoter[]
 
   @@unique([organizationId, userId])
   @@index([organizationId])
@@ -4074,8 +4086,9 @@ model PtaBoardPosition {
   updatedAt        DateTime               @updatedAt
 
   organization Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  assignments  PtaOfficerAssignment[]
-  handoffs     PtaOfficerHandoff[]
+  assignments      PtaOfficerAssignment[]
+  handoffs         PtaOfficerHandoff[]
+  electionContests PtaElectionContest[]
 
   @@unique([organizationId, name])
   @@index([organizationId])
@@ -4388,6 +4401,147 @@ model PtaComplianceRequirement {
   @@unique([organizationId, title])
   @@index([organizationId])
   @@index([organizationId, dueDate])
+}
+
+// ─── PTA Vertical 2.0, PR PTA-L: Elections (feature-gated) ───────────────────
+// SECURITY MODEL (docs/pta-vertical-2.md PTA-L): ballot content and voter
+// identity are DISCONNECTED. PtaElectionVoter records eligibility and
+// participation; PtaBallotChoice rows carry no voter column, use random UUID
+// ids (cuid encodes time), have no timestamps, and are never grouped into
+// whole ballots — so vote identity cannot be reconstructed by ordinary
+// administrators. Feature is org-gated via PtaProfile.electionsEnabled
+// (default OFF).
+
+enum PtaElectionStatus {
+  DRAFT
+  NOMINATIONS
+  VOTING
+  CLOSED
+  CERTIFIED
+  CANCELLED
+}
+
+enum PtaElectionMode {
+  OPEN
+  SECRET_BALLOT
+}
+
+model PtaElection {
+  id                String            @id @default(cuid())
+  organizationId    String
+  title             String
+  description       String?
+  mode              PtaElectionMode   @default(SECRET_BALLOT)
+  status            PtaElectionStatus @default(DRAFT)
+  votingOpensAt     DateTime?
+  votingClosesAt    DateTime?
+  /// Human-readable local eligibility rules ("one vote per paid member",
+  /// state/council requirements) — Unestra never hard-codes them.
+  eligibilityNote   String?
+  createdByUserId   String?
+  certifiedAt       DateTime?
+  certifiedByUserId String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  createdBy    User?                @relation("PtaElectionCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  certifiedBy  User?                @relation("PtaElectionCertifiedBy", fields: [certifiedByUserId], references: [id], onDelete: SetNull)
+  contests     PtaElectionContest[]
+  voters       PtaElectionVoter[]
+  choices      PtaBallotChoice[]
+
+  @@index([organizationId])
+  @@index([organizationId, status])
+}
+
+model PtaElectionContest {
+  id             String   @id @default(cuid())
+  organizationId String
+  electionId     String
+  title          String
+  positionId     String?
+  /// How many candidates a voter may pick (and how many win).
+  seats          Int      @default(1)
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization           @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  election     PtaElection            @relation(fields: [electionId], references: [id], onDelete: Cascade)
+  position     PtaBoardPosition?      @relation(fields: [positionId], references: [id], onDelete: SetNull)
+  candidates   PtaElectionCandidate[]
+  choices      PtaBallotChoice[]
+
+  @@index([organizationId])
+  @@index([electionId])
+}
+
+model PtaElectionCandidate {
+  id               String   @id @default(cuid())
+  organizationId   String
+  contestId        String
+  name             String
+  statement        String?
+  householdAdultId String?
+  isWithdrawn      Boolean  @default(false)
+  sortOrder        Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  contest        PtaElectionContest @relation(fields: [contestId], references: [id], onDelete: Cascade)
+  householdAdult PtaHouseholdAdult? @relation(fields: [householdAdultId], references: [id], onDelete: SetNull)
+  choices        PtaBallotChoice[]
+
+  @@index([organizationId])
+  @@index([contestId])
+}
+
+/// The §21 voter-eligibility SNAPSHOT plus the participation record. Who may
+/// vote and who has voted is legitimately visible to election managers;
+/// WHAT they voted lives only in PtaBallotChoice, which has no link here.
+model PtaElectionVoter {
+  id               String    @id @default(cuid())
+  organizationId   String
+  electionId       String
+  householdAdultId String
+  /// Name snapshot — the roll stays readable even if the adult row changes.
+  name             String
+  snapshotAt       DateTime  @default(now())
+  hasVoted         Boolean   @default(false)
+  votedAt          DateTime?
+
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  election       PtaElection       @relation(fields: [electionId], references: [id], onDelete: Cascade)
+  householdAdult PtaHouseholdAdult @relation(fields: [householdAdultId], references: [id], onDelete: Cascade)
+
+  @@unique([electionId, householdAdultId])
+  @@index([organizationId])
+  @@index([electionId])
+}
+
+/// One anonymous pick: (election, contest, candidate). DELIBERATELY: random
+/// uuid id, NO voter column, NO timestamps, no ballot grouping — see the
+/// security model comment above. openVoterName is stamped ONLY in OPEN-mode
+/// elections (roll-call style); the lib forbids it for SECRET_BALLOT and a
+/// test asserts it. Restrict deletes — cast votes are records.
+model PtaBallotChoice {
+  id             String  @id @default(uuid())
+  organizationId String
+  electionId     String
+  contestId      String
+  candidateId    String
+  openVoterName  String?
+
+  organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  election     PtaElection          @relation(fields: [electionId], references: [id], onDelete: Restrict)
+  contest      PtaElectionContest   @relation(fields: [contestId], references: [id], onDelete: Restrict)
+  candidate    PtaElectionCandidate @relation(fields: [candidateId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId])
+  @@index([electionId])
+  @@index([contestId, candidateId])
 }
 
 // ─── PTA Vertical 2.0, PR PTA-I: Contact directory & vendors (core) ──────────
