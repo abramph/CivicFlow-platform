@@ -53,7 +53,12 @@ export function GivingSetupManager({
   programs,
   viewer,
 }: {
-  settings: { contributionsEnabled: boolean; terminology: string };
+  settings: {
+    contributionsEnabled: boolean;
+    terminology: string;
+    householdGivingEnabled: boolean;
+    householdGivingPrivacyMode: string;
+  };
   funds: FundView[];
   programs: ProgramView[];
   viewer: { canManageFunds: boolean; canManagePrograms: boolean };
@@ -176,6 +181,68 @@ export function GivingSetupManager({
           </p>
         ) : null}
       </div>
+
+      {settings.contributionsEnabled && viewer.canManageFunds ? (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <h3 className="text-sm font-semibold text-slate-900">Household giving privacy</h3>
+          <p className="mt-1 text-xs text-slate-600">
+            Sharing an address is not consent to share money. Each option below states exactly who can see what —
+            the default keeps every member&apos;s giving private, and finance staff visibility is unaffected either way.
+          </p>
+          <div className="mt-3 space-y-2">
+            {[
+              {
+                value: "INDIVIDUAL_PRIVATE",
+                label: "Individual private (default)",
+                detail:
+                  "Household membership changes nothing about giving. No member ever sees another household member's giving.",
+              },
+              {
+                value: "HOUSEHOLD_STATEMENT_ONLY",
+                label: "Household totals",
+                detail:
+                  "Household members see each member's ANNUAL TOTAL and a combined household total. Individual transactions stay private.",
+              },
+              {
+                value: "HOUSEHOLD_SHARED",
+                label: "Fully shared",
+                detail:
+                  "Household members see each other's individual contributions — every gift, its date, amount, and designation. Choose this only if your members expect it.",
+              },
+            ].map((option) => (
+              <label key={option.value} className="flex items-start gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="household-privacy-mode"
+                  checked={
+                    option.value === "INDIVIDUAL_PRIVATE"
+                      ? !settings.householdGivingEnabled || settings.householdGivingPrivacyMode === "INDIVIDUAL_PRIVATE"
+                      : settings.householdGivingEnabled && settings.householdGivingPrivacyMode === option.value
+                  }
+                  disabled={pending}
+                  onChange={() =>
+                    saveSettings({
+                      householdGivingEnabled: option.value !== "INDIVIDUAL_PRIVATE",
+                      householdGivingPrivacyMode: option.value,
+                    })
+                  }
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="font-medium text-slate-900">{option.label}</span>
+                  <span className="block text-xs text-slate-600">{option.detail}</span>
+                </span>
+              </label>
+            ))}
+            {!settings.householdGivingEnabled ? (
+              <p className="text-xs text-slate-500">
+                Household giving is currently off — households (managed under Giving Operations) affect nothing until a
+                shared option is chosen here.
+              </p>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       {settings.contributionsEnabled ? (
         <>

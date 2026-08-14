@@ -32,6 +32,9 @@ export function GivingOperations({
   members,
   recent,
   canReconcile,
+  households = [],
+  canManageHouseholds = false,
+  householdGivingEnabled = false,
 }: {
   funds: { id: string; name: string }[];
   members: { id: string; name: string }[];
@@ -46,6 +49,9 @@ export function GivingOperations({
     voided: boolean;
   }[];
   canReconcile: boolean;
+  households?: { id: string; name: string; members: { id: string; name: string }[] }[];
+  canManageHouseholds?: boolean;
+  householdGivingEnabled?: boolean;
 }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
@@ -139,6 +145,72 @@ export function GivingOperations({
       setCorrectReason("");
       setNotice("Corrected — the original is voided and preserved; the replacement is linked.");
       router.refresh();
+    } finally {
+      setPending(false);
+    }
+  }
+
+  const [newHouseholdName, setNewHouseholdName] = useState("");
+  const [householdMemberPick, setHouseholdMemberPick] = useState<Record<string, string>>({});
+
+  async function addHousehold() {
+    setPending(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/households", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newHouseholdName.trim() }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        setError(data?.error || "Unable to create the household.");
+        return;
+      }
+      setNewHouseholdName("");
+      router.refresh();
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function changeHouseholdMember(householdId: string, memberId: string, action: "add" | "remove") {
+    if (!memberId) return;
+    setPending(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/households/${householdId}/members`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ memberId, action }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        setError(data?.error || "Unable to update the household.");
+        return;
+      }
+      router.refresh();
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function prepareHouseholdStatement(householdId: string) {
+    setPending(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/giving/statements", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ year: stmtYear, householdId }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        setError(data?.error || "Unable to prepare the household statement.");
+        return;
+      }
+      setNotice(`Prepared household statement for ${stmtYear}. Nothing was emailed.`);
+      await loadStatements(stmtYear);
     } finally {
       setPending(false);
     }
@@ -400,6 +472,105 @@ export function GivingOperations({
           </div>
         ) : null}
       </section>
+
+
+      {canManageHouseholds ? (
+        <section className="border-t border-slate-100 pt-4">
+          <h3 className="text-sm font-semibold text-slate-900">Households</h3>
+          <p className="text-xs text-slate-500">
+            {householdGivingEnabled
+              ? "Household giving is on — what household members can see of each other's giving is set by the privacy mode in Giving Setup."
+              : "Household giving is off — households organize your roster but change nothing about giving visibility until a shared mode is chosen in Giving Setup."}
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <input
+              value={newHouseholdName}
+              onChange={(event) => setNewHouseholdName(event.target.value)}
+              placeholder="New household name"
+              className="w-56 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm"
+            />
+            <button
+              type="button"
+              disabled={pending || !newHouseholdName.trim()}
+              onClick={addHousehold}
+              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Create household
+            </button>
+          </div>
+          {households.length > 0 ? (
+            <ul className="mt-3 space-y-3">
+              {households.map((household) => (
+                <li key={household.id} className="rounded-lg border border-slate-200 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-sm font-medium text-slate-900">{household.name}</span>
+                    {householdGivingEnabled ? (
+                      <button
+                        type="button"
+                        disabled={pending || household.members.length === 0}
+                        onClick={() => prepareHouseholdStatement(household.id)}
+                        className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        Prepare {stmtYear} household statement
+                      </button>
+                    ) : null}
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    {household.members.length === 0 ? (
+                      <span className="text-xs text-slate-500">No members yet.</span>
+                    ) : (
+                      household.members.map((member) => (
+                        <span
+                          key={member.id}
+                          className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-800"
+                        >
+                          {member.name}
+                          <button
+                            type="button"
+                            disabled={pending}
+                            onClick={() => changeHouseholdMember(household.id, member.id, "remove")}
+                            aria-label={`Remove ${member.name} from ${household.name}`}
+                            className="font-semibold text-slate-500 hover:text-red-700"
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))
+                    )}
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <select
+                      value={householdMemberPick[household.id] ?? ""}
+                      onChange={(event) =>
+                        setHouseholdMemberPick((prev) => ({ ...prev, [household.id]: event.target.value }))
+                      }
+                      className="w-56 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"
+                      aria-label={`Add member to ${household.name}`}
+                    >
+                      <option value="">Add a member…</option>
+                      {members
+                        .filter((member) => !household.members.some((existing) => existing.id === member.id))
+                        .map((member) => (
+                          <option key={member.id} value={member.id}>
+                            {member.name}
+                          </option>
+                        ))}
+                    </select>
+                    <button
+                      type="button"
+                      disabled={pending || !(householdMemberPick[household.id] ?? "")}
+                      onClick={() => changeHouseholdMember(household.id, householdMemberPick[household.id] ?? "", "add")}
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      Add
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
+      ) : null}
 
       {canReconcile ? (
         <section className="border-t border-slate-100 pt-4">

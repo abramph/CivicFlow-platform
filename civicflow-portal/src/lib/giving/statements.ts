@@ -248,3 +248,155 @@ export async function statementExceptions(organizationId: string, year: number) 
   }
   return exceptions;
 }
+
+/** CORE-GIVE-H — household statement (§29/§30). Mode-gated: refused in
+ * INDIVIDUAL_PRIVATE; STATEMENT_ONLY renders per-member subtotals with no
+ * transaction rows; SHARED renders full transactions. Same §94 version
+ * chain as individual statements. */
+export async function generateHouseholdStatement(input: {
+  organizationId: string;
+  householdId: string;
+  year: number;
+  reason?: string | null;
+  generatedByUserId: string;
+  generatedByEmail?: string | null;
+}) {
+  await ensureContributionsEnabled(input.organizationId);
+  const { getHouseholdGivingSettings } = await import("./households");
+  const { enabled, mode } = await getHouseholdGivingSettings(input.organizationId);
+  if (!enabled || mode === "INDIVIDUAL_PRIVATE") {
+    throw new FinanceError("Household statements are not enabled under this organization's privacy settings.", 409);
+  }
+
+  const household = await prisma.household.findFirst({
+    where: { id: input.householdId, organizationId: input.organizationId },
+    include: { members: { select: { id: true, firstName: true, lastName: true, userId: true } } },
+  });
+  if (!household) throw new FinanceError("Household not found.", 404);
+  const memberIds = household.members.map((member) => member.id);
+
+  const periodStart = new Date(Date.UTC(input.year, 0, 1));
+  const periodEnd = new Date(Date.UTC(input.year + 1, 0, 1));
+  const rows = await prisma.contribution.findMany({
+    where: {
+      organizationId: input.organizationId,
+      memberId: { in: memberIds },
+      voidedAt: null,
+      statementEligible: true,
+      contributionDate: { gte: periodStart, lt: periodEnd },
+    },
+    orderBy: { contributionDate: "asc" },
+    select: {
+      memberId: true,
+      contributionDate: true,
+      amount: true,
+      goodsServicesValue: true,
+      taxDeductibilityClassification: true,
+      fund: { select: { name: true } },
+      campaign: { select: { name: true } },
+    },
+  });
+  if (rows.length === 0) throw new FinanceError(`No statement-eligible contributions in ${input.year}.`, 404);
+  const total = rows.reduce((sum, row) => sum + Number(row.amount), 0);
+
+  const prior = await prisma.contributionStatement.findFirst({
+    where: { organizationId: input.organizationId, year: input.year, status: "GENERATED", householdId: household.id },
+    orderBy: { version: "desc" },
+  });
+  if (prior && !input.reason?.trim()) {
+    throw new FinanceError("A reason is required to reissue an already-generated statement.", 409);
+  }
+
+  // Build the PDF with per-member subtotals; SHARED mode adds transactions.
+  const nameFor = new Map(household.members.map((member) => [member.id, `${member.firstName} ${member.lastName}`.trim()]));
+  const subtotals = new Map<string, number>();
+  for (const row of rows) {
+    if (row.memberId) subtotals.set(row.memberId, (subtotals.get(row.memberId) ?? 0) + Number(row.amount));
+  }
+
+  const organization = await prisma.organization.findUnique({ where: { id: input.organizationId }, select: { name: true } });
+  const pdf = await PDFDocument.create();
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  let page = pdf.addPage([612, 792]);
+  let y = 792 - 48;
+  const line = (text: string, options: { size?: number; useBold?: boolean; gray?: boolean } = {}) => {
+    if (y < 60) {
+      page = pdf.addPage([612, 792]);
+      y = 792 - 48;
+    }
+    page.drawText(toWinAnsiSafe(text), {
+      x: 48,
+      y,
+      size: options.size ?? 10,
+      font: options.useBold ? bold : font,
+      color: options.gray ? rgb(0.35, 0.4, 0.47) : rgb(0.08, 0.11, 0.18),
+    });
+    y -= 15;
+  };
+
+  line(organization?.name ?? "Organization", { gray: true });
+  y -= 4;
+  line(`${input.year} Household Contribution Statement`, { size: 16, useBold: true });
+  line(household.name, { size: 12 });
+  line(`Statement period: January 1, ${input.year} - December 31, ${input.year} · Version ${(prior?.version ?? 0) + 1}`, { gray: true });
+  y -= 10;
+  for (const member of household.members) {
+    line(`${nameFor.get(member.id)}: $${(subtotals.get(member.id) ?? 0).toFixed(2)}`);
+  }
+  line(`Household statement total: $${total.toFixed(2)}`, { useBold: true });
+  if (mode === "HOUSEHOLD_SHARED") {
+    y -= 10;
+    line("Date          Member                    Fund / Designation             Amount", { useBold: true });
+    for (const row of rows) {
+      const designation = row.fund?.name ?? row.campaign?.name ?? "General";
+      const memberName = row.memberId ? (nameFor.get(row.memberId) ?? "Member") : "Member";
+      line(
+        `${row.contributionDate.toISOString().slice(0, 10)}    ${memberName.padEnd(24).slice(0, 24)}  ${designation.padEnd(28).slice(0, 28)}  $${Number(row.amount).toFixed(2)}`
+      );
+    }
+  }
+  y -= 10;
+  line(statementFooter(rows), { gray: true, size: 8 });
+  const bytes = await pdf.save();
+
+  const { buildSafeObjectKey, uploadBufferToSpaces } = await import("@/lib/storage");
+  const objectKey = buildSafeObjectKey(
+    `statements/${input.organizationId}`,
+    `household-statement-${input.year}-v${(prior?.version ?? 0) + 1}.pdf`
+  );
+  await uploadBufferToSpaces({ key: objectKey, buffer: Buffer.from(bytes), contentType: "application/pdf" });
+
+  const statement = await prisma.contributionStatement.create({
+    data: {
+      organizationId: input.organizationId,
+      householdId: household.id,
+      year: input.year,
+      periodStart,
+      periodEnd,
+      version: (prior?.version ?? 0) + 1,
+      reason: input.reason?.trim() || null,
+      totalAmount: new Prisma.Decimal(total.toFixed(2)),
+      contributionCount: rows.length,
+      objectKey,
+      generatedByUserId: input.generatedByUserId,
+    },
+  });
+  if (prior) {
+    await prisma.contributionStatement.update({
+      where: { id: prior.id },
+      data: { status: "SUPERSEDED", supersededById: statement.id },
+    });
+  }
+  const { createAuditEvent } = await import("@/lib/audit");
+  await createAuditEvent({
+    organizationId: input.organizationId,
+    actorUserId: input.generatedByUserId,
+    actorEmail: input.generatedByEmail ?? null,
+    action: "giving.household_statement_generated",
+    entityType: "contribution_statement",
+    entityId: statement.id,
+    metadata: { householdId: household.id, year: input.year, version: statement.version, mode },
+  });
+  return statement;
+}

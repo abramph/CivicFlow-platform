@@ -25,6 +25,15 @@ interface StatementView {
   total: number;
 }
 
+interface HouseholdGivingView {
+  visibility: "TOTALS" | "SHARED";
+  householdName: string;
+  year: number;
+  memberSubtotals: { name: string; total: number; isSelf: boolean }[];
+  householdTotal: number;
+  contributions: { date: string; memberName: string; designation: string; amount: number }[] | null;
+}
+
 interface PledgeView {
   id: string;
   fundId: string;
@@ -75,6 +84,8 @@ export function MemberGiveNow({
   schedules = [],
   pledges = [],
   statements = [],
+  householdGiving = null,
+  householdStatements = [],
 }: {
   organizationId: string;
   terminology: string;
@@ -84,6 +95,8 @@ export function MemberGiveNow({
   schedules?: ScheduleView[];
   pledges?: PledgeView[];
   statements?: StatementView[];
+  householdGiving?: HouseholdGivingView | null;
+  householdStatements?: StatementView[];
 }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -777,6 +790,67 @@ export function MemberGiveNow({
           <p className="mt-1 text-xs text-slate-500">A statement is a record of contributions received — consult your organization regarding tax treatment.</p>
         </div>
       </section>
+
+      {householdGiving ? (
+        <section className="rounded-xl border border-slate-200 bg-white p-4">
+          <h2 className="text-base font-semibold text-slate-900">
+            {householdGiving.householdName} household · {householdGiving.year}
+          </h2>
+          <p className="mt-1 text-xs text-slate-500">
+            {householdGiving.visibility === "SHARED"
+              ? "Your organization shares individual contributions within households. Everyone in your household sees this same view."
+              : "Your organization shares annual totals within households. Individual transactions stay private."}
+          </p>
+          <ul className="mt-2 divide-y divide-slate-100">
+            {householdGiving.memberSubtotals.map((subtotal) => (
+              <li key={subtotal.name} className="flex items-center justify-between py-1.5 text-sm">
+                <span className="text-slate-800">
+                  {subtotal.name}
+                  {subtotal.isSelf ? " (you)" : ""}
+                </span>
+                <span className="font-medium text-slate-900">{money(subtotal.total)}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 flex items-center justify-between border-t border-slate-200 pt-2 text-sm font-semibold text-slate-900">
+            <span>Household total</span>
+            <span>{money(householdGiving.householdTotal)}</span>
+          </p>
+          {householdGiving.contributions && householdGiving.contributions.length > 0 ? (
+            <ul className="mt-3 divide-y divide-slate-100 border-t border-slate-100 pt-1">
+              {householdGiving.contributions.map((row, index) => (
+                <li key={index} className="flex items-center justify-between py-1.5 text-sm">
+                  <span className="text-slate-600">
+                    {new Date(row.date).toLocaleDateString()} · {row.memberName} · {row.designation}
+                  </span>
+                  <span className="text-slate-900">{money(row.amount)}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {householdStatements.length > 0 ? (
+            <div className="mt-3 border-t border-slate-100 pt-2">
+              <h3 className="text-sm font-semibold text-slate-900">Household statements</h3>
+              <ul className="mt-1 divide-y divide-slate-100">
+                {householdStatements.map((statement) => (
+                  <li key={statement.id} className="flex items-center justify-between py-2 text-sm">
+                    <span className={statement.status === "SUPERSEDED" ? "text-slate-400" : "text-slate-800"}>
+                      {statement.year} Household Statement · v{statement.version}
+                      {statement.status === "SUPERSEDED" ? " (superseded)" : ""} — {money(statement.total)}
+                    </span>
+                    <a
+                      href={`/api/giving/statements/${statement.id}/download`}
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 hover:bg-slate-50"
+                    >
+                      Download
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
     </div>
   );
 }
