@@ -67,6 +67,12 @@ export function MemberGiveNow({
   const [memo, setMemo] = useState("");
   const [frequency, setFrequency] = useState<string>("");
   const [confirmDuplicate, setConfirmDuplicate] = useState(false);
+  const [manageId, setManageId] = useState<string | null>(null);
+  const [newAmount, setNewAmount] = useState("");
+  const [newFrequency, setNewFrequency] = useState("");
+  const [cancelReason, setCancelReason] = useState("");
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const fund = funds.find((row) => row.id === fundId) ?? null;
 
@@ -121,6 +127,50 @@ export function MemberGiveNow({
       window.location.href = data.url as string;
     } catch {
       setError("Unable to connect. Please try again.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function manage(scheduleId: string, body: Record<string, unknown>): Promise<boolean> {
+    setPending(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await fetch(`/api/giving/my-recurring/${scheduleId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ organizationId, ...body }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        setError(data?.error || "Unable to update your recurring giving.");
+        return false;
+      }
+      return true;
+    } catch {
+      setError("Unable to connect. Please try again.");
+      return false;
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function updatePaymentMethod(scheduleId: string) {
+    setPending(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/giving/my-recurring/${scheduleId}/payment-method`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ organizationId }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok || !data.url) {
+        setError(data?.error || "Unable to open the payment-method update.");
+        return;
+      }
+      window.location.href = data.url as string;
     } finally {
       setPending(false);
     }
@@ -284,9 +334,173 @@ export function MemberGiveNow({
                   </p>
                   {schedule.status === "PAYMENT_FAILED" || schedule.status === "PAYMENT_ACTION_REQUIRED" ? (
                     <p className="text-xs font-medium text-amber-700">
-                      Your contribution could not be processed. This is not a balance owed — payment-method management
-                      arrives here shortly.
+                      Your contribution could not be processed. This is not a balance owed — update your payment method or
+                      try again below.
                     </p>
+                  ) : null}
+                  {schedule.status !== "CANCELLED" && schedule.status !== "COMPLETED" ? (
+                    <div className="mt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setManageId(manageId === schedule.id ? null : schedule.id);
+                          setNewAmount(String(schedule.amount));
+                          setNewFrequency(schedule.frequency);
+                          setConfirmCancel(false);
+                          setCancelReason("");
+                        }}
+                        className="text-xs font-semibold text-emerald-700 hover:underline"
+                      >
+                        {manageId === schedule.id ? "Close" : "Manage"}
+                      </button>
+                    </div>
+                  ) : null}
+                  {manageId === schedule.id ? (
+                    <div className="mt-2 space-y-3 rounded-lg bg-slate-50 p-3">
+                      <div className="flex flex-wrap items-end gap-2">
+                        <label className="space-y-1 text-xs font-semibold text-slate-700">
+                          <span>Amount ($)</span>
+                          <input
+                            type="number"
+                            min={1}
+                            step="0.01"
+                            value={newAmount}
+                            onChange={(event) => setNewAmount(event.target.value)}
+                            className="block w-28 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          disabled={pending || Number(newAmount) === schedule.amount || !(Number(newAmount) > 0)}
+                          onClick={async () => {
+                            if (await manage(schedule.id, { action: "amount", amount: Number(newAmount) })) {
+                              setNotice("New amount saved — it applies starting with your next scheduled contribution.");
+                              setTimeout(() => window.location.reload(), 1200);
+                            }
+                          }}
+                          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 hover:bg-slate-100 disabled:opacity-50"
+                        >
+                          Change amount
+                        </button>
+                        <label className="space-y-1 text-xs font-semibold text-slate-700">
+                          <span>Frequency</span>
+                          <select
+                            value={newFrequency}
+                            onChange={(event) => setNewFrequency(event.target.value)}
+                            className="block w-40 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"
+                          >
+                            {Object.entries(FREQUENCY_LABELS).map(([value, label]) => (
+                              <option key={value} value={value}>
+                                {label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <button
+                          type="button"
+                          disabled={pending || newFrequency === schedule.frequency}
+                          onClick={async () => {
+                            if (await manage(schedule.id, { action: "frequency", frequency: newFrequency })) {
+                              setNotice("Frequency saved — your next contribution date is unchanged; the new rhythm applies after it.");
+                              setTimeout(() => window.location.reload(), 1200);
+                            }
+                          }}
+                          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 hover:bg-slate-100 disabled:opacity-50"
+                        >
+                          Change frequency
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          disabled={pending}
+                          onClick={() => updatePaymentMethod(schedule.id)}
+                          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 hover:bg-slate-100 disabled:opacity-50"
+                        >
+                          Update payment method
+                        </button>
+                        {schedule.status === "PAYMENT_FAILED" || schedule.status === "PAYMENT_ACTION_REQUIRED" ? (
+                          <button
+                            type="button"
+                            disabled={pending}
+                            onClick={async () => {
+                              if (await manage(schedule.id, { action: "retry" })) {
+                                setNotice("Payment attempted — your history updates once it settles.");
+                                setTimeout(() => window.location.reload(), 1500);
+                              }
+                            }}
+                            className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
+                          >
+                            Try again
+                          </button>
+                        ) : null}
+                        {schedule.status === "PAUSED" ? (
+                          <button
+                            type="button"
+                            disabled={pending}
+                            onClick={async () => {
+                              if (await manage(schedule.id, { action: "resume" })) window.location.reload();
+                            }}
+                            className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
+                          >
+                            Resume
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={pending}
+                            onClick={async () => {
+                              if (await manage(schedule.id, { action: "pause" })) window.location.reload();
+                            }}
+                            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 hover:bg-slate-100 disabled:opacity-50"
+                          >
+                            Pause
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          disabled={pending}
+                          onClick={() => setConfirmCancel((value) => !value)}
+                          className="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                        >
+                          Cancel giving
+                        </button>
+                      </div>
+                      {confirmCancel ? (
+                        <div className="space-y-2 rounded-lg border border-red-200 bg-red-50 p-3">
+                          <p className="text-xs text-red-900">
+                            You are cancelling {money(schedule.amount)}{" "}
+                            {FREQUENCY_LABELS[schedule.frequency]?.toLowerCase() ?? schedule.frequency} to {schedule.fundName}. No
+                            future contribution will be scheduled. Your giving history stays available.
+                          </p>
+                          <select
+                            value={cancelReason}
+                            onChange={(event) => setCancelReason(event.target.value)}
+                            className="block w-64 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"
+                          >
+                            <option value="">Reason (optional)</option>
+                            <option value="financial_circumstances">Financial circumstances</option>
+                            <option value="changing_amount">Changing amount</option>
+                            <option value="switching_frequency">Switching frequency</option>
+                            <option value="prefer_manual_giving">I prefer to give manually</option>
+                            <option value="no_longer_participating">No longer participating</option>
+                            <option value="other">Other</option>
+                            <option value="prefer_not_to_say">Prefer not to say</option>
+                          </select>
+                          <button
+                            type="button"
+                            disabled={pending}
+                            onClick={async () => {
+                              if (await manage(schedule.id, { action: "cancel", reason: cancelReason || null })) window.location.reload();
+                            }}
+                            className="rounded-lg bg-red-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-800 disabled:opacity-50"
+                          >
+                            Confirm cancellation
+                          </button>
+                        </div>
+                      ) : null}
+                      {notice ? <p className="text-xs font-medium text-emerald-700">{notice}</p> : null}
+                    </div>
                   ) : null}
                 </li>
               ))}

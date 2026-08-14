@@ -184,6 +184,24 @@ export async function POST(request: Request) {
         const session = event.data.object as Stripe.Checkout.Session;
         const orgId = session.metadata?.organizationId;
 
+        // CORE-GIVE-D: setup-mode session completing a payment-method update.
+        if (session.mode === "setup" && session.metadata?.paymentType === "giving-method-update") {
+          const setupIntentId =
+            typeof session.setup_intent === "string" ? session.setup_intent : (session.setup_intent?.id ?? null);
+          if (orgId && session.metadata?.scheduleId && setupIntentId) {
+            const { applyPaymentMethodUpdate } = await import("@/lib/giving/recurring-self-service");
+            const applied = await applyPaymentMethodUpdate({
+              organizationId: orgId,
+              scheduleId: session.metadata.scheduleId,
+              setupIntentId,
+            });
+            if (applied === "REJECTED") {
+              console.error(JSON.stringify({ event: "giving_pm_update_rejected", sessionId: session.id, orgId }));
+            }
+          }
+          break;
+        }
+
         // CORE-GIVE-C: a giving-recurring checkout is MEMBER MONEY — it must
         // never be upserted into the SaaS Subscription table. Link it to our
         // schedule (resolved org-scoped: the §50 cross-check) instead.
