@@ -97,6 +97,34 @@ enum OrganizationVertical {
   HOA
 }
 
+/// CORE-GIVE-I (§2): presentation-layer organization categorization.
+/// DELIBERATELY separate from OrganizationVertical: the vertical is the
+/// experience engine (exhaustive nav/terminology/capability maps + the
+/// frozen mobile app consume it); the category refines presentation and
+/// presets WITHIN an experience. Mapping lives in
+/// src/lib/organization-category.ts. Type never gates features by itself —
+/// capabilities and settings do (§2).
+enum OrganizationCategory {
+  COMMUNITY
+  PTA_PTO
+  UNION
+  HOA
+  CHURCH_RELIGIOUS
+  CULTURAL
+  ALUMNI
+  PROFESSIONAL_ASSOCIATION
+  CIVIC_ASSOCIATION
+  FRATERNAL
+  CLUB
+  NONPROFIT
+  OTHER
+}
+
+enum OrgGroupStatus {
+  ACTIVE
+  ARCHIVED
+}
+
 enum MembershipStatus {
   active
   inactive
@@ -553,6 +581,10 @@ model Organization {
   /// via Platform Admin (audited) or explicit signup selection, never
   /// inferred from `organizationType` or free-text name matching.
   primaryVertical  OrganizationVertical @default(COMMUNITY)
+  /// CORE-GIVE-I (§2): finer-grained presentation category (church, cultural,
+  /// alumni, …). Null = legacy, derived from primaryVertical. Never changes
+  /// which experience engine runs — see organization-category.ts.
+  category         OrganizationCategory?
   logoUrl          String?
   email            String?
   website          String?
@@ -681,6 +713,7 @@ model Organization {
   pledges                     Pledge[]
   contributionStatements      ContributionStatement[]
   households                  Household[]
+  orgGroups                   OrgGroup[]
   ptaElections                PtaElection[]
   ptaElectionContests         PtaElectionContest[]
   ptaElectionCandidates       PtaElectionCandidate[]
@@ -1142,6 +1175,7 @@ model OrgMember {
   pledges                   Pledge[]
   contributionStatements    ContributionStatement[]
   household                 Household?                      @relation(fields: [householdId], references: [id], onDelete: SetNull)
+  groupMemberships          OrgGroupMember[]
   receipts                       ContributionReceipt[]
   reminderLogs                   EmailReminderLog[]
   communicationLogs              CommunicationLog[]
@@ -1691,6 +1725,10 @@ model OrgSettings {
   /// Display label for the module ("Giving", "Contributions", "Support").
   /// Null = "Contributions". UI terminology only — backend names are stable.
   contributionTerminology        String?
+  /// CORE-GIVE-I (§3): display label for members ("Congregant", "Alumni
+  /// Member", …). Null = the vertical's default. Presentation only — the
+  /// OrgMember model and every backend concept keep their names.
+  memberTerminology              String?
   /// CORE-GIVE-C: this organization's single Stripe Product for recurring
   /// giving (lazily created) — inline price_data references it, so member-
   /// chosen amounts never create orphan products (§10).
@@ -2420,6 +2458,45 @@ model Household {
 
   @@unique([organizationId, name])
   @@index([organizationId])
+}
+
+/// CORE-GIVE-I (§40): generic core group — ministries, committees, chapters,
+/// interest groups. `kindLabel` is free-text presentation ("Ministry",
+/// "Committee") — "ministry" is deliberately NOT a database concept. Groups
+/// archive, never delete. Leadership and membership live on OrgGroupMember;
+/// group capabilities are disjoint from every giving capability (§41).
+model OrgGroup {
+  id             String         @id @default(cuid())
+  organizationId String
+  name           String
+  description    String?
+  kindLabel      String         @default("Group")
+  status         OrgGroupStatus @default(ACTIVE)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  members      OrgGroupMember[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId, status])
+}
+
+model OrgGroupMember {
+  id        String   @id @default(cuid())
+  groupId   String
+  memberId  String
+  /// §41: a leader manages ONLY this group's membership — verified from the
+  /// caller's own row server-side, never a client claim. Grants nothing
+  /// beyond the group (no financials, no individual giving, no global admin).
+  isLeader  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  group  OrgGroup  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  member OrgMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, memberId])
+  @@index([memberId])
 }
 
 enum ContributionStatementStatus {

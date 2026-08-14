@@ -5,6 +5,8 @@ import { OrganizationSettingsForm } from "@/components/forms/OrganizationSetting
 import { AttachmentManager } from "@/components/forms/AttachmentManager";
 import { OpeningBalanceForm } from "@/components/forms/OpeningBalanceForm";
 import { getVerticalTerminology } from "@/lib/vertical-terminology";
+import { OrganizationCategoryCard } from "@/components/forms/OrganizationCategoryCard";
+import { CATEGORY_INFO, categoriesForVertical, getEffectiveCategory } from "@/lib/organization-category";
 
 export default async function OrgSettingsPage() {
   const { organizationId, role, can } = await requirePermission("org_settings:read");
@@ -17,6 +19,7 @@ export default async function OrgSettingsPage() {
         slug: true,
         organizationType: true,
         primaryVertical: true,
+        category: true,
         email: true,
         phone: true,
         website: true,
@@ -96,6 +99,24 @@ export default async function OrgSettingsPage() {
             This can&apos;t be changed here. Contact Unestra Support if it was set incorrectly during setup.
           </p>
         </div>
+      </SectionCard>
+
+      <SectionCard
+        title="Organization Category"
+        description="A finer-grained classification within your product experience — it drives suggested labels only, never access. Applying presets is always an explicit choice."
+      >
+        <OrganizationCategoryCard
+          current={getEffectiveCategory(organization.primaryVertical, organization.category)}
+          options={categoriesForVertical(organization.primaryVertical).map((value) => ({
+            value,
+            label: CATEGORY_INFO[value].label,
+            description: CATEGORY_INFO[value].description,
+            givingTerminology: CATEGORY_INFO[value].givingTerminology,
+            memberLabel: CATEGORY_INFO[value].memberLabel,
+            groupsLabel: CATEGORY_INFO[value].groupsLabel,
+          }))}
+          canWrite={can("org_settings:write")}
+        />
       </SectionCard>
 
       <SectionCard title="Organization Profile" description="Changes save through the protected organization settings API and stay scoped to the organization attached to your session.">
