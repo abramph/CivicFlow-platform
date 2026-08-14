@@ -17,6 +17,14 @@ interface FundView {
   allowPledges?: boolean;
 }
 
+interface StatementView {
+  id: string;
+  year: number;
+  version: number;
+  status: string;
+  total: number;
+}
+
 interface PledgeView {
   id: string;
   fundId: string;
@@ -66,6 +74,7 @@ export function MemberGiveNow({
   history,
   schedules = [],
   pledges = [],
+  statements = [],
 }: {
   organizationId: string;
   terminology: string;
@@ -74,6 +83,7 @@ export function MemberGiveNow({
   history: { id: string; contributionNumber: string | null; amount: number; date: string; designation: string }[];
   schedules?: ScheduleView[];
   pledges?: PledgeView[];
+  statements?: StatementView[];
 }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -240,6 +250,26 @@ export function MemberGiveNow({
         return;
       }
       window.location.reload();
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function generateMyStatement(year: number) {
+    setPending(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/giving/my-statements", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ organizationId, year }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        setError(data?.error || "Unable to prepare your statement.");
+        return;
+      }
+      window.location.href = `/api/giving/statements/${data.data.id}/download`;
     } finally {
       setPending(false);
     }
@@ -713,6 +743,39 @@ export function MemberGiveNow({
             ))}
           </ul>
         )}
+
+        <div className="mt-4 border-t border-slate-100 pt-3">
+          <h3 className="text-sm font-semibold text-slate-900">Statements</h3>
+          {statements.length === 0 ? (
+            <p className="mt-1 text-sm text-slate-600">No statements yet.</p>
+          ) : (
+            <ul className="mt-1 divide-y divide-slate-100">
+              {statements.map((statement) => (
+                <li key={statement.id} className="flex items-center justify-between py-2 text-sm">
+                  <span className={statement.status === "SUPERSEDED" ? "text-slate-400" : "text-slate-800"}>
+                    {statement.year} Contribution Statement · v{statement.version}
+                    {statement.status === "SUPERSEDED" ? " (superseded)" : ""} — {money(statement.total)}
+                  </span>
+                  <a
+                    href={`/api/giving/statements/${statement.id}/download`}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 hover:bg-slate-50"
+                  >
+                    Download
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )}
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => generateMyStatement(new Date().getFullYear() - (new Date().getMonth() === 0 ? 1 : 0))}
+            className="mt-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-50"
+          >
+            Prepare my current statement
+          </button>
+          <p className="mt-1 text-xs text-slate-500">A statement is a record of contributions received — consult your organization regarding tax treatment.</p>
+        </div>
       </section>
     </div>
   );

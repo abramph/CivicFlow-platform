@@ -679,6 +679,7 @@ model Organization {
   givingCustomers             GivingCustomer[]
   recurringContributionSchedules RecurringContributionSchedule[]
   pledges                     Pledge[]
+  contributionStatements      ContributionStatement[]
   ptaElections                PtaElection[]
   ptaElectionContests         PtaElectionContest[]
   ptaElectionCandidates       PtaElectionCandidate[]
@@ -758,6 +759,8 @@ model User {
   givingCustomers                   GivingCustomer[]
   recurringSchedules                RecurringContributionSchedule[] @relation("RecurringScheduleContributor")
   pledges                           Pledge[]                   @relation("PledgeContributor")
+  statementsAsContributor           ContributionStatement[]    @relation("StatementContributor")
+  statementsGenerated               ContributionStatement[]    @relation("StatementGeneratedBy")
   ptaElectionsCreated               PtaElection[]              @relation("PtaElectionCreatedBy")
   ptaElectionsCertified             PtaElection[]              @relation("PtaElectionCertifiedBy")
   reimbursementsSubmitted           ReimbursementRequest[]     @relation("ReimbursementSubmittedBy")
@@ -1134,6 +1137,7 @@ model OrgMember {
   contributions                  Contribution[]
   recurringSchedules        RecurringContributionSchedule[]
   pledges                   Pledge[]
+  contributionStatements    ContributionStatement[]
   receipts                       ContributionReceipt[]
   reminderLogs                   EmailReminderLog[]
   communicationLogs              CommunicationLog[]
@@ -2377,6 +2381,43 @@ model RecurringContributionSchedule {
   @@index([organizationId, status])
   @@index([contributorUserId])
   @@index([fundId])
+}
+
+enum ContributionStatementStatus {
+  GENERATED
+  SUPERSEDED
+}
+
+/// CORE-GIVE-G: an ISSUED statement artifact (§30/§94). The PDF is stored at
+/// generation time and never altered; corrections issue a new version and
+/// mark this one SUPERSEDED. Never hard-deleted.
+model ContributionStatement {
+  id                String                      @id @default(cuid())
+  organizationId    String
+  memberId          String?
+  contributorUserId String?
+  year              Int
+  periodStart       DateTime
+  periodEnd         DateTime
+  version           Int                         @default(1)
+  status            ContributionStatementStatus @default(GENERATED)
+  supersededById    String?
+  reason            String?
+  totalAmount       Decimal                     @db.Decimal(12, 2)
+  contributionCount Int
+  objectKey         String
+  generatedByUserId String?
+  generatedAt       DateTime                    @default(now())
+
+  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  member        OrgMember?   @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  contributorUser User?      @relation("StatementContributor", fields: [contributorUserId], references: [id], onDelete: SetNull)
+  generatedBy   User?        @relation("StatementGeneratedBy", fields: [generatedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([organizationId, year])
+  @@index([memberId])
+  @@index([contributorUserId])
 }
 
 enum PledgeStatus {

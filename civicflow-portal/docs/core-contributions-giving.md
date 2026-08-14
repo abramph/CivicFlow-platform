@@ -454,3 +454,38 @@ arrears, dues, or delinquency.
   OrgRolePermissionSet, and neither implies refunds (K) or exports (K).
 - Officer surface: new **Giving Operations** page (record form + corrections
   + reconciliation report), nav-gated on `contributions:offline:create`.
+
+## 7. CORE-GIVE-G design — Statements & Receipts 2.0
+
+- **`ContributionStatement`** (§30): an ISSUED ARTIFACT, not a query — the
+  PDF is generated once, stored in Spaces, and never silently altered
+  (§94). Regeneration marks the prior version SUPERSEDED (linked via
+  supersededById) and issues version N+1 with a required reason; both
+  versions stay downloadable, both audited. Rows carry subject (member
+  and/or contributor user), year, period, totals, generator, and objectKey.
+- **Scope split with H (documented)**: G ships INDIVIDUAL statements plus
+  all the machinery (versioning, PDF, exceptions); household statements
+  land in H alongside the household-privacy model and its dedicated review
+  — a household artifact must not precede the policy that governs it.
+- **Statement contents**: statementEligible, non-void contributions in the
+  calendar year — Date | Fund | Description | Amount table + total. Dues
+  payments are deliberately NOT on giving statements (separate obligation
+  domain). §32 goods/services: rows carrying goodsServicesValue render
+  Amount received / Value of goods or services / Potential contribution
+  component. v1 year boundary is calendar-UTC; org-timezone boundaries are
+  a documented limitation (§78) revisited in K.
+- **§31 tax safety**: the title is always "Contribution Statement" — never
+  auto-"tax-deductible receipt". Footer wording derives from the rows'
+  classifications: all-unconfigured → neutral "record of contributions;
+  consult the organization regarding tax treatment"; org-marked rows get
+  the organization's configured language only where present. Unestra
+  certifies nothing.
+- **Generation paths**: members generate/download their OWN current-year
+  statement on demand (audited); `contributions:statements:generate` runs
+  the §96 EXCEPTION REPORT first (unattributed contributions, unassigned
+  funds, duplicate provider references) and then bulk-generates. §95: NO
+  automatic mass email on deploy — v1 distribution is member-pull from
+  their Giving page; push distribution is a later controlled workflow (K).
+- PDF via pdf-lib with the shared `toWinAnsiSafe` sanitizer (the PTA-F
+  lesson, applied from day one). Downloads are signed URLs, audited,
+  owner-or-generator gated.

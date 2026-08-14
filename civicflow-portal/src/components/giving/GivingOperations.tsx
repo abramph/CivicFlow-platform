@@ -67,6 +67,11 @@ export function GivingOperations({
   const [correctAmount, setCorrectAmount] = useState("");
 
   const [recon, setRecon] = useState<ReconItem[] | null>(null);
+  const [stmtYear, setStmtYear] = useState(new Date().getFullYear());
+  const [stmtData, setStmtData] = useState<{
+    exceptions: { kind: string; description: string; count: number }[];
+    statements: { id: string; subject: string; version: number; status: string; total: number }[];
+  } | null>(null);
 
   async function record() {
     setPending(true);
@@ -134,6 +139,43 @@ export function GivingOperations({
       setCorrectReason("");
       setNotice("Corrected — the original is voided and preserved; the replacement is linked.");
       router.refresh();
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function loadStatements(year: number) {
+    setPending(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/giving/statements?year=${year}`);
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        setError(data?.error || "Unable to load statements.");
+        return;
+      }
+      setStmtData({ exceptions: data.data.exceptions, statements: data.data.statements });
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function bulkGenerate(year: number) {
+    setPending(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/giving/statements", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ year, all: true }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        setError(data?.error || "Unable to generate statements.");
+        return;
+      }
+      setNotice(`Prepared ${data.data.generated} statement(s); ${data.data.skipped} already current. Nothing was emailed.`);
+      await loadStatements(year);
     } finally {
       setPending(false);
     }
@@ -287,6 +329,76 @@ export function GivingOperations({
             ))}
           </ul>
         )}
+      </section>
+
+
+      <section className="border-t border-slate-100 pt-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold text-slate-900">Annual statements</h3>
+          <span className="flex items-center gap-2">
+            <input
+              type="number"
+              min={2000}
+              max={2100}
+              value={stmtYear}
+              onChange={(event) => setStmtYear(Number(event.target.value))}
+              className="w-24 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"
+              aria-label="Statement year"
+            />
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => loadStatements(stmtYear)}
+              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Check exceptions
+            </button>
+            <button
+              type="button"
+              disabled={pending || stmtData === null}
+              onClick={() => bulkGenerate(stmtYear)}
+              className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
+            >
+              Prepare statements
+            </button>
+          </span>
+        </div>
+        <p className="text-xs text-slate-500">
+          Preparing generates PDFs only — nothing is emailed. Members can download their own statement from their Giving page.
+        </p>
+        {stmtData ? (
+          <div className="mt-2 space-y-2">
+            {stmtData.exceptions.length > 0 ? (
+              <ul className="space-y-1">
+                {stmtData.exceptions.map((exception) => (
+                  <li key={exception.kind} className="text-sm font-medium text-amber-800">
+                    ⚠ {exception.description} ({exception.count})
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm font-medium text-emerald-700">No exceptions — ready to prepare.</p>
+            )}
+            {stmtData.statements.length > 0 ? (
+              <ul className="divide-y divide-slate-100">
+                {stmtData.statements.map((statement) => (
+                  <li key={statement.id} className="flex items-center justify-between py-1.5 text-sm">
+                    <span className={statement.status === "SUPERSEDED" ? "text-slate-400" : "text-slate-800"}>
+                      {statement.subject} · v{statement.version}
+                      {statement.status === "SUPERSEDED" ? " (superseded)" : ""} — {money(statement.total)}
+                    </span>
+                    <a
+                      href={`/api/giving/statements/${statement.id}/download`}
+                      className="text-xs font-semibold text-emerald-700 hover:underline"
+                    >
+                      Download
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
       </section>
 
       {canReconcile ? (
