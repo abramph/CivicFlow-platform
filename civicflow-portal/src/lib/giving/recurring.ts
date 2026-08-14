@@ -2,6 +2,7 @@ import type { RecurringFrequency } from "@prisma/client";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { FinanceError } from "@/lib/finance-errors";
+import { logGivingEvent } from "./telemetry";
 import { ensureContributionsEnabled } from "./module";
 
 /**
@@ -145,6 +146,7 @@ export async function linkScheduleFromCheckout(input: {
     },
   });
   const { createAuditEvent } = await import("@/lib/audit");
+  logGivingEvent("GIVING_RECURRING_CREATED", { organizationId: schedule.organizationId, scheduleId: schedule.id });
   await createAuditEvent({
     organizationId: input.organizationId,
     actorUserId: schedule.contributorUserId,

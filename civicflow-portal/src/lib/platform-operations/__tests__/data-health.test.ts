@@ -7,6 +7,10 @@ const organizationFindMany = vi.fn();
 const ptaStudentEnrollmentFindMany = vi.fn();
 const ptaCommitteeMemberFindMany = vi.fn();
 const ptaVolunteerSlotFindMany = vi.fn();
+const recurringScheduleFindMany = vi.fn();
+const contributionGroupBy = vi.fn();
+const contributionAggregate = vi.fn();
+const pledgeFindMany = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -19,6 +23,12 @@ vi.mock("@/lib/prisma", () => ({
     ptaStudentEnrollment: { findMany: (...a: unknown[]) => ptaStudentEnrollmentFindMany(...a) },
     ptaCommitteeMember: { findMany: (...a: unknown[]) => ptaCommitteeMemberFindMany(...a) },
     ptaVolunteerSlot: { findMany: (...a: unknown[]) => ptaVolunteerSlotFindMany(...a) },
+    recurringContributionSchedule: { findMany: (...a: unknown[]) => recurringScheduleFindMany(...a) },
+    contribution: {
+      groupBy: (...a: unknown[]) => contributionGroupBy(...a),
+      aggregate: (...a: unknown[]) => contributionAggregate(...a),
+    },
+    pledge: { findMany: (...a: unknown[]) => pledgeFindMany(...a) },
   },
 }));
 
@@ -30,6 +40,10 @@ function resetAllToEmpty() {
   ptaStudentEnrollmentFindMany.mockResolvedValue([]);
   ptaCommitteeMemberFindMany.mockResolvedValue([]);
   ptaVolunteerSlotFindMany.mockResolvedValue([]);
+  recurringScheduleFindMany.mockResolvedValue([]);
+  contributionGroupBy.mockResolvedValue([]);
+  contributionAggregate.mockResolvedValue({ _sum: { amount: 0 } });
+  pledgeFindMany.mockResolvedValue([]);
 }
 
 beforeEach(() => {

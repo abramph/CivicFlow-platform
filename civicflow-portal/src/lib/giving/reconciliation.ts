@@ -1,3 +1,4 @@
+import type Stripe from "stripe";
 import { prisma } from "@/lib/prisma";
 import { getStripe } from "@/lib/stripe";
 
@@ -99,10 +100,42 @@ export async function getReconciliationReport(organizationId: string): Promise<{
   const stripe = getStripe();
   const since = Math.floor((now - 7 * dayMs) / 1000);
   try {
-    const sessions = await stripe.checkout.sessions.list({ created: { gte: since }, limit: 100 });
-    for (const session of sessions.data) {
+    // CORE-GIVE-K hardening: bounded auto-pagination instead of a single
+    // silent 100-event page. A hard cap keeps the sweep O(bounded) on the
+    // shared platform account; hitting it is REPORTED, never silent.
+    const SWEEP_CAP = 500;
+    const sessions: Stripe.Checkout.Session[] = [];
+    let truncated = false;
+    let startingAfter: string | undefined;
+    for (;;) {
+      const page = await stripe.checkout.sessions.list({
+        created: { gte: since },
+        limit: 100,
+        ...(startingAfter ? { starting_after: startingAfter } : {}),
+      });
+      sessions.push(...page.data);
+      if (sessions.length >= SWEEP_CAP) {
+        truncated = sessions.length > SWEEP_CAP || Boolean(page.has_more);
+        sessions.length = Math.min(sessions.length, SWEEP_CAP);
+        break;
+      }
+      if (!page.has_more || page.data.length === 0) break;
+      startingAfter = page.data[page.data.length - 1].id;
+    }
+    if (truncated) {
+      const { logGivingEvent } = await import("./telemetry");
+      logGivingEvent("GIVING_RECONCILIATION_TRUNCATED", { organizationId, count: SWEEP_CAP });
+      items.push({
+        classification: "NEEDS_REVIEW",
+        kind: "provider_sweep_truncated",
+        description: `The provider sweep examined the ${SWEEP_CAP} most recent platform checkout events; older events in the window were not swept this run.`,
+        reference: "stripe",
+        occurredAt: new Date(),
+      });
+    }
+    for (const session of sessions) {
       if (session.metadata?.organizationId !== organizationId) continue;
-      if (session.metadata?.paymentType !== "giving") continue;
+      if (session.metadata?.paymentType !== "giving" && session.metadata?.paymentType !== "public-giving") continue;
       if (session.payment_status !== "paid") continue;
       const reference = typeof session.payment_intent === "string" ? session.payment_intent : (session.payment_intent?.id ?? session.id);
       const recorded = await prisma.contribution.findFirst({
@@ -110,6 +143,8 @@ export async function getReconciliationReport(organizationId: string): Promise<{
         select: { id: true },
       });
       if (!recorded) {
+        const { logGivingEvent } = await import("./telemetry");
+        logGivingEvent("GIVING_RECONCILIATION_MISMATCH", { organizationId, sessionId: session.id, reason: "paid_session_unrecorded" });
         items.push({
           classification: "PROVIDER_ONLY",
           kind: "paid_session_unrecorded",

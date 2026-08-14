@@ -724,6 +724,7 @@ model Organization {
   contributionStatements      ContributionStatement[]
   households                  Household[]
   orgGroups                   OrgGroup[]
+  contributionAdjustments     ContributionAdjustment[]
   ptaElections                PtaElection[]
   ptaElectionContests         PtaElectionContest[]
   ptaElectionCandidates       PtaElectionCandidate[]
@@ -2272,6 +2273,16 @@ model Contribution {
   /// by an authorized-staff resolve action, audited.
   guestEmail                     String?
   guestMatchStatus               GuestMatchStatus?
+  /// CORE-GIVE-K (§34): refunds are provider-confirmed state, never an
+  /// amount edit — `amount` is immutable, reports subtract refundedAmount.
+  refundedAmount                 Decimal?                       @db.Decimal(12, 2)
+  refundedAt                     DateTime?
+  providerRefundId               String?
+  refundReason                   String?
+  refundedByUserId               String?
+  /// CORE-GIVE-K (§35): provider dispute state, mirrored — disputed rows
+  /// are never hidden or removed.
+  providerDisputeStatus          String?
   statementEligible              Boolean                        @default(true)
   taxDeductibilityClassification TaxDeductibilityClassification @default(DEDUCTIBILITY_NOT_CONFIGURED)
   /// §32 goods/services value received (gala ticket, merchandise) — the
@@ -2294,6 +2305,7 @@ model Contribution {
   contributorUser    User?                      @relation("ContributionContributorUser", fields: [contributorUserId], references: [id], onDelete: SetNull)
   recurringSchedule  RecurringContributionSchedule? @relation(fields: [recurringScheduleId], references: [id], onDelete: SetNull)
   pledge             Pledge?                    @relation(fields: [pledgeId], references: [id], onDelete: SetNull)
+  adjustments        ContributionAdjustment[]
   receipts           ContributionReceipt[]
   paymentImportItems PaymentImportItem[]
   fromOfflineReport  PaymentLinkOfflineReport[]
@@ -2520,6 +2532,33 @@ model OrgGroupMember {
 
   @@unique([groupId, memberId])
   @@index([memberId])
+}
+
+enum ContributionAdjustmentKind {
+  FUND_RECLASSIFICATION
+  ATTRIBUTION_CORRECTION
+}
+
+/// CORE-GIVE-K (§100): controlled correction where provider money did NOT
+/// move. Amount is NEVER adjustable through this model — that is a refund
+/// (provider truth) or the offline void+recreate flow. The adjustment row
+/// is the permanent before/after trail; the contribution updates in place.
+model ContributionAdjustment {
+  id             String                     @id @default(cuid())
+  organizationId String
+  contributionId String
+  kind           ContributionAdjustmentKind
+  before         Json
+  after          Json
+  reason         String
+  actorUserId    String
+  createdAt      DateTime                   @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contribution Contribution @relation(fields: [contributionId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, createdAt])
+  @@index([contributionId])
 }
 
 enum ContributionStatementStatus {

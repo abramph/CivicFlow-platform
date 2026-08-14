@@ -76,6 +76,7 @@ function sharedNavigation(vertical: "COMMUNITY" | "UNION" | "HOA"): NavItem[] {
     // capabilities (FINANCE+); the module itself is default-off per org.
     { href: "/settings/giving", label: "Giving Setup", permission: "contributions:funds:manage" },
     { href: "/giving/dashboard", label: "Giving Dashboard", permission: "contributions:summary:view" },
+    { href: "/giving/reports", label: "Giving Reports", permission: "contributions:summary:view" },
     { href: "/giving/operations", label: "Giving Operations", permission: "contributions:offline:create" },
     // CORE-GIVE-I: core groups (ministries/committees/chapters). General
     // structure, independent of the giving module.

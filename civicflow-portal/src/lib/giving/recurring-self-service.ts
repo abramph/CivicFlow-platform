@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getStripe } from "@/lib/stripe";
 import { FinanceError } from "@/lib/finance-errors";
+import { logGivingEvent } from "./telemetry";
 import { stripeIntervalFor } from "./giving-stripe";
 
 /**
@@ -168,6 +169,7 @@ export async function pauseSchedule(input: { organizationId: string; contributor
     data: { status: "PAUSED", pausedAt: new Date() },
   });
   await audit(input.organizationId, input.contributorUserId, "giving.recurring_paused", schedule.id, {});
+  logGivingEvent("GIVING_RECURRING_PAUSED", { organizationId: input.organizationId, scheduleId: schedule.id });
   await notifyMember(input.contributorUserId, "Your recurring contribution is paused", [
     `Your recurring contribution to ${schedule.fund.name} is paused. Nothing will be charged while paused, and no balance accumulates.`,
     "Resume any time from your Giving page.",
@@ -190,6 +192,7 @@ export async function resumeSchedule(input: { organizationId: string; contributo
     where: { id: schedule.id },
     data: { status: "ACTIVE", resumedAt: new Date(), nextContributionDate: nextDate },
   });
+  logGivingEvent("GIVING_RECURRING_RESUMED", { organizationId: input.organizationId, scheduleId: schedule.id });
   await audit(input.organizationId, input.contributorUserId, "giving.recurring_resumed", schedule.id, {
     nextContributionDate: nextDate?.toISOString() ?? null,
   });
@@ -232,6 +235,7 @@ export async function cancelSchedule(input: {
     where: { id: schedule.id },
     data: { status: "CANCELLED", cancelledAt: new Date(), cancelReason: input.reason ?? null, nextContributionDate: null },
   });
+  logGivingEvent("GIVING_RECURRING_CANCELLED", { organizationId: input.organizationId, scheduleId: schedule.id });
   await audit(input.organizationId, input.contributorUserId, "giving.recurring_cancelled", schedule.id, {
     via: "self_service",
     reason: input.reason ?? null,

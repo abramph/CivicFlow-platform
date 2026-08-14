@@ -66,13 +66,21 @@ export async function createPledge(input: ActorInput & {
   return pledge;
 }
 
-/** Live progress: SUM of non-void contributions crediting this pledge. */
+/** Live progress: SUM of non-void contributions crediting this pledge.
+ * CORE-GIVE-K (§34.9): refunds reduce credit — each row counts
+ * amount − refundedAmount, never below zero. */
 export async function pledgeProgress(organizationId: string, pledgeId: string): Promise<number> {
-  const sum = await prisma.contribution.aggregate({
-    where: { organizationId, pledgeId, voidedAt: null },
-    _sum: { amount: true },
-  });
-  return Number(sum._sum.amount ?? 0);
+  const [sum, refundSum] = await Promise.all([
+    prisma.contribution.aggregate({
+      where: { organizationId, pledgeId, voidedAt: null },
+      _sum: { amount: true },
+    }),
+    prisma.contribution.aggregate({
+      where: { organizationId, pledgeId, voidedAt: null, refundedAmount: { not: null } },
+      _sum: { refundedAmount: true },
+    }),
+  ]);
+  return Math.max(0, Number(sum._sum.amount ?? 0) - Number(refundSum._sum.refundedAmount ?? 0));
 }
 
 export async function listMyPledges(organizationId: string, contributorUserId: string) {
