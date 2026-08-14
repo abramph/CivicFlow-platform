@@ -1,5 +1,6 @@
 import { requirePermission } from "@/lib/auth-guards";
 import { getGivingSettings } from "@/lib/giving/module";
+import { getAccountView } from "@/lib/payments/stripe-connect";
 import { prisma } from "@/lib/prisma";
 import { PageHeader, SectionCard } from "@/components/app/PageChrome";
 import { GivingSetupManager } from "@/components/giving/GivingSetupManager";
@@ -15,6 +16,7 @@ export default async function GivingSetupPage() {
 
   const settings = await getGivingSettings(organizationId);
   const organization = await prisma.organization.findUnique({ where: { id: organizationId }, select: { slug: true } });
+  const stripeView = await getAccountView(organizationId);
   const statementCount = settings.contributionsEnabled
     ? await prisma.contributionStatement.count({ where: { organizationId } })
     : 0;
@@ -47,6 +49,7 @@ export default async function GivingSetupPage() {
           {([
             { label: "Enable the Contributions & Giving module", done: settings.contributionsEnabled, href: null },
             { label: "Review who holds financial permissions", done: null, href: "/settings/users" },
+            { label: "Connect Stripe so your organization can accept payments", done: Boolean(stripeView?.chargesEnabled), href: "/settings/payments" },
             { label: "Create your first fund (most organizations start with a General Fund)", done: funds.length > 0, href: null },
             { label: "Configure giving options (programs, suggested amounts, recurring)", done: programs.length > 0, href: null },
             { label: "Choose your terminology (Giving / Contributions / Support)", done: settings.contributionsEnabled, href: null },
