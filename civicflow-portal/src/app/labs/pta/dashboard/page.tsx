@@ -2,7 +2,7 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { getPtaPageGate } from "@/lib/labs/pta/guard";
 import { getPtaProfile } from "@/lib/labs/pta/profile";
-import { getPtaDashboardMetrics } from "@/lib/labs/pta/dashboard";
+import { getPtaDashboardMetrics, getPtaDashboardV2 } from "@/lib/labs/pta/dashboard";
 import { prisma } from "@/lib/prisma";
 import { setupBannerDismissCookieName } from "@/lib/dashboard-setup";
 import { DismissSetupBannerButton } from "@/components/app/DismissSetupBannerButton";
@@ -15,8 +15,14 @@ function centsToDollars(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;
 }
 
+function greetingForHour(hour: number): string {
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+  return "Good evening";
+}
+
 export default async function PtaDashboardPage() {
-  const { organizationId, access, can } = await getPtaPageGate("pta:analytics:read");
+  const { organizationId, session, access, can } = await getPtaPageGate("pta:analytics:read");
 
   if (!access.available) {
     return (
@@ -38,7 +44,11 @@ export default async function PtaDashboardPage() {
     );
   }
 
-  const metrics = await getPtaDashboardMetrics(organizationId, profile.currentSchoolYear);
+  const [metrics, v2] = await Promise.all([
+    getPtaDashboardMetrics(organizationId, profile.currentSchoolYear),
+    getPtaDashboardV2(organizationId, profile.currentSchoolYear, { userId: session.userId, can }),
+  ]);
+  const greeting = `${greetingForHour(new Date().getHours())}${v2.greetingName ? `, ${v2.greetingName}` : ""}`;
 
   // Parity fix: the generic (portal)/dashboard, /settings/dues, and HOA/Union
   // dashboards all show an ongoing "Finish organization setup" nag banner
@@ -71,7 +81,58 @@ export default async function PtaDashboardPage() {
   return (
     <main className="space-y-6">
       <PtaLabsBadge />
-      <PageHeader title={`${profile.schoolOrPtaName} Dashboard`} description={`School year ${profile.currentSchoolYear}. All metrics below are aggregate counts — never a student name.`} />
+      <PageHeader
+        title={greeting}
+        description={`${profile.schoolOrPtaName} — school year ${profile.currentSchoolYear}. All metrics below are aggregate counts — never a student name.`}
+      />
+
+      <SectionCard title="PTA Health">
+        <div className="flex flex-wrap gap-3">
+          {v2.health.map((item) =>
+            item.href ? (
+              <Link key={item.label} href={item.href} className="rounded-xl bg-slate-50 px-4 py-3 hover:bg-slate-100">
+                <p className="text-xl font-bold text-slate-900">{item.value}</p>
+                <p className="text-xs text-slate-500">{item.label}</p>
+              </Link>
+            ) : (
+              <div key={item.label} className="rounded-xl bg-slate-50 px-4 py-3">
+                <p className="text-xl font-bold text-slate-900">{item.value}</p>
+                <p className="text-xs text-slate-500">{item.label}</p>
+              </div>
+            )
+          )}
+        </div>
+      </SectionCard>
+
+      {v2.needsAttention.length > 0 ? (
+        <SectionCard title="Needs attention">
+          <ul className="space-y-1">
+            {v2.needsAttention.map((item) => (
+              <li key={item.label}>
+                <Link href={item.href} className="text-sm font-medium text-amber-800 hover:underline">
+                  ⚠ {item.label}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </SectionCard>
+      ) : null}
+
+      {v2.upcoming.length > 0 ? (
+        <SectionCard title="Upcoming">
+          <ul className="space-y-1 text-sm text-slate-800">
+            {v2.upcoming.map((item) => (
+              <li key={`${item.kind}-${item.label}-${item.date.toISOString()}`}>
+                <span className="font-semibold">
+                  {item.date.toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                </span>{" "}
+                — {item.label}
+                <span className="ml-2 text-xs uppercase tracking-wide text-slate-400">{item.kind.toLowerCase()}</span>
+              </li>
+            ))}
+          </ul>
+        </SectionCard>
+      ) : null}
 
       {showSetupBanner && (
         <div className="rounded-xl border border-amber-300 bg-amber-50 p-5 shadow-sm">
