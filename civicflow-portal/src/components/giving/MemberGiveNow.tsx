@@ -13,7 +13,35 @@ interface FundView {
   suggestedAmounts: number[];
   minimumAmount: number | null;
   maximumAmount: number | null;
+  allowRecurring?: boolean;
 }
+
+interface ScheduleView {
+  id: string;
+  fundName: string;
+  amount: number;
+  frequency: string;
+  status: string;
+  nextContributionDate: string | null;
+  paymentMethodDescriptor: string | null;
+}
+
+const FREQUENCY_LABELS: Record<string, string> = {
+  WEEKLY: "Weekly",
+  BIWEEKLY: "Every two weeks",
+  MONTHLY: "Monthly",
+  QUARTERLY: "Quarterly",
+  ANNUALLY: "Annually",
+};
+
+const SCHEDULE_STATUS_LABELS: Record<string, string> = {
+  ACTIVE: "Active",
+  PAUSED: "Paused",
+  PAYMENT_ACTION_REQUIRED: "Needs attention",
+  PAYMENT_FAILED: "Payment issue",
+  CANCELLED: "Cancelled",
+  COMPLETED: "Completed",
+};
 
 /** CORE-GIVE-B — Give Now + history. The server re-validates everything; the
  * redirect to Stripe never records the gift (the webhook does). */
@@ -23,18 +51,22 @@ export function MemberGiveNow({
   funds,
   yearTotal,
   history,
+  schedules = [],
 }: {
   organizationId: string;
   terminology: string;
   funds: FundView[];
   yearTotal: number;
   history: { id: string; contributionNumber: string | null; amount: number; date: string; designation: string }[];
+  schedules?: ScheduleView[];
 }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fundId, setFundId] = useState(funds[0]?.id ?? "");
   const [amount, setAmount] = useState("");
   const [memo, setMemo] = useState("");
+  const [frequency, setFrequency] = useState<string>("");
+  const [confirmDuplicate, setConfirmDuplicate] = useState(false);
 
   const fund = funds.find((row) => row.id === fundId) ?? null;
 
@@ -55,6 +87,35 @@ export function MemberGiveNow({
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok || !data.url) {
         setError(data?.error || "Unable to start checkout.");
+        return;
+      }
+      window.location.href = data.url as string;
+    } catch {
+      setError("Unable to connect. Please try again.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+
+  async function startRecurring() {
+    const value = Number(amount);
+    if (!fund || !Number.isFinite(value) || value <= 0 || !frequency) {
+      setError("Choose an amount and a frequency.");
+      return;
+    }
+    setPending(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/giving/recurring/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ organizationId, fundId: fund.id, amount: value, frequency, confirmDuplicate }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok || !data.url) {
+        if (res.status === 409 && !confirmDuplicate) setConfirmDuplicate(true);
+        setError(data?.error || "Unable to start recurring giving.");
         return;
       }
       window.location.href = data.url as string;
@@ -144,6 +205,93 @@ export function MemberGiveNow({
           <p role="alert" className="mt-2 text-sm font-medium text-red-700">
             {error}
           </p>
+        ) : null}
+      </section>
+
+      <section className="rounded-xl border border-slate-200 bg-white p-4">
+        <h2 className="text-lg font-semibold text-slate-900">Recurring giving</h2>
+        <p className="mt-1 text-xs text-slate-500">
+          Give automatically on a schedule you choose. Recurring giving is voluntary: you can change, pause, or cancel it at
+          any time, and stopping never creates a balance owed.
+        </p>
+        {fund && fund.allowRecurring !== false ? (
+          <div className="mt-3 space-y-3">
+            <div className="flex flex-wrap gap-2" role="group" aria-label="Frequency">
+              {Object.entries(FREQUENCY_LABELS).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setFrequency(frequency === value ? "" : value)}
+                  className={`rounded-full border px-3 py-1.5 text-sm font-semibold ${
+                    frequency === value
+                      ? "border-emerald-700 bg-emerald-700 text-white"
+                      : "border-slate-300 bg-white text-slate-900 hover:bg-slate-50"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {frequency && amount && Number(amount) > 0 ? (
+              <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
+                You are setting up{" "}
+                <span className="font-semibold">
+                  {money(Number(amount))} {FREQUENCY_LABELS[frequency].toLowerCase()}
+                </span>{" "}
+                to <span className="font-semibold">{fund.name}</span>, starting today. Your card is saved securely by Stripe
+                for future contributions.
+              </p>
+            ) : null}
+            <button
+              type="button"
+              disabled={pending || !fund || !amount || !frequency}
+              onClick={startRecurring}
+              className="w-full rounded-lg border border-emerald-700 bg-white px-4 py-3 text-base font-semibold text-emerald-800 hover:bg-emerald-50 disabled:opacity-50"
+            >
+              {confirmDuplicate ? "Yes, set up another schedule like this" : "Set up recurring giving"}
+            </button>
+          </div>
+        ) : (
+          <p className="mt-2 text-sm text-slate-600">This fund does not accept recurring contributions.</p>
+        )}
+
+        {schedules.length > 0 ? (
+          <div className="mt-4 border-t border-slate-100 pt-3">
+            <h3 className="text-sm font-semibold text-slate-900">My recurring giving</h3>
+            <ul className="mt-1 divide-y divide-slate-100">
+              {schedules.map((schedule) => (
+                <li key={schedule.id} className="py-2 text-sm">
+                  <p className="font-medium text-slate-900">
+                    {schedule.fundName} — {money(schedule.amount)}{" "}
+                    {FREQUENCY_LABELS[schedule.frequency]?.toLowerCase() ?? schedule.frequency}
+                    <span
+                      className={`ml-2 rounded-full px-2 py-0.5 text-xs font-semibold ${
+                        schedule.status === "ACTIVE"
+                          ? "bg-emerald-100 text-emerald-800"
+                          : schedule.status === "PAYMENT_FAILED" || schedule.status === "PAYMENT_ACTION_REQUIRED"
+                            ? "bg-amber-100 text-amber-800"
+                            : "bg-slate-100 text-slate-600"
+                      }`}
+                    >
+                      {SCHEDULE_STATUS_LABELS[schedule.status] ?? schedule.status}
+                    </span>
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {schedule.nextContributionDate
+                      ? `Next contribution ${new Date(schedule.nextContributionDate).toLocaleDateString()}`
+                      : "Schedule starting"}
+                    {schedule.paymentMethodDescriptor ? ` · ${schedule.paymentMethodDescriptor}` : ""}
+                  </p>
+                  {schedule.status === "PAYMENT_FAILED" || schedule.status === "PAYMENT_ACTION_REQUIRED" ? (
+                    <p className="text-xs font-medium text-amber-700">
+                      Your contribution could not be processed. This is not a balance owed — payment-method management
+                      arrives here shortly.
+                    </p>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </div>
         ) : null}
       </section>
 

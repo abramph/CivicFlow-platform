@@ -16,9 +16,9 @@ function money(value: number): string {
 export default async function GivingSuccessPage({
   searchParams,
 }: {
-  searchParams: Promise<{ session_id?: string; org?: string }>;
+  searchParams: Promise<{ session_id?: string; org?: string; recurring?: string }>;
 }) {
-  const { session_id, org } = await searchParams;
+  const { session_id, org, recurring } = await searchParams;
   const memberSession = await getMemberWebSession(org);
   if (!memberSession) {
     return (
@@ -37,7 +37,26 @@ export default async function GivingSuccessPage({
       const stripe = getStripe();
       const session = await stripe.checkout.sessions.retrieve(session_id);
       // Tenant check: only sessions this member's org initiated are shown.
-      if (session.metadata?.organizationId === memberSession.organizationId && session.metadata?.paymentType === "giving") {
+      if (
+        recurring === "1" &&
+        session.metadata?.organizationId === memberSession.organizationId &&
+        session.metadata?.paymentType === "giving-recurring"
+      ) {
+        // Recurring setup: show the schedule state (the first invoice may
+        // still be settling — that is fine and said plainly).
+        const schedule = session.metadata?.scheduleId
+          ? await prisma.recurringContributionSchedule.findFirst({
+              where: { id: session.metadata.scheduleId, organizationId: memberSession.organizationId },
+              include: { fund: { select: { name: true } } },
+            })
+          : null;
+        if (schedule && schedule.status !== "PENDING_SETUP") {
+          state = "PAID_RECORDED";
+          recorded = { contributionNumber: null, amount: Number(schedule.amount), fundName: schedule.fund.name };
+        } else if (schedule) {
+          state = "PAID_PROCESSING";
+        }
+      } else if (session.metadata?.organizationId === memberSession.organizationId && session.metadata?.paymentType === "giving") {
         if (session.payment_status === "paid") {
           const reference =
             typeof session.payment_intent === "string" ? session.payment_intent : (session.payment_intent?.id ?? session.id);
@@ -70,7 +89,9 @@ export default async function GivingSuccessPage({
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-6 text-center">
           <h1 className="text-2xl font-bold text-emerald-900">Thank you!</h1>
           <p className="mt-2 text-emerald-900">
-            Your {money(recorded.amount)} contribution{recorded.fundName ? ` to ${recorded.fundName}` : ""} was received.
+            {recurring === "1"
+              ? `Your recurring ${money(recorded.amount)} contribution${recorded.fundName ? ` to ${recorded.fundName}` : ""} is set up. You can change, pause, or cancel it any time.`
+              : `Your ${money(recorded.amount)} contribution${recorded.fundName ? ` to ${recorded.fundName}` : ""} was received.`}
           </p>
           {recorded.contributionNumber ? (
             <p className="mt-1 font-mono text-sm text-emerald-700">{recorded.contributionNumber}</p>

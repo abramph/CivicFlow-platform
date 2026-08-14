@@ -3,6 +3,7 @@ import { getMemberWebSession } from "@/lib/member-web-session";
 import { getGivingSettings } from "@/lib/giving/module";
 import { prisma } from "@/lib/prisma";
 import { MemberGiveNow } from "@/components/giving/MemberGiveNow";
+import { listMySchedules } from "@/lib/giving/recurring";
 
 /**
  * CORE-GIVE-B — the member Give Now surface (docs/core-contributions-giving.md
@@ -32,7 +33,7 @@ export default async function MemberGivingPage({ searchParams }: { searchParams:
     );
   }
 
-  const [funds, myContributions] = await Promise.all([
+  const [funds, myContributions, mySchedules] = await Promise.all([
     prisma.fund.findMany({
       where: { organizationId: memberSession.organizationId, status: "ACTIVE", allowOneTime: true },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
@@ -43,6 +44,7 @@ export default async function MemberGivingPage({ searchParams }: { searchParams:
         suggestedAmounts: true,
         minimumAmount: true,
         maximumAmount: true,
+        allowRecurring: true,
       },
     }),
     prisma.contribution.findMany({
@@ -62,6 +64,7 @@ export default async function MemberGivingPage({ searchParams }: { searchParams:
       },
       take: 25,
     }),
+    listMySchedules(memberSession.organizationId, memberSession.userId),
   ]);
 
   const yearTotal = myContributions
@@ -84,6 +87,16 @@ export default async function MemberGivingPage({ searchParams }: { searchParams:
           suggestedAmounts: fund.suggestedAmounts.map((amount) => Number(amount)),
           minimumAmount: fund.minimumAmount != null ? Number(fund.minimumAmount) : null,
           maximumAmount: fund.maximumAmount != null ? Number(fund.maximumAmount) : null,
+          allowRecurring: fund.allowRecurring,
+        }))}
+        schedules={mySchedules.map((schedule) => ({
+          id: schedule.id,
+          fundName: schedule.fund.name,
+          amount: Number(schedule.amount),
+          frequency: schedule.frequency,
+          status: schedule.status,
+          nextContributionDate: schedule.nextContributionDate?.toISOString() ?? null,
+          paymentMethodDescriptor: schedule.paymentMethodDescriptor,
         }))}
         yearTotal={yearTotal}
         history={myContributions.map((row) => ({

@@ -245,3 +245,98 @@ guests today) — documented deferral, not architecture debt.
 Decisions: source reuses MEMBER_PROFILE (accurate; no enum widening);
 email receipt delivery reuses the existing receipt machinery — the §33
 immediate receipt is the success page + history entry + receipt record.
+
+## 3. CORE-GIVE-C design — Saved Payment Methods & Recurring Giving
+
+### The §10 provider decision: Stripe Subscriptions own recurring execution
+
+Two candidate architectures were evaluated:
+
+1. **App-scheduled off-session PaymentIntents** (own scheduler charges saved
+   methods): full control, but Unestra owns scheduling, timezone math,
+   retries, and scheduler idempotency — and the repo audit shows /api/cron/*
+   endpoints have NO in-repo scheduler invoking them. A recurring-money
+   engine cannot depend on a scheduler that does not reliably fire.
+2. **Stripe Subscriptions with inline `price_data`** (CHOSEN): Stripe owns
+   the billing cycle, off-session charging, Smart Retries, and dunning
+   state; Unestra owns meaning and the schedule record. **Retry authority =
+   Stripe, exclusively** (§17: exactly one retry authority; our webhook only
+   mirrors state, never re-charges).
+
+Price-sprawl control (§10): one Stripe Product PER ORGANIZATION
+("<org> — Recurring Contribution"), lazily created and cached on
+`OrgSettings.givingStripeProductId`; every subscription uses inline
+`price_data` referencing that product with the member's chosen
+`unit_amount` + interval. No per-amount Price precreation, no orphan
+products. Frequency map: WEEKLY {week,1}, BIWEEKLY {week,2}, MONTHLY
+{month,1}, QUARTERLY {month,3}, ANNUALLY {year,1}.
+
+Amount changes (D) will use subscription-item updates with
+`proration_behavior: "none"` — voluntary contribution schedules must never
+generate surprise prorations (§12).
+
+### Member-level Stripe Customers (the boundary, enforced)
+
+New `GivingCustomer` model: `@@unique([organizationId, userId])` →
+`stripeCustomerId`. Member customers are created ONLY through
+`src/lib/giving/giving-stripe.ts`; `getOrCreateStripeCustomer` (SaaS) is
+untouched and the two can never resolve each other's customers. Payment
+methods are collected exclusively by Stripe Checkout (subscription mode) —
+no card data ever touches Unestra (§8); the schedule stores the provider
+payment-method id + safe display descriptor only. Full method management
+(add/replace/default) is CORE-GIVE-D scope with "change payment method".
+
+### The SaaS/giving webhook split — THE regression risk, handled explicitly
+
+Today `customer.subscription.*` and `invoice.*` are SaaS-only. Giving
+subscriptions carry `metadata.paymentType = "giving-recurring"` (+
+scheduleId/organizationId/fundId), and EVERY relevant webhook branch now
+checks it FIRST:
+- `checkout.session.completed` with a subscription: giving metadata → link
+  `providerSubscriptionId` to the schedule and activate; otherwise the
+  legacy SaaS upsert runs exactly as before.
+- `customer.subscription.updated/deleted`: giving → mirror schedule status
+  (paused/cancelled); SaaS path untouched otherwise.
+- `invoice.paid`: giving → record a Contribution **idempotent on the
+  invoice id**, stamp schedule success state + next date from the period
+  end; SaaS path otherwise.
+- `invoice.payment_failed`: giving → schedule PAYMENT_FAILED /
+  PAYMENT_ACTION_REQUIRED + failureCount, member notification copy is
+  §16-safe ("could not be processed" — NEVER "you owe"); SaaS otherwise.
+A giving event must never touch the `Subscription` table (test-asserted).
+
+### §50 cross-checks for recurring
+Webhook handlers resolve the schedule BY ID from metadata and verify it
+belongs to the metadata organization AND (for invoices) that the paid
+amount matches the schedule amount within the invoice's own line data —
+mismatches mirror nothing and log a security-safe event.
+
+### Scope & consent
+- Create + view in C: member picks fund/amount/frequency; §91 consent copy
+  (amount, frequency, fund, start, cancel-anytime) shown before redirect;
+  §92 duplicate-schedule guard server-side (409 unless explicitly
+  confirmed). Change/pause/resume/cancel/self-service = D (per §105).
+- Currency: USD only in v1, enforced explicitly (§77).
+- Statuses: PENDING_SETUP → ACTIVE → (PAYMENT_ACTION_REQUIRED |
+  PAYMENT_FAILED → recovery via D) | PAUSED (D) | CANCELLED | COMPLETED.
+
+### Payment-flow security review (§72, pre-recurring — this PR)
+- Cross-tenant: schedules/customers resolved org+user-scoped in every query;
+  webhook metadata cross-checked against the schedule row (never trusted
+  alone); GivingCustomer unique per (org,user).
+- IDOR/takeover: schedule ids never accepted from clients for mutation in C
+  (no mutation surface yet); list APIs query-scope to the session user.
+- Amount/fund/currency manipulation: the charge amount comes from the
+  server-validated schedule row at session creation; metadata carries ids
+  only; invoice recording uses provider-truth amounts and re-verifies the
+  schedule linkage; currency pinned USD.
+- Webhook forgery/replay: signature verification + StripeWebhookEvent dedup
+  + invoice-id contribution idempotency (triple layer).
+- Secrets: publishable/secret keys server-side only; Checkout URLs are the
+  only thing the browser sees; no raw card data anywhere (§111.14/15).
+- Voluntary invariant: failure paths set schedule state and notify — they
+  never create DuesCharge rows, arrears, or member-status changes
+  (§112/§113; test-asserted).
+Findings: no critical/high items open; MEDIUM noted — org-level Stripe
+Products are platform-account-visible across orgs in the Stripe dashboard
+(inherent to the no-Connect architecture, accepted and documented).
