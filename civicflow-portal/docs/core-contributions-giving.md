@@ -340,3 +340,44 @@ mismatches mirror nothing and log a security-safe event.
 Findings: no critical/high items open; MEDIUM noted — org-level Stripe
 Products are platform-account-visible across orgs in the Stripe dashboard
 (inherent to the no-Connect architecture, accepted and documented).
+
+## 4. CORE-GIVE-D design — Member Recurring Self-Service
+
+Every action is member-owned and provider-first:
+`authorizeOwnSchedule(org, user, scheduleId)` resolves the schedule ONLY when
+`contributorUserId` matches the session user inside the session org (§111.5 —
+foreign schedules answer 404); the Stripe mutation runs first, and the
+schedule row updates only after provider success (a provider failure changes
+nothing locally). Every change is audited with before/after and emails the
+member (§61) via the existing transactional mail path.
+
+- **Change amount (§12)**: subscription item updated with new inline
+  `price_data` (same product/interval) + `proration_behavior: "none"` — the
+  new amount applies at the NEXT scheduled contribution; the UI says exactly
+  that before confirmation. Audit carries old/new/effective framing.
+- **Change frequency (§13)**: same item-replacement with the new interval,
+  `proration_behavior: "none"`, billing anchor unchanged — the already-
+  scheduled next date stays; the gap AFTER it uses the new frequency. The
+  UI states this before mutation; no duplicate charges are possible because
+  nothing is invoiced at change time.
+- **Change payment method (§8)**: a Stripe Checkout SETUP-mode session for
+  the member's giving customer (card data never touches Unestra); the
+  webhook (`mode=setup`, `paymentType=giving-method-update`) attaches the
+  new method as the subscription default, updates the stored descriptor,
+  and — if the schedule was in a failed state — leaves recovery to Stripe's
+  retries plus the explicit Try Again action.
+- **Pause (§14)**: `pause_collection { behavior: "void" }` — skipped periods
+  are VOIDED, never accumulated, so resuming cannot surprise-charge for
+  missed time. v1 is pause-indefinitely (documented choice). Membership and
+  dues are untouched by construction.
+- **Resume**: clears pause_collection, re-reads the subscription for the
+  real next date, shows it. No immediate charge.
+- **Cancel (§15)**: immediate provider cancel — "no future contribution will
+  be scheduled" is literally true; history preserved; reason OPTIONAL from
+  the fixed list; zero retention patterns.
+- **Try Again (§16)**: pays the latest open invoice for the schedule's own
+  subscription; success flows through the normal invoice.paid recording.
+  Failure copy never says "you owe".
+
+Retry authority remains Stripe alone (§17) — Try Again is a member-initiated
+payment of an existing open invoice, not a second retry engine.
