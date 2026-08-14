@@ -14,6 +14,19 @@ interface FundView {
   minimumAmount: number | null;
   maximumAmount: number | null;
   allowRecurring?: boolean;
+  allowPledges?: boolean;
+}
+
+interface PledgeView {
+  id: string;
+  fundId: string;
+  fundName: string;
+  campaignName: string | null;
+  pledged: number;
+  contributed: number;
+  remainingTowardPledge: number;
+  progressPercent: number;
+  status: string;
 }
 
 interface ScheduleView {
@@ -52,6 +65,7 @@ export function MemberGiveNow({
   yearTotal,
   history,
   schedules = [],
+  pledges = [],
 }: {
   organizationId: string;
   terminology: string;
@@ -59,6 +73,7 @@ export function MemberGiveNow({
   yearTotal: number;
   history: { id: string; contributionNumber: string | null; amount: number; date: string; designation: string }[];
   schedules?: ScheduleView[];
+  pledges?: PledgeView[];
 }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -73,6 +88,10 @@ export function MemberGiveNow({
   const [cancelReason, setCancelReason] = useState("");
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [pledgeGivingId, setPledgeGivingId] = useState<string | null>(null);
+  const [showPledgeForm, setShowPledgeForm] = useState(false);
+  const [pledgeAmount, setPledgeAmount] = useState("");
+  const [pledgeFundId, setPledgeFundId] = useState("");
 
   const fund = funds.find((row) => row.id === fundId) ?? null;
 
@@ -171,6 +190,56 @@ export function MemberGiveNow({
         return;
       }
       window.location.href = data.url as string;
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function giveTowardPledge(pledge: PledgeView) {
+    const value = Number(amount);
+    if (!Number.isFinite(value) || value <= 0) {
+      setError("Enter an amount above, then press Give toward pledge.");
+      return;
+    }
+    setPending(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/giving/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ organizationId, fundId: pledge.fundId, amount: value, pledgeId: pledge.id }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok || !data.url) {
+        setError(data?.error || "Unable to start checkout.");
+        return;
+      }
+      window.location.href = data.url as string;
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function createPledgeNow() {
+    const value = Number(pledgeAmount);
+    if (!pledgeFundId || !Number.isFinite(value) || value <= 0) {
+      setError("Choose a fund and a pledge amount.");
+      return;
+    }
+    setPending(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/giving/my-pledges", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ organizationId, fundId: pledgeFundId, pledgedAmount: value }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        setError(data?.error || "Unable to record your pledge.");
+        return;
+      }
+      window.location.reload();
     } finally {
       setPending(false);
     }
@@ -508,6 +577,119 @@ export function MemberGiveNow({
           </div>
         ) : null}
       </section>
+
+      {(pledges.length > 0 || funds.some((row) => row.allowPledges)) ? (
+        <section className="rounded-xl border border-slate-200 bg-white p-4">
+          <h2 className="text-lg font-semibold text-slate-900">My Pledges</h2>
+          <p className="mt-1 text-xs text-slate-500">
+            A pledge is your stated giving intention — progress tracks what you have given toward it. It is never a balance
+            owed.
+          </p>
+          {pledges.length === 0 ? (
+            <p className="mt-2 text-sm text-slate-600">No pledges yet.</p>
+          ) : (
+            <ul className="mt-2 space-y-3">
+              {pledges.map((pledge) => (
+                <li key={pledge.id} className="rounded-lg border border-slate-100 p-3">
+                  <p className="text-sm font-semibold text-slate-900">
+                    {pledge.fundName}
+                    {pledge.campaignName ? <span className="ml-1 text-xs font-normal text-slate-500">({pledge.campaignName})</span> : null}
+                    {pledge.status === "FULFILLED" ? (
+                      <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">Fulfilled</span>
+                    ) : null}
+                  </p>
+                  <p className="mt-1 text-sm text-slate-700">
+                    Pledged {money(pledge.pledged)} · Given {money(pledge.contributed)} ·{" "}
+                    <span className="font-semibold">Remaining toward pledge: {money(pledge.remainingTowardPledge)}</span>
+                  </p>
+                  <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-100">
+                    <div className="h-full bg-emerald-600" style={{ width: `${pledge.progressPercent}%` }} />
+                  </div>
+                  {pledge.status === "ACTIVE" ? (
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={() => setPledgeGivingId(pledgeGivingId === pledge.id ? null : pledge.id)}
+                        className="rounded-lg border border-emerald-700 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-50 disabled:opacity-50"
+                      >
+                        Give toward pledge
+                      </button>
+                      {pledgeGivingId === pledge.id ? (
+                        <span className="flex items-center gap-2 text-xs text-slate-600">
+                          Uses the amount entered in Give Now above →
+                          <button
+                            type="button"
+                            disabled={pending || !amount}
+                            onClick={() => giveTowardPledge(pledge)}
+                            className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
+                          >
+                            Continue to payment
+                          </button>
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+          {funds.some((row) => row.allowPledges) ? (
+            <div className="mt-3 border-t border-slate-100 pt-3">
+              <button
+                type="button"
+                onClick={() => setShowPledgeForm((value) => !value)}
+                className="text-xs font-semibold text-emerald-700 hover:underline"
+              >
+                {showPledgeForm ? "Close" : "Make a pledge"}
+              </button>
+              {showPledgeForm ? (
+                <div className="mt-2 flex flex-wrap items-end gap-2">
+                  <label className="space-y-1 text-xs font-semibold text-slate-700">
+                    <span>Fund</span>
+                    <select
+                      value={pledgeFundId}
+                      onChange={(event) => setPledgeFundId(event.target.value)}
+                      className="block w-48 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"
+                    >
+                      <option value="">Choose…</option>
+                      {funds
+                        .filter((row) => row.allowPledges)
+                        .map((row) => (
+                          <option key={row.id} value={row.id}>
+                            {row.name}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  <label className="space-y-1 text-xs font-semibold text-slate-700">
+                    <span>Pledge amount ($)</span>
+                    <input
+                      type="number"
+                      min={1}
+                      step="0.01"
+                      value={pledgeAmount}
+                      onChange={(event) => setPledgeAmount(event.target.value)}
+                      className="block w-32 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    disabled={pending || !pledgeFundId || !(Number(pledgeAmount) > 0)}
+                    onClick={createPledgeNow}
+                    className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
+                  >
+                    Record my pledge
+                  </button>
+                  <p className="w-full text-xs text-slate-500">
+                    A pledge states your intention — it never creates a balance owed, and you can cancel it any time.
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="rounded-xl border border-slate-200 bg-white p-4">
         <div className="flex items-baseline justify-between">

@@ -11,6 +11,7 @@ const bodySchema = z.object({
   fundId: z.string().min(1).max(64),
   amount: z.number().positive().max(1_000_000),
   programId: z.string().max(64).nullable().optional(),
+  pledgeId: z.string().max(64).nullable().optional(),
   anonymityMode: z.enum(["NONE", "PUBLICLY_ANONYMOUS"]).optional(),
   memo: z.string().max(280).nullable().optional(),
 });
@@ -28,11 +29,13 @@ export async function POST(request: Request) {
     const input = await parseJsonBody(request, bodySchema);
     const memberSession = await requireMemberWebSession(input.organizationId);
 
-    const { amount, fund, program } = await validateGivingRequest({
+    const { amount, fund, program, pledge } = await validateGivingRequest({
       organizationId: memberSession.organizationId,
       fundId: input.fundId,
       amount: input.amount,
       programId: input.programId ?? null,
+      pledgeId: input.pledgeId ?? null,
+      contributorUserId: memberSession.userId,
     });
 
     const stripe = getStripe();
@@ -66,6 +69,7 @@ export async function POST(request: Request) {
         givingProgramId: program?.id ?? "",
         memberId: memberSession.memberId,
         contributorUserId: memberSession.userId,
+        givingPledgeId: pledge?.id ?? "",
         anonymityMode: input.anonymityMode ?? "NONE",
         givingMemo: input.memo?.slice(0, 200) ?? "",
         environment: process.env.NODE_ENV ?? "development",

@@ -19,6 +19,10 @@ export interface GivingCheckoutInput {
   fundId: string;
   amount: number;
   programId?: string | null;
+  /// CORE-GIVE-E: give-toward-pledge. Validated as the CALLER's own ACTIVE
+  /// pledge on the SAME fund.
+  pledgeId?: string | null;
+  contributorUserId?: string | null;
   anonymityMode?: "NONE" | "PUBLICLY_ANONYMOUS";
   memo?: string | null;
 }
@@ -58,7 +62,19 @@ export async function validateGivingRequest(input: GivingCheckoutInput) {
     }
   }
 
-  return { amount, fund, program };
+  let pledge = null;
+  if (input.pledgeId) {
+    if (!input.contributorUserId) throw new FinanceError("Pledge giving requires a signed-in contributor.", 401);
+    const { validatePledgeForGiving } = await import("./pledges");
+    pledge = await validatePledgeForGiving({
+      organizationId: input.organizationId,
+      contributorUserId: input.contributorUserId,
+      pledgeId: input.pledgeId,
+      fundId: fund.id,
+    });
+  }
+
+  return { amount, fund, program, pledge };
 }
 
 export interface RecordGivingInput {
@@ -68,6 +84,7 @@ export interface RecordGivingInput {
   programId?: string | null;
   memberId?: string | null;
   contributorUserId?: string | null;
+  pledgeId?: string | null;
   anonymityMode?: string | null;
   memo?: string | null;
   /** Values from the Stripe session OBJECT (provider truth). */
@@ -114,6 +131,19 @@ export async function recordGivingContribution(input: RecordGivingInput): Promis
   const program = input.programId
     ? await prisma.contributionProgram.findFirst({ where: { id: input.programId }, select: { taxDeductibility: true } })
     : null;
+
+  // CORE-GIVE-E §50: a mismatched pledge id never blocks the contribution —
+  // the money is real; only the credit is withheld (and logged by caller).
+  let verifiedPledgeId: string | null = null;
+  if (input.pledgeId) {
+    const { verifyPledgeLinkage } = await import("./pledges");
+    verifiedPledgeId = await verifyPledgeLinkage({
+      organizationId: input.organizationId,
+      pledgeId: input.pledgeId,
+      fundId: input.fundId,
+      contributorUserId: input.contributorUserId || null,
+    });
+  }
   const anonymityMode = input.anonymityMode === "PUBLICLY_ANONYMOUS" ? "PUBLICLY_ANONYMOUS" : "NONE";
 
   const { withContributionNumber } = await import("./contribution-numbers");
@@ -135,11 +165,17 @@ export async function recordGivingContribution(input: RecordGivingInput): Promis
         anonymityMode,
         statementEligible: true,
         taxDeductibilityClassification: program?.taxDeductibility ?? "DEDUCTIBILITY_NOT_CONFIGURED",
+        pledgeId: verifiedPledgeId,
         notes: input.memo?.slice(0, 500) || null,
         receiptRequested: true,
       },
     })
   );
+
+  if (verifiedPledgeId) {
+    const { markFulfilledIfComplete } = await import("./pledges");
+    await markFulfilledIfComplete(input.organizationId, verifiedPledgeId);
+  }
 
   const { createAuditEvent } = await import("@/lib/audit");
   await createAuditEvent({
