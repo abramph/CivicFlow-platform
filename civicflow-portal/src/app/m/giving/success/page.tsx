@@ -1,0 +1,105 @@
+import Link from "next/link";
+import { getMemberWebSession } from "@/lib/member-web-session";
+import { OpenInAppBanner } from "@/components/app/OpenInAppBanner";
+import { getStripe } from "@/lib/stripe";
+import { prisma } from "@/lib/prisma";
+
+function money(value: number): string {
+  return value.toLocaleString("en-US", { style: "currency", currency: "USD" });
+}
+
+/**
+ * CORE-GIVE-B — post-checkout landing. Confirmation is SERVER-SIDE (§7): we
+ * retrieve the session from Stripe and look for the webhook-recorded
+ * contribution. The redirect itself proves nothing and records nothing.
+ */
+export default async function GivingSuccessPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ session_id?: string; org?: string }>;
+}) {
+  const { session_id, org } = await searchParams;
+  const memberSession = await getMemberWebSession(org);
+  if (!memberSession) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-100 p-6">
+        <OpenInAppBanner deepLink="giving" title="Giving" />
+      </div>
+    );
+  }
+
+  const backHref = `/m/giving?org=${encodeURIComponent(memberSession.organizationId)}`;
+  let state: "PAID_RECORDED" | "PAID_PROCESSING" | "NOT_PAID" | "UNKNOWN" = "UNKNOWN";
+  let recorded: { contributionNumber: string | null; amount: number; fundName: string | null } | null = null;
+
+  if (session_id) {
+    try {
+      const stripe = getStripe();
+      const session = await stripe.checkout.sessions.retrieve(session_id);
+      // Tenant check: only sessions this member's org initiated are shown.
+      if (session.metadata?.organizationId === memberSession.organizationId && session.metadata?.paymentType === "giving") {
+        if (session.payment_status === "paid") {
+          const reference =
+            typeof session.payment_intent === "string" ? session.payment_intent : (session.payment_intent?.id ?? session.id);
+          const contribution = await prisma.contribution.findFirst({
+            where: { organizationId: memberSession.organizationId, providerPaymentIntentId: reference },
+            select: { contributionNumber: true, amount: true, fund: { select: { name: true } } },
+          });
+          if (contribution) {
+            state = "PAID_RECORDED";
+            recorded = {
+              contributionNumber: contribution.contributionNumber,
+              amount: Number(contribution.amount),
+              fundName: contribution.fund?.name ?? null,
+            };
+          } else {
+            state = "PAID_PROCESSING";
+          }
+        } else {
+          state = "NOT_PAID";
+        }
+      }
+    } catch {
+      state = "UNKNOWN";
+    }
+  }
+
+  return (
+    <main className="mx-auto max-w-2xl space-y-6 p-6">
+      {state === "PAID_RECORDED" && recorded ? (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-6 text-center">
+          <h1 className="text-2xl font-bold text-emerald-900">Thank you!</h1>
+          <p className="mt-2 text-emerald-900">
+            Your {money(recorded.amount)} contribution{recorded.fundName ? ` to ${recorded.fundName}` : ""} was received.
+          </p>
+          {recorded.contributionNumber ? (
+            <p className="mt-1 font-mono text-sm text-emerald-700">{recorded.contributionNumber}</p>
+          ) : null}
+        </div>
+      ) : state === "PAID_PROCESSING" ? (
+        <div className="rounded-xl border border-sky-200 bg-sky-50 p-6 text-center">
+          <h1 className="text-2xl font-bold text-sky-900">Payment received</h1>
+          <p className="mt-2 text-sky-900">
+            Your payment succeeded and your contribution record is being finalized — it will appear in your history in a
+            moment. Refresh this page to see it.
+          </p>
+        </div>
+      ) : state === "NOT_PAID" ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-center">
+          <h1 className="text-2xl font-bold text-amber-900">Payment not completed</h1>
+          <p className="mt-2 text-amber-900">This checkout was not completed. No contribution was recorded.</p>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-slate-200 bg-white p-6 text-center">
+          <h1 className="text-2xl font-bold text-slate-900">Giving</h1>
+          <p className="mt-2 text-slate-600">We could not confirm this checkout session.</p>
+        </div>
+      )}
+      <div className="text-center">
+        <Link href={backHref} className="text-sm font-semibold text-emerald-700 hover:underline">
+          ← Back to Giving
+        </Link>
+      </div>
+    </main>
+  );
+}
