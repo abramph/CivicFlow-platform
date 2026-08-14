@@ -184,6 +184,34 @@ export async function POST(request: Request) {
         const session = event.data.object as Stripe.Checkout.Session;
         const orgId = session.metadata?.organizationId;
 
+        // CORE-GIVE-C: a giving-recurring checkout is MEMBER MONEY — it must
+        // never be upserted into the SaaS Subscription table. Link it to our
+        // schedule (resolved org-scoped: the §50 cross-check) instead.
+        if (session.metadata?.paymentType === "giving-recurring") {
+          if (session.subscription && orgId && session.metadata?.scheduleId) {
+            const subId =
+              typeof session.subscription === "string" ? session.subscription : session.subscription.id;
+            const { linkScheduleFromCheckout } = await import("@/lib/giving/recurring");
+            const linked = await linkScheduleFromCheckout({
+              scheduleId: session.metadata.scheduleId,
+              organizationId: orgId,
+              providerSubscriptionId: subId,
+              providerCustomerId: typeof session.customer === "string" ? session.customer : (session.customer?.id ?? null),
+            });
+            if (linked === "REJECTED") {
+              console.error(JSON.stringify({ event: "giving_recurring_link_rejected", sessionId: session.id, orgId }));
+            }
+            await createAuditEvent({
+              organizationId: orgId,
+              action: "update",
+              entityType: "stripe_webhook",
+              entityId: session.id,
+              metadata: { eventType: event.type, givingRecurring: true, outcome: linked },
+            });
+          }
+          break;
+        }
+
         if (session.subscription) {
           const subId =
             typeof session.subscription === "string"
@@ -309,6 +337,18 @@ export async function POST(request: Request) {
       case "customer.subscription.created":
       case "customer.subscription.updated": {
         const sub = event.data.object as Stripe.Subscription;
+        // CORE-GIVE-C: giving subscriptions mirror onto the schedule and must
+        // never create/patch a SaaS Subscription row.
+        if (sub.metadata?.paymentType === "giving-recurring") {
+          const { syncScheduleFromSubscription } = await import("@/lib/giving/recurring");
+          await syncScheduleFromSubscription({
+            providerSubscriptionId: sub.id,
+            providerStatus: sub.status,
+            cancelAtPeriodEnd: Boolean(sub.cancel_at_period_end),
+            deleted: false,
+          });
+          break;
+        }
         const mapped = await upsertSubscriptionFromStripe(sub);
         if (mapped) {
           await createAuditEvent({
@@ -324,6 +364,16 @@ export async function POST(request: Request) {
 
       case "customer.subscription.deleted": {
         const sub = event.data.object as Stripe.Subscription;
+        if (sub.metadata?.paymentType === "giving-recurring") {
+          const { syncScheduleFromSubscription } = await import("@/lib/giving/recurring");
+          await syncScheduleFromSubscription({
+            providerSubscriptionId: sub.id,
+            providerStatus: sub.status,
+            cancelAtPeriodEnd: false,
+            deleted: true,
+          });
+          break;
+        }
         const orgId = await resolveOrgId(sub);
 
         await prisma.subscription.updateMany({
@@ -358,6 +408,16 @@ export async function POST(request: Request) {
             ? invoice.subscription
             : null;
         if (subId) {
+          // CORE-GIVE-C: failed voluntary giving is a schedule status, NEVER
+          // a debt (§16) — and never a SaaS past_due.
+          const { markRecurringInvoiceFailed } = await import("@/lib/giving/recurring");
+          const givingOutcome = await markRecurringInvoiceFailed({
+            providerSubscriptionId: subId,
+            requiresAction: invoice.status === "open" && Boolean((invoice as { payment_intent?: unknown }).payment_intent),
+          });
+          if (givingOutcome === "MARKED") break;
+        }
+        if (subId) {
           await prisma.subscription.updateMany({
             where: { stripeSubscriptionId: subId },
             data: { status: "past_due" },
@@ -382,6 +442,27 @@ export async function POST(request: Request) {
             ? invoice.subscription
             : null;
         if (subId) {
+          // CORE-GIVE-C: recurring giving invoice → durable Contribution,
+          // idempotent on the invoice id; the schedule is resolved by OUR
+          // unique providerSubscriptionId, never by trusting metadata.
+          const { recordRecurringInvoicePaid } = await import("@/lib/giving/recurring");
+          const givingResult = await recordRecurringInvoicePaid({
+            providerSubscriptionId: subId,
+            providerInvoiceId: invoice.id,
+            amountPaidCents: invoice.amount_paid ?? 0,
+            currency: invoice.currency ?? "usd",
+            periodEnd: invoice.lines?.data?.[0]?.period?.end ?? null,
+            paymentIntentId:
+              typeof (invoice as { payment_intent?: unknown }).payment_intent === "string"
+                ? ((invoice as { payment_intent?: string }).payment_intent ?? null)
+                : null,
+          });
+          if (givingResult.outcome !== "NOT_GIVING") {
+            if (givingResult.outcome === "REJECTED") {
+              console.error(JSON.stringify({ event: "giving_invoice_rejected", stripeInvoiceId: invoice.id }));
+            }
+            break;
+          }
           const sub = await stripe.subscriptions.retrieve(subId);
           await upsertSubscriptionFromStripe(sub);
         }

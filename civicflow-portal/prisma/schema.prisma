@@ -676,6 +676,8 @@ model Organization {
   organizationContacts        OrganizationContact[]
   funds                       Fund[]
   contributionPrograms        ContributionProgram[]
+  givingCustomers             GivingCustomer[]
+  recurringContributionSchedules RecurringContributionSchedule[]
   ptaElections                PtaElection[]
   ptaElectionContests         PtaElectionContest[]
   ptaElectionCandidates       PtaElectionCandidate[]
@@ -752,6 +754,8 @@ model User {
   ptaTransitionsStarted             PtaBoardTransition[]       @relation("PtaTransitionStartedBy")
   ptaHandoffChecklistCompletions    PtaHandoffChecklistItem[]  @relation("PtaHandoffChecklistCompletedBy")
   contributionsGiven                Contribution[]             @relation("ContributionContributorUser")
+  givingCustomers                   GivingCustomer[]
+  recurringSchedules                RecurringContributionSchedule[] @relation("RecurringScheduleContributor")
   ptaElectionsCreated               PtaElection[]              @relation("PtaElectionCreatedBy")
   ptaElectionsCertified             PtaElection[]              @relation("PtaElectionCertifiedBy")
   reimbursementsSubmitted           ReimbursementRequest[]     @relation("ReimbursementSubmittedBy")
@@ -1126,6 +1130,7 @@ model OrgMember {
   duesPayments                   DuesPayment[]
   duesAdjustments                DuesAdjustment[]
   contributions                  Contribution[]
+  recurringSchedules        RecurringContributionSchedule[]
   receipts                       ContributionReceipt[]
   reminderLogs                   EmailReminderLog[]
   communicationLogs              CommunicationLog[]
@@ -1671,6 +1676,10 @@ model OrgSettings {
   /// Display label for the module ("Giving", "Contributions", "Support").
   /// Null = "Contributions". UI terminology only — backend names are stable.
   contributionTerminology        String?
+  /// CORE-GIVE-C: this organization's single Stripe Product for recurring
+  /// giving (lazily created) — inline price_data references it, so member-
+  /// chosen amounts never create orphan products (§10).
+  givingStripeProductId          String?
   updatedAt                      DateTime      @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -2188,6 +2197,9 @@ model Contribution {
   /// §32 goods/services value received (gala ticket, merchandise) — the
   /// organization configures it; Unestra computes no tax consequences.
   goodsServicesValue             Decimal?                       @db.Decimal(12, 2)
+  /// CORE-GIVE-C: set when this row was produced by a recurring schedule's
+  /// provider invoice.
+  recurringScheduleId            String?
 
   organization       Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   member             OrgMember?                 @relation(fields: [memberId], references: [id], onDelete: SetNull)
@@ -2197,6 +2209,7 @@ model Contribution {
   fund               Fund?                      @relation(fields: [fundId], references: [id], onDelete: Restrict)
   contributionProgram ContributionProgram?      @relation(fields: [contributionProgramId], references: [id], onDelete: Restrict)
   contributorUser    User?                      @relation("ContributionContributorUser", fields: [contributorUserId], references: [id], onDelete: SetNull)
+  recurringSchedule  RecurringContributionSchedule? @relation(fields: [recurringScheduleId], references: [id], onDelete: SetNull)
   receipts           ContributionReceipt[]
   paymentImportItems PaymentImportItem[]
   fromOfflineReport  PaymentLinkOfflineReport[]
@@ -2212,6 +2225,7 @@ model Contribution {
   @@index([contributionProgramId])
   @@index([providerPaymentIntentId])
   @@index([contributorUserId])
+  @@index([recurringScheduleId])
 }
 
 // ─── CORE-GIVE-A: Contributions & Giving foundation ──────────────────────────
@@ -2266,6 +2280,89 @@ enum ContributionAnonymityMode {
   PUBLICLY_ANONYMOUS
 }
 
+enum RecurringFrequency {
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+  QUARTERLY
+  ANNUALLY
+}
+
+enum RecurringScheduleStatus {
+  PENDING_SETUP
+  ACTIVE
+  PAUSED
+  PAYMENT_ACTION_REQUIRED
+  PAYMENT_FAILED
+  CANCELLED
+  COMPLETED
+}
+
+/// CORE-GIVE-C: the MEMBER-level Stripe Customer for giving. Deliberately a
+/// separate table from Subscription (which holds the ORGANIZATION's SaaS
+/// customer) — the two domains can never resolve each other's customers.
+model GivingCustomer {
+  id               String   @id @default(cuid())
+  organizationId   String
+  userId           String
+  stripeCustomerId String   @unique
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, userId])
+  @@index([organizationId])
+}
+
+/// CORE-GIVE-C: the member's giving INTENT (§9). Stripe owns execution
+/// (billing cycle, off-session charges, retries); this row owns meaning.
+/// Voluntary by construction: no field on this model can represent debt,
+/// and failure states never touch dues or membership status.
+model RecurringContributionSchedule {
+  id                           String                  @id @default(cuid())
+  organizationId               String
+  memberId                     String?
+  contributorUserId            String
+  fundId                       String
+  contributionProgramId        String?
+  amount                       Decimal                 @db.Decimal(12, 2)
+  currency                     String                  @default("USD")
+  frequency                    RecurringFrequency
+  intervalCount                Int                     @default(1)
+  startDate                    DateTime                @default(now())
+  nextContributionDate         DateTime?
+  endDate                      DateTime?
+  status                       RecurringScheduleStatus @default(PENDING_SETUP)
+  providerCustomerId           String?
+  providerSubscriptionId       String?                 @unique
+  providerPaymentMethodId      String?
+  /// Safe display only ("Visa •••• 4242") — never raw card data (§8).
+  paymentMethodDescriptor      String?
+  lastSuccessfulContributionAt DateTime?
+  lastAttemptAt                DateTime?
+  failureCount                 Int                     @default(0)
+  pausedAt                     DateTime?
+  resumedAt                    DateTime?
+  cancelledAt                  DateTime?
+  cancelReason                 String?
+  createdAt                    DateTime                @default(now())
+  updatedAt                    DateTime                @updatedAt
+
+  organization        Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  member              OrgMember?           @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  contributorUser     User                 @relation("RecurringScheduleContributor", fields: [contributorUserId], references: [id], onDelete: Restrict)
+  fund                Fund                 @relation(fields: [fundId], references: [id], onDelete: Restrict)
+  contributionProgram ContributionProgram? @relation(fields: [contributionProgramId], references: [id], onDelete: SetNull)
+  contributions       Contribution[]
+
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([contributorUserId])
+  @@index([fundId])
+}
+
 /// A Fund answers "where is the money designated?" (§4). Never hard-deleted:
 /// CLOSED/ARCHIVED stop new use while history stays intact; org FK Restrict.
 model Fund {
@@ -2292,9 +2389,10 @@ model Fund {
   createdAt             DateTime           @default(now())
   updatedAt             DateTime           @updatedAt
 
-  organization  Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  programs      ContributionProgram[]
-  contributions Contribution[]
+  organization       Organization                    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  programs           ContributionProgram[]
+  contributions      Contribution[]
+  recurringSchedules RecurringContributionSchedule[]
 
   @@unique([organizationId, name])
   @@index([organizationId])
@@ -2329,9 +2427,10 @@ model ContributionProgram {
   createdAt             DateTime                       @default(now())
   updatedAt             DateTime                       @updatedAt
 
-  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  fund          Fund           @relation(fields: [fundId], references: [id], onDelete: Restrict)
-  contributions Contribution[]
+  organization       Organization                    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  fund               Fund                            @relation(fields: [fundId], references: [id], onDelete: Restrict)
+  contributions      Contribution[]
+  recurringSchedules RecurringContributionSchedule[]
 
   @@unique([organizationId, name])
   @@index([organizationId])

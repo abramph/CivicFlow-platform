@@ -44,6 +44,12 @@ vi.mock("@/lib/prisma", () => ({
     contribution: {
       create: (...args: unknown[]) => contributionCreate(...args),
     },
+    // CORE-GIVE-C: the giving branches probe for a recurring schedule first;
+    // null = NOT_GIVING, so every existing SaaS assertion is unchanged.
+    recurringContributionSchedule: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      findFirst: vi.fn().mockResolvedValue(null),
+    },
     paymentLink: {
       update: (...args: unknown[]) => paymentLinkUpdate(...args),
     },
