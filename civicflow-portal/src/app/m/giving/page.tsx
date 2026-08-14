@@ -34,7 +34,7 @@ export default async function MemberGivingPage({ searchParams }: { searchParams:
     );
   }
 
-  const [funds, myContributions, mySchedules, myPledges] = await Promise.all([
+  const [funds, myContributions, mySchedules, myPledges, myStatements] = await Promise.all([
     prisma.fund.findMany({
       where: { organizationId: memberSession.organizationId, status: "ACTIVE", allowOneTime: true },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
@@ -68,6 +68,14 @@ export default async function MemberGivingPage({ searchParams }: { searchParams:
     }),
     listMySchedules(memberSession.organizationId, memberSession.userId),
     listMyPledges(memberSession.organizationId, memberSession.userId),
+    prisma.contributionStatement.findMany({
+      where: {
+        organizationId: memberSession.organizationId,
+        OR: [{ memberId: memberSession.memberId }, { contributorUserId: memberSession.userId }],
+      },
+      orderBy: [{ year: "desc" }, { version: "desc" }],
+      select: { id: true, year: true, version: true, status: true, totalAmount: true },
+    }),
   ]);
 
   const yearTotal = myContributions
@@ -112,6 +120,13 @@ export default async function MemberGivingPage({ searchParams }: { searchParams:
           status: schedule.status,
           nextContributionDate: schedule.nextContributionDate?.toISOString() ?? null,
           paymentMethodDescriptor: schedule.paymentMethodDescriptor,
+        }))}
+        statements={myStatements.map((statement) => ({
+          id: statement.id,
+          year: statement.year,
+          version: statement.version,
+          status: statement.status,
+          total: Number(statement.totalAmount),
         }))}
         yearTotal={yearTotal}
         history={myContributions.map((row) => ({
