@@ -25,6 +25,7 @@ import {
   type PtaEvent,
   type PtaVolunteerCommitment,
   type PtaVolunteerHours,
+  getGiving,
 } from '@/lib/mobile-api';
 import { useUnreadConversationCount } from '@/lib/unread-count';
 
@@ -50,6 +51,7 @@ export default function DashboardScreen() {
   const [pendingReportCount, setPendingReportCount] = useState(0);
   const [ptaHours, setPtaHours] = useState<PtaVolunteerHours | null>(null);
   const [ptaUpcoming, setPtaUpcoming] = useState<PtaVolunteerCommitment | null>(null);
+  const [givingEnabled, setGivingEnabled] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const unreadCount = useUnreadConversationCount(selectedOrganizationId);
@@ -75,9 +77,14 @@ export default function DashboardScreen() {
       setEvents(eventsData.slice(0, 3));
 
       if (hasMemberIdentity) {
-        const [duesData, historyData] = await Promise.all([getDues(selectedOrganizationId), getPaymentHistory(selectedOrganizationId)]);
+        const [duesData, historyData, givingData] = await Promise.all([
+          getDues(selectedOrganizationId),
+          getPaymentHistory(selectedOrganizationId),
+          getGiving(selectedOrganizationId).catch(() => ({ enabled: false as const })),
+        ]);
         setDues(duesData);
         setPendingReportCount(historyData.reports.filter((r) => r.status === 'pending').length);
+        setGivingEnabled(givingData.enabled);
       } else if (hasPtaIdentity) {
         const duesData = await getPtaDues(selectedOrganizationId);
         setPtaDues(duesData);
@@ -252,6 +259,11 @@ export default function DashboardScreen() {
         {hasMemberIdentity ? (
           <Pressable style={styles.actionButton} onPress={() => router.push('/make-payment')} accessibilityRole="button" accessibilityLabel="Make a payment">
             <ThemedText style={styles.actionButtonText}>Make a Payment</ThemedText>
+          </Pressable>
+        ) : null}
+        {givingEnabled ? (
+          <Pressable style={styles.actionButton} onPress={() => router.push('/giving' as never)} accessibilityRole="button" accessibilityLabel="Giving">
+            <ThemedText style={styles.actionButtonText}>Giving</ThemedText>
           </Pressable>
         ) : null}
         {hasPtaIdentity && !hasMemberIdentity && ptaDues?.onlinePaymentLinkSlug ? (

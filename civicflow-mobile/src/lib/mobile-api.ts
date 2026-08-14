@@ -1843,3 +1843,118 @@ export function getMeetingsForOrganization(
   }
   return legacyHasMemberIdentity ? getMeetings(organizationId) : getPtaMeetings(organizationId);
 }
+
+// ── CORE-GIVE-L: Giving (member self-service only; §64 checkout happens in
+// the system browser — no card entry in-app) ─────────────────────────────
+
+export interface GivingFund {
+  id: string;
+  name: string;
+  description: string | null;
+  suggestedAmounts: number[];
+  minimumAmount: number | null;
+  maximumAmount: number | null;
+  allowRecurring: boolean;
+  allowPledges: boolean;
+}
+
+export interface GivingSchedule {
+  id: string;
+  fundName: string;
+  amount: number;
+  frequency: string;
+  status: string;
+  nextContributionDate: string | null;
+  paymentMethodDescriptor: string | null;
+}
+
+export interface GivingPledge {
+  id: string;
+  fundId: string;
+  fundName: string;
+  campaignName: string | null;
+  pledged: number;
+  contributed: number;
+  remainingTowardPledge: number;
+  progressPercent: number;
+  status: string;
+}
+
+export interface GivingStatement {
+  id: string;
+  year: number;
+  version: number;
+  status: string;
+  total: number;
+}
+
+export interface GivingHistoryRow {
+  id: string;
+  contributionNumber: string | null;
+  amount: number;
+  refundedAmount: number | null;
+  date: string;
+  designation: string;
+}
+
+export type GivingSummary =
+  | { enabled: false }
+  | {
+      enabled: true;
+      terminology: string;
+      yearTotal: number;
+      funds: GivingFund[];
+      history: GivingHistoryRow[];
+      schedules: GivingSchedule[];
+      pledges: GivingPledge[];
+      statements: GivingStatement[];
+    };
+
+export function getGiving(organizationId: string) {
+  return apiFetch<GivingSummary>(`/api/mobile/giving?organizationId=${encodeURIComponent(organizationId)}`);
+}
+
+export function startGivingCheckout(organizationId: string, fundId: string, amount: number) {
+  return apiFetch<{ url: string }>(`/api/mobile/giving/checkout`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId, fundId, amount }),
+  });
+}
+
+export function startRecurringGivingCheckout(
+  organizationId: string,
+  fundId: string,
+  amount: number,
+  frequency: 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY' | 'QUARTERLY' | 'ANNUALLY',
+  confirmDuplicate: boolean = false
+) {
+  return apiFetch<{ url: string }>(`/api/mobile/giving/recurring/checkout`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId, fundId, amount, frequency, confirmDuplicate }),
+  });
+}
+
+export function manageRecurringGiving(
+  organizationId: string,
+  scheduleId: string,
+  action: 'pause' | 'resume' | 'cancel' | 'change-amount' | 'retry',
+  amount?: number
+) {
+  return apiFetch<Record<string, never>>(`/api/mobile/giving/recurring/manage`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId, scheduleId, action, amount: amount ?? null }),
+  });
+}
+
+export function createGivingPledge(organizationId: string, fundId: string, amount: number) {
+  return apiFetch<{ id: string }>(`/api/mobile/giving/pledges`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId, fundId, amount }),
+  });
+}
+
+export function getGivingStatementUrl(organizationId: string, statementId: string) {
+  return apiFetch<{ url: string }>(
+    `/api/mobile/giving/statements/${encodeURIComponent(statementId)}?organizationId=${encodeURIComponent(organizationId)}`
+  );
+}
