@@ -31,7 +31,7 @@ export default async function PtaLayout({ children }: { children: ReactNode }) {
 
   const profile = await prisma.ptaProfile.findUnique({
     where: { organizationId },
-    select: { concernsEnabled: true, concernsLabel: true },
+    select: { concernsEnabled: true, concernsLabel: true, electionsEnabled: true },
   });
 
   const officerTabs: PtaTab[] = [
@@ -52,6 +52,8 @@ export default async function PtaLayout({ children }: { children: ReactNode }) {
     { href: "/labs/pta/governance", label: "Bylaws & Policies", visible: can("governance:read") },
     { href: "/labs/pta/compliance", label: "Compliance", visible: can("pta:board:view") },
     { href: "/labs/pta/contacts", label: "Contacts & Vendors", visible: can("contacts:read") },
+    // PTA-L: permission AND the org's elections flag — dark by default.
+    { href: "/labs/pta/elections", label: "Elections", visible: can("pta:elections:view") && profile?.electionsEnabled === true },
     {
       href: "/labs/pta/concerns",
       label: profile?.concernsLabel?.trim() || "Concerns",

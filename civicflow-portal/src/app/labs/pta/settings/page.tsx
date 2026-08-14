@@ -25,7 +25,11 @@ export default async function PtaSettingsPage() {
         description="Configure your PTA's basic information. This never touches your organization's paid plan or Stripe billing."
       />
       <SectionCard title="PTA profile" description="School/PTA name, designation, current school year, and membership model.">
-        <PtaProfileForm initialProfile={profile} canManageConcerns={can("pta:concerns:manage")} />
+        <PtaProfileForm
+          initialProfile={profile}
+          canManageConcerns={can("pta:concerns:manage")}
+          canManageElections={can("pta:elections:manage")}
+        />
       </SectionCard>
       {can("pta:school-years:manage") ? (
         <SectionCard

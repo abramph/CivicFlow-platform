@@ -219,6 +219,13 @@ export const PERMISSIONS = {
   PTA_CONCERNS_RESOLVE: "pta:concerns:resolve",
   PTA_CONCERNS_EXPORT:  "pta:concerns:export",
 
+  // PTA Vertical 2.0, PR PTA-L — elections. Granted to NO bundle below
+  // ORG_ADMIN; voting itself is linkage-gated (snapshotted household
+  // adults), never a permission. The whole surface is additionally dark
+  // until PtaProfile.electionsEnabled is switched on per org.
+  PTA_ELECTIONS_VIEW:   "pta:elections:view",
+  PTA_ELECTIONS_MANAGE: "pta:elections:manage",
+
   // Unestra for HOA — Property/Resident foundation (PR #43, see
   // docs/hoa-domain-model.md and docs/hoa-navigation-proposal.md). Gated
   // additionally by requireHoaCapability()'s primaryVertical === "HOA"
@@ -376,6 +383,8 @@ const ORG_OWNER_PERMISSIONS: Permission[] = [
   PERMISSIONS.PTA_CONCERNS_ASSIGN,
   PERMISSIONS.PTA_CONCERNS_RESOLVE,
   PERMISSIONS.PTA_CONCERNS_EXPORT,
+  PERMISSIONS.PTA_ELECTIONS_VIEW,
+  PERMISSIONS.PTA_ELECTIONS_MANAGE,
   PERMISSIONS.DOCUMENTS_READ,
   PERMISSIONS.DOCUMENTS_WRITE,
   PERMISSIONS.GOVERNANCE_READ,
@@ -478,6 +487,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.PTA_CONCERNS_ASSIGN,
     PERMISSIONS.PTA_CONCERNS_RESOLVE,
     PERMISSIONS.PTA_CONCERNS_EXPORT,
+    PERMISSIONS.PTA_ELECTIONS_VIEW,
+    PERMISSIONS.PTA_ELECTIONS_MANAGE,
     PERMISSIONS.DOCUMENTS_READ,
     PERMISSIONS.DOCUMENTS_WRITE,
     PERMISSIONS.GOVERNANCE_READ,

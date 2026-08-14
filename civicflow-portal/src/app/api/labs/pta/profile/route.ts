@@ -24,6 +24,7 @@ const bodySchema = z.object({
   gradesServed: z.array(z.string()).optional(),
   concernsEnabled: z.boolean().optional(),
   concernsLabel: z.string().max(80).nullable().optional(),
+  electionsEnabled: z.boolean().optional(),
 });
 
 export async function PUT(request: Request) {
@@ -34,6 +35,10 @@ export async function PUT(request: Request) {
     // to pta:concerns:manage (ORG_ADMIN+), not general profile editing.
     if (input.concernsEnabled !== undefined || input.concernsLabel !== undefined) {
       await requirePtaAccess("pta:concerns:manage");
+    }
+    // PTA-L: the elections switch is election-management authority.
+    if (input.electionsEnabled !== undefined) {
+      await requirePtaAccess("pta:elections:manage");
     }
     const profile = await upsertPtaProfile({ organizationId, actorUserId: session.userId, actorEmail: session.userEmail, ...input });
     return Response.json({ ok: true, data: profile });
