@@ -674,6 +674,8 @@ model Organization {
   reimbursementRequests       ReimbursementRequest[]
   ptaComplianceRequirements   PtaComplianceRequirement[]
   organizationContacts        OrganizationContact[]
+  funds                       Fund[]
+  contributionPrograms        ContributionProgram[]
   ptaElections                PtaElection[]
   ptaElectionContests         PtaElectionContest[]
   ptaElectionCandidates       PtaElectionCandidate[]
@@ -749,6 +751,7 @@ model User {
   ptaConcernNotesAuthored           PtaConcernNote[]           @relation("PtaConcernNoteAuthor")
   ptaTransitionsStarted             PtaBoardTransition[]       @relation("PtaTransitionStartedBy")
   ptaHandoffChecklistCompletions    PtaHandoffChecklistItem[]  @relation("PtaHandoffChecklistCompletedBy")
+  contributionsGiven                Contribution[]             @relation("ContributionContributorUser")
   ptaElectionsCreated               PtaElection[]              @relation("PtaElectionCreatedBy")
   ptaElectionsCertified             PtaElection[]              @relation("PtaElectionCertifiedBy")
   reimbursementsSubmitted           ReimbursementRequest[]     @relation("ReimbursementSubmittedBy")
@@ -1662,6 +1665,12 @@ model OrgSettings {
   /// no auto-flagging. Approval itself is always required and always by a
   /// different person than the submitter, regardless of amount.
   reimbursementApprovalThreshold Decimal?      @db.Decimal(12, 2)
+  /// CORE-GIVE-A: the Contributions & Giving module master switch. Default
+  /// OFF — no organization gets giving surfaces until deliberately enabled.
+  contributionsEnabled           Boolean       @default(false)
+  /// Display label for the module ("Giving", "Contributions", "Support").
+  /// Null = "Contributions". UI terminology only — backend names are stable.
+  contributionTerminology        String?
   updatedAt                      DateTime      @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -2156,21 +2165,178 @@ model Contribution {
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
 
+  // ── CORE-GIVE-A additive extension (docs/core-contributions-giving.md §6):
+  // the durable fund-aware giving fields. All nullable/defaulted — every
+  // pre-existing row stays valid unchanged (§69: never reclassify history).
+  /// Where the money is designated. Null on legacy rows (statements treat as
+  /// "General (unassigned)").
+  fundId                         String?
+  contributionProgramId          String?
+  /// Human-readable reference "CTR-2026-000001" for NEW-module rows; never an
+  /// authorization identifier (§36). Legacy rows stay null.
+  contributionNumber             String?
+  /// The signed-in User who gave (memberId covers OrgMember linkage; portal
+  /// members and household adults are Users first).
+  contributorUserId              String?
+  currency                       String                         @default("USD")
+  providerPaymentIntentId        String?
+  providerChargeId               String?
+  providerInvoiceId              String?
+  anonymityMode                  ContributionAnonymityMode      @default(NONE)
+  statementEligible              Boolean                        @default(true)
+  taxDeductibilityClassification TaxDeductibilityClassification @default(DEDUCTIBILITY_NOT_CONFIGURED)
+  /// §32 goods/services value received (gala ticket, merchandise) — the
+  /// organization configures it; Unestra computes no tax consequences.
+  goodsServicesValue             Decimal?                       @db.Decimal(12, 2)
+
   organization       Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   member             OrgMember?                 @relation(fields: [memberId], references: [id], onDelete: SetNull)
   campaign           Campaign?                  @relation(fields: [campaignId], references: [id], onDelete: SetNull)
   event              Event?                     @relation(fields: [eventId], references: [id], onDelete: SetNull)
   createdByUser      User?                      @relation("ContributionCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  fund               Fund?                      @relation(fields: [fundId], references: [id], onDelete: Restrict)
+  contributionProgram ContributionProgram?      @relation(fields: [contributionProgramId], references: [id], onDelete: Restrict)
+  contributorUser    User?                      @relation("ContributionContributorUser", fields: [contributorUserId], references: [id], onDelete: SetNull)
   receipts           ContributionReceipt[]
   paymentImportItems PaymentImportItem[]
   fromOfflineReport  PaymentLinkOfflineReport[]
 
+  @@unique([organizationId, contributionNumber])
   @@index([organizationId])
   @@index([memberId])
   @@index([campaignId])
   @@index([eventId])
   @@index([contributionDate])
   @@index([createdAt])
+  @@index([fundId])
+  @@index([contributionProgramId])
+  @@index([providerPaymentIntentId])
+  @@index([contributorUserId])
+}
+
+// ─── CORE-GIVE-A: Contributions & Giving foundation ──────────────────────────
+// MEMBER MONEY, never platform billing (docs/core-contributions-giving.md §1):
+// these models describe money members give their ORGANIZATION. Unestra SaaS
+// billing lives exclusively on Subscription and is never interpreted through
+// these tables.
+
+enum GivingModuleStatus {
+  DRAFT
+  ACTIVE
+  INACTIVE
+  CLOSED
+  ARCHIVED
+}
+
+enum ObligationNature {
+  REQUIRED
+  VOLUNTARY
+}
+
+enum ContributionProgramType {
+  DUES
+  VOLUNTARY_CONTRIBUTION
+  SUGGESTED_CONTRIBUTION
+  ONE_TIME_GIVING
+  PLEDGE_CAMPAIGN
+  FUNDRAISER
+  SPECIAL_OFFERING
+  SPONSORSHIP
+  OTHER
+}
+
+enum ContributionProgramVisibility {
+  MEMBERS
+  PUBLIC
+  HIDDEN
+}
+
+enum TaxDeductibilityClassification {
+  DEDUCTIBILITY_NOT_CONFIGURED
+  ORGANIZATION_MARKED_POTENTIALLY_DEDUCTIBLE
+  NOT_DEDUCTIBLE
+  PARTIALLY_DEDUCTIBLE
+  REQUIRES_REVIEW
+}
+
+/// §20: ORGANIZATION_ANONYMOUS is deliberately NOT offered — provider records
+/// identify the payer and Unestra does not promise impossible anonymity.
+enum ContributionAnonymityMode {
+  NONE
+  PUBLICLY_ANONYMOUS
+}
+
+/// A Fund answers "where is the money designated?" (§4). Never hard-deleted:
+/// CLOSED/ARCHIVED stop new use while history stays intact; org FK Restrict.
+model Fund {
+  id                    String             @id @default(cuid())
+  organizationId        String
+  name                  String
+  description           String?
+  shortCode             String?
+  status                GivingModuleStatus @default(ACTIVE)
+  isPublic              Boolean            @default(false)
+  allowOneTime          Boolean            @default(true)
+  allowRecurring        Boolean            @default(true)
+  allowPledges          Boolean            @default(false)
+  /// Whole-currency suggested amounts shown to givers (never enforced).
+  suggestedAmounts      Decimal[]          @db.Decimal(12, 2)
+  minimumAmount         Decimal?           @db.Decimal(12, 2)
+  maximumAmount         Decimal?           @db.Decimal(12, 2)
+  startDate             DateTime?
+  endDate               DateTime?
+  sortOrder             Int                @default(0)
+  accountingCode        String?
+  externalAccountingRef String?
+  archivedAt            DateTime?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  organization  Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  programs      ContributionProgram[]
+  contributions Contribution[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@index([organizationId, status])
+}
+
+/// A ContributionProgram answers "what giving/payment experience is offered?"
+/// (§5). obligationNature is explicit and SERVER-ENFORCED: REQUIRED is legal
+/// only for type DUES; every other type is voluntary and can never produce
+/// debt, arrears, or delinquency (the program's non-negotiable distinction).
+model ContributionProgram {
+  id                    String                         @id @default(cuid())
+  organizationId        String
+  fundId                String
+  name                  String
+  description           String?
+  type                  ContributionProgramType        @default(VOLUNTARY_CONTRIBUTION)
+  obligationNature      ObligationNature               @default(VOLUNTARY)
+  allowCustomAmount     Boolean                        @default(true)
+  suggestedAmounts      Decimal[]                      @db.Decimal(12, 2)
+  defaultAmount         Decimal?                       @db.Decimal(12, 2)
+  /// Subset of WEEKLY/BIWEEKLY/MONTHLY/QUARTERLY/ANNUALLY offered for
+  /// recurring giving (consumed by CORE-GIVE-C).
+  allowedFrequencies    String[]
+  startDate             DateTime?
+  endDate               DateTime?
+  visibility            ContributionProgramVisibility  @default(MEMBERS)
+  receiptLanguage       String?
+  taxDeductibility      TaxDeductibilityClassification @default(DEDUCTIBILITY_NOT_CONFIGURED)
+  status                GivingModuleStatus             @default(ACTIVE)
+  sortOrder             Int                            @default(0)
+  createdAt             DateTime                       @default(now())
+  updatedAt             DateTime                       @updatedAt
+
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  fund          Fund           @relation(fields: [fundId], references: [id], onDelete: Restrict)
+  contributions Contribution[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([fundId])
 }
 
 model ContributionReceipt {
