@@ -199,3 +199,49 @@ gated to funds:manage.
 - **2026-08-14 (A):** ORGANIZATION_ANONYMOUS not offered (§20 honesty rule).
 - **2026-08-14 (A):** `pledgeId`/`recurringScheduleId` columns land with their
   owning PRs (E/C), not as dangling columns in A.
+
+## 2. CORE-GIVE-B design — One-Time Giving
+
+**Scope (§105-B):** member Give Now on the `/m` member surface, fund
+selection, custom amounts, provider flow, webhook recording, receipts,
+contribution history, idempotency. **Guest giving deferred to J** (the public
+giving page owns the guest experience; /pay/[slug] links continue serving
+guests today) — documented deferral, not architecture debt.
+
+- **Checkout** (`POST /api/giving/checkout`): mirrors the proven
+  member-dues-checkout pattern — `requireMemberWebSession`, rate limit,
+  server-side validation (module enabled; fund org-scoped + ACTIVE +
+  allowOneTime; amount within fund min/max; when a program is chosen it must
+  be ACTIVE, belong to the fund, and if `allowCustomAmount=false` the amount
+  must be one of its suggested amounts), then a one-time Checkout Session
+  with dynamic `price_data`. Metadata is stamped SERVER-SIDE from the
+  authenticated session (`paymentType:"giving"`, organizationId, fundId,
+  programId, memberId, contributorUserId, anonymityMode, memo) — client
+  input is never trusted for attribution (§64 rule applied to web too).
+- **Recording** happens ONLY in the webhook (§7: never trust the redirect).
+  New `paymentType === "giving"` branch in `checkout.session.completed`,
+  ahead of the legacy paymentLinkId branch:
+  1. §50 cross-check: the metadata fund must exist IN the metadata
+     organization and not be CLOSED/ARCHIVED — mismatch logs a
+     security-safe observability event and records nothing;
+  2. idempotency belt beyond event-id dedup: skip if a Contribution already
+     holds this payment_intent;
+  3. create via `withContributionNumber` — fund/program/member/contributor
+     attribution, amount+currency from the session, source MEMBER_PROFILE,
+     `providerPaymentIntentId`, anonymityMode, program tax classification,
+     receipt record via existing `createReceiptForContribution`.
+- **Success page** `/m/giving/success` confirms server-side (retrieves the
+  session from Stripe; shows the recorded contribution or a
+  webhook-still-processing state) — the browser redirect alone never marks
+  anything paid.
+- **Member surface** `/m/giving`: Give Now (funds with suggested-amount
+  chips + custom entry) + contribution history (own rows only, year filter,
+  contribution numbers) + link into success/receipt view. Shell nav follows
+  the existing static-list convention (page renders a friendly not-enabled
+  state, like Violations does for non-HOA).
+- **History API** `GET /api/giving/my-contributions`: rows where the caller
+  is the member OR the contributor — query-scoped, never filtered client-side.
+
+Decisions: source reuses MEMBER_PROFILE (accurate; no enum widening);
+email receipt delivery reuses the existing receipt machinery — the §33
+immediate receipt is the success page + history entry + receipt record.

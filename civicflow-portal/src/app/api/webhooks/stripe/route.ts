@@ -193,6 +193,41 @@ export async function POST(request: Request) {
           await upsertSubscriptionFromStripe(sub, orgId ?? undefined);
         }
 
+        // CORE-GIVE-B: fund-designated member giving. Handled BEFORE the
+        // legacy payment-link branch; the recorder does the §50 tenant
+        // cross-check (fund must exist inside the metadata organization) and
+        // the payment-intent idempotency belt, and records NOTHING on any
+        // linkage inconsistency.
+        if (session.metadata?.paymentType === "giving" && orgId && session.payment_status === "paid") {
+          const { recordGivingContribution } = await import("@/lib/giving/checkout");
+          const result = await recordGivingContribution({
+            organizationId: orgId,
+            fundId: session.metadata?.givingFundId ?? "",
+            programId: session.metadata?.givingProgramId || null,
+            memberId: session.metadata?.memberId || null,
+            contributorUserId: session.metadata?.contributorUserId || null,
+            anonymityMode: session.metadata?.anonymityMode || null,
+            memo: session.metadata?.givingMemo || null,
+            amountTotalCents: session.amount_total ?? 0,
+            currency: session.currency ?? "usd",
+            providerPaymentIntentId: typeof session.payment_intent === "string" ? session.payment_intent : (session.payment_intent?.id ?? null),
+            providerSessionId: session.id,
+          });
+          if (result.outcome === "REJECTED") {
+            console.error(
+              JSON.stringify({ event: "giving_webhook_rejected", reason: result.reason, sessionId: session.id, orgId })
+            );
+          }
+          await createAuditEvent({
+            organizationId: orgId,
+            action: "update",
+            entityType: "stripe_webhook",
+            entityId: session.id,
+            metadata: { eventType: event.type, giving: true, outcome: result.outcome },
+          });
+          break;
+        }
+
         // Record a Contribution (or, for dues, a DuesPayment applied to the
         // member's balance) when a payment link checkout completes.
         const paymentLinkId = session.metadata?.paymentLinkId;
