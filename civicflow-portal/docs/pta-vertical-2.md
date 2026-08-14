@@ -425,3 +425,29 @@ new mobile screens ride a later app release (no placeholder mobile APIs —
   same acceptance rules apply (required checklist items must be complete),
   and board managers keep their PTA-F path unchanged. Surfaced inside
   My PTA only when applicable — no dead tab.
+
+## PR PTA-K — Dashboard 2.0 (this PR)
+
+The §25 actionable officer dashboard — pure read-side aggregation of
+everything A–J built; NO migration, no new mutations.
+
+- **Greeting**: time-of-day + the viewer's own sitting board position
+  (resolved through their household-adult link) — "Good evening, President".
+- **PTA Health strip**: households, adults, volunteer needs (live open-spot
+  math), upcoming events, board fill (X/Y), transition readiness %,
+  compliance state, open/overdue action items — each metric linking to its
+  surface.
+- **Upcoming**: meetings + events + compliance deadlines merged and sorted
+  (60 days, top 8).
+- **Needs Attention**: derived warnings — unaccepted handoffs (per-position
+  when ≤3), open volunteer spots, compliance due-soon/overdue with day
+  counts, overdue action items, reimbursements awaiting review, open
+  concern cases.
+- **§25's two rules enforced in the LIB, not the template**: every section
+  is guarded by the viewer's `can` (an unauthorized metric is never
+  computed, let alone rendered), and grievances appear at most as a
+  permission-safe count of open NON-restricted cases — restricted cases are
+  excluded even from the number.
+- The existing metrics grid (membership/volunteers/payments/fundraising/
+  governance) stays below — Dashboard 2.0 is the actionable layer on top,
+  not a rewrite.
