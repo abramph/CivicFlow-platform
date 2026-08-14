@@ -16,6 +16,10 @@ export async function GET() {
 const putSchema = z.object({
   contributionsEnabled: z.boolean().optional(),
   contributionTerminology: z.string().max(40).nullable().optional(),
+  householdGivingEnabled: z.boolean().optional(),
+  householdGivingPrivacyMode: z
+    .enum(["INDIVIDUAL_PRIVATE", "HOUSEHOLD_STATEMENT_ONLY", "HOUSEHOLD_SHARED"])
+    .optional(),
 });
 
 /** PUT — enable/disable the module and set terminology. Deliberately held to

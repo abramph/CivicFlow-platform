@@ -680,6 +680,7 @@ model Organization {
   recurringContributionSchedules RecurringContributionSchedule[]
   pledges                     Pledge[]
   contributionStatements      ContributionStatement[]
+  households                  Household[]
   ptaElections                PtaElection[]
   ptaElectionContests         PtaElectionContest[]
   ptaElectionCandidates       PtaElectionCandidate[]
@@ -1075,6 +1076,8 @@ model OrgMember {
   membershipCategoryId             String?
   membershipCategoryManualOverride Boolean              @default(false)
   householdName                    String?
+  /// CORE-GIVE-H: structured core household (optional; orgs opt in).
+  householdId                      String?
   emergencyContactName             String?
   emergencyContactPhone            String?
   notes                            String?
@@ -1138,6 +1141,7 @@ model OrgMember {
   recurringSchedules        RecurringContributionSchedule[]
   pledges                   Pledge[]
   contributionStatements    ContributionStatement[]
+  household                 Household?                      @relation(fields: [householdId], references: [id], onDelete: SetNull)
   receipts                       ContributionReceipt[]
   reminderLogs                   EmailReminderLog[]
   communicationLogs              CommunicationLog[]
@@ -1691,6 +1695,10 @@ model OrgSettings {
   /// giving (lazily created) — inline price_data references it, so member-
   /// chosen amounts never create orphan products (§10).
   givingStripeProductId          String?
+  /// CORE-GIVE-H (§28/§29): structured households for giving, default OFF,
+  /// with member-to-member visibility governed by the privacy mode.
+  householdGivingEnabled         Boolean       @default(false)
+  householdGivingPrivacyMode     HouseholdGivingPrivacyMode @default(INDIVIDUAL_PRIVATE)
   updatedAt                      DateTime      @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -2383,6 +2391,37 @@ model RecurringContributionSchedule {
   @@index([fundId])
 }
 
+enum HouseholdGivingPrivacyMode {
+  INDIVIDUAL_PRIVATE
+  HOUSEHOLD_SHARED
+  HOUSEHOLD_STATEMENT_ONLY
+}
+
+/// CORE-GIVE-H: the minimal GENERAL household (§28) — a name and a shared
+/// address. Deliberately not PTA's household system (school-year semantics
+/// must not become mandatory). Giving visibility inside a household is
+/// governed by OrgSettings.householdGivingPrivacyMode (§29) — sharing an
+/// address is not consent to share money.
+model Household {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  addressLine1   String?
+  addressLine2   String?
+  city           String?
+  state          String?
+  zipCode        String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization            @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  members      OrgMember[]
+  statements   ContributionStatement[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
 enum ContributionStatementStatus {
   GENERATED
   SUPERSEDED
@@ -2396,6 +2435,8 @@ model ContributionStatement {
   organizationId    String
   memberId          String?
   contributorUserId String?
+  /// CORE-GIVE-H: set on household statements.
+  householdId       String?
   year              Int
   periodStart       DateTime
   periodEnd         DateTime
@@ -2413,11 +2454,13 @@ model ContributionStatement {
   member        OrgMember?   @relation(fields: [memberId], references: [id], onDelete: SetNull)
   contributorUser User?      @relation("StatementContributor", fields: [contributorUserId], references: [id], onDelete: SetNull)
   generatedBy   User?        @relation("StatementGeneratedBy", fields: [generatedByUserId], references: [id], onDelete: SetNull)
+  household     Household?   @relation(fields: [householdId], references: [id], onDelete: SetNull)
 
   @@index([organizationId])
   @@index([organizationId, year])
   @@index([memberId])
   @@index([contributorUserId])
+  @@index([householdId])
 }
 
 enum PledgeStatus {

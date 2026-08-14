@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { MemberGiveNow } from "@/components/giving/MemberGiveNow";
 import { listMySchedules } from "@/lib/giving/recurring";
 import { listMyPledges } from "@/lib/giving/pledges";
+import { getMyHouseholdGiving } from "@/lib/giving/households";
 
 /**
  * CORE-GIVE-B — the member Give Now surface (docs/core-contributions-giving.md
@@ -78,6 +79,50 @@ export default async function MemberGivingPage({ searchParams }: { searchParams:
     }),
   ]);
 
+  const householdGiving = memberSession.memberId
+    ? await getMyHouseholdGiving(memberSession.organizationId, memberSession.memberId, new Date().getFullYear())
+    : ({ visibility: "NONE" } as const);
+  let householdStatements: { id: string; year: number; version: number; status: string; total: number }[] = [];
+  if (householdGiving.visibility !== "NONE" && memberSession.memberId) {
+    const me = await prisma.orgMember.findUnique({
+      where: { id: memberSession.memberId },
+      select: { householdId: true },
+    });
+    if (me?.householdId) {
+      const rows = await prisma.contributionStatement.findMany({
+        where: { organizationId: memberSession.organizationId, householdId: me.householdId },
+        orderBy: [{ year: "desc" }, { version: "desc" }],
+        select: { id: true, year: true, version: true, status: true, totalAmount: true },
+      });
+      householdStatements = rows.map((row) => ({
+        id: row.id,
+        year: row.year,
+        version: row.version,
+        status: row.status,
+        total: Number(row.totalAmount),
+      }));
+    }
+  }
+  const householdGivingView =
+    householdGiving.visibility === "NONE"
+      ? null
+      : {
+          visibility: householdGiving.visibility,
+          householdName: householdGiving.householdName,
+          year: householdGiving.year,
+          memberSubtotals: householdGiving.memberSubtotals,
+          householdTotal: householdGiving.householdTotal,
+          contributions:
+            householdGiving.visibility === "SHARED"
+              ? householdGiving.contributions.map((row) => ({
+                  date: row.date.toISOString(),
+                  memberName: row.memberName,
+                  designation: row.designation,
+                  amount: row.amount,
+                }))
+              : null,
+        };
+
   const yearTotal = myContributions
     .filter((row) => row.contributionDate.getFullYear() === new Date().getFullYear())
     .reduce((sum, row) => sum + Number(row.amount), 0);
@@ -128,6 +173,8 @@ export default async function MemberGivingPage({ searchParams }: { searchParams:
           status: statement.status,
           total: Number(statement.totalAmount),
         }))}
+        householdGiving={householdGivingView}
+        householdStatements={householdStatements}
         yearTotal={yearTotal}
         history={myContributions.map((row) => ({
           id: row.id,

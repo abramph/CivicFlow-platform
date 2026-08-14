@@ -12,11 +12,18 @@ export const DEFAULT_TERMINOLOGY = "Contributions";
 export async function getGivingSettings(organizationId: string) {
   const settings = await prisma.orgSettings.findUnique({
     where: { organizationId },
-    select: { contributionsEnabled: true, contributionTerminology: true },
+    select: {
+      contributionsEnabled: true,
+      contributionTerminology: true,
+      householdGivingEnabled: true,
+      householdGivingPrivacyMode: true,
+    },
   });
   return {
     contributionsEnabled: settings?.contributionsEnabled ?? false,
     terminology: settings?.contributionTerminology?.trim() || DEFAULT_TERMINOLOGY,
+    householdGivingEnabled: settings?.householdGivingEnabled ?? false,
+    householdGivingPrivacyMode: settings?.householdGivingPrivacyMode ?? "INDIVIDUAL_PRIVATE",
   };
 }
 
@@ -33,24 +40,25 @@ export async function setGivingSettings(input: {
   organizationId: string;
   contributionsEnabled?: boolean;
   contributionTerminology?: string | null;
+  householdGivingEnabled?: boolean;
+  householdGivingPrivacyMode?: "INDIVIDUAL_PRIVATE" | "HOUSEHOLD_STATEMENT_ONLY" | "HOUSEHOLD_SHARED";
   actorUserId: string;
   actorEmail?: string | null;
 }) {
+  const fields = {
+    ...(input.contributionsEnabled !== undefined ? { contributionsEnabled: input.contributionsEnabled } : {}),
+    ...(input.contributionTerminology !== undefined
+      ? { contributionTerminology: input.contributionTerminology?.trim() || null }
+      : {}),
+    ...(input.householdGivingEnabled !== undefined ? { householdGivingEnabled: input.householdGivingEnabled } : {}),
+    ...(input.householdGivingPrivacyMode !== undefined
+      ? { householdGivingPrivacyMode: input.householdGivingPrivacyMode }
+      : {}),
+  };
   const settings = await prisma.orgSettings.upsert({
     where: { organizationId: input.organizationId },
-    create: {
-      organizationId: input.organizationId,
-      ...(input.contributionsEnabled !== undefined ? { contributionsEnabled: input.contributionsEnabled } : {}),
-      ...(input.contributionTerminology !== undefined
-        ? { contributionTerminology: input.contributionTerminology?.trim() || null }
-        : {}),
-    },
-    update: {
-      ...(input.contributionsEnabled !== undefined ? { contributionsEnabled: input.contributionsEnabled } : {}),
-      ...(input.contributionTerminology !== undefined
-        ? { contributionTerminology: input.contributionTerminology?.trim() || null }
-        : {}),
-    },
+    create: { organizationId: input.organizationId, ...fields },
+    update: fields,
   });
 
   const { createAuditEvent } = await import("@/lib/audit");
@@ -66,7 +74,11 @@ export async function setGivingSettings(input: {
           : "giving.module_disabled",
     entityType: "org_settings",
     entityId: settings.id,
-    metadata: { contributionsEnabled: settings.contributionsEnabled },
+    metadata: {
+      contributionsEnabled: settings.contributionsEnabled,
+      householdGivingEnabled: settings.householdGivingEnabled,
+      householdGivingPrivacyMode: settings.householdGivingPrivacyMode,
+    },
   });
   return settings;
 }

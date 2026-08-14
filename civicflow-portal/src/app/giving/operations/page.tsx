@@ -22,7 +22,7 @@ export default async function GivingOperationsPage() {
     );
   }
 
-  const [funds, members, recentOffline] = await Promise.all([
+  const [funds, members, recentOffline, households] = await Promise.all([
     prisma.fund.findMany({
       where: { organizationId, status: "ACTIVE" },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
@@ -50,6 +50,12 @@ export default async function GivingOperationsPage() {
         member: { select: { firstName: true, lastName: true } },
       },
       take: 25,
+    }),
+    prisma.household.findMany({
+      where: { organizationId },
+      orderBy: { name: "asc" },
+      include: { members: { select: { id: true, firstName: true, lastName: true }, orderBy: { lastName: "asc" } } },
+      take: 500,
     }),
   ]);
 
@@ -79,6 +85,16 @@ export default async function GivingOperationsPage() {
             voided: Boolean(row.voidedAt),
           }))}
           canReconcile={can("contributions:reconciliation:view")}
+          households={households.map((household) => ({
+            id: household.id,
+            name: household.name,
+            members: household.members.map((member) => ({
+              id: member.id,
+              name: `${member.firstName} ${member.lastName}`.trim(),
+            })),
+          }))}
+          canManageHouseholds={can("members:write")}
+          householdGivingEnabled={settings.householdGivingEnabled}
         />
       </SectionCard>
     </main>

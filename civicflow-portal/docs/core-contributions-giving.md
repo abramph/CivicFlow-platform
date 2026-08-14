@@ -489,3 +489,62 @@ arrears, dues, or delinquency.
 - PDF via pdf-lib with the shared `toWinAnsiSafe` sanitizer (the PTA-F
   lesson, applied from day one). Downloads are signed URLs, audited,
   owner-or-generator gated.
+
+## 8. CORE-GIVE-H design — Household Giving & Privacy
+
+### The household model (§28)
+Core had only a free-text `OrgMember.householdName`. H adds a minimal,
+genuinely general core `Household` (name + shared address) with
+`OrgMember.householdId` — organizations opt in via
+`OrgSettings.householdGivingEnabled` (default OFF). PTA's household system
+is deliberately NOT reused (school-year semantics, adult/student shape —
+PTA assumptions must not become mandatory). Giving attribution is
+query-time through the member's current household — no denormalized copy
+to drift; the documented consequence is that moving a member re-attributes
+their history to the new household (acceptable v1, revisited if orgs need
+frozen attribution).
+
+### Privacy modes (§29) — the dedicated privacy review
+
+**Threat model**: household adult A reading household adult B's giving
+without authorization. Sharing an address is NOT consent to share money.
+
+- `INDIVIDUAL_PRIVATE` (DEFAULT): the household endpoints return nothing —
+  no totals, no rows, no household statement. Being in a household changes
+  literally nothing about giving visibility.
+- `HOUSEHOLD_STATEMENT_ONLY`: members see the household TOTAL and
+  per-member subtotals (the §29 example: Abram $1,200 / Adelaide $900 /
+  household $2,100) — never transaction-by-transaction detail. Household
+  statements list subtotals only, no transaction rows.
+- `HOUSEHOLD_SHARED`: full mutual visibility inside the household —
+  combined history with member names; household statements list all
+  transactions.
+
+**Enforcement (all server-side, all tested)**:
+1. The mode gate lives in ONE lib function every household surface calls;
+   the member endpoint derives the household from the CALLER's OrgMember
+   row — a household id is never accepted from the client.
+2. The mode is org-level configuration changed only by
+   `contributions:funds:manage` holders through the audited giving-settings
+   route — members cannot escalate their own visibility.
+3. Household statements refuse to generate in INDIVIDUAL_PRIVATE; in
+   STATEMENT_ONLY they contain subtotals only. Statement downloads reuse
+   G's owner-or-generator gate, extended so any CURRENT member of the
+   statement's household may download it when the mode permits.
+4. Finance staff visibility is unchanged: `contributions:individual:view`
+   holders already see individual giving — household modes govern
+   MEMBER-to-member visibility only.
+5. Assignment (`members:write`) is org-scoped and audited; cross-org
+   members cannot be attached (query-scoped).
+Findings: no critical/high. NOTED: household statements in SHARED mode
+reveal each member's transactions to the whole household by design —
+the UI states this when an admin selects the mode.
+
+### Mechanics
+- Additive schema: `Household`, `OrgMember.householdId`,
+  `ContributionStatement.householdId`, two OrgSettings columns.
+- Member surface: a Household Giving card on /m/giving (mode-dependent:
+  nothing / totals / combined history) + household-statement download when
+  permitted.
+- Admin: household create/assign in Giving Operations; mode + enable
+  toggle in Giving Setup with explicit visibility wording per mode.

@@ -27,6 +27,28 @@ export async function GET(_request: Request, { params }: { params: Promise<{ sta
       authorized = true;
       actorUserId = memberSession.userId;
     }
+    // CORE-GIVE-H: a household statement is downloadable by any CURRENT
+    // member of that household — but only while the privacy mode still
+    // permits household visibility (§29; membership and mode are checked
+    // at download time, not issue time).
+    if (!authorized && memberSession && statement.householdId && memberSession.memberId) {
+      const { getHouseholdGivingSettings } = await import("@/lib/giving/households");
+      const { enabled, mode } = await getHouseholdGivingSettings(statement.organizationId);
+      if (enabled && mode !== "INDIVIDUAL_PRIVATE") {
+        const caller = await prisma.orgMember.findFirst({
+          where: {
+            id: memberSession.memberId,
+            organizationId: statement.organizationId,
+            householdId: statement.householdId,
+          },
+          select: { id: true },
+        });
+        if (caller) {
+          authorized = true;
+          actorUserId = memberSession.userId;
+        }
+      }
+    }
     if (!authorized) {
       const { organizationId, session } = await requirePermission("contributions:statements:generate", "throw");
       if (organizationId !== statement.organizationId) {

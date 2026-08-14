@@ -1,7 +1,7 @@
 import { withApiErrorHandling } from "@/lib/api-route";
 import { requirePermission } from "@/lib/auth-guards";
 import { ensureContributionsEnabled } from "@/lib/giving/module";
-import { generateStatement, statementExceptions } from "@/lib/giving/statements";
+import { generateHouseholdStatement, generateStatement, statementExceptions } from "@/lib/giving/statements";
 import { prisma } from "@/lib/prisma";
 import { parseJsonBody, z } from "@/lib/validation";
 
@@ -20,6 +20,7 @@ export async function GET(request: Request) {
         include: {
           member: { select: { firstName: true, lastName: true } },
           contributorUser: { select: { displayName: true, email: true } },
+          household: { select: { name: true } },
         },
         take: 500,
       }),
@@ -32,9 +33,11 @@ export async function GET(request: Request) {
         exceptions,
         statements: statements.map((statement) => ({
           id: statement.id,
-          subject: statement.member
-            ? `${statement.member.firstName} ${statement.member.lastName}`.trim()
-            : (statement.contributorUser?.displayName ?? statement.contributorUser?.email ?? "—"),
+          subject: statement.household
+            ? `${statement.household.name} (household)`
+            : statement.member
+              ? `${statement.member.firstName} ${statement.member.lastName}`.trim()
+              : (statement.contributorUser?.displayName ?? statement.contributorUser?.email ?? "—"),
           version: statement.version,
           status: statement.status,
           total: Number(statement.totalAmount),
@@ -52,6 +55,7 @@ const postSchema = z.object({
    * PREPARES statements — it never emails anyone. */
   all: z.boolean().optional(),
   memberId: z.string().max(64).nullable().optional(),
+  householdId: z.string().max(64).nullable().optional(),
   reason: z.string().max(500).nullable().optional(),
 });
 
@@ -61,6 +65,17 @@ export async function POST(request: Request) {
     await ensureContributionsEnabled(organizationId);
     const input = await parseJsonBody(request, postSchema);
     const actor = { generatedByUserId: session.userId, generatedByEmail: session.userEmail };
+
+    if (input.householdId) {
+      const statement = await generateHouseholdStatement({
+        organizationId,
+        householdId: input.householdId,
+        year: input.year,
+        reason: input.reason ?? null,
+        ...actor,
+      });
+      return Response.json({ ok: true, data: { generated: 1, statementId: statement.id } }, { status: 201 });
+    }
 
     if (input.memberId) {
       const member = await prisma.orgMember.findFirst({ where: { id: input.memberId, organizationId } });
