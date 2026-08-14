@@ -1,3 +1,4 @@
+import type Stripe from "stripe";
 import type { OrganizationStripeAccount } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { FinanceError } from "@/lib/finance-errors";
@@ -158,4 +159,110 @@ export async function getAccountView(organizationId: string): Promise<
     accountMode: account.accountMode,
     statusLabel,
   };
+}
+
+// ── CONNECT-B: onboarding + status sync ─────────────────────────────────────
+
+/** Mode-aware Stripe client. "live" uses the platform key; "test" requires
+ * the OPTIONAL STRIPE_TEST_SECRET_KEY and is permitted ONLY for
+ * billing-exempt (internal/demo) organizations — decided server-side in
+ * startConnectOnboarding, never by callers. */
+export async function getStripeForMode(mode: "test" | "live"): Promise<Stripe> {
+  const { getStripe } = await import("@/lib/stripe");
+  if (mode === "live") return getStripe();
+  const { getServerEnv } = await import("@/lib/env");
+  const key = getServerEnv().STRIPE_TEST_SECRET_KEY;
+  if (!key) throw new FinanceError("Test-mode payments are not configured on this server.", 501);
+  const StripeCtor = (await import("stripe")).default;
+  return new StripeCtor(key, { apiVersion: "2024-06-20" });
+}
+
+export interface OnboardingStart {
+  url: string;
+  stripeAccountId: string;
+  accountMode: "test" | "live";
+  resumed: boolean;
+}
+
+/**
+ * §3/§6 — create (or resume) Stripe-hosted onboarding for the caller's own
+ * organization. Creates a STANDARD account (no custom KYC ever) plus a
+ * single-use Account Link. Mode is decided HERE: billing-exempt demo orgs
+ * get test mode when the test key exists; every real organization is live.
+ * Returning from Stripe never marks anything connected — only
+ * refreshAccountStatus's provider fetch does (§6).
+ */
+export async function startConnectOnboarding(input: {
+  organizationId: string;
+  baseUrl: string;
+  actorUserId: string;
+  actorEmail?: string | null;
+}): Promise<OnboardingStart> {
+  const organization = await prisma.organization.findUnique({
+    where: { id: input.organizationId },
+    select: { name: true, email: true, billingExempt: true },
+  });
+  if (!organization) throw new FinanceError("Organization not found.", 404);
+
+  const existing = await prisma.organizationStripeAccount.findUnique({ where: { organizationId: input.organizationId } });
+  if (existing?.disabledAt) {
+    throw new FinanceError("This organization's Stripe connection was disconnected — reconnection is a managed workflow.", 409);
+  }
+
+  const { getServerEnv } = await import("@/lib/env");
+  const accountMode: "test" | "live" =
+    existing ? (existing.accountMode as "test" | "live")
+    : organization.billingExempt && getServerEnv().STRIPE_TEST_SECRET_KEY ? "test"
+    : "live";
+  const stripe = await getStripeForMode(accountMode);
+
+  let stripeAccountId = existing?.stripeAccountId ?? null;
+  let resumed = Boolean(existing);
+  if (!stripeAccountId) {
+    const account = await stripe.accounts.create({
+      type: "standard",
+      email: organization.email ?? undefined,
+      metadata: { organizationId: input.organizationId, product: "Unestra" },
+    });
+    stripeAccountId = account.id;
+    await prisma.organizationStripeAccount.create({
+      data: {
+        organizationId: input.organizationId,
+        stripeAccountId,
+        accountMode,
+        onboardingStatus: "ONBOARDING_STARTED",
+      },
+    });
+    resumed = false;
+  }
+
+  const link = await stripe.accountLinks.create({
+    account: stripeAccountId,
+    type: "account_onboarding",
+    refresh_url: `${input.baseUrl}/settings/payments?stripe=refresh`,
+    return_url: `${input.baseUrl}/settings/payments?stripe=return`,
+  });
+
+  const { createAuditEvent } = await import("@/lib/audit");
+  await createAuditEvent({
+    organizationId: input.organizationId,
+    actorUserId: input.actorUserId,
+    actorEmail: input.actorEmail ?? null,
+    action: resumed ? "payments.stripe_onboarding_resumed" : "payments.stripe_account_created",
+    entityType: "organization_stripe_account",
+    entityId: stripeAccountId,
+    metadata: { accountMode },
+  });
+  return { url: link.url, stripeAccountId, accountMode, resumed };
+}
+
+/** §6/§27 — provider-truth sync: fetch the account from Stripe and persist
+ * the snapshot. The ONLY path that advances connection state. */
+export async function refreshAccountStatus(organizationId: string) {
+  const existing = await prisma.organizationStripeAccount.findUnique({ where: { organizationId } });
+  if (!existing) throw new FinanceError("Payments are not set up for this organization yet.", 404);
+  const stripe = await getStripeForMode(existing.accountMode as "test" | "live");
+  const account = await stripe.accounts.retrieve(existing.stripeAccountId);
+  await recordAccountSync(organizationId, account as unknown as StripeAccountSnapshot, existing.accountMode as "test" | "live");
+  return getAccountView(organizationId);
 }

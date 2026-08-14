@@ -33,6 +33,10 @@ const serverEnvSchema = z.object({
   // APH Technologies, LLC Stripe account. See docs/APH_TECHNOLOGIES_STRIPE_SETUP.md.
   STRIPE_SECRET_KEY: z.string().min(1),
   STRIPE_WEBHOOK_SECRET: z.string().min(1),
+  // CONNECT-B: OPTIONAL test-mode key for TEST-MODE connected accounts
+  // (billing-exempt demo orgs only — see stripe-connect.ts). Live member
+  // money never uses this key.
+  STRIPE_TEST_SECRET_KEY: z.string().min(1).optional(),
   STRIPE_PRICE_ESSENTIAL_MONTHLY: z.string().optional(),
   STRIPE_PRICE_ESSENTIAL_YEARLY: z.string().optional(),
   STRIPE_PRICE_ELITE_MONTHLY: z.string().optional(),
@@ -108,6 +112,7 @@ export function getServerEnv(): ServerEnv {
     ANDROID_SHA256_CERT_FINGERPRINTS: process.env.ANDROID_SHA256_CERT_FINGERPRINTS,
     STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY,
     STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET,
+    STRIPE_TEST_SECRET_KEY: process.env.STRIPE_TEST_SECRET_KEY,
     STRIPE_PRICE_ESSENTIAL_MONTHLY: process.env.STRIPE_PRICE_ESSENTIAL_MONTHLY,
     STRIPE_PRICE_ESSENTIAL_YEARLY: process.env.STRIPE_PRICE_ESSENTIAL_YEARLY,
     STRIPE_PRICE_ELITE_MONTHLY: process.env.STRIPE_PRICE_ELITE_MONTHLY,

@@ -94,6 +94,8 @@ function sharedNavigation(vertical: "COMMUNITY" | "UNION" | "HOA"): NavItem[] {
     { href: "/settings/categories", label: "Categories", permission: "org_settings:read" },
     { href: "/settings/dues", label: "Dues Setup", permission: "dues:read" },
     { href: "/settings/payment-methods", label: "Payment Methods", permission: "org_settings:read" },
+    // CONNECT-B: the organization's own Stripe connected account (§24).
+    { href: "/settings/payments", label: "Payments", permission: "payments:stripe:view" },
     { href: "/settings/users", label: usersLabel, permission: "users:read" },
     { href: "/settings/roles", label: "Role Permissions", minRole: "ORG_OWNER" },
     { href: "/settings/security", label: "Security" },
