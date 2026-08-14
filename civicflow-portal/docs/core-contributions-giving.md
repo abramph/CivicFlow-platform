@@ -381,3 +381,41 @@ member (§61) via the existing transactional mail path.
 
 Retry authority remains Stripe alone (§17) — Try Again is a member-initiated
 payment of an existing open invoice, not a second retry engine.
+
+## 5. CORE-GIVE-E design — Pledges & Campaigns
+
+A pledge is a STATED INTENTION, never enforceable debt (§22): the UI says
+"Remaining toward pledge", progress is computed live from credited
+contributions, and nothing anywhere converts an unpaid pledge balance into
+arrears, dues, or delinquency.
+
+- **`Pledge`**: org/fund/contributor-scoped intention with pledgedAmount,
+  optional campaign + target date, status ACTIVE/FULFILLED/CANCELLED/
+  EXPIRED/ARCHIVED. Members create their own pledges on pledge-enabled
+  funds (`fund.allowPledges`); officers with `contributions:pledges:manage`
+  can record one for a member. Progress = SUM of non-void contributions
+  carrying `pledgeId` — never stored, never double-counted.
+- **Allocation (§23), no-double-count by construction**: one contribution
+  credits AT MOST one pledge via `Contribution.pledgeId`. v1 supports
+  EXPLICIT designation only (give-toward-pledge at checkout, or a recurring
+  schedule pinned to a pledge via new `RecurringContributionSchedule.pledgeId`
+  — every invoice contribution inherits it). Auto-allocation and split
+  allocation are deliberately deferred (§41): explicit is auditable and
+  cannot surprise anyone.
+- **§50 for pledges**: checkout validates the pledge belongs to the caller,
+  the org, and the SAME fund; the webhook re-verifies that linkage — a
+  mismatched pledge id records the contribution WITHOUT pledge credit (the
+  money is real; the credit is not) and logs a security-safe event.
+- **Fulfillment**: when a recorded credit crosses the pledged amount the
+  status flips to FULFILLED once, audited — display always derives from the
+  live sum regardless.
+- **Campaigns (§24)**: additive `Campaign.fundId` links a campaign to its
+  designated fund; pledges may reference a campaign; campaign totals
+  (pledged / received toward pledges) are computed endpoints. Existing
+  campaign raised-math is untouched — zero regression surface on the legacy
+  fundraising flow. Public per-donor exposure unchanged (none).
+- **Member surface**: My Pledges cards (Pledged / Contributed / **Remaining
+  toward pledge** / progress bar), pledge creation on pledge-enabled funds,
+  and "Give toward pledge" prefilling Give Now. Officer surface: pledge
+  list + campaign pledge totals on the giving setup page (full reporting
+  arrives in K).

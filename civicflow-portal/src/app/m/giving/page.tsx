@@ -4,6 +4,7 @@ import { getGivingSettings } from "@/lib/giving/module";
 import { prisma } from "@/lib/prisma";
 import { MemberGiveNow } from "@/components/giving/MemberGiveNow";
 import { listMySchedules } from "@/lib/giving/recurring";
+import { listMyPledges } from "@/lib/giving/pledges";
 
 /**
  * CORE-GIVE-B — the member Give Now surface (docs/core-contributions-giving.md
@@ -33,7 +34,7 @@ export default async function MemberGivingPage({ searchParams }: { searchParams:
     );
   }
 
-  const [funds, myContributions, mySchedules] = await Promise.all([
+  const [funds, myContributions, mySchedules, myPledges] = await Promise.all([
     prisma.fund.findMany({
       where: { organizationId: memberSession.organizationId, status: "ACTIVE", allowOneTime: true },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
@@ -45,6 +46,7 @@ export default async function MemberGivingPage({ searchParams }: { searchParams:
         minimumAmount: true,
         maximumAmount: true,
         allowRecurring: true,
+        allowPledges: true,
       },
     }),
     prisma.contribution.findMany({
@@ -65,6 +67,7 @@ export default async function MemberGivingPage({ searchParams }: { searchParams:
       take: 25,
     }),
     listMySchedules(memberSession.organizationId, memberSession.userId),
+    listMyPledges(memberSession.organizationId, memberSession.userId),
   ]);
 
   const yearTotal = myContributions
@@ -88,6 +91,18 @@ export default async function MemberGivingPage({ searchParams }: { searchParams:
           minimumAmount: fund.minimumAmount != null ? Number(fund.minimumAmount) : null,
           maximumAmount: fund.maximumAmount != null ? Number(fund.maximumAmount) : null,
           allowRecurring: fund.allowRecurring,
+          allowPledges: fund.allowPledges,
+        }))}
+        pledges={myPledges.map((pledge) => ({
+          id: pledge.id,
+          fundId: pledge.fundId,
+          fundName: pledge.fundName,
+          campaignName: pledge.campaignName,
+          pledged: pledge.pledged,
+          contributed: pledge.contributed,
+          remainingTowardPledge: pledge.remainingTowardPledge,
+          progressPercent: pledge.progressPercent,
+          status: pledge.status,
         }))}
         schedules={mySchedules.map((schedule) => ({
           id: schedule.id,

@@ -678,6 +678,7 @@ model Organization {
   contributionPrograms        ContributionProgram[]
   givingCustomers             GivingCustomer[]
   recurringContributionSchedules RecurringContributionSchedule[]
+  pledges                     Pledge[]
   ptaElections                PtaElection[]
   ptaElectionContests         PtaElectionContest[]
   ptaElectionCandidates       PtaElectionCandidate[]
@@ -756,6 +757,7 @@ model User {
   contributionsGiven                Contribution[]             @relation("ContributionContributorUser")
   givingCustomers                   GivingCustomer[]
   recurringSchedules                RecurringContributionSchedule[] @relation("RecurringScheduleContributor")
+  pledges                           Pledge[]                   @relation("PledgeContributor")
   ptaElectionsCreated               PtaElection[]              @relation("PtaElectionCreatedBy")
   ptaElectionsCertified             PtaElection[]              @relation("PtaElectionCertifiedBy")
   reimbursementsSubmitted           ReimbursementRequest[]     @relation("ReimbursementSubmittedBy")
@@ -1131,6 +1133,7 @@ model OrgMember {
   duesAdjustments                DuesAdjustment[]
   contributions                  Contribution[]
   recurringSchedules        RecurringContributionSchedule[]
+  pledges                   Pledge[]
   receipts                       ContributionReceipt[]
   reminderLogs                   EmailReminderLog[]
   communicationLogs              CommunicationLog[]
@@ -1169,6 +1172,8 @@ model OrgMember {
 model Campaign {
   id             String    @id @default(cuid())
   organizationId String
+  /// CORE-GIVE-E: optional designated fund for this campaign.
+  fundId         String?
   name           String
   description    String?
   goal           Decimal?  @db.Decimal(12, 2)
@@ -1180,6 +1185,8 @@ model Campaign {
   updatedAt      DateTime  @updatedAt
 
   organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  fund               Fund?               @relation(fields: [fundId], references: [id], onDelete: SetNull)
+  pledges            Pledge[]
   contributions      Contribution[]
   communicationLogs  CommunicationLog[]
   expenditures       Expenditure[]
@@ -2200,6 +2207,9 @@ model Contribution {
   /// CORE-GIVE-C: set when this row was produced by a recurring schedule's
   /// provider invoice.
   recurringScheduleId            String?
+  /// CORE-GIVE-E: at most ONE pledge is credited per contribution (§23 —
+  /// no double counting by construction).
+  pledgeId                       String?
 
   organization       Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   member             OrgMember?                 @relation(fields: [memberId], references: [id], onDelete: SetNull)
@@ -2210,6 +2220,7 @@ model Contribution {
   contributionProgram ContributionProgram?      @relation(fields: [contributionProgramId], references: [id], onDelete: Restrict)
   contributorUser    User?                      @relation("ContributionContributorUser", fields: [contributorUserId], references: [id], onDelete: SetNull)
   recurringSchedule  RecurringContributionSchedule? @relation(fields: [recurringScheduleId], references: [id], onDelete: SetNull)
+  pledge             Pledge?                    @relation(fields: [pledgeId], references: [id], onDelete: SetNull)
   receipts           ContributionReceipt[]
   paymentImportItems PaymentImportItem[]
   fromOfflineReport  PaymentLinkOfflineReport[]
@@ -2226,6 +2237,7 @@ model Contribution {
   @@index([providerPaymentIntentId])
   @@index([contributorUserId])
   @@index([recurringScheduleId])
+  @@index([pledgeId])
 }
 
 // ─── CORE-GIVE-A: Contributions & Giving foundation ──────────────────────────
@@ -2327,6 +2339,9 @@ model RecurringContributionSchedule {
   contributorUserId            String
   fundId                       String
   contributionProgramId        String?
+  /// CORE-GIVE-E: a schedule pinned to a pledge — every invoice
+  /// contribution inherits the credit (explicit, auditable allocation).
+  pledgeId                     String?
   amount                       Decimal                 @db.Decimal(12, 2)
   currency                     String                  @default("USD")
   frequency                    RecurringFrequency
@@ -2355,12 +2370,58 @@ model RecurringContributionSchedule {
   contributorUser     User                 @relation("RecurringScheduleContributor", fields: [contributorUserId], references: [id], onDelete: Restrict)
   fund                Fund                 @relation(fields: [fundId], references: [id], onDelete: Restrict)
   contributionProgram ContributionProgram? @relation(fields: [contributionProgramId], references: [id], onDelete: SetNull)
+  pledge              Pledge?              @relation(fields: [pledgeId], references: [id], onDelete: SetNull)
   contributions       Contribution[]
 
   @@index([organizationId])
   @@index([organizationId, status])
   @@index([contributorUserId])
   @@index([fundId])
+}
+
+enum PledgeStatus {
+  ACTIVE
+  FULFILLED
+  CANCELLED
+  EXPIRED
+  ARCHIVED
+}
+
+/// CORE-GIVE-E: a STATED GIVING INTENTION (docs/core-contributions-giving.md
+/// section 5), never enforceable debt. Progress is computed live from
+/// contributions carrying pledgeId; nothing converts an unpaid pledge
+/// balance into arrears, dues, or delinquency.
+model Pledge {
+  id                     String       @id @default(cuid())
+  organizationId         String
+  memberId               String?
+  contributorUserId      String
+  fundId                 String
+  campaignId             String?
+  pledgedAmount          Decimal      @db.Decimal(12, 2)
+  currency               String       @default("USD")
+  pledgeDate             DateTime     @default(now())
+  startDate              DateTime?
+  targetCompletionDate   DateTime?
+  status                 PledgeStatus @default(ACTIVE)
+  allowPublicRecognition Boolean      @default(false)
+  notes                  String?
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  member          OrgMember?   @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  contributorUser User         @relation("PledgeContributor", fields: [contributorUserId], references: [id], onDelete: Restrict)
+  fund            Fund         @relation(fields: [fundId], references: [id], onDelete: Restrict)
+  campaign        Campaign?    @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  contributions   Contribution[]
+  recurringSchedules RecurringContributionSchedule[]
+
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([contributorUserId])
+  @@index([fundId])
+  @@index([campaignId])
 }
 
 /// A Fund answers "where is the money designated?" (§4). Never hard-deleted:
@@ -2393,6 +2454,8 @@ model Fund {
   programs           ContributionProgram[]
   contributions      Contribution[]
   recurringSchedules RecurringContributionSchedule[]
+  pledges            Pledge[]
+  campaigns          Campaign[]
 
   @@unique([organizationId, name])
   @@index([organizationId])

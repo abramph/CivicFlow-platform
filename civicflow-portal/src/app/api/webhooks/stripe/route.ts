@@ -252,6 +252,7 @@ export async function POST(request: Request) {
             programId: session.metadata?.givingProgramId || null,
             memberId: session.metadata?.memberId || null,
             contributorUserId: session.metadata?.contributorUserId || null,
+            pledgeId: session.metadata?.givingPledgeId || null,
             anonymityMode: session.metadata?.anonymityMode || null,
             memo: session.metadata?.givingMemo || null,
             amountTotalCents: session.amount_total ?? 0,

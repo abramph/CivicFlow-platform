@@ -25,6 +25,9 @@ export interface RecurringRequestInput {
   amount: number;
   frequency: RecurringFrequency;
   programId?: string | null;
+  /// CORE-GIVE-E: pin the schedule to the caller's own pledge — every
+  /// invoice contribution inherits the credit.
+  pledgeId?: string | null;
   confirmDuplicate?: boolean;
   contributorUserId: string;
 }
@@ -86,12 +89,22 @@ export async function validateRecurringRequest(input: RecurringRequestInput) {
 /** Creates the PENDING_SETUP schedule row the checkout session will carry. */
 export async function createPendingSchedule(input: RecurringRequestInput & { memberId?: string | null }) {
   const { amount, fund, program } = await validateRecurringRequest(input);
+  if (input.pledgeId) {
+    const { validatePledgeForGiving } = await import("./pledges");
+    await validatePledgeForGiving({
+      organizationId: input.organizationId,
+      contributorUserId: input.contributorUserId,
+      pledgeId: input.pledgeId,
+      fundId: fund.id,
+    });
+  }
   const schedule = await prisma.recurringContributionSchedule.create({
     data: {
       organizationId: input.organizationId,
       memberId: input.memberId ?? null,
       contributorUserId: input.contributorUserId,
       fundId: fund.id,
+      pledgeId: input.pledgeId ?? null,
       contributionProgramId: program?.id ?? null,
       amount: new Prisma.Decimal(amount.toFixed(2)),
       currency: SUPPORTED_CURRENCY,
@@ -186,6 +199,7 @@ export async function recordRecurringInvoicePaid(input: RecurringInvoiceInput): 
         fundId: schedule.fundId,
         contributionProgramId: schedule.contributionProgramId,
         recurringScheduleId: schedule.id,
+        pledgeId: schedule.pledgeId,
         memberId: schedule.memberId,
         contributorUserId: schedule.contributorUserId,
         amount: input.amountPaidCents / 100,
@@ -200,6 +214,11 @@ export async function recordRecurringInvoicePaid(input: RecurringInvoiceInput): 
       },
     })
   );
+
+  if (schedule.pledgeId) {
+    const { markFulfilledIfComplete } = await import("./pledges");
+    await markFulfilledIfComplete(schedule.organizationId, schedule.pledgeId);
+  }
 
   await prisma.recurringContributionSchedule.update({
     where: { id: schedule.id },

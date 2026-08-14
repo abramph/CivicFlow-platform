@@ -14,6 +14,7 @@ const bodySchema = z.object({
   amount: z.number().positive().max(1_000_000),
   frequency: z.enum(["WEEKLY", "BIWEEKLY", "MONTHLY", "QUARTERLY", "ANNUALLY"]),
   programId: z.string().max(64).nullable().optional(),
+  pledgeId: z.string().max(64).nullable().optional(),
   /** §92: the duplicate-schedule guard 409s unless this is explicitly true. */
   confirmDuplicate: z.boolean().optional(),
 });
@@ -39,6 +40,7 @@ export async function POST(request: Request) {
       amount: input.amount,
       frequency: input.frequency,
       programId: input.programId ?? null,
+      pledgeId: input.pledgeId ?? null,
       confirmDuplicate: input.confirmDuplicate ?? false,
       contributorUserId: memberSession.userId,
       memberId: memberSession.memberId,
