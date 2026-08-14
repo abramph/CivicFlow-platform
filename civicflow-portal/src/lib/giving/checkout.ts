@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { FinanceError } from "@/lib/finance-errors";
 import { ensureContributionsEnabled } from "./module";
+import { logGivingEvent } from "./telemetry";
 
 /**
  * CORE-GIVE-B — one-time giving checkout validation + the webhook-side
@@ -126,7 +127,10 @@ export async function recordGivingContribution(input: RecordGivingInput): Promis
     where: { organizationId: input.organizationId, providerPaymentIntentId: reference },
     select: { id: true },
   });
-  if (existing) return { outcome: "DUPLICATE", contributionId: existing.id };
+  if (existing) {
+    logGivingEvent("GIVING_PAYMENT_DUPLICATE_IGNORED", { organizationId: input.organizationId, contributionId: existing.id });
+    return { outcome: "DUPLICATE", contributionId: existing.id };
+  }
 
   const program = input.programId
     ? await prisma.contributionProgram.findFirst({ where: { id: input.programId }, select: { taxDeductibility: true } })
@@ -187,5 +191,11 @@ export async function recordGivingContribution(input: RecordGivingInput): Promis
     metadata: { contributionNumber: contribution.contributionNumber, fundId: input.fundId, amountCents: input.amountTotalCents },
   });
 
+  logGivingEvent("GIVING_PAYMENT_RECORDED", {
+    organizationId: input.organizationId,
+    contributionId: contribution.id,
+    fundId: input.fundId,
+    amountCents: input.amountTotalCents,
+  });
   return { outcome: "RECORDED", contributionId: contribution.id, contributionNumber: contribution.contributionNumber };
 }

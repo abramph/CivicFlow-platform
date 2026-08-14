@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { FinanceError } from "@/lib/finance-errors";
 import { validateGivingRequest } from "./checkout";
+import { logGivingEvent } from "./telemetry";
 
 /**
  * CORE-GIVE-J — the public giving page (docs/core-contributions-giving.md
@@ -136,7 +137,10 @@ export async function recordPublicGivingContribution(input: RecordPublicGivingIn
     where: { organizationId: input.organizationId, providerPaymentIntentId: reference },
     select: { id: true },
   });
-  if (existing) return { outcome: "DUPLICATE", contributionId: existing.id };
+  if (existing) {
+    logGivingEvent("GIVING_PAYMENT_DUPLICATE_IGNORED", { organizationId: input.organizationId, contributionId: existing.id });
+    return { outcome: "DUPLICATE", contributionId: existing.id };
+  }
 
   // §57 matching: an email that matches the roster SUGGESTS a link and
   // nothing more. memberId stays null here, always.
@@ -182,6 +186,13 @@ export async function recordPublicGivingContribution(input: RecordPublicGivingIn
     entityType: "contribution",
     entityId: contribution.id,
     metadata: { contributionNumber: contribution.contributionNumber, fundId: input.fundId, amountCents: input.amountTotalCents, matchStatus },
+  });
+  logGivingEvent("GIVING_PAYMENT_RECORDED", {
+    organizationId: input.organizationId,
+    contributionId: contribution.id,
+    fundId: input.fundId,
+    amountCents: input.amountTotalCents,
+    matchStatus,
   });
   return { outcome: "RECORDED", contributionId: contribution.id, contributionNumber: contribution.contributionNumber, matchStatus };
 }

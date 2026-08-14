@@ -725,3 +725,78 @@ money attributed to a tenant.
 
 **Findings: no CRITICAL/HIGH. Accepted MEDIUMs: metadata PII visibility
 (6), distributed card-testing residual (7). Release not blocked.**
+
+## 11. CORE-GIVE-K design — Reporting, Refunds, Data Health & Finance Operations
+
+**Scope (§105-K):** contribution/recurring/pledge/fund reports, refunds,
+exports, Data Health, observability, reconciliation hardening, plus §100
+controlled adjustments and §35 dispute visibility.
+
+### Refunds (§34) — provider-confirmed, never optimistic
+
+- New Contribution fields: `refundedAmount`, `refundedAt`,
+  `providerRefundId`, `refundReason`, `refundedByUserId`,
+  `providerDisputeStatus`. A refund NEVER voids the row and never edits
+  `amount` — history stays intact; reports subtract.
+- `issueRefund` (gate `contributions:refund`): provider rows only
+  (offline corrections stay F's VOID+recreate), not voided, full or
+  partial with a cumulative cap at the original amount, reason required.
+  Calls `stripe.refunds.create` — the row is marked ONLY from provider
+  truth: immediately when Stripe returns `succeeded`, otherwise by the
+  `charge.refunded` webhook (idempotent on `providerRefundId`). §34's
+  "never mark refunded until provider confirms" holds on both paths.
+- Pledge credit (§34.9): pledge progress sums now use
+  `amount − refundedAmount`, so refunds automatically reduce
+  remaining-toward-pledge without touching allocation rows.
+- Disputes (§35): `charge.dispute.created/closed` set
+  `providerDisputeStatus` on the matching giving contribution (by payment
+  intent) + audit. Disputed rows are never hidden or removed.
+
+### Controlled adjustments (§100)
+
+`ContributionAdjustment` — for corrections where provider money did NOT
+move: FUND_RECLASSIFICATION and ATTRIBUTION_CORRECTION only. Amount is
+NEVER adjustable (that is a refund or F's void+recreate). Each adjustment
+stores before/after snapshots + reason + actor and is audited; the
+contribution row is updated in place (fundId or member attribution), the
+adjustment row is the permanent trail.
+
+### Reports (§52) + export safety (§53)
+
+- One lib (`reports.ts`) returning a uniform `{ columns, rows }` per type:
+  summary (monthly totals), by-fund, by-program, methods, recurring
+  (active schedules + run rate), pledge-progress, failures, refunds,
+  offline, year-over-year. Aggregate reports gate
+  `contributions:summary:view`; anything naming individuals gates
+  `contributions:individual:view` on top.
+- CSV export (`?format=csv`) additionally gates `contributions:export`
+  and EVERY export writes an audit event (§53). Exports carry only the
+  displayed columns — no provider metadata, no payment-method ids, no
+  household details.
+- Deferred, documented: household-giving report (needs the H privacy
+  model surfaced org-wide), statement-summary (the operations page
+  already lists statements), recurring-changes timeline (audit log covers
+  it). Not architecture debt — scope control.
+
+### Data Health (§70) + observability (§71)
+
+- Platform data-health gains giving checks, aggregate-only (no donor
+  amounts at platform level): ACTIVE schedules on closed/archived funds,
+  ACTIVE schedules missing a provider subscription id, duplicate provider
+  payment references, pledges credited above pledged amount, GivingCustomer
+  rows whose org/user pair no longer resolves.
+- `telemetry.ts`: `logGivingEvent(name, metadata)` — structured JSON to
+  stdout with a sanitizer (no emails, no names, no card data; ids and
+  amounts only). Wired: checkout started, payment recorded/duplicate/
+  rejected, recurring created/paused/resumed/cancelled, refund completed,
+  statement generated, reconciliation mismatch.
+
+### Reconciliation hardening (the F flag)
+
+The 7-day provider sweep listed sessions/invoices PLATFORM-WIDE and
+filtered locally — O(all platform events). Hardened: auto-pagination with
+a hard cap + explicit truncation flag surfaced in the report, and one-time
+checkout sessions now also stamp `payment_intent_data.metadata`
+(organizationId/paymentType) so payment intents become org-searchable in
+Stripe going forward, enabling a search-based sweep later without
+re-stamping history.

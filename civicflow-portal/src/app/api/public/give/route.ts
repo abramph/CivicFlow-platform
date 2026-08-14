@@ -4,6 +4,7 @@ import { requireRateLimit } from "@/lib/rate-limit";
 import { parseJsonBody, z } from "@/lib/validation";
 import { getStripe } from "@/lib/stripe";
 import { getServerEnv } from "@/lib/env";
+import { logGivingEvent } from "@/lib/giving/telemetry";
 
 const bodySchema = z.object({
   slug: z.string().min(1).max(100),
@@ -37,8 +38,14 @@ export async function POST(request: Request) {
     const env = getServerEnv();
     const baseUrl = env.NEXTAUTH_URL.replace(/\/$/, "");
 
+    logGivingEvent("GIVING_CHECKOUT_STARTED", { organizationId: organizationId, fundId: fund.id, amountCents: Math.round(amount * 100) });
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
+      // CORE-GIVE-K: also stamp the PAYMENT INTENT so intents are
+      // org-searchable in Stripe (session metadata does not propagate).
+      payment_intent_data: {
+        metadata: { organizationId: organizationId, paymentType: "public-giving" },
+      },
       line_items: [
         {
           price_data: {

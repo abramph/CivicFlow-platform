@@ -519,6 +519,56 @@ export async function POST(request: Request) {
         break;
       }
 
+      case "charge.refunded": {
+        // CORE-GIVE-K (§34): provider-truth refund state. The charge's
+        // payment intent locates OUR contribution; org comes from the
+        // contribution row itself, never from unverified metadata.
+        const charge = event.data.object as Stripe.Charge;
+        const paymentIntentId = typeof charge.payment_intent === "string" ? charge.payment_intent : (charge.payment_intent?.id ?? null);
+        if (paymentIntentId) {
+          const refundList = (charge as { refunds?: { data?: { id: string }[] } }).refunds?.data ?? [];
+          const latestRefundId = refundList[0]?.id ?? `charge-${charge.id}`;
+          const contribution = await prisma.contribution.findFirst({
+            where: { providerPaymentIntentId: paymentIntentId },
+            select: { organizationId: true },
+          });
+          if (contribution) {
+            const { applyProviderRefund } = await import("@/lib/giving/refunds");
+            await applyProviderRefund({
+              organizationId: contribution.organizationId,
+              providerPaymentIntentId: paymentIntentId,
+              providerRefundId: latestRefundId,
+              amountRefundedCents: charge.amount_refunded ?? 0,
+              mode: "cumulative",
+            });
+          }
+        }
+        break;
+      }
+
+      case "charge.dispute.created":
+      case "charge.dispute.closed": {
+        // CORE-GIVE-K (§35): mirror the provider's dispute state; the row
+        // is never hidden or removed.
+        const dispute = event.data.object as Stripe.Dispute;
+        const paymentIntentId = typeof dispute.payment_intent === "string" ? dispute.payment_intent : (dispute.payment_intent?.id ?? null);
+        if (paymentIntentId) {
+          const contribution = await prisma.contribution.findFirst({
+            where: { providerPaymentIntentId: paymentIntentId },
+            select: { organizationId: true },
+          });
+          if (contribution) {
+            const { applyDisputeStatus } = await import("@/lib/giving/refunds");
+            await applyDisputeStatus({
+              organizationId: contribution.organizationId,
+              providerPaymentIntentId: paymentIntentId,
+              disputeStatus: dispute.status ?? "unknown",
+            });
+          }
+        }
+        break;
+      }
+
       default:
         break;
     }

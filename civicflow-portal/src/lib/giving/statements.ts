@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { FinanceError } from "@/lib/finance-errors";
 import { toWinAnsiSafe } from "@/lib/pdf-text";
 import { ensureContributionsEnabled } from "./module";
+import { logGivingEvent } from "./telemetry";
 
 /**
  * CORE-GIVE-G — contribution statements (docs/core-contributions-giving.md
@@ -206,6 +207,7 @@ export async function generateStatement(input: GenerateStatementInput) {
     entityId: statement.id,
     metadata: { year: input.year, version: statement.version, total, reissue: Boolean(prior) },
   });
+  logGivingEvent("GIVING_STATEMENT_GENERATED", { organizationId: input.organizationId, statementId: statement.id });
   return statement;
 }
 

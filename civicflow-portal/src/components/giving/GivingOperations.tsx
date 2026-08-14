@@ -35,6 +35,8 @@ export function GivingOperations({
   households = [],
   canManageHouseholds = false,
   householdGivingEnabled = false,
+  canRefund = false,
+  recentProvider = [],
 }: {
   funds: { id: string; name: string }[];
   members: { id: string; name: string }[];
@@ -52,6 +54,17 @@ export function GivingOperations({
   households?: { id: string; name: string; members: { id: string; name: string }[] }[];
   canManageHouseholds?: boolean;
   householdGivingEnabled?: boolean;
+  canRefund?: boolean;
+  recentProvider?: {
+    id: string;
+    contributionNumber: string | null;
+    amount: number;
+    refundedAmount: number | null;
+    disputeStatus: string | null;
+    date: string;
+    attribution: string;
+    fundName: string;
+  }[];
 }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
@@ -144,6 +157,64 @@ export function GivingOperations({
       setCorrectingId(null);
       setCorrectReason("");
       setNotice("Corrected — the original is voided and preserved; the replacement is linked.");
+      router.refresh();
+    } finally {
+      setPending(false);
+    }
+  }
+
+  const [refundingId, setRefundingId] = useState<string | null>(null);
+  const [refundAmount, setRefundAmount] = useState("");
+  const [refundReason, setRefundReason] = useState("");
+  const [adjustingId, setAdjustingId] = useState<string | null>(null);
+  const [adjustFundId, setAdjustFundId] = useState("");
+  const [adjustReason, setAdjustReason] = useState("");
+
+  async function submitRefund(contributionId: string) {
+    setPending(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/giving/contributions/${contributionId}/refund`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount: refundAmount.trim() ? Number(refundAmount) : null, reason: refundReason.trim() }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        setError(data?.error || "Unable to issue the refund.");
+        return;
+      }
+      setNotice(
+        data.data.marked
+          ? "Refund confirmed by the payment provider and recorded."
+          : "Refund submitted - it will be recorded when the provider confirms."
+      );
+      setRefundingId(null);
+      setRefundAmount("");
+      setRefundReason("");
+      router.refresh();
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function submitAdjust(contributionId: string) {
+    setPending(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/giving/contributions/${contributionId}/adjust`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "FUND_RECLASSIFICATION", newFundId: adjustFundId, reason: adjustReason.trim() }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        setError(data?.error || "Unable to adjust.");
+        return;
+      }
+      setNotice("Fund reclassified - the adjustment trail records before, after, reason, and actor.");
+      setAdjustingId(null);
+      setAdjustReason("");
       router.refresh();
     } finally {
       setPending(false);
@@ -526,6 +597,124 @@ export function GivingOperations({
       </section>
 
 
+
+
+      <section className="border-t border-slate-100 pt-4">
+        <h3 className="text-sm font-semibold text-slate-900">Provider (card) contributions</h3>
+        <p className="text-xs text-slate-500">
+          Refunds go through the payment provider and are recorded only when the provider confirms. Fund
+          reclassification never moves money and leaves a permanent adjustment trail.
+        </p>
+        {recentProvider.length === 0 ? (
+          <p className="mt-2 text-sm text-slate-600">No provider contributions yet.</p>
+        ) : (
+          <ul className="mt-2 divide-y divide-slate-100">
+            {recentProvider.map((row) => (
+              <li key={row.id} className="py-2 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-slate-800">
+                    {row.contributionNumber ?? "-"} - {new Date(row.date).toLocaleDateString()} - {row.attribution} -{" "}
+                    {row.fundName} - <span className="font-medium">{money(row.amount)}</span>
+                    {row.refundedAmount ? (
+                      <span className="ml-1 text-amber-700">({money(row.refundedAmount)} refunded)</span>
+                    ) : null}
+                    {row.disputeStatus ? (
+                      <span className="ml-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-800">
+                        dispute: {row.disputeStatus}
+                      </span>
+                    ) : null}
+                  </span>
+                  <span className="flex gap-2">
+                    {canRefund && (row.refundedAmount ?? 0) < row.amount ? (
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={() => {
+                          setRefundingId(refundingId === row.id ? null : row.id);
+                          setAdjustingId(null);
+                        }}
+                        className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        Refund
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      disabled={pending}
+                      onClick={() => {
+                        setAdjustingId(adjustingId === row.id ? null : row.id);
+                        setRefundingId(null);
+                      }}
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      Reclassify fund
+                    </button>
+                  </span>
+                </div>
+                {refundingId === row.id ? (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <input
+                      type="number"
+                      min={0.01}
+                      max={row.amount - (row.refundedAmount ?? 0)}
+                      step="0.01"
+                      value={refundAmount}
+                      onChange={(event) => setRefundAmount(event.target.value)}
+                      placeholder={`Blank = full remaining (${money(row.amount - (row.refundedAmount ?? 0))})`}
+                      className="w-64 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm"
+                    />
+                    <input
+                      value={refundReason}
+                      onChange={(event) => setRefundReason(event.target.value)}
+                      placeholder="Reason (required)"
+                      className="w-72 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm"
+                    />
+                    <button
+                      type="button"
+                      disabled={pending || !refundReason.trim()}
+                      onClick={() => submitRefund(row.id)}
+                      className="rounded-lg bg-red-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-800 disabled:opacity-50"
+                    >
+                      Issue refund
+                    </button>
+                  </div>
+                ) : null}
+                {adjustingId === row.id ? (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <select
+                      value={adjustFundId}
+                      onChange={(event) => setAdjustFundId(event.target.value)}
+                      className="w-56 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"
+                      aria-label="Destination fund"
+                    >
+                      <option value="">Move to fund...</option>
+                      {funds.map((fund) => (
+                        <option key={fund.id} value={fund.id}>
+                          {fund.name}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      value={adjustReason}
+                      onChange={(event) => setAdjustReason(event.target.value)}
+                      placeholder="Reason (required)"
+                      className="w-72 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm"
+                    />
+                    <button
+                      type="button"
+                      disabled={pending || !adjustFundId || !adjustReason.trim()}
+                      onClick={() => submitAdjust(row.id)}
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      Reclassify
+                    </button>
+                  </div>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       <section className="border-t border-slate-100 pt-4">
         <div className="flex items-center gap-2">

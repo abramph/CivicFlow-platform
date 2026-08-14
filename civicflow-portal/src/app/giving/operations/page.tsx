@@ -22,7 +22,7 @@ export default async function GivingOperationsPage() {
     );
   }
 
-  const [funds, members, recentOffline, households] = await Promise.all([
+  const [funds, members, recentOffline, households, recentProvider] = await Promise.all([
     prisma.fund.findMany({
       where: { organizationId, status: "ACTIVE" },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
@@ -56,6 +56,23 @@ export default async function GivingOperationsPage() {
       orderBy: { name: "asc" },
       include: { members: { select: { id: true, firstName: true, lastName: true }, orderBy: { lastName: "asc" } } },
       take: 500,
+    }),
+    prisma.contribution.findMany({
+      where: { organizationId, paymentMethod: "STRIPE", providerPaymentIntentId: { not: null }, voidedAt: null },
+      orderBy: { contributionDate: "desc" },
+      select: {
+        id: true,
+        contributionNumber: true,
+        amount: true,
+        refundedAmount: true,
+        providerDisputeStatus: true,
+        contributionDate: true,
+        contributorName: true,
+        anonymityMode: true,
+        fund: { select: { name: true } },
+        member: { select: { firstName: true, lastName: true } },
+      },
+      take: 25,
     }),
   ]);
 
@@ -95,6 +112,22 @@ export default async function GivingOperationsPage() {
           }))}
           canManageHouseholds={can("members:write")}
           householdGivingEnabled={settings.householdGivingEnabled}
+          canRefund={can("contributions:refund")}
+          recentProvider={recentProvider.map((row) => ({
+            id: row.id,
+            contributionNumber: row.contributionNumber,
+            amount: Number(row.amount),
+            refundedAmount: row.refundedAmount !== null ? Number(row.refundedAmount) : null,
+            disputeStatus: row.providerDisputeStatus,
+            date: row.contributionDate.toISOString(),
+            attribution:
+              row.anonymityMode === "PUBLICLY_ANONYMOUS"
+                ? "(anonymous)"
+                : row.member
+                  ? `${row.member.firstName} ${row.member.lastName}`.trim()
+                  : (row.contributorName ?? "—"),
+            fundName: row.fund?.name ?? "—",
+          }))}
         />
       </SectionCard>
     </main>

@@ -184,6 +184,96 @@ async function volunteerSlotOverCapacityFindings(): Promise<OperationalRisk[]> {
   }));
 }
 
+
+// ── CORE-GIVE-K (§70): giving data-integrity checks. Aggregate/structural
+// only — donor amounts never appear at platform level.
+
+async function activeScheduleOnClosedFundFindings(): Promise<OperationalRisk[]> {
+  const schedules = await prisma.recurringContributionSchedule.findMany({
+    where: { status: "ACTIVE", fund: { status: { in: ["CLOSED", "ARCHIVED"] } } },
+    select: { id: true, organizationId: true, organization: { select: { name: true } }, fund: { select: { name: true, status: true } } },
+    take: 500,
+  });
+  return schedules.map((schedule) => ({
+    id: `giving-schedule-closed-fund:${schedule.id}`,
+    severity: "critical" as const,
+    title: "Active recurring schedule designates a closed/archived fund",
+    explanation: `Organization ${schedule.organization.name} has an ACTIVE recurring giving schedule pointed at fund "${schedule.fund.name}" (${schedule.fund.status}). Future invoices will still record; the organization should redesignate or cancel the schedule.`,
+    affectedEntity: { type: "recurring_schedule", id: schedule.id, label: schedule.id },
+    firstDetectedAt: null,
+    href: `/admin/platform/organizations/${schedule.organizationId}`,
+    source: "database" as const,
+  }));
+}
+
+async function activeScheduleMissingProviderFindings(): Promise<OperationalRisk[]> {
+  const schedules = await prisma.recurringContributionSchedule.findMany({
+    where: { status: "ACTIVE", providerSubscriptionId: null },
+    select: { id: true, organizationId: true, organization: { select: { name: true } } },
+    take: 500,
+  });
+  return schedules.map((schedule) => ({
+    id: `giving-schedule-no-provider:${schedule.id}`,
+    severity: "critical" as const,
+    title: "ACTIVE giving schedule has no provider subscription id",
+    explanation: `Organization ${schedule.organization.name} has a schedule marked ACTIVE without a providerSubscriptionId — it can never receive invoices and its status misrepresents reality. Likely a webhook linkage failure.`,
+    affectedEntity: { type: "recurring_schedule", id: schedule.id, label: schedule.id },
+    firstDetectedAt: null,
+    href: `/admin/platform/organizations/${schedule.organizationId}`,
+    source: "database" as const,
+  }));
+}
+
+async function duplicateProviderReferenceFindings(): Promise<OperationalRisk[]> {
+  const dupes = await prisma.contribution.groupBy({
+    by: ["organizationId", "providerPaymentIntentId"],
+    where: { providerPaymentIntentId: { not: null }, voidedAt: null },
+    _count: { id: true },
+    having: { id: { _count: { gt: 1 } } },
+    orderBy: { organizationId: "asc" },
+    take: 200,
+  });
+  return dupes.map((dupe) => ({
+    id: `giving-duplicate-provider-ref:${shortHash(`${dupe.organizationId}:${dupe.providerPaymentIntentId}`)}`,
+    severity: "critical" as const,
+    title: "Duplicate provider payment reference",
+    explanation: `An organization has ${dupe._count.id} non-void contributions sharing one provider payment reference — the idempotency belt should make this impossible; investigate before statements are issued.`,
+    affectedEntity: { type: "contribution", id: dupe.providerPaymentIntentId ?? "", label: "duplicate reference" },
+    firstDetectedAt: null,
+    href: `/admin/platform/organizations/${dupe.organizationId}`,
+    source: "database" as const,
+  }));
+}
+
+async function pledgeOvercreditFindings(): Promise<OperationalRisk[]> {
+  const pledges = await prisma.pledge.findMany({
+    where: { status: { in: ["ACTIVE", "FULFILLED"] } },
+    select: { id: true, pledgedAmount: true, organizationId: true, organization: { select: { name: true } } },
+    take: 2000,
+  });
+  const findings: OperationalRisk[] = [];
+  for (const pledge of pledges) {
+    const sum = await prisma.contribution.aggregate({
+      where: { organizationId: pledge.organizationId, pledgeId: pledge.id, voidedAt: null },
+      _sum: { amount: true },
+    });
+    const credited = Number(sum._sum.amount ?? 0);
+    if (credited > Number(pledge.pledgedAmount) * 1.5) {
+      findings.push({
+        id: `giving-pledge-overcredit:${pledge.id}`,
+        severity: "warning" as const,
+        title: "Pledge credited far above pledged amount",
+        explanation: `Organization ${pledge.organization.name} has a pledge credited at more than 150% of its stated amount. Overgiving is legal and welcome — this flags a possible mis-allocation for a spot check, not wrongdoing.`,
+        affectedEntity: { type: "pledge", id: pledge.id, label: pledge.id },
+        firstDetectedAt: null,
+        href: `/admin/platform/organizations/${pledge.organizationId}`,
+        source: "database" as const,
+      });
+    }
+  }
+  return findings;
+}
+
 export async function getDataHealthFindings(): Promise<OperationalRisk[]> {
   const groups = await Promise.all([
     householdsMissingPrimaryContactFindings(),
@@ -193,6 +283,10 @@ export async function getDataHealthFindings(): Promise<OperationalRisk[]> {
     inactiveStudentActiveEnrollmentFindings(),
     staleCommitteeMembershipFindings(),
     volunteerSlotOverCapacityFindings(),
+    activeScheduleOnClosedFundFindings(),
+    activeScheduleMissingProviderFindings(),
+    duplicateProviderReferenceFindings(),
+    pledgeOvercreditFindings(),
   ]);
 
   const severityRank: Record<OperationalRisk["severity"], number> = { critical: 0, warning: 1, info: 2 };
