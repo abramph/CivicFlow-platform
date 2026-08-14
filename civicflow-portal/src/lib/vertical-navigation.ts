@@ -75,6 +75,7 @@ function sharedNavigation(vertical: "COMMUNITY" | "UNION" | "HOA"): NavItem[] {
     // CORE-GIVE-A: module setup — appears only for holders of the new giving
     // capabilities (FINANCE+); the module itself is default-off per org.
     { href: "/settings/giving", label: "Giving Setup", permission: "contributions:funds:manage" },
+    { href: "/giving/operations", label: "Giving Operations", permission: "contributions:offline:create" },
     { href: "/reports", label: "Reports" },
     { href: "/receipts", label: "Receipts" },
     { href: "/reminders", label: "Reminders" },

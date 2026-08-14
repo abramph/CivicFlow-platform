@@ -419,3 +419,38 @@ arrears, dues, or delinquency.
   and "Give toward pledge" prefilling Give Now. Officer surface: pledge
   list + campaign pledge totals on the giving setup page (full reporting
   arrives in K).
+
+## 6. CORE-GIVE-F design — Offline Contributions & Reconciliation
+
+- **Offline entry (§21)**: `contributions:offline:create` records cash /
+  check / ACH / Zelle / etc. (the existing DuesPaymentMethod values — no
+  enum widening) against a fund, with member attribution, free-text
+  contributor name, or explicit anonymity; optional reference/check number
+  and memo; optional pledge credit re-using the same §50 linkage
+  verification the webhook uses (the credit must belong to the attributed
+  contributor). Every entry gets a CTR- number, source MANUAL, and a
+  CONTRIBUTION_OFFLINE_RECORDED audit event.
+- **Corrections (§21/§100)**: never destructive. `correctOfflineContribution`
+  VOIDS the original (voidedAt/voidReason — the existing correction
+  machinery, reused) and creates a replacement linked via correctionOfId
+  with an incremented revisionNumber, both audited; pledge credits recompute
+  automatically because progress is a live sum over non-void rows.
+  Statement-aware supersede semantics arrive with statements themselves (G).
+- **Reconciliation (§51)**: computed view for
+  `contributions:reconciliation:view`, never auto-correcting anything:
+  - Unestra-side anomalies: PENDING_SETUP schedules older than 24h
+    (abandoned checkouts), schedules in PAYMENT_FAILED /
+    PAYMENT_ACTION_REQUIRED, provider-referenced contributions missing a
+    contribution number, duplicate provider payment references.
+  - Provider-side sweep (last 7 days, two list calls): paid giving Checkout
+    Sessions without a recorded contribution → PROVIDER_ONLY; paid invoices
+    on our giving subscriptions without a contribution → PROVIDER_ONLY.
+  - Classification: MATCHED / NEEDS_REVIEW / PROVIDER_ONLY / UNESTRA_ONLY.
+  Full provider-pull hardening and REFUND_MISMATCH arrive with refunds in
+  K (§105-K), documented deferral.
+- **Permission separation (§46)**: recording (`offline:create`) and
+  reconciliation (`reconciliation:view`) are distinct capabilities;
+  organizations split Financial-Secretary vs Treasurer via
+  OrgRolePermissionSet, and neither implies refunds (K) or exports (K).
+- Officer surface: new **Giving Operations** page (record form + corrections
+  + reconciliation report), nav-gated on `contributions:offline:create`.
