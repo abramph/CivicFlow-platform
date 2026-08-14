@@ -800,3 +800,60 @@ checkout sessions now also stamp `payment_intent_data.metadata`
 (organizationId/paymentType) so payment intents become org-searchable in
 Stripe going forward, enabling a search-based sweep later without
 re-stamping history.
+
+## 12. CORE-GIVE-L design — Mobile Giving
+
+**Scope (§105-L):** Give Now, My Giving, recurring management, pledges,
+history, statements — member self-service ONLY. No finance administration
+in mobile V1 (no offline entry, refunds, reports, or reconciliation).
+
+### Release isolation (§109) — the governing constraint
+
+Code lands on main; the FEATURE ships in the NEXT store build. The current
+store release artifact is not regenerated, no EAS build is triggered by
+this PR, and the store-provisioning freeze stays in force. Portal-side
+endpoints deploy immediately (additive, invisible to the current app —
+old builds simply never call them).
+
+### Payment security (§64/§65)
+
+No card entry in-app, ever: Give Now and recurring setup create the same
+server-stamped Stripe Checkout sessions as the member web surface and hand
+off to the SYSTEM BROWSER (the app's existing `expo-web-browser` pattern
+for payment links). This also keeps charitable giving outside the app's
+purchase flow (§65). Checkout lands on a new session-less
+`/giving/checkout-complete` page ("return to the app") — the webhook
+remains the only recorder; the app refreshes state on return.
+
+### Endpoints — `/api/mobile/giving/*`
+
+All behind `requireMobileMembership` (caller's own org tie + linked member
+re-verified server-side; scoped to own data only):
+- `GET /api/mobile/giving?organizationId=` — one round trip:
+  `{ enabled, terminology, funds, yearTotal, history, schedules, pledges,
+  statements }`. Module off → `{ enabled: false }` and the app renders no
+  giving surface (§84).
+- `POST checkout` / `POST recurring/checkout` — wrap the exact web libs
+  (validateGivingRequest / createPendingSchedule §92 duplicate guard);
+  metadata identical to the web member flow (memberId + contributorUserId
+  from the MOBILE session, server-stamped).
+- `POST recurring/manage` — pause/resume/cancel/change-amount via the D
+  self-service lib (`authorizeOwnSchedule` ownership-in-query 404).
+- `POST pledges` — createPledge (voluntary-never-debt wording reused).
+- `GET statements/[statementId]` — signed URL; subject-only (the caller's
+  own member/contributor rows; household statements excluded from mobile
+  V1 — the H mode gate stays a web concern for now, documented).
+
+### App changes (`civicflow-mobile`)
+
+- `mobile-api.ts`: typed `getGiving` / `startGivingCheckout` /
+  `startRecurringGivingCheckout` / `manageRecurringGiving` /
+  `createGivingPledge` / `getGivingStatementUrl`.
+- New `/giving` screen (§38 member dashboard): year total, Give Now (fund
+  chips + suggested amounts + custom), recurring list with manage actions,
+  pledges (+ make a pledge on pledge-enabled funds), recent history,
+  statements (system browser via signed URL). Renders nothing when the
+  module is off; copy carries the §16 no-debt language for failures.
+- Dashboard entry card appears only when `enabled` — no dead ends.
+- No deep-link changes (the nav-wedge readiness gate from PR #93 is not
+  touched).
