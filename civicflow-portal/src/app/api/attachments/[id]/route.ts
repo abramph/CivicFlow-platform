@@ -4,6 +4,38 @@ import { requirePermission, withForbiddenHandler } from "@/lib/auth-guards";
 import { prisma } from "@/lib/prisma";
 import { deleteObjectFromSpaces } from "@/lib/storage";
 
+/** PATCH /api/attachments/:id — PTA-J: flip member visibility. Requires the
+ * entity type's WRITE permission; the member-facing routes only ever serve
+ * rows where this flag is true. */
+export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  return withForbiddenHandler(async () => {
+    const { id } = await params;
+    const body = (await request.json().catch(() => null)) as { memberVisible?: unknown } | null;
+    if (!body || typeof body.memberVisible !== "boolean") {
+      return Response.json({ ok: false, error: "memberVisible (boolean) is required." }, { status: 400 });
+    }
+    const existing = await prisma.attachment.findFirst({ where: { id, deletedAt: null } });
+    if (!existing) return Response.json({ ok: false, error: "Attachment not found." }, { status: 404 });
+
+    const { session, organizationId } = await requirePermission(attachmentPermission(existing.entityType, "write"), "throw");
+    if (organizationId !== existing.organizationId) {
+      return Response.json({ ok: false, error: "Attachment not found." }, { status: 404 });
+    }
+
+    const row = await prisma.attachment.update({ where: { id }, data: { memberVisible: body.memberVisible } });
+    await createAuditEvent({
+      organizationId,
+      actorUserId: session.userId,
+      actorEmail: session.userEmail,
+      action: body.memberVisible ? "attachment.member_visible_enabled" : "attachment.member_visible_disabled",
+      entityType: "attachment",
+      entityId: id,
+      metadata: { fileName: row.fileName },
+    });
+    return Response.json({ ok: true, data: row });
+  });
+}
+
 export async function DELETE(_: Request, { params }: { params: Promise<{ id: string }> }) {
   return withForbiddenHandler(async () => {
     const { id } = await params;

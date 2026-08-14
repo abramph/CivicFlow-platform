@@ -49,9 +49,11 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...args: unknown[]) => createAuditEvent(...args) }));
 
 import {
+  acceptOwnHandoff,
   checklistTemplateForPosition,
   computeReadiness,
   createTransition,
+  getMyIncomingHandoff,
   setChecklistItemCompletion,
   updateHandoff,
   updateTransition,
@@ -265,6 +267,55 @@ describe("completing a transition (the ceremony)", () => {
     await expect(
       updateTransition({ organizationId: "org-1", transitionId: "t1", status: "PREPARING", ...actor })
     ).rejects.toMatchObject({ code: "PTA_VALIDATION_ERROR" });
+  });
+});
+
+describe("self-service acceptance (PTA-J, §15)", () => {
+  const ownHandoff = {
+    id: "h1",
+    status: "IN_PROGRESS",
+    position: { id: "p1", name: "Treasurer", responsibilities: null },
+    transition: { id: "t1", status: "HANDOFF_IN_PROGRESS", fromSchoolYear: { label: "2026-2027" }, toSchoolYear: { label: "2027-2028" } },
+    outgoingAssignment: null,
+    checklistItems: [{ id: "c1", isRequired: true, completedAt: new Date() }],
+  };
+
+  it("lookup is linkage-gated: incoming assignment must belong to the caller's own adult", async () => {
+    findFirstHandoff.mockResolvedValueOnce(null);
+    await getMyIncomingHandoff("org-1", "user-9");
+    expect(findFirstHandoff.mock.calls[0][0].where).toMatchObject({
+      organizationId: "org-1",
+      transition: { status: { not: "COMPLETED" } },
+      incomingAssignment: { status: "INCOMING", householdAdult: { userId: "user-9" } },
+    });
+  });
+
+  it("accepting your own position requires the outgoing officer's required items to be done", async () => {
+    findFirstHandoff.mockResolvedValueOnce({
+      ...ownHandoff,
+      checklistItems: [{ id: "c1", isRequired: true, completedAt: null }],
+    });
+    await expect(acceptOwnHandoff({ organizationId: "org-1", userId: "user-9" })).rejects.toMatchObject({ code: "PTA_VALIDATION_ERROR" });
+  });
+
+  it("acceptance stamps acceptedAt, audits with selfService, and is idempotent", async () => {
+    findFirstHandoff.mockResolvedValueOnce(ownHandoff);
+    updateHandoffRow.mockImplementation(async (args: { data: Record<string, unknown> }) => ({ ...ownHandoff, ...args.data }));
+    await acceptOwnHandoff({ organizationId: "org-1", userId: "user-9" });
+    expect(updateHandoffRow.mock.calls[0][0].data).toMatchObject({ status: "ACCEPTED" });
+    expect(createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "pta.transition.handoff_accepted", metadata: expect.objectContaining({ selfService: true }) })
+    );
+
+    findFirstHandoff.mockResolvedValueOnce({ ...ownHandoff, status: "ACCEPTED" });
+    const again = await acceptOwnHandoff({ organizationId: "org-1", userId: "user-9" });
+    expect(again.status).toBe("ACCEPTED");
+    expect(updateHandoffRow).toHaveBeenCalledTimes(1);
+  });
+
+  it("nobody without a live incoming assignment can accept anything", async () => {
+    findFirstHandoff.mockResolvedValueOnce(null);
+    await expect(acceptOwnHandoff({ organizationId: "org-1", userId: "stranger" })).rejects.toMatchObject({ code: "PTA_HANDOFF_NOT_FOUND" });
   });
 });
 

@@ -3073,6 +3073,11 @@ model Attachment {
   objectKey        String
   title            String?
   description      String?
+  /// PTA-J: whether ordinary members (parents, mobile members) may see this
+  /// file through the dedicated member-facing routes. Default FALSE — a
+  /// document is never member-visible by omission; an officer flips it
+  /// deliberately per file.
+  memberVisible    Boolean              @default(false)
   uploadedByUserId String?
   uploadedAt       DateTime             @default(now())
   deletedAt        DateTime?

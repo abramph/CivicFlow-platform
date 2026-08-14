@@ -69,6 +69,7 @@ export default async function PtaLayout({ children }: { children: ReactNode }) {
   });
 
   const parentTabs: PtaTab[] = [
+    { href: "/labs/pta/my-pta", label: "My PTA", visible: Boolean(adult) },
     { href: "/labs/pta/my-household", label: "My Household", visible: Boolean(adult) },
     { href: "/labs/pta/membership", label: "My Membership", visible: Boolean(adult) },
     { href: "/labs/pta/volunteers", label: "Volunteer Opportunities", visible: Boolean(adult) },

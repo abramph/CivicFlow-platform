@@ -11,6 +11,7 @@ type AttachmentRow = {
   contentType: string;
   byteSize: number;
   purpose: string | null;
+  memberVisible?: boolean;
   title: string | null;
   description: string | null;
   uploadedAt: string;
@@ -27,6 +28,7 @@ export function AttachmentManager({
   entityId,
   purpose,
   filterByPurpose = false,
+  showMemberVisibility = false,
   canWrite,
   titleLabel = "File title",
 }: {
@@ -37,6 +39,9 @@ export function AttachmentManager({
    * by default: single-purpose surfaces may hold legacy rows whose purpose
    * was stamped differently, and must keep showing everything. */
   filterByPurpose?: boolean;
+  /** PTA-J: show the per-file "Visible to members" toggle (Document Center).
+   * Off by default — most attachment surfaces are officer-only records. */
+  showMemberVisibility?: boolean;
   canWrite: boolean;
   titleLabel?: string;
 }) {
@@ -101,6 +106,23 @@ export function AttachmentManager({
       router.refresh();
     }
     setSaving(false);
+  }
+
+  async function handleVisibility(id: string, memberVisible: boolean) {
+    setError(null);
+    setMessage(null);
+    const response = await fetch(`/api/attachments/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ memberVisible }),
+    });
+    const payload = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+    if (!response.ok || !payload?.ok) {
+      setError(payload?.error ?? "Failed to update visibility.");
+    } else {
+      await loadRows();
+      router.refresh();
+    }
   }
 
   async function handleDelete(id: string) {
@@ -175,6 +197,14 @@ export function AttachmentManager({
                   <div className="flex flex-wrap gap-2">
                     <a href={`/api/attachments/${row.id}/download`} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 hover:bg-slate-50">Download</a>
                     {canWrite ? <button type="button" onClick={() => void handleDelete(row.id)} className="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50">Remove</button> : null}
+                    {showMemberVisibility && canWrite ? (
+                      <label className="flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-semibold text-slate-700">
+                        <input type="checkbox" checked={row.memberVisible ?? false} onChange={(event) => void handleVisibility(row.id, event.target.checked)} className="h-3.5 w-3.5" />
+                        Visible to members
+                      </label>
+                    ) : showMemberVisibility && row.memberVisible ? (
+                      <span className="rounded-lg bg-sky-100 px-2 py-1.5 text-xs font-semibold text-sky-800">Member-visible</span>
+                    ) : null}
                   </div>
                 </td>
               </tr>
