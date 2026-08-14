@@ -199,6 +199,15 @@ gated to funds:manage.
 - **2026-08-14 (A):** ORGANIZATION_ANONYMOUS not offered (§20 honesty rule).
 - **2026-08-14 (A):** `pledgeId`/`recurringScheduleId` columns land with their
   owning PRs (E/C), not as dangling columns in A.
+- **2026-08-15 (I):** Org-type expansion implemented as a NEW
+  `OrganizationCategory` presentation enum + vertical mapping, NOT a widening
+  of `OrganizationVertical` — the vertical drives ~10 exhaustive maps and the
+  frozen mobile app; §2's "type + configuration + capabilities" model is the
+  design, not a compromise.
+- **2026-08-15 (I):** Found and fixed an A-era RBAC defect: the giving
+  bundle intended for FINANCE ("all but segment") had been patched into
+  ORG_ADMIN twice; FINANCE held NO new giving capability until now.
+  Undetected because prod smokes impersonate ORG_OWNER.
 
 ## 2. CORE-GIVE-B design — One-Time Giving
 
@@ -548,3 +557,88 @@ the UI states this when an admin selects the mode.
   permitted.
 - Admin: household create/assign in Giving Operations; mode + enable
   toggle in Giving Setup with explicit visibility wording per mode.
+
+## 9. CORE-GIVE-I design — General Organization / Church Experience
+
+**Scope (§105-I):** organization type/preset experience, giving terminology
+presets, Ministries/Groups as core infrastructure, the finance dashboard
+(§37), General Organization Dashboard giving cards (§54), the giving
+activation checklist (§85/§86), and the member giving summary (§38).
+
+### Organization categories — type + configuration, not a wider vertical enum
+
+§2's own rule ("Do not assume organization type alone controls every
+feature; use type + feature configuration + capabilities + settings")
+resolves the deferred enum question. `OrganizationVertical` stays four
+values: it is the EXPERIENCE ENGINE — ~10 exhaustive `Record` maps
+(navigation, terminology, capabilities, RSVP, support-assistant knowledge)
+and the FROZEN mobile app all consume it, and widening it would push
+unknown values into a mobile release we are forbidden to regenerate.
+Instead:
+
+- New `OrganizationCategory` enum (13 values: COMMUNITY, PTA_PTO, UNION,
+  HOA, CHURCH_RELIGIOUS, CULTURAL, ALUMNI, PROFESSIONAL_ASSOCIATION,
+  CIVIC_ASSOCIATION, FRATERNAL, CLUB, NONPROFIT, OTHER) on
+  `Organization.category` (nullable; null = legacy, derived from vertical).
+- `src/lib/organization-category.ts` maps every category to its experience
+  vertical (CHURCH_RELIGIOUS/CULTURAL/ALUMNI/… → COMMUNITY experience) plus
+  presentation presets: giving terminology ("Giving" for churches,
+  "Contributions" for associations, "Support" where apt), a member label
+  ("Congregant", "Alumni Member", …), and a groups label ("Ministries",
+  "Committees", "Chapters", "Groups").
+- Presets are OFFERED at category selection and applied only on explicit
+  confirmation — they write the existing `contributionTerminology` plus new
+  `OrgSettings.memberTerminology`; §3's rule holds: backend concepts never
+  rename, presentation only. A cultural organization can run voluntary
+  giving without being "classified as a church".
+- Category changes gated `org_settings:write`, audited.
+
+### Ministries / Groups — core group architecture (§40/§41)
+
+Core has NO generic group model (PtaCommittee is PTA-Labs-only). New:
+
+- `OrgGroup` (org-scoped, name unique per org, free-text `kindLabel` —
+  "Ministry"/"Committee"/"Chapter" — NEVER a hard-coded db concept, §40),
+  status ACTIVE/ARCHIVED (archive, never delete).
+- `OrgGroupMember` (group × OrgMember unique, `isLeader` flag).
+- §41 scoped leadership: a leader manages ONLY their own group's membership
+  — authorization is the caller's own leadership row, looked up server-side
+  from their session, never a client claim. Group capabilities
+  (`groups:view`, `groups:manage`, `groups:members:manage`) are DISJOINT
+  from every giving capability; the groups lib never imports giving code.
+  Leadership grants zero access to financials, individual contributions,
+  payment methods, or global member admin — asserted by tests (§111.3).
+- RBAC: OWNER/ADMIN hold all three; STAFF and FINANCE hold `groups:view`
+  only.
+
+### Finance dashboard (§37) and General Organization Dashboard (§54)
+
+- `/giving/dashboard` (gate: `contributions:summary:view` + module on):
+  this month, YTD, active recurring contributors, monthly run rate
+  (frequencies normalized: weekly ×52/12, biweekly ×26/12, quarterly ÷3,
+  annual ÷12), pledged vs received-toward-pledges, failed schedules
+  needing attention, top funds YTD. Aggregates only — individual giving
+  stays behind `contributions:individual:view`.
+- Portal dashboard gains a giving card row and needs-attention lines
+  rendered ONLY for `contributions:summary:view` holders with the module
+  enabled (§54: "ordinary members must never receive organizational
+  contribution totals accidentally") plus an Active Groups card for
+  `groups:view`.
+
+### Activation checklist (§85/§86) and member summary (§38)
+
+- /settings/giving gains a computed activation checklist (enable →
+  financial roles → first fund → giving options → receipt language →
+  statements → public page [J — shown as "coming later"] → test). Pure
+  presentation over real state; no new activation state machine, and
+  nothing here can start live collection by itself.
+- /m/giving gains a compact "My Giving" summary header (year total, active
+  recurring + next date, pledge remaining) — assembled from data the page
+  already loads; no new data exposure.
+
+### §82 testbed note
+
+A dedicated Demo Church/General organization requires the org-creation
+flow (account signup) — not performed autonomously. Prod smoke uses Demo
+Community with synthetic groups/category data; a Demo Church org is
+flagged for an assisted session alongside the member-journey run.

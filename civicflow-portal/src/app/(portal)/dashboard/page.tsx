@@ -10,6 +10,7 @@ import { getEffectivePermissions } from "@/lib/role-permissions";
 import { setupBannerDismissCookieName } from "@/lib/dashboard-setup";
 import { DismissSetupBannerButton } from "@/components/app/DismissSetupBannerButton";
 import { getVerticalTerminology, getQuickActions, getHelpTopics, getEmptyStateCopy } from "@/lib/vertical-terminology";
+import { getFinanceDashboard } from "@/lib/giving/finance-dashboard";
 import { getLandingRoute } from "@/lib/vertical-navigation";
 import type { OrganizationVertical } from "@prisma/client";
 import {
@@ -170,6 +171,11 @@ export default async function DashboardPage() {
   const canSeeExpenditures = can("expenditures:read");
   const vertical: OrganizationVertical = session?.primaryVertical ?? "COMMUNITY";
   const terminology = getVerticalTerminology(vertical);
+  // CORE-GIVE-I (§54): giving cards render ONLY for summary-capability
+  // holders with the module enabled — an ordinary admin or member must never
+  // receive organizational contribution totals accidentally.
+  const canSeeGivingSummary = can("contributions:summary:view");
+  const canSeeGroups = can("groups:view");
   const widgets = dashboardWidgets(vertical);
   const quickActionDefs = getQuickActions(vertical);
   const helpTopics = getHelpTopics(vertical);
@@ -384,6 +390,16 @@ export default async function DashboardPage() {
   const openingCents      = openingBalance?.openingBalanceCents ?? 0;
   const ledgerCents       = totalDuesCents + totalContribCents - expYtdCents + openingCents;
 
+
+  // CORE-GIVE-I (§54): permission-gated giving + groups snapshots.
+  const givingSettingsRow = canSeeGivingSummary
+    ? await prisma.orgSettings.findUnique({ where: { organizationId: orgId }, select: { contributionsEnabled: true } })
+    : null;
+  const givingDashboard = givingSettingsRow?.contributionsEnabled ? await getFinanceDashboard(orgId) : null;
+  const activeGroupsCount = canSeeGroups
+    ? await prisma.orgGroup.count({ where: { organizationId: orgId, status: "ACTIVE" } })
+    : 0;
+
   const statusCounts = Object.fromEntries(
     membershipBreakdown.map((r) => [r.membershipStatus, r._count.id])
   );
@@ -458,6 +474,12 @@ export default async function DashboardPage() {
         {canSeeExpenditures && <StatCard label="Expenditures (Month)"    value={toCurrency(expMonthCents)}     subtext="Current month" icon={Receipt}     color="red"     href="/expenditures" />}
         {canSeeExpenditures && <StatCard label="Expenditures (YTD)"      value={toCurrency(expYtdCents)}       subtext="Year to date"  icon={Receipt}     color="red"     href="/expenditures" />}
         <StatCard label="Upcoming Events"         value={upcomingEventsCount}           subtext="Next 30 days"  icon={Calendar}    color="sky"     href="/events" />
+        {givingDashboard && <StatCard label="Giving This Month"     value={toCurrency(Math.round(givingDashboard.thisMonth * 100))}              subtext="Contributions module" icon={DollarSign} color="emerald" href="/giving/dashboard" />}
+        {givingDashboard && <StatCard label="Recurring Giving"      value={`${toCurrency(Math.round(givingDashboard.recurringMonthlyRunRate * 100))}/mo`} subtext={`${givingDashboard.activeRecurringContributors} active contributors`} icon={DollarSign} color="sky" href="/giving/dashboard" />}
+        {givingDashboard && givingDashboard.failedNeedingAttention > 0 && (
+          <StatCard label="Giving Needs Attention" value={givingDashboard.failedNeedingAttention} subtext="Failed recurring payments" icon={AlertCircle} color="amber" href="/giving/dashboard" />
+        )}
+        {canSeeGroups && activeGroupsCount > 0 && <StatCard label="Active Groups" value={activeGroupsCount} subtext="Ministries, committees, chapters" icon={Users} color="sky" href="/groups" />}
       </div>
 
       {/* Membership Governance — Community only; Union/HOA don't have a

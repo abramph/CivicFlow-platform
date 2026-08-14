@@ -288,8 +288,40 @@ export function MemberGiveNow({
     }
   }
 
+  const activeSchedules = schedules.filter((schedule) => schedule.status === "ACTIVE");
+  const nextRecurringDate = activeSchedules
+    .map((schedule) => schedule.nextContributionDate)
+    .filter((date): date is string => Boolean(date))
+    .sort()[0];
+  const openPledges = pledges.filter((pledge) => pledge.status === "ACTIVE");
+
   return (
     <div className="space-y-6">
+      <section className="rounded-xl border border-slate-200 bg-white p-4">
+        <h2 className="text-base font-semibold text-slate-900">My {terminology}</h2>
+        <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{new Date().getFullYear()} total</p>
+            <p className="text-xl font-bold text-slate-900">{money(yearTotal)}</p>
+          </div>
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Active recurring</p>
+            <p className="text-xl font-bold text-slate-900">{activeSchedules.length}</p>
+            {nextRecurringDate ? (
+              <p className="text-xs text-slate-500">Next: {new Date(nextRecurringDate).toLocaleDateString()}</p>
+            ) : null}
+          </div>
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Open pledges</p>
+            <p className="text-xl font-bold text-slate-900">{openPledges.length}</p>
+            {openPledges.length > 0 ? (
+              <p className="text-xs text-slate-500">
+                {money(openPledges.reduce((sum, pledge) => sum + pledge.remainingTowardPledge, 0))} remaining toward pledges
+              </p>
+            ) : null}
+          </div>
+        </div>
+      </section>
       <section className="rounded-xl border border-slate-200 bg-white p-4">
         <h2 className="text-lg font-semibold text-slate-900">Give Now</h2>
         {funds.length === 0 ? (
