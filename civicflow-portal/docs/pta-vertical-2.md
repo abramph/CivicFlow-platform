@@ -394,3 +394,34 @@ its officers:
   contacts:read/write (STAFF+ write, READ_ONLY read).
 - **Transition packet**: gains "Key contacts" and "Vendors" sections (§23:
   "this becomes part of board transition").
+
+## PR PTA-J — Member Experience (this PR)
+
+§19's "My PTA" for the web portal, §15's deferred officer self-onboarding,
+and member-visible documents. Constraint honored: mobile app BUILDS are
+frozen, so this PR ships the portal member surface + the server capabilities;
+new mobile screens ride a later app release (no placeholder mobile APIs —
+§41: capabilities ship when a client can exercise them).
+
+- **Member-visible documents**: new `Attachment.memberVisible` flag
+  (default false — nothing leaks by omission), toggled per file by officers
+  in the Document Center. Parents read them through a DEDICATED
+  linkage-gated route pair (`/api/labs/pta/my/documents` + signed download)
+  built on requirePtaHouseholdSelfAccess — parents hold zero Permissions,
+  so the member path NEVER touches the RBAC attachment API (the HOA
+  resident-path precedent in attachments.ts). Downloads audited.
+- **My PTA page** (`/labs/pta/my-pta`, parent tab): member documents,
+  current governing documents index (bylaws & policies — titles/versions;
+  §19 "Governance information"), the board roster (position + holder name
+  ONLY — no personal contact details) with the PTA's contact email as the
+  "Contact the board" action, and upcoming meetings (title/date only).
+  Volunteer history/attendance deliberately not duplicated — they already
+  live on the parent volunteer surface.
+- **Officer self-onboarding** (§15, deferred from PTA-F): an incoming
+  officer whose assignment links to their own household-adult account sees
+  their position's handoff — checklist state, outgoing officer's notes —
+  and can ACCEPT their own position. Linkage-gated
+  (assignment.householdAdult.userId === session), never a Permission; the
+  same acceptance rules apply (required checklist items must be complete),
+  and board managers keep their PTA-F path unchanged. Surfaced inside
+  My PTA only when applicable — no dead tab.

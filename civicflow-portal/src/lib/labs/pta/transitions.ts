@@ -512,3 +512,57 @@ export async function addChecklistItem(input: ActorInput & { organizationId: str
   });
   return item;
 }
+
+/**
+ * PTA-J (§15, deferred from PTA-F): the signed-in user's OWN incoming
+ * handoff — linkage-gated (assignment.householdAdult.userId), never a
+ * Permission. Returns null when the user is not an incoming officer in a
+ * live transition.
+ */
+export async function getMyIncomingHandoff(organizationId: string, userId: string) {
+  return prisma.ptaOfficerHandoff.findFirst({
+    where: {
+      organizationId,
+      transition: { status: { not: "COMPLETED" } },
+      incomingAssignment: { status: "INCOMING", householdAdult: { userId } },
+    },
+    include: {
+      position: { select: { id: true, name: true, responsibilities: true } },
+      transition: { select: { id: true, status: true, fromSchoolYear: { select: { label: true } }, toSchoolYear: { select: { label: true } } } },
+      outgoingAssignment: { select: { personName: true, householdAdult: { select: { name: true } } } },
+      checklistItems: { orderBy: { sortOrder: "asc" } },
+    },
+  });
+}
+
+/** §15 step 9 — the incoming officer accepts their own position. Same rules
+ * as the manager path (required checklist items complete), plus the caller
+ * must BE the incoming officer. */
+export async function acceptOwnHandoff(input: { organizationId: string; userId: string; userEmail?: string | null }) {
+  const handoff = await getMyIncomingHandoff(input.organizationId, input.userId);
+  if (!handoff) throw new PtaError("PTA_HANDOFF_NOT_FOUND", "You have no pending officer handoff.");
+  if (handoff.status === "ACCEPTED") return handoff;
+
+  const required = handoff.checklistItems.filter((item) => item.isRequired);
+  if (!required.every((item) => item.completedAt !== null)) {
+    throw new PtaError(
+      "PTA_VALIDATION_ERROR",
+      "The outgoing officer has not finished the required handoff checklist yet — accept once every required item is checked off."
+    );
+  }
+
+  const updated = await prisma.ptaOfficerHandoff.update({
+    where: { id: handoff.id },
+    data: { status: "ACCEPTED", acceptedAt: new Date() },
+  });
+  await createAuditEvent({
+    organizationId: input.organizationId,
+    actorUserId: input.userId,
+    actorEmail: input.userEmail ?? null,
+    action: "pta.transition.handoff_accepted",
+    entityType: "pta_officer_handoff",
+    entityId: handoff.id,
+    metadata: { position: handoff.position.name, selfService: true },
+  });
+  return updated;
+}

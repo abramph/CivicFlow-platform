@@ -51,6 +51,7 @@ export function PtaDocumentCenter({ organizationId, canWrite }: { organizationId
         entityId={organizationId}
         purpose={category}
         filterByPurpose
+        showMemberVisibility
         canWrite={canWrite}
         titleLabel="Document title"
       />
