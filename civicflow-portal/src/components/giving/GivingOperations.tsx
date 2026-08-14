@@ -150,6 +150,58 @@ export function GivingOperations({
     }
   }
 
+  const [guests, setGuests] = useState<
+    | {
+        id: string;
+        contributionNumber: string | null;
+        amount: number;
+        date: string;
+        guestName: string | null;
+        guestEmail: string | null;
+        matchStatus: string;
+        fundName: string;
+        suggestedMember: { memberId: string; memberName: string } | null;
+      }[]
+    | null
+  >(null);
+  const [guestLinkPick, setGuestLinkPick] = useState<Record<string, string>>({});
+
+  async function loadGuests() {
+    setPending(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/giving/guest-contributions");
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        setError(data?.error || "Unable to load guest contributions.");
+        return;
+      }
+      setGuests(data.data);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function resolveGuest(contributionId: string, action: "link" | "dismiss", memberId?: string) {
+    setPending(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/giving/guest-contributions/${contributionId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, memberId: memberId ?? null }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        setError(data?.error || "Unable to resolve.");
+        return;
+      }
+      await loadGuests();
+    } finally {
+      setPending(false);
+    }
+  }
+
   const [newHouseholdName, setNewHouseholdName] = useState("");
   const [householdMemberPick, setHouseholdMemberPick] = useState<Record<string, string>>({});
 
@@ -473,6 +525,100 @@ export function GivingOperations({
         ) : null}
       </section>
 
+
+
+      <section className="border-t border-slate-100 pt-4">
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-semibold text-slate-900">Guest contributions</h3>
+          <button
+            type="button"
+            disabled={pending}
+            onClick={loadGuests}
+            className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            {guests === null ? "Load" : "Refresh"}
+          </button>
+        </div>
+        <p className="text-xs text-slate-500">
+          Gifts from the public giving page. An email match only suggests — linking to a member is always your explicit,
+          audited action.
+        </p>
+        {guests !== null ? (
+          guests.length === 0 ? (
+            <p className="mt-2 text-sm text-slate-600">No guest contributions yet.</p>
+          ) : (
+            <ul className="mt-2 divide-y divide-slate-100">
+              {guests.map((guest) => (
+                <li key={guest.id} className="py-2 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-slate-800">
+                      {new Date(guest.date).toLocaleDateString()} · {guest.guestName || "(no name)"}
+                      {guest.guestEmail ? ` · ${guest.guestEmail}` : ""} · {guest.fundName} —{" "}
+                      <span className="font-medium">{money(guest.amount)}</span>
+                    </span>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                        guest.matchStatus === "LINKED"
+                          ? "bg-emerald-100 text-emerald-800"
+                          : guest.matchStatus === "MATCH_SUGGESTED"
+                            ? "bg-amber-100 text-amber-800"
+                            : "bg-slate-100 text-slate-600"
+                      }`}
+                    >
+                      {guest.matchStatus === "MATCH_SUGGESTED" ? "match suggested" : guest.matchStatus.toLowerCase()}
+                    </span>
+                  </div>
+                  {guest.matchStatus !== "LINKED" ? (
+                    <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                      {guest.suggestedMember ? (
+                        <button
+                          type="button"
+                          disabled={pending}
+                          onClick={() => resolveGuest(guest.id, "link", guest.suggestedMember!.memberId)}
+                          className="rounded-lg bg-emerald-700 px-3 py-1 text-xs font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
+                        >
+                          Link to {guest.suggestedMember.memberName}
+                        </button>
+                      ) : null}
+                      <select
+                        value={guestLinkPick[guest.id] ?? ""}
+                        onChange={(event) => setGuestLinkPick((prev) => ({ ...prev, [guest.id]: event.target.value }))}
+                        className="w-52 rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs"
+                        aria-label="Link to a member"
+                      >
+                        <option value="">Link to another member…</option>
+                        {members.map((member) => (
+                          <option key={member.id} value={member.id}>
+                            {member.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        disabled={pending || !(guestLinkPick[guest.id] ?? "")}
+                        onClick={() => resolveGuest(guest.id, "link", guestLinkPick[guest.id])}
+                        className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        Link
+                      </button>
+                      {guest.matchStatus === "MATCH_SUGGESTED" ? (
+                        <button
+                          type="button"
+                          disabled={pending}
+                          onClick={() => resolveGuest(guest.id, "dismiss")}
+                          className="text-xs font-semibold text-slate-500 hover:text-slate-800"
+                        >
+                          Dismiss suggestion
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )
+        ) : null}
+      </section>
 
       {canManageHouseholds ? (
         <section className="border-t border-slate-100 pt-4">

@@ -14,6 +14,7 @@ export default async function GivingSetupPage() {
   const { organizationId, can } = await requirePermission("contributions:summary:view");
 
   const settings = await getGivingSettings(organizationId);
+  const organization = await prisma.organization.findUnique({ where: { id: organizationId }, select: { slug: true } });
   const statementCount = settings.contributionsEnabled
     ? await prisma.contributionStatement.count({ where: { organizationId } })
     : 0;
@@ -50,9 +51,9 @@ export default async function GivingSetupPage() {
             { label: "Configure giving options (programs, suggested amounts, recurring)", done: programs.length > 0, href: null },
             { label: "Choose your terminology (Giving / Contributions / Support)", done: settings.contributionsEnabled, href: null },
             { label: "Prepare year-end statements when the time comes", done: statementCount > 0, href: "/giving/operations" },
-            { label: "Public giving page", done: null, href: null, comingSoon: true },
+            { label: "Publish your public giving page (optional)", done: settings.publicGivingEnabled, href: null },
             { label: "Test the member experience on your Giving page", done: null, href: "/m/giving" },
-          ] satisfies { label: string; done: boolean | null; href: string | null; comingSoon?: boolean }[]).map((step, index) => (
+          ] satisfies { label: string; done: boolean | null; href: string | null }[]).map((step, index) => (
             <li key={index} className="flex items-start gap-2 text-sm">
               <span
                 className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
@@ -63,15 +64,14 @@ export default async function GivingSetupPage() {
               >
                 {step.done === true ? "✓" : index + 1}
               </span>
-              <span className={step.comingSoon ? "text-slate-400" : "text-slate-800"}>
-                {step.href && !step.comingSoon ? (
+              <span className="text-slate-800">
+                {step.href ? (
                   <a href={step.href} className="hover:underline">
                     {step.label}
                   </a>
                 ) : (
                   step.label
                 )}
-                {step.comingSoon ? " — coming in a later update" : null}
               </span>
             </li>
           ))}
@@ -83,6 +83,7 @@ export default async function GivingSetupPage() {
       >
         <GivingSetupManager
           settings={settings}
+          slug={organization?.slug ?? ""}
           funds={funds.map((fund) => ({
             id: fund.id,
             name: fund.name,

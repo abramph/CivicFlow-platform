@@ -199,6 +199,16 @@ enum ContributionSource {
   EVENT_PAGE
   MANUAL
   IMPORT
+  /// CORE-GIVE-J: the org's public giving page (guest or member-unlinked).
+  PUBLIC_PAGE
+}
+
+/// CORE-GIVE-J (§57): guest-contribution → member matching. An email match
+/// only ever SUGGESTS — memberId is set exclusively by authorized staff.
+enum GuestMatchStatus {
+  UNLINKED
+  MATCH_SUGGESTED
+  LINKED
 }
 
 enum ReceiptDeliveryStatus {
@@ -1219,6 +1229,10 @@ model Campaign {
   name           String
   description    String?
   goal           Decimal?  @db.Decimal(12, 2)
+  /// CORE-GIVE-J (§24): show goal + raised TOTAL on the public giving page.
+  /// Default OFF — public progress is an explicit organizational choice;
+  /// individual donor amounts are never public regardless.
+  showPublicProgress Boolean @default(false)
   startDate      DateTime?
   endDate        DateTime?
   status         String    @default("active")
@@ -1737,6 +1751,10 @@ model OrgSettings {
   /// with member-to-member visibility governed by the privacy mode.
   householdGivingEnabled         Boolean       @default(false)
   householdGivingPrivacyMode     HouseholdGivingPrivacyMode @default(INDIVIDUAL_PRIVATE)
+  /// CORE-GIVE-J (§55): the public /give/[slug] page. Default OFF; unknown
+  /// slug and disabled page 404 identically (no tenant enumeration).
+  publicGivingEnabled            Boolean       @default(false)
+  publicGivingMessage            String?
   updatedAt                      DateTime      @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -2249,6 +2267,11 @@ model Contribution {
   providerChargeId               String?
   providerInvoiceId              String?
   anonymityMode                  ContributionAnonymityMode      @default(NONE)
+  /// CORE-GIVE-J: guest identity from the public giving page. Email match
+  /// against the roster only ever SUGGESTS (§57) — memberId is set solely
+  /// by an authorized-staff resolve action, audited.
+  guestEmail                     String?
+  guestMatchStatus               GuestMatchStatus?
   statementEligible              Boolean                        @default(true)
   taxDeductibilityClassification TaxDeductibilityClassification @default(DEDUCTIBILITY_NOT_CONFIGURED)
   /// §32 goods/services value received (gala ticket, merchandise) — the

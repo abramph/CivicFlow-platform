@@ -642,3 +642,86 @@ A dedicated Demo Church/General organization requires the org-creation
 flow (account signup) — not performed autonomously. Prod smoke uses Demo
 Community with synthetic groups/category data; a Demo Church org is
 flagged for an assisted session alongside the member-journey run.
+
+## 10. CORE-GIVE-J design — Public Giving
+
+**Scope (§105-J):** public giving page, guest contributions, member
+matching, public branding, anti-abuse/rate limiting, public campaign/fund
+display. **Dedicated security review below, written before implementation.**
+
+### Design
+
+- Route: `/give/[slug]` (this app's domain). Renders ONLY when the
+  organization has BOTH `contributionsEnabled` and the new
+  `OrgSettings.publicGivingEnabled` (default OFF). Unknown slug and
+  disabled page return the identical 404 — the route never confirms an
+  organization exists.
+- Page content is strictly the org's PUBLISHED surface: name, logo,
+  `publicGivingMessage`, funds with `isPublic` (ACTIVE + one-time),
+  campaigns with the new `Campaign.showPublicProgress` (default OFF, §24 —
+  goal + raised total only, never donor names/amounts). No member data, no
+  internal settings, no session.
+- Checkout: `POST /api/public/give` — no session, rate-limited harder than
+  the member route (10/min/IP). Server resolves the org BY SLUG, re-runs
+  validateGivingRequest, and additionally requires `fund.isPublic` (a
+  non-public fund 404s — existence not revealed). Stripe session metadata
+  is server-stamped: `paymentType="public-giving"`, orgId, fundId, guest
+  name/email, anonymity. ONE-TIME ONLY: guest recurring is deliberately
+  deferred — a guest has no account to manage/cancel a schedule from, which
+  would violate the §11 self-service invariant. "Create an account to
+  manage your giving" is offered AFTER success (§56), never required first.
+- Webhook: new `public-giving` branch mirrors the member recorder — §50
+  fund/org cross-check (mismatch records NOTHING), payment-intent
+  idempotency belt, provider-truth amounts, CTR number, source
+  `PUBLIC_PAGE` (new enum value). `receiptRequested` only when the guest
+  gave an email.
+- Guest contributions carry `guestEmail` + `guestMatchStatus`
+  (UNLINKED / MATCH_SUGGESTED / LINKED). §57: an email that matches an
+  OrgMember produces **MATCH_SUGGESTED only** — `memberId` is NEVER set by
+  matching. Authorized staff resolve suggestions in Giving Operations:
+  link (sets memberId + LINKED, audited) or dismiss (UNLINKED, audited).
+  Listing requires `contributions:individual:view`; resolving requires
+  `contributions:offline:create` (the data-entry authority).
+
+### Dedicated public-giving security review (§72 subset)
+
+Threat model: the page is reachable by anyone, with no session, and takes
+money attributed to a tenant.
+
+1. **Tenant/slug enumeration** — unknown slug, disabled page, and
+   module-off all return the same 404 via one gate function. The page never
+   distinguishes "org doesn't exist" from "org didn't publish".
+2. **Amount/fund/currency manipulation** — the client sends slug+fund+
+   amount only; the server re-resolves the org from the slug, re-validates
+   fund status/one-time/min/max AND isPublic, pins USD, and stamps all
+   metadata server-side. The webhook trusts only its own §50 re-checks and
+   the provider's amount_total.
+3. **Cross-tenant attribution** — §50: the fund named in metadata must
+   exist inside the org named in metadata or nothing is recorded and a
+   security event is logged (same guarantee as B/C).
+4. **Webhook forgery/replay** — existing signature verification +
+   StripeWebhookEvent dedup + one-contribution-per-payment-intent belt.
+5. **Member-existence oracle (guest matching)** — the public response is
+   identical whether or not the email matches a member; matching happens
+   only webhook-side, its result visible only to
+   contributions:individual:view holders. Matching NEVER auto-links (§57):
+   a stranger entering a member's email cannot attach contributions to
+   that member's record — only staff can, audited.
+6. **PII** — guest name/email stored on the Contribution row (finance-
+   capability visibility only) and in Stripe metadata (platform dashboard
+   visibility — ACCEPTED, consistent with the C review's finding; only
+   fields the recorder needs are stamped). PUBLICLY_ANONYMOUS remains the
+   only anonymity offer (§20) and hides the name from public surfaces
+   only — the organization still has the record.
+7. **Abuse/floods** — 10/min/IP rate limit on checkout POST (page itself
+   is read-only), zod validation, 1M amount cap, name/email length caps.
+   Card testing is additionally mitigated by Stripe Radar on the platform
+   account. Residual risk: distributed abuse across IPs — ACCEPTED for v1
+   (Stripe-side controls are the real backstop; revisit in K
+   observability).
+8. **No admin surface leakage** — the public page renders from a dedicated
+   query that selects only published fields; it shares no component with
+   officer surfaces.
+
+**Findings: no CRITICAL/HIGH. Accepted MEDIUMs: metadata PII visibility
+(6), distributed card-testing residual (7). Release not blocked.**

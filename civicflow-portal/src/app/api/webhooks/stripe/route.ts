@@ -275,6 +275,37 @@ export async function POST(request: Request) {
           break;
         }
 
+        // CORE-GIVE-J: guest gifts from the public /give/[slug] page. Same
+        // discipline as the member branch: §50 cross-check, idempotency
+        // belt, provider-truth amounts; email matching only ever SUGGESTS.
+        if (session.metadata?.paymentType === "public-giving" && orgId && session.payment_status === "paid") {
+          const { recordPublicGivingContribution } = await import("@/lib/giving/public-giving");
+          const result = await recordPublicGivingContribution({
+            organizationId: orgId,
+            fundId: session.metadata?.givingFundId ?? "",
+            guestName: session.metadata?.guestName || null,
+            guestEmail: session.metadata?.guestEmail || null,
+            anonymityMode: session.metadata?.anonymityMode || null,
+            amountTotalCents: session.amount_total ?? 0,
+            currency: session.currency ?? "usd",
+            providerPaymentIntentId: typeof session.payment_intent === "string" ? session.payment_intent : (session.payment_intent?.id ?? null),
+            providerSessionId: session.id,
+          });
+          if (result.outcome === "REJECTED") {
+            console.error(
+              JSON.stringify({ event: "public_giving_webhook_rejected", reason: result.reason, sessionId: session.id, orgId })
+            );
+          }
+          await createAuditEvent({
+            organizationId: orgId,
+            action: "update",
+            entityType: "stripe_webhook",
+            entityId: session.id,
+            metadata: { eventType: event.type, publicGiving: true, outcome: result.outcome },
+          });
+          break;
+        }
+
         // Record a Contribution (or, for dues, a DuesPayment applied to the
         // member's balance) when a payment link checkout completes.
         const paymentLinkId = session.metadata?.paymentLinkId;

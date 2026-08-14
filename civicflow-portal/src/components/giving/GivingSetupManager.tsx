@@ -49,6 +49,7 @@ interface ProgramView {
  * nature, fund lifecycle, permissions); this component narrates them. */
 export function GivingSetupManager({
   settings,
+  slug = "",
   funds,
   programs,
   viewer,
@@ -58,7 +59,10 @@ export function GivingSetupManager({
     terminology: string;
     householdGivingEnabled: boolean;
     householdGivingPrivacyMode: string;
+    publicGivingEnabled: boolean;
+    publicGivingMessage: string | null;
   };
+  slug?: string;
   funds: FundView[];
   programs: ProgramView[];
   viewer: { canManageFunds: boolean; canManagePrograms: boolean };
@@ -71,6 +75,11 @@ export function GivingSetupManager({
   const [fundName, setFundName] = useState("");
   const [fundDescription, setFundDescription] = useState("");
   const [fundSuggested, setFundSuggested] = useState("");
+
+  const [publicMessage, setPublicMessage] = useState(settings.publicGivingMessage ?? "");
+  const [publicCampaigns, setPublicCampaigns] = useState<
+    { id: string; name: string; goal: number | null; showPublicProgress: boolean }[] | null
+  >(null);
 
   const [programName, setProgramName] = useState("");
   const [programFundId, setProgramFundId] = useState("");
@@ -118,6 +127,32 @@ export function GivingSetupManager({
 
   async function setFundStatus(fundId: string, status: string) {
     if (await call(`/api/funds/${fundId}`, { method: "PATCH", body: JSON.stringify({ status }) })) router.refresh();
+  }
+
+  async function loadPublicCampaigns() {
+    setPending(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/giving/public-campaigns");
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        setError(data?.error || "Unable to load campaigns.");
+        return;
+      }
+      setPublicCampaigns(data.data);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function togglePublicCampaign(campaignId: string, showPublicProgress: boolean) {
+    if (await call("/api/giving/public-campaigns", { method: "PATCH", body: JSON.stringify({ campaignId, showPublicProgress }) })) {
+      await loadPublicCampaigns();
+    }
+  }
+
+  async function setFundPublic(fundId: string, isPublic: boolean) {
+    if (await call(`/api/funds/${fundId}`, { method: "PATCH", body: JSON.stringify({ isPublic }) })) router.refresh();
   }
 
   async function addProgram() {
@@ -244,6 +279,104 @@ export function GivingSetupManager({
         </div>
       ) : null}
 
+      {settings.contributionsEnabled && viewer.canManageFunds ? (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <h3 className="text-sm font-semibold text-slate-900">Public giving page</h3>
+          <p className="mt-1 text-xs text-slate-600">
+            An optional public page where anyone can give — no account required. It shows only funds marked
+            &ldquo;Public&rdquo; and campaigns you explicitly publish. Off by default; the link 404s until enabled.
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => saveSettings({ publicGivingEnabled: !settings.publicGivingEnabled })}
+              className={`rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-50 ${
+                settings.publicGivingEnabled
+                  ? "border border-slate-300 bg-white text-slate-900 hover:bg-slate-50"
+                  : "bg-emerald-700 text-white hover:bg-emerald-800"
+              }`}
+            >
+              {settings.publicGivingEnabled ? "Unpublish page" : "Publish public giving page"}
+            </button>
+            {settings.publicGivingEnabled && slug ? (
+              <code className="rounded-lg bg-white px-3 py-2 text-xs text-slate-800 ring-1 ring-slate-200">
+                {typeof window !== "undefined" ? window.location.origin : ""}/give/{slug}
+              </code>
+            ) : null}
+          </div>
+          {settings.publicGivingEnabled ? (
+            <div className="mt-3 space-y-3">
+              <label className="block space-y-1 text-sm font-medium text-slate-900">
+                <span>Welcome message (shown to the public)</span>
+                <div className="flex gap-2">
+                  <input
+                    value={publicMessage}
+                    onChange={(event) => setPublicMessage(event.target.value)}
+                    maxLength={600}
+                    className={inputClass}
+                    placeholder="Your generosity powers everything we do."
+                  />
+                  <button
+                    type="button"
+                    disabled={pending || publicMessage.trim() === (settings.publicGivingMessage ?? "")}
+                    onClick={() => saveSettings({ publicGivingMessage: publicMessage.trim() || null })}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    Save
+                  </button>
+                </div>
+              </label>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-600">Public campaign progress</h4>
+                  <button
+                    type="button"
+                    disabled={pending}
+                    onClick={loadPublicCampaigns}
+                    className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    {publicCampaigns === null ? "Load campaigns" : "Refresh"}
+                  </button>
+                </div>
+                {publicCampaigns !== null ? (
+                  publicCampaigns.length === 0 ? (
+                    <p className="mt-1 text-xs text-slate-500">No active campaigns.</p>
+                  ) : (
+                    <ul className="mt-1 space-y-1">
+                      {publicCampaigns.map((campaign) => (
+                        <li key={campaign.id} className="flex items-center justify-between text-sm">
+                          <span className="text-slate-800">
+                            {campaign.name}
+                            {campaign.goal ? ` · goal $${campaign.goal.toLocaleString()}` : ""}
+                          </span>
+                          <button
+                            type="button"
+                            disabled={pending}
+                            onClick={() => togglePublicCampaign(campaign.id, !campaign.showPublicProgress)}
+                            className={`rounded-lg border px-3 py-1 text-xs font-semibold disabled:opacity-50 ${
+                              campaign.showPublicProgress
+                                ? "border-emerald-600 bg-emerald-50 text-emerald-800"
+                                : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                            }`}
+                          >
+                            {campaign.showPublicProgress ? "Shown publicly" : "Show publicly"}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )
+                ) : (
+                  <p className="mt-1 text-xs text-slate-500">
+                    Only the goal and total raised ever appear publicly — never individual gifts.
+                  </p>
+                )}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       {settings.contributionsEnabled ? (
         <>
           <div>
@@ -270,9 +403,24 @@ export function GivingSetupManager({
                     {viewer.canManageFunds ? (
                       <div className="flex gap-2">
                         {fund.status === "ACTIVE" ? (
+                          <>
+                          <button
+                            type="button"
+                            disabled={pending}
+                            onClick={() => setFundPublic(fund.id, !fund.isPublic)}
+                            className={`rounded-lg border px-3 py-1.5 text-xs font-semibold disabled:opacity-50 ${
+                              fund.isPublic
+                                ? "border-emerald-600 bg-emerald-50 text-emerald-800"
+                                : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                            }`}
+                            title="Public funds appear on the public giving page"
+                          >
+                            {fund.isPublic ? "Public" : "Make public"}
+                          </button>
                           <button type="button" disabled={pending} onClick={() => setFundStatus(fund.id, "CLOSED")} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
                             Close
                           </button>
+                          </>
                         ) : fund.status === "CLOSED" ? (
                           <>
                             <button type="button" disabled={pending} onClick={() => setFundStatus(fund.id, "ACTIVE")} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">

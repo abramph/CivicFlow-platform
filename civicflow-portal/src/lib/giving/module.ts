@@ -17,6 +17,8 @@ export async function getGivingSettings(organizationId: string) {
       contributionTerminology: true,
       householdGivingEnabled: true,
       householdGivingPrivacyMode: true,
+      publicGivingEnabled: true,
+      publicGivingMessage: true,
     },
   });
   return {
@@ -24,6 +26,8 @@ export async function getGivingSettings(organizationId: string) {
     terminology: settings?.contributionTerminology?.trim() || DEFAULT_TERMINOLOGY,
     householdGivingEnabled: settings?.householdGivingEnabled ?? false,
     householdGivingPrivacyMode: settings?.householdGivingPrivacyMode ?? "INDIVIDUAL_PRIVATE",
+    publicGivingEnabled: settings?.publicGivingEnabled ?? false,
+    publicGivingMessage: settings?.publicGivingMessage ?? null,
   };
 }
 
@@ -42,10 +46,16 @@ export async function setGivingSettings(input: {
   contributionTerminology?: string | null;
   householdGivingEnabled?: boolean;
   householdGivingPrivacyMode?: "INDIVIDUAL_PRIVATE" | "HOUSEHOLD_STATEMENT_ONLY" | "HOUSEHOLD_SHARED";
+  publicGivingEnabled?: boolean;
+  publicGivingMessage?: string | null;
   actorUserId: string;
   actorEmail?: string | null;
 }) {
   const fields = {
+    ...(input.publicGivingEnabled !== undefined ? { publicGivingEnabled: input.publicGivingEnabled } : {}),
+    ...(input.publicGivingMessage !== undefined
+      ? { publicGivingMessage: input.publicGivingMessage?.trim() || null }
+      : {}),
     ...(input.contributionsEnabled !== undefined ? { contributionsEnabled: input.contributionsEnabled } : {}),
     ...(input.contributionTerminology !== undefined
       ? { contributionTerminology: input.contributionTerminology?.trim() || null }
