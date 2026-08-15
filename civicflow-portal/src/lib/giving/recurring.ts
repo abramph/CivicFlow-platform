@@ -132,6 +132,9 @@ export async function linkScheduleFromCheckout(input: {
   organizationId: string;
   providerSubscriptionId: string;
   providerCustomerId: string | null;
+  /** CONNECT-D (§56): the connected account that owns the subscription —
+   * from `event.account`, never from metadata. Immutable once stamped. */
+  stripeConnectedAccountId?: string | null;
 }): Promise<"LINKED" | "REJECTED"> {
   const schedule = await prisma.recurringContributionSchedule.findFirst({
     where: { id: input.scheduleId, organizationId: input.organizationId },
@@ -143,6 +146,9 @@ export async function linkScheduleFromCheckout(input: {
       providerSubscriptionId: input.providerSubscriptionId,
       providerCustomerId: input.providerCustomerId,
       status: schedule.status === "PENDING_SETUP" ? "ACTIVE" : schedule.status,
+      ...(input.stripeConnectedAccountId
+        ? { stripeConnectedAccountId: input.stripeConnectedAccountId, providerAccountContext: "CONNECTED_ACCOUNT_PAYMENT" }
+        : {}),
     },
   });
   const { createAuditEvent } = await import("@/lib/audit");
@@ -211,6 +217,10 @@ export async function recordRecurringInvoicePaid(input: RecurringInvoiceInput): 
         source: "MEMBER_PROFILE",
         providerInvoiceId: input.providerInvoiceId,
         providerPaymentIntentId: input.paymentIntentId,
+        // CONNECT-D (§56): attribution comes from the SCHEDULE's own
+        // immutable stamp, never re-derived from the invoice/event.
+        stripeConnectedAccountId: schedule.stripeConnectedAccountId,
+        providerAccountContext: schedule.providerAccountContext,
         taxDeductibilityClassification: schedule.contributionProgram?.taxDeductibility ?? "DEDUCTIBILITY_NOT_CONFIGURED",
         receiptRequested: true,
       },

@@ -1,10 +1,10 @@
 import { withApiErrorHandling } from "@/lib/api-route";
 import { requireMobileMembership } from "@/lib/mobile-auth";
 import { createPendingSchedule } from "@/lib/giving/recurring";
-import { getOrCreateGivingCustomer, getOrCreateGivingProduct, stripeIntervalFor } from "@/lib/giving/giving-stripe";
+import { getOrCreateConnectedGivingCustomer, getOrCreateConnectedGivingProduct, stripeIntervalFor } from "@/lib/giving/giving-stripe";
+import { resolveConnectedAccountForCharges, getStripeForMode } from "@/lib/payments/stripe-connect";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { parseJsonBody, z } from "@/lib/validation";
-import { getStripe } from "@/lib/stripe";
 import { getServerEnv } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
 
@@ -41,18 +41,24 @@ export async function POST(request: Request) {
       memberId,
     });
 
+    const { stripeConnectedAccountId, accountMode } = await resolveConnectedAccountForCharges(organizationId);
+    const mode = accountMode as "test" | "live";
+
     const user = await prisma.user.findUnique({ where: { id: mobileSession.userId }, select: { email: true, displayName: true } });
     const [customerId, productId] = await Promise.all([
-      getOrCreateGivingCustomer({
+      getOrCreateConnectedGivingCustomer({
         organizationId,
         userId: mobileSession.userId,
+        memberId,
+        stripeConnectedAccountId,
+        accountMode: mode,
         email: user?.email ?? null,
         name: user?.displayName ?? null,
       }),
-      getOrCreateGivingProduct(organizationId),
+      getOrCreateConnectedGivingProduct({ organizationId, stripeConnectedAccountId, accountMode: mode }),
     ]);
 
-    const stripe = getStripe();
+    const stripe = await getStripeForMode(mode);
     const env = getServerEnv();
     const baseUrl = env.NEXTAUTH_URL.replace(/\/$/, "");
     const givingMetadata = {
@@ -62,28 +68,32 @@ export async function POST(request: Request) {
       organizationId,
       scheduleId: schedule.id,
       givingFundId: fund.id,
+      stripeConnectedAccountId,
       environment: process.env.NODE_ENV ?? "development",
     };
 
-    const session = await stripe.checkout.sessions.create({
-      mode: "subscription",
-      customer: customerId,
-      line_items: [
-        {
-          price_data: {
-            currency: "usd",
-            product: productId,
-            recurring: stripeIntervalFor(input.frequency),
-            unit_amount: Math.round(amount * 100),
+    const session = await stripe.checkout.sessions.create(
+      {
+        mode: "subscription",
+        customer: customerId,
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              product: productId,
+              recurring: stripeIntervalFor(input.frequency),
+              unit_amount: Math.round(amount * 100),
+            },
+            quantity: 1,
           },
-          quantity: 1,
-        },
-      ],
-      subscription_data: { metadata: givingMetadata },
-      success_url: `${baseUrl}/giving/checkout-complete?state=success&recurring=1`,
-      cancel_url: `${baseUrl}/giving/checkout-complete?state=cancelled`,
-      metadata: givingMetadata,
-    });
+        ],
+        subscription_data: { metadata: givingMetadata },
+        success_url: `${baseUrl}/giving/checkout-complete?state=success&recurring=1`,
+        cancel_url: `${baseUrl}/giving/checkout-complete?state=cancelled`,
+        metadata: givingMetadata,
+      },
+      { stripeAccount: stripeConnectedAccountId }
+    );
     if (!session.url) throw new Error("Stripe did not return a checkout URL");
     return Response.json({ ok: true, data: { url: session.url } });
   });

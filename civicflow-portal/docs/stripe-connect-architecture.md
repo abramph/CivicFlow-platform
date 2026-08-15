@@ -295,6 +295,55 @@ Each PR merges + deploys + production-verifies before the next.
   completes onboarding), and the full G-scope webhook separation
   (`STRIPE_WEBHOOK_SECRET` recovery + $5 event replay).
 
+## 12. CONNECT-D — recurring giving on connected accounts (implemented)
+
+- **Scope:** every Stripe call site touching a recurring giving subscription
+  now resolves the CONNECTED account — nine call sites in
+  `recurring-self-service.ts` (change amount/frequency, pause, resume,
+  cancel, retry, payment-method start/apply, plus the shared subscription-item
+  lookup) via a new `getStripeForSchedule(schedule)` helper mirroring
+  CONNECT-C's refund pattern: null `stripeConnectedAccountId` → platform
+  client, no `stripeAccount` option (legacy schedules, unchanged); a stamped
+  connected account → look up its mode via `OrganizationStripeAccount`,
+  `getStripeForMode`, pass `{stripeAccount}`. The schedule's OWN immutable
+  attribution drives every mutation — never the org's current settings.
+- **Checkout (`giving/recurring/checkout`, `mobile/giving/recurring/checkout`):**
+  same §10/§55 gate as C (`resolveConnectedAccountForCharges`, 409-only, no
+  platform fallback), then a NEW connected-account customer/product pair —
+  `getOrCreateConnectedGivingCustomer` (writes
+  `OrganizationMemberStripeCustomer`, unique per org+user+connected-account,
+  CONNECT-A §11) and `getOrCreateConnectedGivingProduct` (a Product created
+  ON the connected account, since products are account-scoped in Stripe;
+  cached on the same `OrgSettings.givingStripeProductId` field, assuming one
+  connected account per org's active lifetime — documented, not enforced).
+  The LEGACY `getOrCreateGivingCustomer`/`getOrCreateGivingProduct`/
+  `GivingCustomer` stay untouched and unused by new checkouts, per CONNECT-A's
+  own note that CONNECT-D stops writing them.
+- **Attribution (§56):** `linkScheduleFromCheckout` stamps
+  `stripeConnectedAccountId` + `providerAccountContext` on the schedule at
+  linkage time; `recordRecurringInvoicePaid` reads those two fields straight
+  off the already-resolved schedule row (never re-derived from the invoice)
+  when stamping each recurring Contribution.
+- **Webhook — LEGACY COEXISTENCE, unlike C's full removal:** CONNECT-C could
+  remove its old-webhook branches outright because its own audit (§53) proved
+  zero real platform-account one-time contributions ever existed. CONNECT-D's
+  audit could not rule out a pre-existing recurring subscription already
+  running on the platform account (a PENDING_SETUP or just-started schedule
+  that never generated a payment would leave no trace in §53's
+  transaction-history audit). So: the giving-recurring branches were ADDED to
+  `/api/webhooks/stripe-connect` (checkout.session.completed,
+  customer.subscription.created/updated/deleted, invoice.paid,
+  invoice.payment_failed) for all NEW connected-account subscriptions, and
+  the equivalent branches in the OLD `/api/webhooks/stripe` were LEFT IN
+  PLACE — not removed — as the only path for any subscription that might
+  still be running on the platform account. Also added to the connect
+  webhook: the `giving-method-update` setup-mode session branch.
+- **Not covered here:** dues/events/payment links (E), processing-cost
+  coverage on recurring schedules (F), and confirming — via CONNECT-I's
+  Demo Church test-mode validation — whether any real platform-account
+  recurring schedule actually exists (the legacy-coexistence code handles it
+  either way, but the question itself is unresolved).
+
 ## Decisions log
 
 - **2026-08-14 (A):** Standard accounts + direct charges (rationale §2).
@@ -321,3 +370,14 @@ Each PR merges + deploys + production-verifies before the next.
   account-configuration change) requires the user's explicit permission —
   code shipped in this PR is inert until that endpoint exists; see the
   PR's own notes for the pending ask.
+- **2026-08-15 (D):** Unlike C, the OLD platform webhook's giving-recurring
+  branches are NOT removed — D's audit couldn't rule out a pre-existing
+  platform-account subscription the way C's audit ruled out pre-existing
+  one-time contributions. Both webhooks now carry the giving-recurring
+  logic; the connect webhook handles everything created after D ships.
+- **2026-08-15 (D):** Products are account-scoped in Stripe, so
+  `getOrCreateConnectedGivingProduct` creates a NEW product on the connected
+  account rather than reusing any platform-account product id. Cached on
+  the existing `OrgSettings.givingStripeProductId` field under the
+  assumption of one connected account per org's active lifetime (true today
+  per CONNECT-A §26 — accounts are disabled, never replaced).

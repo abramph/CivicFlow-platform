@@ -1,10 +1,10 @@
 import { withApiErrorHandling } from "@/lib/api-route";
 import { requireMemberWebSession } from "@/lib/member-web-session";
 import { createPendingSchedule } from "@/lib/giving/recurring";
-import { getOrCreateGivingCustomer, getOrCreateGivingProduct, stripeIntervalFor } from "@/lib/giving/giving-stripe";
+import { getOrCreateConnectedGivingCustomer, getOrCreateConnectedGivingProduct, stripeIntervalFor } from "@/lib/giving/giving-stripe";
+import { resolveConnectedAccountForCharges, getStripeForMode } from "@/lib/payments/stripe-connect";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { parseJsonBody, z } from "@/lib/validation";
-import { getStripe } from "@/lib/stripe";
 import { getServerEnv } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
 
@@ -46,18 +46,26 @@ export async function POST(request: Request) {
       memberId: memberSession.memberId,
     });
 
+    // CONNECT-D (§10/§55): resolved SERVER-SIDE from the organization — the
+    // org's OWN connected account or a clean 409, never the platform account.
+    const { stripeConnectedAccountId, accountMode } = await resolveConnectedAccountForCharges(memberSession.organizationId);
+    const mode = accountMode as "test" | "live";
+
     const user = await prisma.user.findUnique({ where: { id: memberSession.userId }, select: { email: true, displayName: true } });
     const [customerId, productId] = await Promise.all([
-      getOrCreateGivingCustomer({
+      getOrCreateConnectedGivingCustomer({
         organizationId: memberSession.organizationId,
         userId: memberSession.userId,
+        memberId: memberSession.memberId,
+        stripeConnectedAccountId,
+        accountMode: mode,
         email: user?.email ?? null,
         name: user?.displayName ?? null,
       }),
-      getOrCreateGivingProduct(memberSession.organizationId),
+      getOrCreateConnectedGivingProduct({ organizationId: memberSession.organizationId, stripeConnectedAccountId, accountMode: mode }),
     ]);
 
-    const stripe = getStripe();
+    const stripe = await getStripeForMode(mode);
     const env = getServerEnv();
     const baseUrl = env.NEXTAUTH_URL.replace(/\/$/, "");
     const recurring = stripeIntervalFor(input.frequency);
@@ -68,28 +76,34 @@ export async function POST(request: Request) {
       organizationId: memberSession.organizationId,
       scheduleId: schedule.id,
       givingFundId: fund.id,
+      // CONNECT-D (§20): cross-checked against event.account in the
+      // connected-account webhook — never trusted alone.
+      stripeConnectedAccountId,
       environment: process.env.NODE_ENV ?? "development",
     };
 
-    const session = await stripe.checkout.sessions.create({
-      mode: "subscription",
-      customer: customerId,
-      line_items: [
-        {
-          price_data: {
-            currency: "usd",
-            product: productId,
-            recurring,
-            unit_amount: Math.round(amount * 100),
+    const session = await stripe.checkout.sessions.create(
+      {
+        mode: "subscription",
+        customer: customerId,
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              product: productId,
+              recurring,
+              unit_amount: Math.round(amount * 100),
+            },
+            quantity: 1,
           },
-          quantity: 1,
-        },
-      ],
-      subscription_data: { metadata: givingMetadata },
-      success_url: `${baseUrl}/m/giving/success?session_id={CHECKOUT_SESSION_ID}&recurring=1&org=${encodeURIComponent(memberSession.organizationId)}`,
-      cancel_url: `${baseUrl}/m/giving?org=${encodeURIComponent(memberSession.organizationId)}`,
-      metadata: givingMetadata,
-    });
+        ],
+        subscription_data: { metadata: givingMetadata },
+        success_url: `${baseUrl}/m/giving/success?session_id={CHECKOUT_SESSION_ID}&recurring=1&org=${encodeURIComponent(memberSession.organizationId)}`,
+        cancel_url: `${baseUrl}/m/giving?org=${encodeURIComponent(memberSession.organizationId)}`,
+        metadata: givingMetadata,
+      },
+      { stripeAccount: stripeConnectedAccountId }
+    );
     if (!session.url) throw new Error("Stripe did not return a checkout URL");
 
     return Response.json({ ok: true, url: session.url });
