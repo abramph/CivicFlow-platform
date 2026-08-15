@@ -229,9 +229,14 @@ enum ReminderType {
   DUES_UPCOMING
   CONTRIBUTION_RECEIPT
   MEMBERSHIP_RENEWAL
-  /// UNION-CASE-A: queued from UnionCaseDeadline by the (future UNION-CASE-D)
-  /// deadline scanner, dispatched by the existing generic
-  /// processPendingReminderLogs() -- no separate scheduling system.
+  /// Reserved, currently unused: UNION-CASE-C's deadline scanner
+  /// (sendUnionCaseDeadlineReminders in src/lib/union/cases.ts) ended up
+  /// mirroring lib/hoa/violations.ts's sendDeadlineReminders() instead --
+  /// direct send + UnionCaseDeadlineReminderLog dedup, not this
+  /// EmailReminderLog queue -- once that precedent was read carefully
+  /// rather than guessed at during UNION-CASE-A. Left in place rather than
+  /// removed for a harmless unused enum value; a future feature that
+  /// genuinely wants queued (not immediate) Union reminders can still use it.
   UNION_CASE_DEADLINE
 }
 
@@ -1226,6 +1231,7 @@ model OrgMember {
   unionCasesAsMember             UnionCase[]                     @relation("UnionCaseMember")
   unionCasesAssigned             UnionCase[]                     @relation("UnionCaseAssignee")
   unionCaseDeadlinesResponsible  UnionCaseDeadline[]
+  unionCaseDeadlineReminderLogs  UnionCaseDeadlineReminderLog[]
 
   @@unique([organizationId, userId])
   @@unique([organizationId, memberNumber])
@@ -5876,11 +5882,14 @@ model UnionCaseContractReference {
 
 /// A single deadline/date tracked against a case (filing deadline,
 /// management response due, Step 1/2/3, hearing/arbitration, follow-up,
-/// custom). The (future UNION-CASE-D) deadline scanner reads dueAt/
-/// completedAt here and queues EmailReminderLog rows with reminderType
-/// UNION_CASE_DEADLINE -- reusing the existing generic reminder-dispatch
-/// cron rather than a separate scheduling system, same pattern as
-/// lib/hoa/violations.ts's sendDeadlineReminders().
+/// custom). UNION-CASE-C's deadline scanner (sendUnionCaseDeadlineReminders
+/// in src/lib/union/cases.ts) reads dueAt/completedAt here directly and
+/// notifies the responsible party inline, deduplicated via
+/// UnionCaseDeadlineReminderLog -- mirrors lib/hoa/violations.ts's
+/// sendDeadlineReminders() exactly (claim-then-send via a unique
+/// constraint, not a read-then-write), not the EmailReminderLog queue this
+/// model's own doc comment originally guessed at before that precedent was
+/// re-read carefully.
 model UnionCaseDeadline {
   id                     String    @id @default(cuid())
   organizationId         String
@@ -5899,12 +5908,45 @@ model UnionCaseDeadline {
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  case         UnionCase    @relation(fields: [caseId], references: [id], onDelete: Restrict)
-  responsible  OrgMember?   @relation(fields: [responsibleOrgMemberId], references: [id], onDelete: SetNull)
+  organization Organization                   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  case         UnionCase                      @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  responsible  OrgMember?                     @relation(fields: [responsibleOrgMemberId], references: [id], onDelete: SetNull)
+  reminderLogs UnionCaseDeadlineReminderLog[]
 
   @@index([organizationId])
   @@index([caseId])
   @@index([organizationId, dueAt])
   @@index([organizationId, completedAt])
+}
+
+/// Per-(deadline, recipient, offset) send ledger for
+/// sendUnionCaseDeadlineReminders() (UNION-CASE-C) -- identical shape and
+/// concurrency-safety reasoning to ViolationReminderLog: the unique
+/// constraint below is the dedup mechanism itself (claim-then-send via
+/// INSERT, a P2002 conflict means "already sent"), not a preceding read.
+/// dueOffsetDays = floor((dueAt - sentAt) / 1 day) at send time, so it
+/// naturally re-fires daily for a still-open overdue deadline (a fresh,
+/// distinct key each day) without a separate escalation mechanism.
+/// Deliberately no `organization Organization @relation` field -- same
+/// simplification ViolationReminderLog already made: this is an
+/// append-only send ledger, never fetched via Organization's own relation
+/// graph, so organizationId stays a plain indexed column rather than
+/// another entry in Organization's already-large relation block.
+model UnionCaseDeadlineReminderLog {
+  id             String   @id @default(cuid())
+  organizationId String
+  deadlineId     String
+  orgMemberId    String
+  /// Free-text, matching ViolationReminderLog.reminderType's own precedent
+  /// -- "DEADLINE_REMINDER" today, room for other kinds later without a
+  /// migration.
+  reminderType   String
+  dueOffsetDays  Int
+  sentAt         DateTime @default(now())
+
+  deadline  UnionCaseDeadline @relation(fields: [deadlineId], references: [id], onDelete: Restrict)
+  orgMember OrgMember         @relation(fields: [orgMemberId], references: [id], onDelete: Restrict)
+
+  @@unique([deadlineId, orgMemberId, reminderType, dueOffsetDays])
+  @@index([organizationId])
 }
