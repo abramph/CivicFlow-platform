@@ -5,11 +5,11 @@ case-management workflow for union orgs (members, stewards, representatives, aut
 **This is deliberately not a full legal case-management platform and does not duplicate
 UnionFlow** — Unestra Union stays thin and reuses existing Unestra infrastructure wherever
 possible (see "Reused infrastructure" below). `UNION-CASE-A` shipped the foundation: schema, RBAC,
-the status state machine, member intake, and basic staff read. `UNION-CASE-B` (this PR) ships the
+the status state machine, member intake, and basic staff read. `UNION-CASE-B` shipped the
 steward/officer dashboard, assignment, and case management (notes, contract references,
-deadlines) — both API and UI. `UNION-CASE-C`/`D` (deadline reminder dispatch, member mobile
-experience + hardening) remain separate, sequential PRs — each merged, deployed, and
-production-smoke-tested before the next begins.
+deadlines) — both API and UI. `UNION-CASE-C` (this PR) ships deadline reminder dispatch.
+`UNION-CASE-D` (member mobile experience + hardening) remains a separate PR — each merged,
+deployed, and production-smoke-tested before the next begins.
 
 ## Discovery (why this design)
 
@@ -192,17 +192,27 @@ this scope discovered during the program gets recorded as POST-LAUNCH, not built
 - **UNION-CASE-A** — DONE, merged, deployed, production-smoke-verified 2026-08-15. Foundation:
   schema, RBAC, state machine, member intake, basic staff read. 34 tests (state machine, tenant
   isolation, note-visibility adversarial).
-- **UNION-CASE-B** — DONE (this PR). Steward/officer dashboard, assignment, status transitions,
-  notes, contract references, and deadline management — both the API and the UI (the detail page
-  needed notes/contract-references/deadlines to be usable and testable, so B absorbed what was
-  originally sketched as UNION-CASE-C's UI scope; see "Adjust the boundaries if the repository
-  architecture strongly suggests a better split" in the program spec). 14 additional tests
-  (dashboard bucket/filter correctness). Live-verified in the browser against a real UNION demo
-  org (assign → auto-bump to ASSIGNED → start active work → add an internal note → add a
-  member-visible note → add a contract reference → add an overdue deadline → dashboard's Overdue
-  chip picks it up correctly).
-- **UNION-CASE-C** (renumbered) — deadlines/reminders dispatch: the `EmailReminderLog`-queuing
-  cron scanner mirroring `sendDeadlineReminders()` in `lib/hoa/violations.ts`. Not started.
+- **UNION-CASE-B** — DONE, merged, deployed, production-smoke-verified 2026-08-15. Steward/officer
+  dashboard, assignment, status transitions, notes, contract references, and deadline management —
+  both the API and the UI (the detail page needed notes/contract-references/deadlines to be usable
+  and testable, so B absorbed what was originally sketched as UNION-CASE-C's UI scope; see "Adjust
+  the boundaries if the repository architecture strongly suggests a better split" in the program
+  spec). 14 additional tests (dashboard bucket/filter correctness). Live-verified in the browser
+  against a real UNION demo org (assign → auto-bump to ASSIGNED → start active work → add an
+  internal note → add a member-visible note → add a contract reference → add an overdue deadline →
+  dashboard's Overdue chip picks it up correctly).
+- **UNION-CASE-C** (renumbered, this PR) — deadline reminder dispatch:
+  `sendUnionCaseDeadlineReminders()` in `src/lib/union/cases.ts`, called by
+  `POST /api/cron/union-case-deadline-reminders`. Turned out NOT to route through the generic
+  `EmailReminderLog` queue as this doc originally guessed during A's discovery pass — re-reading
+  `lib/hoa/violations.ts`'s actual `sendDeadlineReminders()` carefully showed the real, already-
+  proven precedent is a direct send plus a dedicated per-(entity, recipient, offset) dedup-log
+  table whose unique constraint IS the concurrency-safety mechanism (claim via INSERT, a P2002
+  conflict means "already sent," not a preceding read) — see the new
+  `UnionCaseDeadlineReminderLog` model. 11 mocked unit tests plus a real-database concurrency
+  integration test (8 simultaneous invocations racing the same due deadline converge on exactly
+  one send), run for real against the local dev DB before committing. Not yet wired into any
+  external scheduler — same as HOA's own `hoa-violation-reminders` endpoint; see `DEPLOYMENT.md`.
 - **UNION-CASE-D** (renumbered) — member mobile experience + hardening pass. Not started.
 
 Once the full program is complete, the next phase is full regression/security testing and
