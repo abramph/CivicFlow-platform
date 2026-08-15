@@ -132,14 +132,20 @@ Rationale:
   built — one provider exists; renaming later is cheaper than abstracting
   now.
 
-## 4. Webhook topology (§19–§23, §58) — implemented in CONNECT-G
+## 4. Webhook topology (§19–§23, §58) — **minimal slice pulled forward into
+CONNECT-C** (see the CONNECT-C entry below); full separation work
+(secret-recovery replay, broader event coverage for D/E) remains at G.
 
 - **Two endpoints, two secrets, one handler file per concern:**
   - Platform: `/api/webhooks/stripe` (existing URL) — SaaS billing events
     only, secret env `STRIPE_WEBHOOK_SECRET` (kept name; it becomes
     platform-only by subscription pruning, documented to avoid ambiguity).
   - Connect: `/api/webhooks/stripe-connect` — "Events on connected
-    accounts" endpoint; secret env `STRIPE_CONNECT_WEBHOOK_SECRET`.
+    accounts" endpoint; secret env `STRIPE_CONNECT_WEBHOOK_SECRET`. Shipped
+    in CONNECT-C scoped to `checkout.session.completed` (giving +
+    public-giving), `charge.refunded`, `charge.dispute.created/closed` — the
+    minimum needed to make direct-charge one-time/public giving real and
+    testable, per the program's own "no PR ships untestable" discipline.
 - Tenant resolution (§20): `event.account` (`acct_…`) →
   `OrganizationStripeAccount` → organization → internal object. Metadata is
   a CROSS-CHECK only (§23); account-context is the primary signal. No
@@ -147,7 +153,9 @@ Rationale:
 - Idempotency: the existing `StripeWebhookEvent` unique-event-id dedup +
   per-object belts continue, keyed with account context.
 - Recovery order (§59) executes at CONNECT-G, including the deferred
-  platform-secret correction and controlled replay of the $5 event.
+  platform-secret correction and controlled replay of the $5 event. This is
+  UNCHANGED by the CONNECT-C pull-forward: the new endpoint only ever
+  receives NEW connected-account events, never the stuck $5 platform event.
 
 ## 5. Optional processing-cost coverage (§28–§47) — CONNECT-F
 
@@ -236,6 +244,57 @@ G Webhook separation & recovery (incl. deferred secret fix + replay) →
 H Historical reconciliation → I Demo Church on test-mode Connect.
 Each PR merges + deploys + production-verifies before the next.
 
+## 11. CONNECT-C — one-time + public giving on direct charges (implemented)
+
+- **Checkout (member web `/api/giving/checkout`, mobile
+  `/api/mobile/giving/checkout`, public `/api/public/give`):** each route
+  now calls `resolveConnectedAccountForCharges(organizationId)` (§10/§55 —
+  org-only signature, no client-supplied account) before creating a
+  session, uses `getStripeForMode(accountMode)` for the matching
+  test/live data plane, and passes `{ stripeAccount: stripeConnectedAccountId }`
+  as the session-create request option — the connected account becomes the
+  merchant of record (§2 direct-charge decision). A 409 from the resolver
+  (`Payments are not set up…` / `…needs additional information…`) is the
+  ONLY outcome when an org hasn't connected or isn't charges-enabled —
+  there is no code path back to the platform account (§14/§55).
+- **Public giving page (`getPublicGivingPage`):** added a
+  `chargesEnabled && !disabledAt` gate; when false, `funds: []` is
+  returned (the identical "not accepting online gifts" empty-state the
+  page already had for zero published funds) rather than a working form —
+  §14's "temporarily unavailable" behavior with no new UI surface.
+- **New webhook `/api/webhooks/stripe-connect`:** built per the §4 topology
+  above (pulled forward from G). `event.account` resolves the org via
+  `OrganizationStripeAccount.stripeAccountId` (unique); `session.metadata
+  .organizationId`, when present, is cross-checked and a mismatch is
+  rejected + logged, never trusted alone (§20/§23). Reuses the SAME
+  `recordGivingContribution` / `recordPublicGivingContribution` /
+  `applyProviderRefund` / `applyDisputeStatus` functions as the platform
+  webhook — no forked business logic, only a different tenant-resolution
+  and account-scoping wrapper.
+- **Old platform webhook (`/api/webhooks/stripe`):** the `paymentType ===
+  "giving"` / `"public-giving"` branches were REMOVED (not left dead) —
+  once checkout sessions are created against the connected account, their
+  `checkout.session.completed` events physically cannot arrive on the
+  platform's "Events on your account" stream.
+- **Attribution (§56):** `RecordGivingInput`/`RecordPublicGivingInput` now
+  REQUIRE `stripeConnectedAccountId`; every Contribution row created
+  through these paths stamps `stripeConnectedAccountId` +
+  `providerAccountContext: CONNECTED_ACCOUNT_PAYMENT` immutably. Pre-C
+  historical rows (if any existed — §53 found none from real member money)
+  are untouched; no backfill migration.
+- **Refunds (§17):** `issueRefund` resolves the Stripe client + `{
+  stripeAccount }` option from the CONTRIBUTION'S OWN
+  `stripeConnectedAccountId` (via a fresh `OrganizationStripeAccount`
+  lookup by that id, not the org's current settings) when
+  `providerAccountContext === CONNECTED_ACCOUNT_PAYMENT`; legacy/null rows
+  keep using the platform client with no `stripeAccount` option, unchanged.
+- **Scope not covered here (deferred, unblocked by nothing in C):**
+  recurring giving (D), dues/events/payment-links (E), processing-cost
+  coverage (F), the live-mode counterpart of the new webhook endpoint
+  (needed only once a real org — not just test-mode Demo Church —
+  completes onboarding), and the full G-scope webhook separation
+  (`STRIPE_WEBHOOK_SECRET` recovery + $5 event replay).
+
 ## Decisions log
 
 - **2026-08-14 (A):** Standard accounts + direct charges (rationale §2).
@@ -248,3 +307,17 @@ Each PR merges + deploys + production-verifies before the next.
   anti-over-engineering clause).
 - **2026-08-14 (A):** `STRIPE_WEBHOOK_SECRET` keeps its name as the
   platform-billing secret; `STRIPE_CONNECT_WEBHOOK_SECRET` is new in G.
+- **2026-08-15 (C):** Pulled forward the MINIMUM slice of G's webhook
+  separation (new endpoint, new secret, `event.account` tenant resolution)
+  into C rather than shipping checkout-side direct charges with no working
+  webhook path — an untestable PR would violate the program's own
+  per-PR-verified discipline. Full G scope (secret recovery, $5 replay,
+  broader D/E event coverage) is unchanged and still deferred.
+- **2026-08-15 (C):** `STRIPE_CONNECT_WEBHOOK_SECRET` ships as a single
+  TEST-mode secret for now (Demo Church is the only connected account that
+  exists). A live-mode counterpart is added whenever the first real org
+  completes live Connect onboarding — not preemptively built in C.
+- **2026-08-15 (C):** Creating the actual Stripe webhook endpoint (an
+  account-configuration change) requires the user's explicit permission —
+  code shipped in this PR is inert until that endpoint exists; see the
+  PR's own notes for the pending ask.

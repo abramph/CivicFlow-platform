@@ -8,7 +8,9 @@ const findFirstOrgMember = vi.fn();
 const createAdjustment = vi.fn();
 const transaction = vi.fn();
 const findUniqueOrgSettings = vi.fn();
+const findUniqueStripeAccount = vi.fn();
 const stripeRefundsCreate = vi.fn();
+const stripeRefundsCreateConnected = vi.fn();
 const createAuditEvent = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("@/lib/prisma", () => ({
@@ -22,11 +24,15 @@ vi.mock("@/lib/prisma", () => ({
     orgMember: { findFirst: (...a: unknown[]) => findFirstOrgMember(...a) },
     contributionAdjustment: { create: (...a: unknown[]) => createAdjustment(...a) },
     orgSettings: { findUnique: (...a: unknown[]) => findUniqueOrgSettings(...a) },
+    organizationStripeAccount: { findUnique: (...a: unknown[]) => findUniqueStripeAccount(...a) },
     $transaction: (...a: unknown[]) => transaction(...a),
   },
 }));
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...args: unknown[]) => createAuditEvent(...args) }));
 vi.mock("@/lib/stripe", () => ({ getStripe: () => ({ refunds: { create: (...a: unknown[]) => stripeRefundsCreate(...a) } }) }));
+vi.mock("@/lib/payments/stripe-connect", () => ({
+  getStripeForMode: async () => ({ refunds: { create: (...a: unknown[]) => stripeRefundsCreateConnected(...a) } }),
+}));
 
 import { adjustContribution, applyProviderRefund, issueRefund } from "@/lib/giving/refunds";
 import { pledgeProgress } from "@/lib/giving/pledges";
@@ -89,6 +95,35 @@ describe("issueRefund (§34)", () => {
     const data = updateContribution.mock.calls[0][0].data;
     expect(Number(data.refundedAmount)).toBe(25);
     expect(data.providerRefundId).toBe("re_1");
+  });
+
+  it("CONNECT-C §17: a connected-account contribution refunds against ITS OWN account, not the platform", async () => {
+    findFirstContribution.mockResolvedValueOnce({
+      ...PROVIDER_ROW,
+      stripeConnectedAccountId: "acct_connected1",
+      providerAccountContext: "CONNECTED_ACCOUNT_PAYMENT",
+    });
+    findUniqueStripeAccount.mockResolvedValueOnce({ accountMode: "test" });
+    stripeRefundsCreateConnected.mockResolvedValueOnce({ id: "re_conn1", status: "succeeded", amount: 2500 });
+    findFirstContribution.mockResolvedValueOnce({
+      ...PROVIDER_ROW,
+      stripeConnectedAccountId: "acct_connected1",
+      providerAccountContext: "CONNECTED_ACCOUNT_PAYMENT",
+    }); // applyProviderRefund lookup
+    await issueRefund({ organizationId: "org-1", contributionId: "c-1", amount: 25, reason: "duplicate gift", actorUserId: "fin" });
+    expect(stripeRefundsCreate).not.toHaveBeenCalled();
+    expect(stripeRefundsCreateConnected.mock.calls[0][0]).toMatchObject({ payment_intent: "pi_1", amount: 2500 });
+    expect(stripeRefundsCreateConnected.mock.calls[0][1]).toEqual({ stripeAccount: "acct_connected1" });
+    expect(findUniqueStripeAccount.mock.calls[0][0].where).toEqual({ stripeAccountId: "acct_connected1" });
+  });
+
+  it("a legacy (pre-Connect) platform-account row still refunds via the platform client, no stripeAccount option", async () => {
+    findFirstContribution.mockResolvedValueOnce({ ...PROVIDER_ROW, stripeConnectedAccountId: null, providerAccountContext: null });
+    stripeRefundsCreate.mockResolvedValueOnce({ id: "re_legacy1", status: "succeeded", amount: 2500 });
+    findFirstContribution.mockResolvedValueOnce({ ...PROVIDER_ROW, stripeConnectedAccountId: null, providerAccountContext: null });
+    await issueRefund({ organizationId: "org-1", contributionId: "c-1", amount: 25, reason: "duplicate gift", actorUserId: "fin" });
+    expect(stripeRefundsCreateConnected).not.toHaveBeenCalled();
+    expect(stripeRefundsCreate.mock.calls[0][1]).toBeUndefined();
   });
 
   it("a pending provider refund does NOT mark the row — the webhook will", async () => {

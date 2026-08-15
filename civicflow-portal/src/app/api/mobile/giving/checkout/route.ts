@@ -3,7 +3,7 @@ import { requireMobileMembership } from "@/lib/mobile-auth";
 import { validateGivingRequest } from "@/lib/giving/checkout";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { parseJsonBody, z } from "@/lib/validation";
-import { getStripe } from "@/lib/stripe";
+import { resolveConnectedAccountForCharges, getStripeForMode } from "@/lib/payments/stripe-connect";
 import { getServerEnv } from "@/lib/env";
 import { logGivingEvent } from "@/lib/giving/telemetry";
 
@@ -39,46 +39,51 @@ export async function POST(request: Request) {
       contributorUserId: mobileSession.userId,
     });
 
-    const stripe = getStripe();
+    const { stripeConnectedAccountId, accountMode } = await resolveConnectedAccountForCharges(organizationId);
+    const stripe = await getStripeForMode(accountMode as "test" | "live");
     const env = getServerEnv();
     const baseUrl = env.NEXTAUTH_URL.replace(/\/$/, "");
 
     logGivingEvent("GIVING_CHECKOUT_STARTED", { organizationId, fundId: fund.id, amountCents: Math.round(amount * 100) });
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      payment_intent_data: {
-        metadata: { organizationId, paymentType: "giving" },
-      },
-      line_items: [
-        {
-          price_data: {
-            currency: "usd",
-            product_data: {
-              name: program ? `${program.name} — ${fund.name}` : fund.name,
-              description: "Contribution",
-            },
-            unit_amount: Math.round(amount * 100),
-          },
-          quantity: 1,
+    const session = await stripe.checkout.sessions.create(
+      {
+        mode: "payment",
+        payment_intent_data: {
+          metadata: { organizationId, paymentType: "giving" },
         },
-      ],
-      success_url: `${baseUrl}/giving/checkout-complete?state=success`,
-      cancel_url: `${baseUrl}/giving/checkout-complete?state=cancelled`,
-      metadata: {
-        product: "Unestra",
-        platformOwner: "APH Technologies, LLC",
-        paymentType: "giving",
-        organizationId,
-        givingFundId: fund.id,
-        givingProgramId: program?.id ?? "",
-        memberId,
-        contributorUserId: mobileSession.userId,
-        givingPledgeId: pledge?.id ?? "",
-        anonymityMode: input.anonymityMode ?? "NONE",
-        givingMemo: "",
-        environment: process.env.NODE_ENV ?? "development",
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: {
+                name: program ? `${program.name} — ${fund.name}` : fund.name,
+                description: "Contribution",
+              },
+              unit_amount: Math.round(amount * 100),
+            },
+            quantity: 1,
+          },
+        ],
+        success_url: `${baseUrl}/giving/checkout-complete?state=success`,
+        cancel_url: `${baseUrl}/giving/checkout-complete?state=cancelled`,
+        metadata: {
+          product: "Unestra",
+          platformOwner: "APH Technologies, LLC",
+          paymentType: "giving",
+          organizationId,
+          stripeConnectedAccountId,
+          givingFundId: fund.id,
+          givingProgramId: program?.id ?? "",
+          memberId,
+          contributorUserId: mobileSession.userId,
+          givingPledgeId: pledge?.id ?? "",
+          anonymityMode: input.anonymityMode ?? "NONE",
+          givingMemo: "",
+          environment: process.env.NODE_ENV ?? "development",
+        },
       },
-    });
+      { stripeAccount: stripeConnectedAccountId }
+    );
     if (!session.url) throw new Error("Stripe did not return a checkout URL");
     return Response.json({ ok: true, data: { url: session.url } });
   });

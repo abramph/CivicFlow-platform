@@ -12,12 +12,14 @@ const createContribution = vi.fn();
 const updateContribution = vi.fn();
 const findFirstOrgMember = vi.fn();
 const findManyOrgMembers = vi.fn();
+const findUniqueStripeAccount = vi.fn();
 const createAuditEvent = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     organization: { findUnique: (...a: unknown[]) => findUniqueOrg(...a) },
     orgSettings: { findUnique: (...a: unknown[]) => findUniqueOrgSettings(...a) },
+    organizationStripeAccount: { findUnique: (...a: unknown[]) => findUniqueStripeAccount(...a) },
     fund: {
       findMany: (...a: unknown[]) => findManyFunds(...a),
       findFirst: (...a: unknown[]) => findFirstFund(...a),
@@ -69,6 +71,7 @@ beforeEach(() => {
     publicGivingMessage: null,
     contributionTerminology: "Giving",
   });
+  findUniqueStripeAccount.mockResolvedValue({ chargesEnabled: true, disabledAt: null });
   createContribution.mockImplementation(async (args: { data: Record<string, unknown> }) => ({
     id: "c-1",
     contributionNumber: "CTR-2026-000042",
@@ -94,6 +97,37 @@ describe("no tenant enumeration (§55 security review 1)", () => {
 
     findUniqueOrgSettings.mockResolvedValueOnce({ contributionsEnabled: true, publicGivingEnabled: false });
     await expect(validatePublicGivingRequest({ slug: "x", fundId: "f-1", amount: 10 })).rejects.toMatchObject({ status: 404 });
+  });
+});
+
+describe("CONNECT-C §14: never falls back to the platform account", () => {
+  it("no connected account, or charges not yet enabled, hides funds — never a working give form", async () => {
+    findManyFunds.mockResolvedValue([{ id: "f-1", name: "General", description: null, suggestedAmounts: [], minimumAmount: null, maximumAmount: null }]);
+    findManyCampaigns.mockResolvedValue([]);
+
+    findUniqueStripeAccount.mockResolvedValueOnce(null);
+    let page = await getPublicGivingPage("demo");
+    expect(page?.givingAvailable).toBe(false);
+    expect(page?.funds).toEqual([]);
+
+    findUniqueStripeAccount.mockResolvedValueOnce({ chargesEnabled: false, disabledAt: null });
+    page = await getPublicGivingPage("demo");
+    expect(page?.givingAvailable).toBe(false);
+    expect(page?.funds).toEqual([]);
+
+    findUniqueStripeAccount.mockResolvedValueOnce({ chargesEnabled: true, disabledAt: new Date() });
+    page = await getPublicGivingPage("demo");
+    expect(page?.givingAvailable).toBe(false);
+    expect(page?.funds).toEqual([]);
+  });
+
+  it("a charges-enabled connected account exposes the published funds normally", async () => {
+    findManyFunds.mockResolvedValueOnce([{ id: "f-1", name: "General", description: null, suggestedAmounts: [], minimumAmount: null, maximumAmount: null }]);
+    findManyCampaigns.mockResolvedValueOnce([]);
+    findUniqueStripeAccount.mockResolvedValueOnce({ chargesEnabled: true, disabledAt: null });
+    const page = await getPublicGivingPage("demo");
+    expect(page?.givingAvailable).toBe(true);
+    expect(page?.funds).toHaveLength(1);
   });
 });
 
@@ -126,6 +160,7 @@ describe("webhook recorder (§50 + idempotency + §57)", () => {
     currency: "usd",
     providerPaymentIntentId: "pi_1",
     providerSessionId: "cs_1",
+    stripeConnectedAccountId: "acct_connected1",
   };
 
   it("fund/org mismatch records NOTHING", async () => {
@@ -154,6 +189,9 @@ describe("webhook recorder (§50 + idempotency + §57)", () => {
     expect(data.guestEmail).toBe("member@example.com");
     expect(data).not.toHaveProperty("memberId");
     expect(data.source).toBe("PUBLIC_PAGE");
+    // CONNECT-C (§56): immutable connected-account attribution.
+    expect(data.stripeConnectedAccountId).toBe("acct_connected1");
+    expect(data.providerAccountContext).toBe("CONNECTED_ACCOUNT_PAYMENT");
   });
 
   it("no email → UNLINKED, no receipt requested, unknown anonymity degrades to NONE", async () => {

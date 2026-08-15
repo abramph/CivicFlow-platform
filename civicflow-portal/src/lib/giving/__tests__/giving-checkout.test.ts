@@ -31,6 +31,7 @@ const baseRecord = {
   currency: "usd",
   providerPaymentIntentId: "pi_123",
   providerSessionId: "cs_123",
+  stripeConnectedAccountId: "acct_connected1",
 };
 
 beforeEach(() => {
@@ -133,6 +134,9 @@ describe("recordGivingContribution (webhook side)", () => {
       providerPaymentIntentId: "pi_123",
       anonymityMode: "PUBLICLY_ANONYMOUS",
       source: "MEMBER_PROFILE",
+      // CONNECT-C (§56): immutable connected-account attribution.
+      stripeConnectedAccountId: "acct_connected1",
+      providerAccountContext: "CONNECTED_ACCOUNT_PAYMENT",
     });
     expect(String(data.contributionNumber)).toMatch(/^CTR-\d{4}-\d{6}$/);
     expect(createAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "giving.contribution_recorded" }));

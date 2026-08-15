@@ -37,6 +37,11 @@ const serverEnvSchema = z.object({
   // (billing-exempt demo orgs only — see stripe-connect.ts). Live member
   // money never uses this key.
   STRIPE_TEST_SECRET_KEY: z.string().min(1).optional(),
+  // CONNECT-C: signs events on the platform's TEST-mode "Events on connected
+  // accounts" webhook endpoint (docs/stripe-connect-architecture.md §4).
+  // Optional until a live-mode connected-account endpoint exists too — see
+  // the doc's CONNECT-C decisions-log entry.
+  STRIPE_CONNECT_WEBHOOK_SECRET: z.string().min(1).optional(),
   STRIPE_PRICE_ESSENTIAL_MONTHLY: z.string().optional(),
   STRIPE_PRICE_ESSENTIAL_YEARLY: z.string().optional(),
   STRIPE_PRICE_ELITE_MONTHLY: z.string().optional(),
@@ -113,6 +118,7 @@ export function getServerEnv(): ServerEnv {
     STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY,
     STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET,
     STRIPE_TEST_SECRET_KEY: process.env.STRIPE_TEST_SECRET_KEY,
+    STRIPE_CONNECT_WEBHOOK_SECRET: process.env.STRIPE_CONNECT_WEBHOOK_SECRET,
     STRIPE_PRICE_ESSENTIAL_MONTHLY: process.env.STRIPE_PRICE_ESSENTIAL_MONTHLY,
     STRIPE_PRICE_ESSENTIAL_YEARLY: process.env.STRIPE_PRICE_ESSENTIAL_YEARLY,
     STRIPE_PRICE_ELITE_MONTHLY: process.env.STRIPE_PRICE_ELITE_MONTHLY,
@@ -163,6 +169,11 @@ export function getServerEnv(): ServerEnv {
     ANDROID_SHA256_CERT_FINGERPRINTS: parsed.ANDROID_SHA256_CERT_FINGERPRINTS,
     STRIPE_SECRET_KEY: parsed.STRIPE_SECRET_KEY ?? "",
     STRIPE_WEBHOOK_SECRET: parsed.STRIPE_WEBHOOK_SECRET ?? "",
+    // Pre-existing gap fixed in passing: this branch (dev/test) previously
+    // never copied STRIPE_TEST_SECRET_KEY from `parsed`, so it always read
+    // as undefined outside production even when set locally.
+    STRIPE_TEST_SECRET_KEY: parsed.STRIPE_TEST_SECRET_KEY,
+    STRIPE_CONNECT_WEBHOOK_SECRET: parsed.STRIPE_CONNECT_WEBHOOK_SECRET,
     STRIPE_PRICE_ESSENTIAL_MONTHLY: parsed.STRIPE_PRICE_ESSENTIAL_MONTHLY,
     STRIPE_PRICE_ESSENTIAL_YEARLY: parsed.STRIPE_PRICE_ESSENTIAL_YEARLY,
     STRIPE_PRICE_ELITE_MONTHLY: parsed.STRIPE_PRICE_ELITE_MONTHLY,
