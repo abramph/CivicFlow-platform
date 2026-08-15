@@ -20,6 +20,7 @@ export const attachmentEntityTypes = [
   "PAYMENT_REPORT",
   "HOA_VIOLATION",
   "HOA_ARCHITECTURAL_REQUEST",
+  "UNION_CASE",
   "OTHER",
 ] as const satisfies readonly AttachmentEntityType[];
 
@@ -56,6 +57,11 @@ const readPermissions: Record<AttachmentEntityType, Permission> = {
   // filters by the attachment's `purpose` classification -- see
   // docs/hoa-architectural-requests.md's attachment-visibility section.
   HOA_ARCHITECTURAL_REQUEST: "hoa:architectural-requests:read",
+  // Staff path only, same shape as HOA_ARCHITECTURAL_REQUEST just above -- a
+  // member's own read access to their own case's member-visible attachments
+  // does NOT go through this at all; see requireUnionCaseMemberAccess() in
+  // src/lib/union/cases-guard.ts.
+  UNION_CASE: "union:cases:read",
   OTHER: "org_settings:read",
 };
 
@@ -77,6 +83,7 @@ const writePermissions: Record<AttachmentEntityType, Permission> = {
   PAYMENT_REPORT: "dues:write",
   HOA_VIOLATION: "hoa:violations:write",
   HOA_ARCHITECTURAL_REQUEST: "hoa:architectural-requests:write",
+  UNION_CASE: "union:cases:manage",
   OTHER: "org_settings:write",
 };
 

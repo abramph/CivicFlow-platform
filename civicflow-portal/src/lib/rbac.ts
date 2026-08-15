@@ -327,6 +327,26 @@ export const PERMISSIONS = {
   IMPORTS_RESUME:               "imports:resume",
   IMPORTS_CANCEL:                "imports:cancel",
   IMPORTS_RESOLVE_DUPLICATES:    "imports:resolve-duplicates",
+
+  // Union Case Center (UNION-CASE-A) — grievance & representation case
+  // management. Five tiers rather than the usual read/write pair: viewing
+  // the org's cases, general case administration (triage/assign/reassign/
+  // status/member-visible updates/contract references), adding INTERNAL
+  // (union-staff-only) notes, and managing deadlines are all meaningfully
+  // different authority levels, and closing/resolving is the terminal,
+  // record-closing action reserved for board-level authority — same
+  // multi-tier reasoning as HOA Violations/Architectural Requests above.
+  // Gated additionally by requireUnionCaseCapability()'s "caseManagement"
+  // flag (see src/lib/vertical-capabilities.ts) — holding one of these is
+  // necessary but never sufficient by itself. A member's own submit/view of
+  // their own case does NOT go through this permission set at all — see
+  // requireUnionCaseMemberAccess() in src/lib/union/cases-guard.ts,
+  // mirroring requireArchitecturalRequestResidentAccess()'s pattern.
+  UNION_CASES_READ:             "union:cases:read",
+  UNION_CASES_MANAGE:           "union:cases:manage",
+  UNION_CASES_NOTES_INTERNAL:   "union:cases:notes:internal",
+  UNION_CASES_DEADLINES_MANAGE: "union:cases:deadlines:manage",
+  UNION_CASES_CLOSE:            "union:cases:close",
 } as const;
 
 // Parent/household-adult self-service (view own household, RSVP, pay own
@@ -468,6 +488,11 @@ const ORG_OWNER_PERMISSIONS: Permission[] = [
   PERMISSIONS.IMPORTS_RESUME,
   PERMISSIONS.IMPORTS_CANCEL,
   PERMISSIONS.IMPORTS_RESOLVE_DUPLICATES,
+  PERMISSIONS.UNION_CASES_READ,
+  PERMISSIONS.UNION_CASES_MANAGE,
+  PERMISSIONS.UNION_CASES_NOTES_INTERNAL,
+  PERMISSIONS.UNION_CASES_DEADLINES_MANAGE,
+  PERMISSIONS.UNION_CASES_CLOSE,
 ];
 
 const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
@@ -593,6 +618,11 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.IMPORTS_RESUME,
     PERMISSIONS.IMPORTS_CANCEL,
     PERMISSIONS.IMPORTS_RESOLVE_DUPLICATES,
+    PERMISSIONS.UNION_CASES_READ,
+    PERMISSIONS.UNION_CASES_MANAGE,
+    PERMISSIONS.UNION_CASES_NOTES_INTERNAL,
+    PERMISSIONS.UNION_CASES_DEADLINES_MANAGE,
+    PERMISSIONS.UNION_CASES_CLOSE,
   ],
 
   // Maps naturally onto "Treasurer" via OrgRolePermissionSet if an org wants
@@ -667,6 +697,9 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     // ones, even though a violation may eventually carry a fine (billed as
     // an ordinary DuesCharge the Treasurer already sees through the
     // existing dues permissions above, once fine-creation ships).
+    // Deliberately NO UNION_CASES_* permission at all, same reasoning:
+    // grievance/representation case management is a steward/board function,
+    // not a financial one.
   ],
 
   // Maps naturally onto "Membership Chair" / "Volunteer Coordinator" /
@@ -746,6 +779,17 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     // state, and canceling a batch outright is consequential enough to
     // reserve for ORG_OWNER/ORG_ADMIN, same reasoning as RESOLVE/DECIDE
     // being withheld above.
+    // Maps onto "Steward"/"Representative" via OrgRolePermissionSet: the
+    // day-to-day case-work tier (view, triage/assign, internal notes,
+    // deadlines) without the terminal close/resolve authority.
+    PERMISSIONS.UNION_CASES_READ,
+    PERMISSIONS.UNION_CASES_MANAGE,
+    PERMISSIONS.UNION_CASES_NOTES_INTERNAL,
+    PERMISSIONS.UNION_CASES_DEADLINES_MANAGE,
+    // Deliberately NOT UNION_CASES_CLOSE -- closing/resolving a case is the
+    // terminal, record-closing action, reserved for ORG_OWNER/ORG_ADMIN
+    // (board-level authority), same reasoning as HOA_VIOLATIONS_RESOLVE and
+    // HOA_ARCHITECTURAL_REQUESTS_DECIDE being withheld above.
   ],
 
   // Maps onto "General Member" (an officer viewing without editing rights) —
@@ -777,6 +821,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.HOA_VIOLATIONS_READ,
     PERMISSIONS.HOA_ARCHITECTURAL_REQUESTS_READ,
     PERMISSIONS.IMPORTS_READ,
+    PERMISSIONS.UNION_CASES_READ,
   ],
 
   // Members never get staff permissions — a MEMBER role must never see other
