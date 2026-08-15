@@ -59,6 +59,10 @@ export function GivingOperations({
     id: string;
     contributionNumber: string | null;
     amount: number;
+    /** CONNECT-I: what was actually charged (base + any processing-cost
+     * coverage) — the true refundable ceiling. Null on legacy rows, where
+     * `amount` already is the full charge. */
+    totalChargedAmount: number | null;
     refundedAmount: number | null;
     disputeStatus: string | null;
     date: string;
@@ -609,12 +613,22 @@ export function GivingOperations({
           <p className="mt-2 text-sm text-slate-600">No provider contributions yet.</p>
         ) : (
           <ul className="mt-2 divide-y divide-slate-100">
-            {recentProvider.map((row) => (
+            {recentProvider.map((row) => {
+              // CONNECT-I: refund against what was actually CHARGED (base +
+              // any processing-cost coverage), not just the base `amount` —
+              // otherwise a covered contributor's coverage could never be
+              // refunded through this form. Falls back to `amount` on
+              // legacy rows with no totalChargedAmount.
+              const refundCeiling = row.totalChargedAmount ?? row.amount;
+              return (
               <li key={row.id} className="py-2 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-slate-800">
                     {row.contributionNumber ?? "-"} - {new Date(row.date).toLocaleDateString()} - {row.attribution} -{" "}
                     {row.fundName} - <span className="font-medium">{money(row.amount)}</span>
+                    {row.totalChargedAmount && row.totalChargedAmount !== row.amount ? (
+                      <span className="ml-1 text-slate-500">({money(row.totalChargedAmount)} charged incl. coverage)</span>
+                    ) : null}
                     {row.refundedAmount ? (
                       <span className="ml-1 text-amber-700">({money(row.refundedAmount)} refunded)</span>
                     ) : null}
@@ -625,7 +639,7 @@ export function GivingOperations({
                     ) : null}
                   </span>
                   <span className="flex gap-2">
-                    {canRefund && (row.refundedAmount ?? 0) < row.amount ? (
+                    {canRefund && (row.refundedAmount ?? 0) < refundCeiling ? (
                       <button
                         type="button"
                         disabled={pending}
@@ -656,11 +670,11 @@ export function GivingOperations({
                     <input
                       type="number"
                       min={0.01}
-                      max={row.amount - (row.refundedAmount ?? 0)}
+                      max={refundCeiling - (row.refundedAmount ?? 0)}
                       step="0.01"
                       value={refundAmount}
                       onChange={(event) => setRefundAmount(event.target.value)}
-                      placeholder={`Blank = full remaining (${money(row.amount - (row.refundedAmount ?? 0))})`}
+                      placeholder={`Blank = full remaining (${money(refundCeiling - (row.refundedAmount ?? 0))})`}
                       className="w-64 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm"
                     />
                     <input
@@ -711,7 +725,8 @@ export function GivingOperations({
                   </div>
                 ) : null}
               </li>
-            ))}
+              );
+            })}
           </ul>
         )}
       </section>
