@@ -43,7 +43,7 @@ const TRANSITIONS: Record<UnionCaseStatus, UnionCaseStatus[]> = {
   WITHDRAWN: [],
 };
 
-const TERMINAL_STATUSES: UnionCaseStatus[] = ["CLOSED", "WITHDRAWN"];
+export const TERMINAL_STATUSES: UnionCaseStatus[] = ["CLOSED", "WITHDRAWN"];
 
 export function isTerminalStatus(status: UnionCaseStatus): boolean {
   return TERMINAL_STATUSES.includes(status);
@@ -443,19 +443,183 @@ export async function completeUnionCaseDeadline(input: { organizationId: string;
 
 // ── Staff reads ──────────────────────────────────────────────────────────
 
-export async function listUnionCases(organizationId: string, filters: { status?: UnionCaseStatus; assignedToOrgMemberId?: string }) {
+export async function listUnionCases(
+  organizationId: string,
+  filters: {
+    status?: UnionCaseStatus;
+    assignedToOrgMemberId?: string;
+    unassigned?: boolean;
+    caseType?: string;
+    deadlineWindow?: "approaching" | "overdue";
+    search?: string;
+  }
+) {
+  const now = new Date();
+  const approachingWindow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const searchTerm = filters.search?.trim();
+  const searchAsNumber = searchTerm && /^\d+$/.test(searchTerm) ? Number(searchTerm) : undefined;
+
   return prisma.unionCase.findMany({
     where: {
       organizationId,
       ...(filters.status ? { status: filters.status } : {}),
-      ...(filters.assignedToOrgMemberId ? { assignedToOrgMemberId: filters.assignedToOrgMemberId } : {}),
+      // unassigned takes priority over an explicit assignedToOrgMemberId --
+      // the two are mutually exclusive dashboard-chip filters, never
+      // combined by the UI.
+      ...(filters.unassigned
+        ? { assignedToOrgMemberId: null }
+        : filters.assignedToOrgMemberId
+          ? { assignedToOrgMemberId: filters.assignedToOrgMemberId }
+          : {}),
+      ...(filters.caseType ? { caseType: filters.caseType } : {}),
+      ...(filters.deadlineWindow
+        ? {
+            deadlines: {
+              some:
+                filters.deadlineWindow === "overdue"
+                  ? { completedAt: null, dueAt: { lt: now } }
+                  : { completedAt: null, dueAt: { gte: now, lte: approachingWindow } },
+            },
+          }
+        : {}),
+      ...(searchTerm
+        ? {
+            OR: [
+              ...(searchAsNumber !== undefined ? [{ caseNumber: searchAsNumber }] : []),
+              { title: { contains: searchTerm, mode: "insensitive" as const } },
+              { member: { firstName: { contains: searchTerm, mode: "insensitive" as const } } },
+              { member: { lastName: { contains: searchTerm, mode: "insensitive" as const } } },
+            ],
+          }
+        : {}),
     },
     orderBy: { createdAt: "desc" },
     include: {
       member: { select: { id: true, firstName: true, lastName: true } },
       assignedTo: { select: { id: true, firstName: true, lastName: true } },
+      deadlines: { where: { completedAt: null }, orderBy: { dueAt: "asc" }, take: 1, select: { dueAt: true } },
     },
   });
+}
+
+export interface UnionCaseDashboardCounts {
+  newUnassigned: number;
+  assignedToMe: number;
+  active: number;
+  pending: number;
+  deadlinesApproaching: number;
+  overdue: number;
+  recentlyResolved: number;
+}
+
+/** Bucket counts for the steward/officer dashboard's quick-filter chips.
+ * Deliberately just counts, not an analytics breakdown -- the dashboard
+ * answers "what needs my attention today," nothing more. "Approaching"
+ * means an open (not completed) deadline due within 7 days on a
+ * non-terminal case; "overdue" is the same but already past due.
+ * "Recently resolved" is RESOLVED or CLOSED in the last 14 days. */
+export async function getUnionCaseDashboardCounts(organizationId: string, viewerOrgMemberId: string): Promise<UnionCaseDashboardCounts> {
+  const now = new Date();
+  const approachingWindow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const recentWindow = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+
+  const [newUnassigned, assignedToMe, active, pending, deadlinesApproaching, overdue, recentlyResolved] = await Promise.all([
+    prisma.unionCase.count({ where: { organizationId, status: { in: ["NEW", "TRIAGE"] }, assignedToOrgMemberId: null } }),
+    prisma.unionCase.count({ where: { organizationId, assignedToOrgMemberId: viewerOrgMemberId, status: { notIn: TERMINAL_STATUSES } } }),
+    prisma.unionCase.count({ where: { organizationId, status: "ACTIVE" } }),
+    prisma.unionCase.count({ where: { organizationId, status: "PENDING" } }),
+    prisma.unionCaseDeadline.count({
+      where: { organizationId, completedAt: null, dueAt: { gte: now, lte: approachingWindow }, case: { status: { notIn: TERMINAL_STATUSES } } },
+    }),
+    prisma.unionCaseDeadline.count({
+      where: { organizationId, completedAt: null, dueAt: { lt: now }, case: { status: { notIn: TERMINAL_STATUSES } } },
+    }),
+    prisma.unionCase.count({
+      where: {
+        organizationId,
+        status: { in: ["RESOLVED", "CLOSED"] },
+        OR: [{ resolvedAt: { gte: recentWindow } }, { closedAt: { gte: recentWindow } }],
+      },
+    }),
+  ]);
+
+  return { newUnassigned, assignedToMe, active, pending, deadlinesApproaching, overdue, recentlyResolved };
+}
+
+export type UnionCaseDashboardBucket =
+  | "unassigned"
+  | "assigned-to-me"
+  | "active"
+  | "pending"
+  | "deadlines-approaching"
+  | "overdue"
+  | "recently-resolved";
+
+const DASHBOARD_LIST_INCLUDE = {
+  member: { select: { id: true, firstName: true, lastName: true } },
+  assignedTo: { select: { id: true, firstName: true, lastName: true } },
+  deadlines: { where: { completedAt: null }, orderBy: { dueAt: "asc" as const }, take: 1, select: { dueAt: true } },
+};
+
+/** The list backing each dashboard chip in getUnionCaseDashboardCounts --
+ * same bucket definitions, kept in sync manually since one returns counts
+ * and the other rows. Capped at 200 rows; this is a "what needs my
+ * attention today" list, not a paginated archive. */
+export async function listUnionCasesByBucket(organizationId: string, bucket: UnionCaseDashboardBucket, viewerOrgMemberId: string | null) {
+  const now = new Date();
+  const approachingWindow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const recentWindow = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+
+  switch (bucket) {
+    case "unassigned":
+      return prisma.unionCase.findMany({
+        where: { organizationId, status: { in: ["NEW", "TRIAGE"] }, assignedToOrgMemberId: null },
+        orderBy: { createdAt: "desc" },
+        take: 200,
+        include: DASHBOARD_LIST_INCLUDE,
+      });
+    case "assigned-to-me":
+      if (!viewerOrgMemberId) return [];
+      return prisma.unionCase.findMany({
+        where: { organizationId, assignedToOrgMemberId: viewerOrgMemberId, status: { notIn: TERMINAL_STATUSES } },
+        orderBy: { createdAt: "desc" },
+        take: 200,
+        include: DASHBOARD_LIST_INCLUDE,
+      });
+    case "active":
+      return prisma.unionCase.findMany({ where: { organizationId, status: "ACTIVE" }, orderBy: { createdAt: "desc" }, take: 200, include: DASHBOARD_LIST_INCLUDE });
+    case "pending":
+      return prisma.unionCase.findMany({ where: { organizationId, status: "PENDING" }, orderBy: { createdAt: "desc" }, take: 200, include: DASHBOARD_LIST_INCLUDE });
+    case "deadlines-approaching":
+      return prisma.unionCase.findMany({
+        where: {
+          organizationId,
+          status: { notIn: TERMINAL_STATUSES },
+          deadlines: { some: { completedAt: null, dueAt: { gte: now, lte: approachingWindow } } },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 200,
+        include: DASHBOARD_LIST_INCLUDE,
+      });
+    case "overdue":
+      return prisma.unionCase.findMany({
+        where: { organizationId, status: { notIn: TERMINAL_STATUSES }, deadlines: { some: { completedAt: null, dueAt: { lt: now } } } },
+        orderBy: { createdAt: "desc" },
+        take: 200,
+        include: DASHBOARD_LIST_INCLUDE,
+      });
+    case "recently-resolved":
+      return prisma.unionCase.findMany({
+        where: {
+          organizationId,
+          status: { in: ["RESOLVED", "CLOSED"] },
+          OR: [{ resolvedAt: { gte: recentWindow } }, { closedAt: { gte: recentWindow } }],
+        },
+        orderBy: { createdAt: "desc" },
+        take: 200,
+        include: DASHBOARD_LIST_INCLUDE,
+      });
+  }
 }
 
 export async function getUnionCaseDetail(organizationId: string, caseId: string) {
