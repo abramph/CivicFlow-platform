@@ -13,6 +13,19 @@ const setupIntentsRetrieve = vi.fn();
 const paymentMethodsRetrieve = vi.fn();
 const sendEmail = vi.fn().mockResolvedValue({ sent: true });
 const createAuditEvent = vi.fn().mockResolvedValue(undefined);
+const findUniqueStripeAccount = vi.fn();
+const stripeClient = {
+  subscriptionItems: { update: (...a: unknown[]) => subscriptionItemsUpdate(...a) },
+  subscriptions: {
+    update: (...a: unknown[]) => subscriptionsUpdate(...a),
+    cancel: (...a: unknown[]) => subscriptionsCancel(...a),
+    retrieve: (...a: unknown[]) => subscriptionsRetrieve(...a),
+  },
+  invoices: { list: (...a: unknown[]) => invoicesList(...a), pay: (...a: unknown[]) => invoicesPay(...a) },
+  setupIntents: { retrieve: (...a: unknown[]) => setupIntentsRetrieve(...a) },
+  paymentMethods: { retrieve: (...a: unknown[]) => paymentMethodsRetrieve(...a) },
+  checkout: { sessions: { create: vi.fn() } },
+};
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -21,22 +34,11 @@ vi.mock("@/lib/prisma", () => ({
       update: (...a: unknown[]) => updateScheduleRow(...a),
     },
     user: { findUnique: (...a: unknown[]) => findUniqueUser(...a) },
+    organizationStripeAccount: { findUnique: (...a: unknown[]) => findUniqueStripeAccount(...a) },
   },
 }));
-vi.mock("@/lib/stripe", () => ({
-  getStripe: () => ({
-    subscriptionItems: { update: (...a: unknown[]) => subscriptionItemsUpdate(...a) },
-    subscriptions: {
-      update: (...a: unknown[]) => subscriptionsUpdate(...a),
-      cancel: (...a: unknown[]) => subscriptionsCancel(...a),
-      retrieve: (...a: unknown[]) => subscriptionsRetrieve(...a),
-    },
-    invoices: { list: (...a: unknown[]) => invoicesList(...a), pay: (...a: unknown[]) => invoicesPay(...a) },
-    setupIntents: { retrieve: (...a: unknown[]) => setupIntentsRetrieve(...a) },
-    paymentMethods: { retrieve: (...a: unknown[]) => paymentMethodsRetrieve(...a) },
-    checkout: { sessions: { create: vi.fn() } },
-  }),
-}));
+vi.mock("@/lib/stripe", () => ({ getStripe: () => stripeClient }));
+vi.mock("@/lib/payments/stripe-connect", () => ({ getStripeForMode: async () => stripeClient }));
 vi.mock("@/lib/mail", () => ({ sendEmail: (...args: unknown[]) => sendEmail(...args) }));
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...args: unknown[]) => createAuditEvent(...args) }));
 
@@ -60,6 +62,7 @@ const ownSchedule = {
   amount: 100,
   frequency: "MONTHLY",
   fund: { name: "General Fund" },
+  stripeConnectedAccountId: null as string | null,
 };
 
 const caller = { organizationId: "org-1", contributorUserId: "u1", scheduleId: "s1" };
@@ -153,7 +156,7 @@ describe("cancel (§15/§112)", () => {
   it("provider cancel, terminal row, optional reason, history untouched — and idempotent", async () => {
     findFirstSchedule.mockResolvedValueOnce({ ...ownSchedule });
     await cancelSchedule({ ...caller, reason: "prefer_manual_giving" });
-    expect(subscriptionsCancel).toHaveBeenCalledWith("sub_1");
+    expect(subscriptionsCancel).toHaveBeenCalledWith("sub_1", undefined);
     expect(updateScheduleRow.mock.calls[0][0].data).toMatchObject({ status: "CANCELLED", cancelReason: "prefer_manual_giving" });
 
     findFirstSchedule.mockResolvedValueOnce({ ...ownSchedule, status: "CANCELLED" });
@@ -175,7 +178,7 @@ describe("retry (§16/§17)", () => {
     invoicesList.mockResolvedValueOnce({ data: [{ id: "in_open" }] });
     await retryFailedPayment(caller);
     expect(invoicesList.mock.calls[0][0]).toMatchObject({ subscription: "sub_1", status: "open" });
-    expect(invoicesPay).toHaveBeenCalledWith("in_open");
+    expect(invoicesPay).toHaveBeenCalledWith("in_open", undefined, undefined);
 
     findFirstSchedule.mockResolvedValueOnce({ ...ownSchedule, status: "ACTIVE" });
     await expect(retryFailedPayment(caller)).rejects.toMatchObject({ status: 409 });
@@ -188,6 +191,23 @@ describe("retry (§16/§17)", () => {
     await expect(retryFailedPayment(caller)).rejects.toMatchObject({
       message: expect.not.stringMatching(/owe|debt|balance due/i),
     });
+  });
+});
+
+describe("CONNECT-D §17/§56: connected-account resolution", () => {
+  it("a schedule with a stamped connected account passes {stripeAccount} on every provider call", async () => {
+    findFirstSchedule.mockResolvedValueOnce({ ...ownSchedule, stripeConnectedAccountId: "acct_connected1" });
+    findUniqueStripeAccount.mockResolvedValueOnce({ accountMode: "test" });
+    await pauseSchedule(caller);
+    expect(findUniqueStripeAccount.mock.calls[0][0].where).toEqual({ stripeAccountId: "acct_connected1" });
+    expect(subscriptionsUpdate.mock.calls[0][2]).toEqual({ stripeAccount: "acct_connected1" });
+  });
+
+  it("a legacy (pre-Connect) schedule never resolves an account and passes no stripeAccount option", async () => {
+    findFirstSchedule.mockResolvedValueOnce({ ...ownSchedule, stripeConnectedAccountId: null });
+    await pauseSchedule(caller);
+    expect(findUniqueStripeAccount).not.toHaveBeenCalled();
+    expect(subscriptionsUpdate.mock.calls[0][2]).toBeUndefined();
   });
 });
 

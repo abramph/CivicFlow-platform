@@ -98,6 +98,57 @@ export async function POST(request: Request) {
           break;
         }
 
+        // CONNECT-D: setup-mode session completing a recurring payment-method
+        // update (mirrors the platform webhook's giving-method-update branch).
+        if (session.mode === "setup" && session.metadata?.paymentType === "giving-method-update") {
+          const setupIntentId =
+            typeof session.setup_intent === "string" ? session.setup_intent : (session.setup_intent?.id ?? null);
+          if (session.metadata?.scheduleId && setupIntentId) {
+            const { applyPaymentMethodUpdate } = await import("@/lib/giving/recurring-self-service");
+            const applied = await applyPaymentMethodUpdate({
+              organizationId,
+              scheduleId: session.metadata.scheduleId,
+              setupIntentId,
+            });
+            if (applied === "REJECTED") {
+              console.error(
+                JSON.stringify({ event: "giving_pm_update_connect_webhook_rejected", sessionId: session.id, organizationId })
+              );
+            }
+          }
+          break;
+        }
+
+        // CONNECT-D: a giving-recurring checkout is MEMBER MONEY — it must
+        // never be upserted into the SaaS Subscription table (which only
+        // ever lives on the platform account and can never appear here).
+        if (session.metadata?.paymentType === "giving-recurring") {
+          if (session.subscription && session.metadata?.scheduleId) {
+            const subId = typeof session.subscription === "string" ? session.subscription : session.subscription.id;
+            const { linkScheduleFromCheckout } = await import("@/lib/giving/recurring");
+            const linked = await linkScheduleFromCheckout({
+              scheduleId: session.metadata.scheduleId,
+              organizationId,
+              providerSubscriptionId: subId,
+              providerCustomerId: typeof session.customer === "string" ? session.customer : (session.customer?.id ?? null),
+              stripeConnectedAccountId: connectedAccountId,
+            });
+            if (linked === "REJECTED") {
+              console.error(
+                JSON.stringify({ event: "giving_recurring_connect_webhook_link_rejected", sessionId: session.id, organizationId })
+              );
+            }
+            await createAuditEvent({
+              organizationId,
+              action: "update",
+              entityType: "stripe_webhook",
+              entityId: session.id,
+              metadata: { eventType: event.type, givingRecurring: true, connected: true, outcome: linked },
+            });
+          }
+          break;
+        }
+
         if (session.metadata?.paymentType === "giving" && session.payment_status === "paid") {
           const { recordGivingContribution } = await import("@/lib/giving/checkout");
           const result = await recordGivingContribution({
@@ -211,6 +262,77 @@ export async function POST(request: Request) {
           if (contribution) {
             const { applyDisputeStatus } = await import("@/lib/giving/refunds");
             await applyDisputeStatus({ organizationId, providerPaymentIntentId: paymentIntentId, disputeStatus: dispute.status ?? "unknown" });
+          }
+        }
+        break;
+      }
+
+      case "customer.subscription.created":
+      case "customer.subscription.updated": {
+        // CONNECT-D: subscriptions on connected accounts are giving-recurring
+        // by construction today (SaaS billing never runs on a connected
+        // account) — the metadata check guards against future connected
+        // subscription types added in later CONNECT letters.
+        const sub = event.data.object as Stripe.Subscription;
+        if (sub.metadata?.paymentType === "giving-recurring") {
+          const { syncScheduleFromSubscription } = await import("@/lib/giving/recurring");
+          await syncScheduleFromSubscription({
+            providerSubscriptionId: sub.id,
+            providerStatus: sub.status,
+            cancelAtPeriodEnd: Boolean(sub.cancel_at_period_end),
+            deleted: false,
+          });
+        }
+        break;
+      }
+
+      case "customer.subscription.deleted": {
+        const sub = event.data.object as Stripe.Subscription;
+        if (sub.metadata?.paymentType === "giving-recurring") {
+          const { syncScheduleFromSubscription } = await import("@/lib/giving/recurring");
+          await syncScheduleFromSubscription({
+            providerSubscriptionId: sub.id,
+            providerStatus: sub.status,
+            cancelAtPeriodEnd: false,
+            deleted: true,
+          });
+        }
+        break;
+      }
+
+      case "invoice.payment_failed": {
+        const invoice = event.data.object as Stripe.Invoice;
+        const subId = typeof invoice.subscription === "string" ? invoice.subscription : null;
+        if (subId) {
+          // CONNECT-D (§16): failed voluntary giving is a schedule status,
+          // NEVER a debt.
+          const { markRecurringInvoiceFailed } = await import("@/lib/giving/recurring");
+          await markRecurringInvoiceFailed({
+            providerSubscriptionId: subId,
+            requiresAction: invoice.status === "open" && Boolean((invoice as { payment_intent?: unknown }).payment_intent),
+          });
+        }
+        break;
+      }
+
+      case "invoice.paid": {
+        const invoice = event.data.object as Stripe.Invoice;
+        const subId = typeof invoice.subscription === "string" ? invoice.subscription : null;
+        if (subId) {
+          const { recordRecurringInvoicePaid } = await import("@/lib/giving/recurring");
+          const result = await recordRecurringInvoicePaid({
+            providerSubscriptionId: subId,
+            providerInvoiceId: invoice.id,
+            amountPaidCents: invoice.amount_paid ?? 0,
+            currency: invoice.currency ?? "usd",
+            periodEnd: invoice.lines?.data?.[0]?.period?.end ?? null,
+            paymentIntentId:
+              typeof (invoice as { payment_intent?: unknown }).payment_intent === "string"
+                ? ((invoice as { payment_intent?: string }).payment_intent ?? null)
+                : null,
+          });
+          if (result.outcome === "REJECTED") {
+            console.error(JSON.stringify({ event: "giving_recurring_invoice_connect_webhook_rejected", stripeInvoiceId: invoice.id }));
           }
         }
         break;

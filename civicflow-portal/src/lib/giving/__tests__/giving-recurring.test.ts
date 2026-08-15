@@ -119,6 +119,25 @@ describe("webhook lifecycle — the SaaS/giving split", () => {
     expect(updateSchedule).not.toHaveBeenCalled();
   });
 
+  it("CONNECT-D §56: linkage stamps the connected account immutably when provided", async () => {
+    // mockReset (not just mockResolvedValueOnce) guards against unconsumed
+    // once-queue leftovers from earlier tests in this file that skip their
+    // own findFirst call under certain branches.
+    findFirstSchedule.mockReset();
+    findFirstSchedule.mockResolvedValueOnce({ id: "s1", status: "PENDING_SETUP" });
+    await linkScheduleFromCheckout({
+      scheduleId: "s1",
+      organizationId: "org-1",
+      providerSubscriptionId: "sub_1",
+      providerCustomerId: "cus_1",
+      stripeConnectedAccountId: "acct_connected1",
+    });
+    expect(updateSchedule.mock.calls[0][0].data).toMatchObject({
+      stripeConnectedAccountId: "acct_connected1",
+      providerAccountContext: "CONNECTED_ACCOUNT_PAYMENT",
+    });
+  });
+
   it("invoice.paid records an idempotent contribution and advances the schedule — and never touches the SaaS Subscription table", async () => {
     findUniqueSchedule.mockResolvedValueOnce({
       id: "s1",
@@ -128,6 +147,8 @@ describe("webhook lifecycle — the SaaS/giving split", () => {
       memberId: "m1",
       contributorUserId: "u1",
       contributionProgram: null,
+      stripeConnectedAccountId: "acct_connected1",
+      providerAccountContext: "CONNECTED_ACCOUNT_PAYMENT",
     });
     findFirstContribution.mockResolvedValueOnce(null);
     const result = await recordRecurringInvoicePaid({
@@ -143,6 +164,9 @@ describe("webhook lifecycle — the SaaS/giving split", () => {
       recurringScheduleId: "s1",
       providerInvoiceId: "in_1",
       amount: 100,
+      // CONNECT-D (§56): attribution comes from the schedule's own stamp.
+      stripeConnectedAccountId: "acct_connected1",
+      providerAccountContext: "CONNECTED_ACCOUNT_PAYMENT",
     });
     expect(updateSchedule.mock.calls[0][0].data).toMatchObject({ status: "ACTIVE", failureCount: 0 });
     expect(saasSubscriptionUpsert).not.toHaveBeenCalled();

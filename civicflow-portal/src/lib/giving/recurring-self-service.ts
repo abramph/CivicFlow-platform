@@ -55,9 +55,31 @@ async function audit(
   });
 }
 
-async function getSubscriptionItemId(providerSubscriptionId: string): Promise<{ itemId: string; productId: string }> {
-  const stripe = getStripe();
-  const subscription = await stripe.subscriptions.retrieve(providerSubscriptionId);
+/** CONNECT-D (§17/§56): resolve the Stripe client + request options for a
+ * schedule's OWN immutable connected account — never the org's current
+ * settings. Legacy (pre-Connect, null stripeConnectedAccountId) schedules
+ * fall back to the platform client with no stripeAccount option, unchanged. */
+async function getStripeForSchedule(schedule: {
+  stripeConnectedAccountId: string | null;
+}): Promise<{ stripe: import("stripe").default; stripeAccountOptions?: { stripeAccount: string } }> {
+  if (!schedule.stripeConnectedAccountId) {
+    return { stripe: getStripe() };
+  }
+  const { getStripeForMode } = await import("@/lib/payments/stripe-connect");
+  const accountRow = await prisma.organizationStripeAccount.findUnique({
+    where: { stripeAccountId: schedule.stripeConnectedAccountId },
+    select: { accountMode: true },
+  });
+  const stripe = await getStripeForMode((accountRow?.accountMode as "test" | "live") ?? "live");
+  return { stripe, stripeAccountOptions: { stripeAccount: schedule.stripeConnectedAccountId } };
+}
+
+async function getSubscriptionItemId(schedule: {
+  stripeConnectedAccountId: string | null;
+  providerSubscriptionId: string;
+}): Promise<{ itemId: string; productId: string }> {
+  const { stripe, stripeAccountOptions } = await getStripeForSchedule(schedule);
+  const subscription = await stripe.subscriptions.retrieve(schedule.providerSubscriptionId, stripeAccountOptions);
   const item = subscription.items.data[0];
   if (!item) throw new FinanceError("The provider subscription has no item to update.", 502);
   const productId = typeof item.price.product === "string" ? item.price.product : item.price.product.id;
@@ -82,17 +104,24 @@ export async function changeAmount(input: {
   const oldAmount = Number(schedule.amount);
   if (newAmount === oldAmount) return schedule;
 
-  const stripe = getStripe();
-  const { itemId, productId } = await getSubscriptionItemId(schedule.providerSubscriptionId);
-  await stripe.subscriptionItems.update(itemId, {
-    price_data: {
-      currency: "usd",
-      product: productId,
-      recurring: stripeIntervalFor(schedule.frequency),
-      unit_amount: Math.round(newAmount * 100),
-    },
-    proration_behavior: "none",
+  const { stripe, stripeAccountOptions } = await getStripeForSchedule(schedule);
+  const { itemId, productId } = await getSubscriptionItemId({
+    stripeConnectedAccountId: schedule.stripeConnectedAccountId,
+    providerSubscriptionId: schedule.providerSubscriptionId,
   });
+  await stripe.subscriptionItems.update(
+    itemId,
+    {
+      price_data: {
+        currency: "usd",
+        product: productId,
+        recurring: stripeIntervalFor(schedule.frequency),
+        unit_amount: Math.round(newAmount * 100),
+      },
+      proration_behavior: "none",
+    },
+    stripeAccountOptions
+  );
 
   const updated = await prisma.recurringContributionSchedule.update({
     where: { id: schedule.id },
@@ -125,17 +154,24 @@ export async function changeFrequency(input: {
   }
   if (schedule.frequency === input.newFrequency) return schedule;
 
-  const stripe = getStripe();
-  const { itemId, productId } = await getSubscriptionItemId(schedule.providerSubscriptionId);
-  await stripe.subscriptionItems.update(itemId, {
-    price_data: {
-      currency: "usd",
-      product: productId,
-      recurring: stripeIntervalFor(input.newFrequency),
-      unit_amount: Math.round(Number(schedule.amount) * 100),
-    },
-    proration_behavior: "none",
+  const { stripe, stripeAccountOptions } = await getStripeForSchedule(schedule);
+  const { itemId, productId } = await getSubscriptionItemId({
+    stripeConnectedAccountId: schedule.stripeConnectedAccountId,
+    providerSubscriptionId: schedule.providerSubscriptionId,
   });
+  await stripe.subscriptionItems.update(
+    itemId,
+    {
+      price_data: {
+        currency: "usd",
+        product: productId,
+        recurring: stripeIntervalFor(input.newFrequency),
+        unit_amount: Math.round(Number(schedule.amount) * 100),
+      },
+      proration_behavior: "none",
+    },
+    stripeAccountOptions
+  );
 
   const updated = await prisma.recurringContributionSchedule.update({
     where: { id: schedule.id },
@@ -161,8 +197,12 @@ export async function pauseSchedule(input: { organizationId: string; contributor
     throw new FinanceError("Only an active schedule can be paused.", 409);
   }
 
-  const stripe = getStripe();
-  await stripe.subscriptions.update(schedule.providerSubscriptionId, { pause_collection: { behavior: "void" } });
+  const { stripe, stripeAccountOptions } = await getStripeForSchedule(schedule);
+  await stripe.subscriptions.update(
+    schedule.providerSubscriptionId,
+    { pause_collection: { behavior: "void" } },
+    stripeAccountOptions
+  );
 
   const updated = await prisma.recurringContributionSchedule.update({
     where: { id: schedule.id },
@@ -184,8 +224,12 @@ export async function resumeSchedule(input: { organizationId: string; contributo
   if (!schedule.providerSubscriptionId) throw new FinanceError("This schedule is not active with the payment provider.", 409);
   if (schedule.status !== "PAUSED") throw new FinanceError("Only a paused schedule can be resumed.", 409);
 
-  const stripe = getStripe();
-  const subscription = await stripe.subscriptions.update(schedule.providerSubscriptionId, { pause_collection: null });
+  const { stripe, stripeAccountOptions } = await getStripeForSchedule(schedule);
+  const subscription = await stripe.subscriptions.update(
+    schedule.providerSubscriptionId,
+    { pause_collection: null },
+    stripeAccountOptions
+  );
   const nextDate = subscription.current_period_end ? new Date(subscription.current_period_end * 1000) : null;
 
   const updated = await prisma.recurringContributionSchedule.update({
@@ -227,8 +271,8 @@ export async function cancelSchedule(input: {
   }
 
   if (schedule.providerSubscriptionId) {
-    const stripe = getStripe();
-    await stripe.subscriptions.cancel(schedule.providerSubscriptionId);
+    const { stripe, stripeAccountOptions } = await getStripeForSchedule(schedule);
+    await stripe.subscriptions.cancel(schedule.providerSubscriptionId, stripeAccountOptions);
   }
 
   const updated = await prisma.recurringContributionSchedule.update({
@@ -259,19 +303,23 @@ export async function startPaymentMethodUpdate(input: {
   if (!schedule.providerSubscriptionId || !schedule.providerCustomerId) {
     throw new FinanceError("This schedule is not active with the payment provider.", 409);
   }
-  const stripe = getStripe();
-  const session = await stripe.checkout.sessions.create({
-    mode: "setup",
-    customer: schedule.providerCustomerId,
-    success_url: `${input.baseUrl}/m/giving?org=${encodeURIComponent(input.organizationId)}&pm=updated`,
-    cancel_url: `${input.baseUrl}/m/giving?org=${encodeURIComponent(input.organizationId)}`,
-    metadata: {
-      product: "Unestra Giving",
-      paymentType: "giving-method-update",
-      organizationId: input.organizationId,
-      scheduleId: schedule.id,
+  const { stripe, stripeAccountOptions } = await getStripeForSchedule(schedule);
+  const session = await stripe.checkout.sessions.create(
+    {
+      mode: "setup",
+      customer: schedule.providerCustomerId,
+      success_url: `${input.baseUrl}/m/giving?org=${encodeURIComponent(input.organizationId)}&pm=updated`,
+      cancel_url: `${input.baseUrl}/m/giving?org=${encodeURIComponent(input.organizationId)}`,
+      metadata: {
+        product: "Unestra Giving",
+        paymentType: "giving-method-update",
+        organizationId: input.organizationId,
+        scheduleId: schedule.id,
+        ...(schedule.stripeConnectedAccountId ? { stripeConnectedAccountId: schedule.stripeConnectedAccountId } : {}),
+      },
     },
-  });
+    stripeAccountOptions
+  );
   if (!session.url) throw new FinanceError("The payment provider did not return a URL.", 502);
   return session.url;
 }
@@ -289,13 +337,17 @@ export async function applyPaymentMethodUpdate(input: {
   });
   if (!schedule || !schedule.providerSubscriptionId) return "REJECTED";
 
-  const stripe = getStripe();
-  const setupIntent = await stripe.setupIntents.retrieve(input.setupIntentId);
+  const { stripe, stripeAccountOptions } = await getStripeForSchedule(schedule);
+  const setupIntent = await stripe.setupIntents.retrieve(input.setupIntentId, stripeAccountOptions);
   const paymentMethodId = typeof setupIntent.payment_method === "string" ? setupIntent.payment_method : setupIntent.payment_method?.id;
   if (!paymentMethodId) return "REJECTED";
 
-  await stripe.subscriptions.update(schedule.providerSubscriptionId, { default_payment_method: paymentMethodId });
-  const method = await stripe.paymentMethods.retrieve(paymentMethodId);
+  await stripe.subscriptions.update(
+    schedule.providerSubscriptionId,
+    { default_payment_method: paymentMethodId },
+    stripeAccountOptions
+  );
+  const method = await stripe.paymentMethods.retrieve(paymentMethodId, stripeAccountOptions);
   const descriptor = method.card ? `${method.card.brand.toUpperCase()} •••• ${method.card.last4}` : method.type;
 
   await prisma.recurringContributionSchedule.update({
@@ -321,13 +373,16 @@ export async function retryFailedPayment(input: { organizationId: string; contri
     throw new FinanceError("This schedule has no failed payment to retry.", 409);
   }
 
-  const stripe = getStripe();
-  const invoices = await stripe.invoices.list({ subscription: schedule.providerSubscriptionId, status: "open", limit: 1 });
+  const { stripe, stripeAccountOptions } = await getStripeForSchedule(schedule);
+  const invoices = await stripe.invoices.list(
+    { subscription: schedule.providerSubscriptionId, status: "open", limit: 1 },
+    stripeAccountOptions
+  );
   const openInvoice = invoices.data[0];
   if (!openInvoice?.id) throw new FinanceError("No open payment attempt was found — it may have already succeeded.", 409);
 
   try {
-    await stripe.invoices.pay(openInvoice.id);
+    await stripe.invoices.pay(openInvoice.id, undefined, stripeAccountOptions);
   } catch {
     throw new FinanceError("Your contribution could not be processed. Try updating your payment method.", 402);
   }

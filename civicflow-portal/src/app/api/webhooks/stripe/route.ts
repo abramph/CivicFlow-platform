@@ -205,6 +205,16 @@ export async function POST(request: Request) {
         // CORE-GIVE-C: a giving-recurring checkout is MEMBER MONEY — it must
         // never be upserted into the SaaS Subscription table. Link it to our
         // schedule (resolved org-scoped: the §50 cross-check) instead.
+        //
+        // CONNECT-D: new recurring giving checkout sessions are now created
+        // against the org's connected account (see
+        // src/app/api/giving/recurring/checkout/route.ts), so their events
+        // arrive on /api/webhooks/stripe-connect instead, which has its own
+        // copy of this branch. UNLIKE CONNECT-C's one-time/public giving
+        // (where the audit proved zero real platform-account transactions
+        // existed), this branch is kept here rather than removed — it
+        // remains the only path for any recurring schedule that was already
+        // running on the platform account before CONNECT-D shipped.
         if (session.metadata?.paymentType === "giving-recurring") {
           if (session.subscription && orgId && session.metadata?.scheduleId) {
             const subId =
