@@ -485,6 +485,65 @@ Each PR merges + deploys + production-verifies before the next.
   binary. No native UI was built (out of scope; a future mobile release
   can adopt the same already-wired backend).
 
+## 15. CONNECT-G — webhook recovery & the deferred secret fix (implemented)
+
+- **Root cause found (2026-08-15):** the platform webhook endpoint
+  (`we_1TrU0gJe9g4GsjEndebyeAUM`, `https://app.getunestra.com/api/webhooks/stripe`)
+  had been failing 100% of deliveries since 2026-08-14 with
+  `{"ok": false, "error": "Invalid Stripe signature"}` — confirmed directly
+  from the endpoint's own Event deliveries log, not inferred. DO's
+  `STRIPE_WEBHOOK_SECRET` didn't match the endpoint's actual signing secret
+  (pre-dates this program; the domain-migration fix in CONNECT-A only
+  corrected the URL, never the secret).
+- **Fix (account-side, via Chrome walkthrough — user's explicit choice,
+  same as C/D):** rolled the endpoint's signing secret in Stripe
+  (immediate expiration of the old one — it was already failing 100%, no
+  live traffic to protect), user copied/pasted the new value into
+  DigitalOcean via the same bulk `.env`-paste editor used for prior
+  secrets. Deploy triggered automatically off the app-spec change, went
+  ACTIVE.
+- **Live controlled replay:** resent the stuck $5 synthetic validation
+  event (`evt_1U4MdFJe9g4GsjEnYfEkm38H`, the same
+  `pi_3U4MdCJe9g4GsjEn0cwFqbpb` HISTORICAL_PLATFORM_TEST gift from §2's
+  inventory) via the Stripe dashboard. First resend → `200 OK`,
+  `{"ok": true}`. Second resend (duplicate) → production runtime logs
+  show `Unique constraint failed on the fields: (stripeEventId)` — the
+  idempotency belt (§9) working exactly as designed, confirmed against a
+  REAL duplicate delivery, not a unit-test double. No reason to backfill
+  this specific event into a Contribution row (§2: no real migration
+  inventory exists for it; it predates the Connect migration entirely and
+  its paymentType branch was already deliberately removed from this same
+  webhook in CONNECT-C).
+- **Code fix — signature-failure logging (was silent):** both webhook
+  routes' signature-verification `catch` blocks previously returned a 400
+  with NO logging at all — the exact reason a stale secret could fail
+  100% of deliveries for over a day with nothing visible in
+  `doctl apps logs`. Both now log a structured
+  `stripe_webhook_signature_invalid` / `stripe_connect_webhook_signature_invalid`
+  event with the SDK's verification-failure message only — never the raw
+  body or signature header (could embed sensitive payload fragments).
+- **Event coverage reviewed, found adequate:** the platform endpoint
+  listens to 6 events — `checkout.session.completed`,
+  `customer.subscription.created/updated/deleted`, `invoice.paid`,
+  `invoice.payment_failed` — the correct SaaS-billing set now that C
+  removed its one-time/public-giving branches and D left its
+  giving-recurring branches as the legacy-coexistence safety net. No
+  changes needed. The connect endpoint's 9 events (from C/D) were not
+  revisited — already correct for the flows migrated so far (E's
+  payment-link branch reuses `checkout.session.completed`, F needed no new
+  event types).
+- **Out of scope, flagged not fixed:** a THIRD failing live-mode endpoint
+  exists on this same platform Stripe account —
+  `https://api.civicflowapp.com/webhooks/stripe` (2 events, Active) — this
+  belongs to the separate cloud-api unit (a different deployable/repo per
+  [[project_architecture]]), still on the pre-migration `civicflowapp.com`
+  domain. Not touched here; flagged for whoever owns that unit.
+- **Deferred, not part of this PR:** the second half of G's original scope
+  (secret ENCRYPTION — the new value saved as unencrypted `type: none` via
+  the bulk `.env` editor, same gap `STRIPE_TEST_SECRET_KEY` hit earlier —
+  needs a manual toggle to Encrypted in the DO UI) is a follow-up action
+  item for the user, not a code change.
+
 ## Decisions log
 
 - **2026-08-14 (A):** Standard accounts + direct charges (rationale §2).
@@ -551,3 +610,26 @@ Each PR merges + deploys + production-verifies before the next.
   vc4 binary is frozen (§71) and the backend change is purely additive/
   optional, so there is no functional gap for existing mobile users, only
   a missing opt-in surface deferred to a future mobile release.
+- **2026-08-15 (G):** Fixed the stale platform secret via a secret ROLL,
+  not an attempt to recover/guess the existing one — the endpoint's own
+  delivery log already proved the current value was wrong 100% of the
+  time, so a fresh, verifiably-correct secret was strictly safer than any
+  reveal-and-compare approach (which would also have exposed the value
+  unnecessarily).
+- **2026-08-15 (G):** The stuck $5 synthetic validation event is NOT
+  backfilled into a Contribution row after the replay succeeds — §2
+  already documents it as HISTORICAL_PLATFORM_TEST with no real migration
+  inventory, and its paymentType branch was deliberately removed from this
+  webhook in CONNECT-C. The replay's purpose was proving the webhook
+  INFRASTRUCTURE works (signature + idempotency), not resurrecting this
+  specific historical event's business effect.
+- **2026-08-15 (G):** The cloud-api unit's separate failing endpoint
+  (`api.civicflowapp.com/webhooks/stripe`) is explicitly out of scope —
+  different deployable, different repo, not something this program's code
+  changes can reach. Flagged in this doc so it isn't lost, not silently
+  ignored.
+- **2026-08-15 (G):** Secret encryption (toggling the new
+  `STRIPE_WEBHOOK_SECRET` to type Encrypted in DO) is left as a pending
+  user action rather than something Claude did — DO's env-var encryption
+  toggle isn't reachable via `doctl`/API in this setup and requires the
+  same UI the secret itself was pasted into.
