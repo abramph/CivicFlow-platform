@@ -13,10 +13,14 @@ describe("getNavigationProfile", () => {
     expect(nav.every((n) => n.label !== "Dashboard")).toBe(true);
   });
 
-  it("Community and Union share the same underlying routes (one platform, differentiated labels)", () => {
+  it("Union shares Community's routes plus one addition: /union/cases (Union Case Center, UNION-CASE-B)", () => {
     const community = getNavigationProfile("COMMUNITY").map((n) => n.href).sort();
     const union = getNavigationProfile("UNION").map((n) => n.href).sort();
-    expect(union).toEqual(community);
+    expect(union).toEqual([...community, "/union/cases"].sort());
+
+    const caseCenterItem = getNavigationProfile("UNION").find((n) => n.href === "/union/cases");
+    expect(caseCenterItem?.label).toBe("Case Center");
+    expect(caseCenterItem?.permission).toBe("union:cases:read");
   });
 
   it("HOA shares Community's routes plus three additions: /hoa/properties (PR #43), /hoa/violations (HOA Violations MVP), and /hoa/architectural-requests", () => {
@@ -44,6 +48,11 @@ describe("getNavigationProfile", () => {
     expect(getNavigationProfile("UNION").some((n) => n.href === "/hoa/violations")).toBe(false);
     expect(getNavigationProfile("COMMUNITY").some((n) => n.href === "/hoa/architectural-requests")).toBe(false);
     expect(getNavigationProfile("UNION").some((n) => n.href === "/hoa/architectural-requests")).toBe(false);
+  });
+
+  it("does not add /union/cases for Community or HOA -- same dead-end-link reasoning as the HOA items above", () => {
+    expect(getNavigationProfile("COMMUNITY").some((n) => n.href === "/union/cases")).toBe(false);
+    expect(getNavigationProfile("HOA").some((n) => n.href === "/union/cases")).toBe(false);
   });
 
   it("relabels the dashboard/dues/users items per vertical without changing the destination route", () => {
