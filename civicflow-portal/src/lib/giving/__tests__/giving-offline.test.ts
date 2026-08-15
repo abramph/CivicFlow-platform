@@ -15,6 +15,9 @@ const aggregateContributions = vi.fn();
 const createAuditEvent = vi.fn().mockResolvedValue(undefined);
 const sessionsList = vi.fn();
 const invoicesList = vi.fn();
+const findUniqueStripeAccount = vi.fn();
+const connectedSessionsList = vi.fn();
+const connectedInvoicesList = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -33,6 +36,7 @@ vi.mock("@/lib/prisma", () => ({
       aggregate: (...a: unknown[]) => aggregateContributions(...a),
     },
     recurringContributionSchedule: { findMany: (...a: unknown[]) => findManySchedules(...a) },
+    organizationStripeAccount: { findUnique: (...a: unknown[]) => findUniqueStripeAccount(...a) },
   },
 }));
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...args: unknown[]) => createAuditEvent(...args) }));
@@ -40,6 +44,12 @@ vi.mock("@/lib/stripe", () => ({
   getStripe: () => ({
     checkout: { sessions: { list: (...a: unknown[]) => sessionsList(...a) } },
     invoices: { list: (...a: unknown[]) => invoicesList(...a) },
+  }),
+}));
+vi.mock("@/lib/payments/stripe-connect", () => ({
+  getStripeForMode: async () => ({
+    checkout: { sessions: { list: (...a: unknown[]) => connectedSessionsList(...a) } },
+    invoices: { list: (...a: unknown[]) => connectedInvoicesList(...a) },
   }),
 }));
 
@@ -68,6 +78,9 @@ beforeEach(() => {
   aggregateContributions.mockResolvedValue({ _sum: { amount: 0 } });
   sessionsList.mockResolvedValue({ data: [] });
   invoicesList.mockResolvedValue({ data: [] });
+  connectedSessionsList.mockResolvedValue({ data: [] });
+  connectedInvoicesList.mockResolvedValue({ data: [] });
+  findUniqueStripeAccount.mockResolvedValue(null);
 });
 
 describe("offline entry (§21)", () => {
@@ -186,5 +199,55 @@ describe("reconciliation (§51) — read-only classification", () => {
     sessionsList.mockRejectedValueOnce(new Error("stripe down"));
     const report = await getReconciliationReport("org-1");
     expect(report.items.some((item) => item.kind === "provider_sweep_unavailable")).toBe(true);
+  });
+
+  describe("CONNECT-H: sweeps the org's own connected account once connected", () => {
+    it("a connected/charges-enabled org is swept via the CONNECTED client, never the platform one", async () => {
+      findUniqueStripeAccount.mockResolvedValueOnce({
+        stripeAccountId: "acct_connected1",
+        accountMode: "test",
+        chargesEnabled: true,
+        disabledAt: null,
+      });
+      connectedSessionsList.mockResolvedValueOnce({
+        data: [
+          {
+            metadata: { organizationId: "org-1", paymentType: "giving" },
+            payment_status: "paid",
+            payment_intent: "pi_connected_missing",
+            amount_total: 2500,
+            currency: "usd",
+            created: 1_700_000_000,
+          },
+        ],
+      });
+      findFirstContribution.mockResolvedValueOnce(null);
+      const report = await getReconciliationReport("org-1");
+
+      expect(sessionsList).not.toHaveBeenCalled();
+      expect(invoicesList).not.toHaveBeenCalled();
+      expect(connectedSessionsList.mock.calls[0][1]).toEqual({ stripeAccount: "acct_connected1" });
+      const providerOnly = report.items.filter((item) => item.classification === "PROVIDER_ONLY");
+      expect(providerOnly.map((item) => item.reference)).toContain("pi_connected_missing");
+    });
+
+    it("a never-connected org still sweeps the platform account (nothing new lives there, but the sweep runs)", async () => {
+      findUniqueStripeAccount.mockResolvedValueOnce(null);
+      await getReconciliationReport("org-1");
+      expect(connectedSessionsList).not.toHaveBeenCalled();
+      expect(sessionsList).toHaveBeenCalled();
+    });
+
+    it("a disabled connected account falls back to the platform sweep, not the disabled account", async () => {
+      findUniqueStripeAccount.mockResolvedValueOnce({
+        stripeAccountId: "acct_connected1",
+        accountMode: "test",
+        chargesEnabled: true,
+        disabledAt: new Date(),
+      });
+      await getReconciliationReport("org-1");
+      expect(connectedSessionsList).not.toHaveBeenCalled();
+      expect(sessionsList).toHaveBeenCalled();
+    });
   });
 });

@@ -538,11 +538,43 @@ Each PR merges + deploys + production-verifies before the next.
   belongs to the separate cloud-api unit (a different deployable/repo per
   [[project_architecture]]), still on the pre-migration `civicflowapp.com`
   domain. Not touched here; flagged for whoever owns that unit.
-- **Deferred, not part of this PR:** the second half of G's original scope
-  (secret ENCRYPTION — the new value saved as unencrypted `type: none` via
-  the bulk `.env` editor, same gap `STRIPE_TEST_SECRET_KEY` hit earlier —
-  needs a manual toggle to Encrypted in the DO UI) is a follow-up action
-  item for the user, not a code change.
+- **Resolved (2026-08-15, same day):** the new `STRIPE_WEBHOOK_SECRET` was
+  toggled to Encrypted in the DO Environment Variables UI by the user —
+  the plaintext-save gap this section originally flagged is closed.
+
+## 16. CONNECT-H — historical reconciliation (implemented)
+
+- **Reconciliation sweep now targets the right account (§51):**
+  `getReconciliationReport` (`src/lib/giving/reconciliation.ts`) always
+  called the PLATFORM Stripe client for its provider-side sweep — a real
+  gap once C/D moved giving/recurring checkout onto connected accounts,
+  since Stripe's own API only ever returns a connected account's sessions
+  and invoices when the request carries that account's
+  `{stripeAccount}` option. An org's post-migration activity was
+  therefore invisible to its own reconciliation report. Fixed: resolves
+  the org's `OrganizationStripeAccount` row and, when
+  connected/charges-enabled, sweeps via `getStripeForMode` +
+  `{stripeAccount}` instead of the platform client. A never-connected or
+  disabled-account org still gets the platform sweep (correctly finds
+  nothing new there — matches every prior audit). No schema change.
+- **The $5 synthetic validation gift — final treatment (§52/§53), decided
+  and executed:** presented the two candidates the doc has carried since
+  CONNECT-A (record-then-refund vs. refund-untracked-and-document) to the
+  user; chosen: **refund untracked, document only**. Rationale (both
+  mine and the user's): the payment was never tied to any real
+  organization's giving flow — inventing an attribution to record it as
+  a `Contribution` would be artificial, and Stripe's own audit trail
+  already fully documents the transaction. Executed via the Stripe
+  Dashboard (`pi_3U4MdCJe9g4GsjEn0cwFqbpb`, full $5.00, reason "Other",
+  note references this section) — confirmed **Refunded** with the note
+  visible on the payment's timeline. No `Contribution` row was ever
+  created or will be; this event's disposition is now closed.
+- **Not touched:** the payment-link/dues reconciliation gap (§51's sweep
+  has never covered `paymentType: "campaign" | "event" | "dues"`
+  checkout sessions, even before Connect existed) — a genuine pre-existing
+  scope gap in CORE-GIVE-F, not something this Connect-migration stage
+  introduced or was asked to fix. Flagged the same way E flagged the
+  `DuesPayment` refund gap: real, out of scope, not silently dropped.
 
 ## Decisions log
 
@@ -633,3 +665,21 @@ Each PR merges + deploys + production-verifies before the next.
   user action rather than something Claude did — DO's env-var encryption
   toggle isn't reachable via `doctl`/API in this setup and requires the
   same UI the secret itself was pasted into.
+- **2026-08-15 (H):** The reconciliation fix resolves the account from
+  `OrganizationStripeAccount` fresh on every call rather than caching or
+  threading it through from a caller — reconciliation is an infrequent,
+  read-only report; correctness (always reflecting current connection
+  state) was judged more valuable than the trivial cost of one extra
+  query.
+- **2026-08-15 (H):** The $5 gift's treatment was surfaced to the user as
+  an explicit choice rather than decided unilaterally — real money (even
+  trivial), genuinely ambiguous between two documented candidates, and
+  the doc had deferred exactly this decision since CONNECT-A. Refund
+  executed via the Stripe Dashboard (not the app's own `issueRefund`,
+  which requires an existing `Contribution` row — this payment never had
+  one) with an explicit user choice already in hand.
+- **2026-08-15 (H):** The payment-link/dues reconciliation gap is
+  explicitly NOT fixed here — broadening §51's sweep to cover
+  `paymentType: "campaign" | "event" | "dues"` would be new CORE-GIVE-F
+  scope, not a Connect-migration fix, and was never part of what this
+  program's stages promised to touch.
