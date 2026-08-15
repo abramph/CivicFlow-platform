@@ -576,6 +576,72 @@ Each PR merges + deploys + production-verifies before the next.
   introduced or was asked to fix. Flagged the same way E flagged the
   `DuesPayment` refund gap: real, out of scope, not silently dropped.
 
+## 17. CONNECT-I — Demo Church end-to-end validation (implemented) — PROGRAM COMPLETE
+
+Per §9's own checklist ("Demo Church connects a TEST-MODE connected
+account and runs onboarding → payment → recurring → refund →
+requirement-state → public giving end-to-end"): most of this was
+already live-verified incrementally as each stage shipped (B:
+onboarding, C: one-time + public giving, D: recurring, E: payment
+links, F: processing-cost coverage). CONNECT-I closed the remaining
+gaps and, in doing so, found two real bugs neither prior stage's
+narrower verification had surfaced:
+
+- **Refund, live, for the first time against a connected-account row
+  with coverage:** created a real $5.00 public gift with F's coverage
+  checked ($0.46 at 2.9%+$0.30, Demo Church's own configured rate — set
+  live via Giving Setup for this test), completed checkout (Stripe
+  showed "Demo-church", $5.46 charged, matching the gross-up exactly),
+  then issued a staff refund via Giving Operations with the amount left
+  blank ("full remaining"). Confirmed refunded: **$5.46**, not just the
+  $5.00 base — proving CONNECT-H's `totalChargedAmount ?? amount`
+  refund-ceiling fix works end-to-end against a real connected-account
+  charge, not just in unit tests. Production runtime logs show
+  `GIVING_REFUND_COMPLETED amountCents: 546` (fired twice — synchronous
+  confirmation + the `charge.refunded` webhook, correctly deduped by
+  `providerRefundId`, exactly as designed).
+- **Bug found — success pages retrieved the wrong Stripe account.**
+  `/give/[slug]/success` and `/m/giving/success` both called the
+  PLATFORM Stripe client to retrieve the checkout session, but every
+  session since CONNECT-C lives on the org's connected account.
+  Cross-account retrieval always fails, so every real gift's
+  confirmation page showed "We could not confirm a payment from this
+  link" even though the webhook had already recorded it correctly —
+  live since CONNECT-C shipped, never caught because every prior
+  stage's own live verification confirmed success via direct API calls
+  or runtime logs, never by rendering this specific page with a real
+  `session_id` after a full browser checkout. Money-safety was never
+  affected (§7 — the redirect proves and records nothing; the webhook
+  is the sole recorder). Fixed both pages to resolve the connected
+  account the same way `reconciliation.ts` does.
+- **Bug found — staff refund form capped at the base amount.** Giving
+  Operations' refund amount input used `row.amount` for its `max` and
+  its "full remaining" placeholder, so a covered contributor's coverage
+  portion was never reachable as an explicit partial-refund figure (the
+  backend was already correct; a blank-amount refund worked regardless
+  — this was a form-limits bug, not a money bug). Fixed to read from
+  `totalChargedAmount` when present.
+- **Requirement-state / account-status surface confirmed correct:**
+  `/settings/payments` for Demo Church shows Payments Enabled, Payouts
+  Enabled, Requirements Due 0 — accurate, no drift. A synthetic
+  requirements-due state was deliberately NOT manufactured (§26:
+  accounts are never manipulated outside real Stripe onboarding/KYC
+  flows; simulating a requirements-due state on a real connected
+  account would risk real account-state side effects for no
+  verification benefit beyond what B already proved).
+
+**With CONNECT-I done, the full A–I program (§10 staging) is complete.**
+Every organization's member money now flows through its own connected
+Stripe account, with direct charges, immutable per-row attribution,
+optional processing-cost coverage, working webhooks (both signature
+failures and successful deliveries are now visible), account-aware
+reconciliation, and end-to-end live-verified checkout/refund/success
+paths. Two follow-up items remain, both explicitly out of this
+program's scope and flagged rather than silently dropped: the
+`api.civicflowapp.com` cloud-api webhook endpoint (separate
+deployable — CONNECT-G), and the payment-link/dues reconciliation gap
+(pre-existing CORE-GIVE-F scope — CONNECT-H).
+
 ## Decisions log
 
 - **2026-08-14 (A):** Standard accounts + direct charges (rationale §2).
@@ -683,3 +749,23 @@ Each PR merges + deploys + production-verifies before the next.
   `paymentType: "campaign" | "event" | "dues"` would be new CORE-GIVE-F
   scope, not a Connect-migration fix, and was never part of what this
   program's stages promised to touch.
+- **2026-08-15 (I):** No synthetic requirements-due state was
+  manufactured to test that UI path — real connected accounts should
+  only ever be manipulated through genuine Stripe onboarding/KYC flows;
+  the verification value of forcing a fake requirements-due state was
+  judged not worth the risk of an unintended real-account side effect.
+  B's own live verification already exercised this status-derivation
+  logic thoroughly (§5, mode-pinning-defect fix).
+- **2026-08-15 (I):** The two bugs I found were fixed immediately rather
+  than deferred to a follow-up — both are direct consequences of the
+  Connect migration itself (account-resolution gaps introduced by C/H),
+  not new scope, and both were cheap, well-contained fixes discovered
+  while already doing the live verification that would have needed
+  re-running anyway once fixed.
+- **2026-08-15 (I):** Money-safety framing matters here: neither bug
+  ever affected what was actually recorded or refunded — both were
+  display/form-limit bugs downstream of correct webhook and backend
+  logic. Called out explicitly in both the PR and this doc so "found 2
+  bugs in the final validation stage" isn't misread as "the migration
+  was unsafe" — it was the opposite: the money-handling logic was
+  correct throughout; only two UI surfaces hadn't caught up to it.
