@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getMemberWebSession } from "@/lib/member-web-session";
 import { OpenInAppBanner } from "@/components/app/OpenInAppBanner";
 import { getStripe } from "@/lib/stripe";
+import { getStripeForMode } from "@/lib/payments/stripe-connect";
 import { prisma } from "@/lib/prisma";
 
 function money(value: number): string {
@@ -34,8 +35,18 @@ export default async function GivingSuccessPage({
 
   if (session_id) {
     try {
-      const stripe = getStripe();
-      const session = await stripe.checkout.sessions.retrieve(session_id);
+      // CONNECT-I: the checkout session was created on the org's CONNECTED
+      // account (once connected) — retrieving it with the platform client
+      // always 404s cross-account, landing every real gift in the UNKNOWN
+      // "could not confirm" state even though the webhook recorded it fine.
+      const accountRow = await prisma.organizationStripeAccount.findUnique({
+        where: { organizationId: memberSession.organizationId },
+        select: { stripeAccountId: true, accountMode: true, chargesEnabled: true, disabledAt: true },
+      });
+      const stripeAccountOptions =
+        accountRow?.chargesEnabled && !accountRow.disabledAt ? { stripeAccount: accountRow.stripeAccountId } : undefined;
+      const stripe = stripeAccountOptions ? await getStripeForMode(accountRow!.accountMode as "test" | "live") : getStripe();
+      const session = await stripe.checkout.sessions.retrieve(session_id, {}, stripeAccountOptions);
       // Tenant check: only sessions this member's org initiated are shown.
       if (
         recurring === "1" &&

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getStripe } from "@/lib/stripe";
+import { getStripeForMode } from "@/lib/payments/stripe-connect";
 
 function money(value: number): string {
   return value.toLocaleString("en-US", { style: "currency", currency: "USD" });
@@ -29,8 +30,18 @@ export default async function PublicGiveSuccessPage({
   let amount: number | null = null;
   if (session_id) {
     try {
-      const stripe = getStripe();
-      const session = await stripe.checkout.sessions.retrieve(session_id);
+      // CONNECT-I: the checkout session was created on the org's CONNECTED
+      // account (once connected) — retrieving it with the platform client
+      // always 404s cross-account, landing every real gift in the UNKNOWN
+      // "could not confirm" state even though the webhook recorded it fine.
+      const accountRow = await prisma.organizationStripeAccount.findUnique({
+        where: { organizationId: organization.id },
+        select: { stripeAccountId: true, accountMode: true, chargesEnabled: true, disabledAt: true },
+      });
+      const stripeAccountOptions =
+        accountRow?.chargesEnabled && !accountRow.disabledAt ? { stripeAccount: accountRow.stripeAccountId } : undefined;
+      const stripe = stripeAccountOptions ? await getStripeForMode(accountRow!.accountMode as "test" | "live") : getStripe();
+      const session = await stripe.checkout.sessions.retrieve(session_id, {}, stripeAccountOptions);
       if (session.metadata?.organizationId === organization.id && session.metadata?.paymentType === "public-giving") {
         if (session.payment_status === "paid") {
           state = "PAID";
