@@ -18,7 +18,8 @@ export type CapabilityFlag =
   | "architecturalRequests"
   | "maintenanceRequests"
   | "payrollCheckoff"
-  | "ptaHouseholds";
+  | "ptaHouseholds"
+  | "caseManagement";
 
 const ALL_FLAGS: CapabilityFlag[] = [
   "properties",
@@ -28,6 +29,7 @@ const ALL_FLAGS: CapabilityFlag[] = [
   "maintenanceRequests",
   "payrollCheckoff",
   "ptaHouseholds",
+  "caseManagement",
 ];
 
 /** Which flags are on for each vertical. Absent keys default to false. */
@@ -38,6 +40,9 @@ const VERTICAL_CAPABILITIES: Record<OrganizationVertical, Partial<Record<Capabil
   },
   UNION: {
     payrollCheckoff: true,
+    // Union Case Center (UNION-CASE-A) -- grievance & representation case
+    // management. See src/lib/union/cases-guard.ts.
+    caseManagement: true,
   },
   HOA: {
     properties: true,
