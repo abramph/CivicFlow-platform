@@ -1,4 +1,4 @@
-import type { DuesPaymentMethod, Prisma } from "@prisma/client";
+import type { DuesPaymentMethod, Prisma, ProviderAccountContext } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 
 type TxClient = Prisma.TransactionClient;
@@ -13,6 +13,10 @@ interface RecordDuesPaymentParams {
   method: DuesPaymentMethod;
   reference?: string | null;
   notes?: string | null;
+  /** CONNECT-E (§56): immutable account attribution — only the Stripe
+   * webhook path passes these; offline/manual entries leave them null. */
+  stripeConnectedAccountId?: string | null;
+  providerAccountContext?: ProviderAccountContext | null;
   /** Pass the already-validated charge to have its balance updated. */
   charge?: { id: string; amountPaid: unknown; amountDue: unknown } | null;
 }
@@ -29,6 +33,8 @@ async function recordDuesPaymentWithClient(tx: TxClient, params: RecordDuesPayme
       method: params.method,
       reference: params.reference ?? null,
       notes: params.notes ?? null,
+      stripeConnectedAccountId: params.stripeConnectedAccountId ?? null,
+      providerAccountContext: params.providerAccountContext ?? null,
     },
   });
 

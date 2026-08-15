@@ -2,7 +2,7 @@ import { withApiErrorHandling } from "@/lib/api-route";
 import { prisma } from "@/lib/prisma";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { parseJsonBody, ValidationError, z } from "@/lib/validation";
-import { getStripe } from "@/lib/stripe";
+import { resolveConnectedAccountForCharges, getStripeForMode } from "@/lib/payments/stripe-connect";
 import { getServerEnv } from "@/lib/env";
 
 const checkoutSchema = z.object({
@@ -64,43 +64,53 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
       throw new ValidationError(`Minimum payment is $${(minCents / 100).toFixed(2)}.`);
     }
 
-    const stripe = getStripe();
+    // CONNECT-E (§10/§55): resolved SERVER-SIDE from the organization — a
+    // clean 409 ("Payments are not set up...") when not connected, never a
+    // fallback to the platform account. Manual/offline payment methods on
+    // this same link (see PaymentMethodConfig) are unaffected — this route
+    // only ever runs for the STRIPE method, already gated above.
+    const { stripeConnectedAccountId, accountMode } = await resolveConnectedAccountForCharges(link.organizationId);
+    const stripe = await getStripeForMode(accountMode as "test" | "live");
     const env = getServerEnv();
     const baseUrl = env.NEXTAUTH_URL.replace(/\/$/, "");
 
     const destination =
       link.campaign?.name ?? link.event?.title ?? link.organization.name;
 
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      line_items: [
-        {
-          price_data: {
-            currency: "usd",
-            product_data: {
-              name: link.title,
-              description: destination,
+    const session = await stripe.checkout.sessions.create(
+      {
+        mode: "payment",
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: {
+                name: link.title,
+                description: destination,
+              },
+              unit_amount: amountCents,
             },
-            unit_amount: amountCents,
+            quantity: 1,
           },
-          quantity: 1,
+        ],
+        ...(input.contributorEmail ? { customer_email: input.contributorEmail } : {}),
+        success_url: `${baseUrl}/pay/${slug}/success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${baseUrl}/pay/${slug}`,
+        metadata: {
+          product: "Unestra",
+          platformOwner: "APH Technologies, LLC",
+          paymentType: link.campaign?.name ? "campaign" : link.event?.title ? "event" : "dues",
+          paymentLinkId: link.id,
+          organizationId: link.organizationId,
+          campaignId: link.campaignId ?? "",
+          eventId: link.eventId ?? "",
+          contributorName: input.contributorName ?? "",
+          stripeConnectedAccountId,
+          environment: process.env.NODE_ENV ?? "development",
         },
-      ],
-      ...(input.contributorEmail ? { customer_email: input.contributorEmail } : {}),
-      success_url: `${baseUrl}/pay/${slug}/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${baseUrl}/pay/${slug}`,
-      metadata: {
-        product: "Unestra",
-        platformOwner: "APH Technologies, LLC",
-        paymentType: link.campaign?.name ? "campaign" : link.event?.title ? "event" : "dues",
-        paymentLinkId: link.id,
-        organizationId: link.organizationId,
-        campaignId: link.campaignId ?? "",
-        eventId: link.eventId ?? "",
-        contributorName: input.contributorName ?? "",
-        environment: process.env.NODE_ENV ?? "development",
       },
-    });
+      { stripeAccount: stripeConnectedAccountId }
+    );
 
     if (!session.url) throw new Error("Stripe did not return a checkout URL");
 

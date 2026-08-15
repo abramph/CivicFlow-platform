@@ -17,10 +17,13 @@ vi.mock("@/lib/payment-links", () => ({
 }));
 
 const sessionsCreate = vi.fn();
-vi.mock("@/lib/stripe", () => ({
-  getStripe: () => ({ checkout: { sessions: { create: (...args: unknown[]) => sessionsCreate(...args) } } }),
+const resolveConnectedAccountForCharges = vi.fn();
+vi.mock("@/lib/payments/stripe-connect", () => ({
+  resolveConnectedAccountForCharges: (...args: unknown[]) => resolveConnectedAccountForCharges(...args),
+  getStripeForMode: async () => ({ checkout: { sessions: { create: (...args: unknown[]) => sessionsCreate(...args) } } }),
 }));
 
+import { FinanceError } from "@/lib/finance-errors";
 import { POST } from "@/app/api/member-portal/dues/checkout/route";
 
 function buildRequest(body: object) {
@@ -36,6 +39,8 @@ describe("POST /api/member-portal/dues/checkout", () => {
     requireMemberWebSession.mockReset();
     findActivePaymentLink.mockReset();
     sessionsCreate.mockReset();
+    resolveConnectedAccountForCharges.mockReset();
+    resolveConnectedAccountForCharges.mockResolvedValue({ stripeConnectedAccountId: "acct_connected1", accountMode: "test" });
   });
 
   it("returns 404 when the organization has no active DUES payment link", async () => {
@@ -71,8 +76,24 @@ describe("POST /api/member-portal/dues/checkout", () => {
       paymentLinkId: "link-1",
       organizationId: "org-1",
       memberId: "member-1",
+      stripeConnectedAccountId: "acct_connected1",
     });
     expect(call.line_items[0].price_data.unit_amount).toBe(6000);
+    // CONNECT-E (§10/§55): the connected account, never the platform.
+    expect(sessionsCreate.mock.calls[0][1]).toEqual({ stripeAccount: "acct_connected1" });
+  });
+
+  it("CONNECT-E §14/§55: an org without a connected/charges-enabled account gets a clean error, never a platform fallback", async () => {
+    requireMemberWebSession.mockResolvedValueOnce({ organizationId: "org-1", memberId: "member-1" });
+    findActivePaymentLink.mockResolvedValueOnce({ id: "link-1", title: "Annual Dues", amount: 60, minAmount: null });
+    resolveConnectedAccountForCharges.mockRejectedValueOnce(
+      new FinanceError("Payments are not set up for this organization yet.", 409)
+    );
+
+    const response = await POST(buildRequest({ organizationId: "org-1" }));
+
+    expect(response.status).toBe(409);
+    expect(sessionsCreate).not.toHaveBeenCalled();
   });
 
   it("rejects a custom amount below the payment link's configured minimum", async () => {
