@@ -210,14 +210,20 @@ export async function startConnectOnboarding(input: {
   }
 
   const { getServerEnv } = await import("@/lib/env");
-  const accountMode: "test" | "live" =
-    existing ? (existing.accountMode as "test" | "live")
-    : organization.billingExempt && getServerEnv().STRIPE_TEST_SECRET_KEY ? "test"
-    : "live";
+  const desiredMode: "test" | "live" =
+    organization.billingExempt && getServerEnv().STRIPE_TEST_SECRET_KEY ? "test" : "live";
+  // A prior attempt's mode is authoritative ONLY once something was actually
+  // submitted to Stripe. An account still sitting at ONBOARDING_STARTED with
+  // nothing submitted is an empty shell — platform configuration (e.g. a
+  // test key arriving) may legitimately change the intended mode before
+  // then, and re-deciding is safe because nothing downstream references it
+  // yet (no charges, no webhook, no linked schedule can exist).
+  const modeIsSwitchable = existing ? !existing.detailsSubmitted && existing.accountMode !== desiredMode : false;
+  const accountMode: "test" | "live" = existing && !modeIsSwitchable ? (existing.accountMode as "test" | "live") : desiredMode;
   const stripe = await getStripeForMode(accountMode);
 
-  let stripeAccountId = existing?.stripeAccountId ?? null;
-  let resumed = Boolean(existing);
+  let stripeAccountId = existing && !modeIsSwitchable ? existing.stripeAccountId : null;
+  let resumed = Boolean(existing) && !modeIsSwitchable;
   if (!stripeAccountId) {
     const account = await stripe.accounts.create({
       type: "standard",
@@ -225,14 +231,31 @@ export async function startConnectOnboarding(input: {
       metadata: { organizationId: input.organizationId, product: "Unestra" },
     });
     stripeAccountId = account.id;
-    await prisma.organizationStripeAccount.create({
-      data: {
+    if (existing && modeIsSwitchable) {
+      await prisma.organizationStripeAccount.update({
+        where: { organizationId: input.organizationId },
+        data: { stripeAccountId, accountMode, onboardingStatus: "ONBOARDING_STARTED" },
+      });
+      const { createAuditEvent } = await import("@/lib/audit");
+      await createAuditEvent({
         organizationId: input.organizationId,
-        stripeAccountId,
-        accountMode,
-        onboardingStatus: "ONBOARDING_STARTED",
-      },
-    });
+        actorUserId: input.actorUserId,
+        actorEmail: input.actorEmail ?? null,
+        action: "payments.stripe_account_mode_corrected",
+        entityType: "organization_stripe_account",
+        entityId: stripeAccountId,
+        metadata: { fromMode: existing.accountMode, toMode: accountMode, priorStripeAccountId: existing.stripeAccountId },
+      });
+    } else {
+      await prisma.organizationStripeAccount.create({
+        data: {
+          organizationId: input.organizationId,
+          stripeAccountId,
+          accountMode,
+          onboardingStatus: "ONBOARDING_STARTED",
+        },
+      });
+    }
     resumed = false;
   }
 

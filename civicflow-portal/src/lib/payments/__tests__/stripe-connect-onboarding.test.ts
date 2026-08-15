@@ -4,6 +4,7 @@ const findUniqueOrg = vi.fn();
 const findUniqueAccount = vi.fn();
 const createAccountRow = vi.fn();
 const upsertAccount = vi.fn();
+const updateAccount = vi.fn();
 const stripeAccountsCreate = vi.fn();
 const stripeAccountsRetrieve = vi.fn();
 const stripeAccountLinksCreate = vi.fn();
@@ -17,6 +18,7 @@ vi.mock("@/lib/prisma", () => ({
       findUnique: (...a: unknown[]) => findUniqueAccount(...a),
       create: (...a: unknown[]) => createAccountRow(...a),
       upsert: (...a: unknown[]) => upsertAccount(...a),
+      update: (...a: unknown[]) => updateAccount(...a),
     },
   },
 }));
@@ -43,6 +45,7 @@ beforeEach(() => {
   stripeAccountsCreate.mockResolvedValue({ id: "acct_new" });
   stripeAccountLinksCreate.mockResolvedValue({ url: "https://connect.stripe.com/setup/x" });
   upsertAccount.mockResolvedValue({});
+  updateAccount.mockResolvedValue({});
   findUniqueAccount.mockResolvedValue(null);
 });
 
@@ -73,6 +76,50 @@ describe("startConnectOnboarding (§3/§6/§10)", () => {
     findUniqueOrg.mockResolvedValueOnce({ name: "Demo Church", email: null, billingExempt: true });
     const result = await startConnectOnboarding({ organizationId: "org-demo", baseUrl: "https://app.example", actorUserId: "own" });
     expect(result.accountMode).toBe("live");
+  });
+
+  it("a never-submitted account with the WRONG mode is corrected in place, not permanently pinned", async () => {
+    // Real incident: an account was created in "live" mode before the test
+    // key was ever configured; once the key exists, the next attempt must
+    // switch modes rather than resuming the stale live shell forever.
+    findUniqueOrg.mockResolvedValueOnce({ name: "Demo Church", email: null, billingExempt: true });
+    findUniqueAccount.mockResolvedValueOnce({
+      organizationId: "org-demo",
+      stripeAccountId: "acct_old_live",
+      accountMode: "live",
+      detailsSubmitted: false,
+      disabledAt: null,
+    });
+    stripeAccountsCreate.mockResolvedValueOnce({ id: "acct_new_test" });
+    const result = await startConnectOnboarding({ organizationId: "org-demo", baseUrl: "https://app.example", actorUserId: "own" });
+    expect(result.accountMode).toBe("test");
+    expect(result.resumed).toBe(false);
+    expect(stripeAccountsCreate).toHaveBeenCalledTimes(1);
+    // The existing ROW is updated in place — never a second row.
+    expect(createAccountRow).not.toHaveBeenCalled();
+    const updateCall = updateAccount.mock.calls.find((call) => call[0]?.data?.stripeAccountId === "acct_new_test");
+    expect(updateCall?.[0]).toMatchObject({
+      where: { organizationId: "org-demo" },
+      data: { stripeAccountId: "acct_new_test", accountMode: "test", onboardingStatus: "ONBOARDING_STARTED" },
+    });
+    expect(createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "payments.stripe_account_mode_corrected" })
+    );
+  });
+
+  it("a SUBMITTED account keeps its mode even if the desired mode later changes", async () => {
+    findUniqueOrg.mockResolvedValueOnce({ name: "Demo Church", email: null, billingExempt: true });
+    findUniqueAccount.mockResolvedValueOnce({
+      organizationId: "org-demo",
+      stripeAccountId: "acct_submitted_live",
+      accountMode: "live",
+      detailsSubmitted: true,
+      disabledAt: null,
+    });
+    const result = await startConnectOnboarding({ organizationId: "org-demo", baseUrl: "https://app.example", actorUserId: "own" });
+    expect(result.accountMode).toBe("live");
+    expect(result.resumed).toBe(true);
+    expect(stripeAccountsCreate).not.toHaveBeenCalled();
   });
 
   it("an existing account RESUMES (no second account is created); a disconnected one refuses", async () => {
