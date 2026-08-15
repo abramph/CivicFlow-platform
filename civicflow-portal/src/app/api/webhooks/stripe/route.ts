@@ -163,7 +163,17 @@ export async function POST(request: Request) {
   let event: Stripe.Event;
   try {
     event = stripe.webhooks.constructEvent(rawBody, signature, env.STRIPE_WEBHOOK_SECRET);
-  } catch {
+  } catch (err) {
+    // CONNECT-G: this used to fail SILENTLY — a stale secret produced a
+    // steady stream of 400s with no trace anywhere. Never log the body or
+    // signature header (may embed sensitive payload fragments); the error
+    // message from Stripe's SDK is safe (verification-failure reason only).
+    console.error(
+      JSON.stringify({
+        event: "stripe_webhook_signature_invalid",
+        message: err instanceof Error ? err.message : String(err),
+      })
+    );
     return Response.json({ ok: false, error: "Invalid Stripe signature" }, { status: 400 });
   }
 
