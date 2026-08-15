@@ -2,7 +2,7 @@ import { withApiErrorHandling } from "@/lib/api-route";
 import { validatePublicGivingRequest } from "@/lib/giving/public-giving";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { parseJsonBody, z } from "@/lib/validation";
-import { getStripe } from "@/lib/stripe";
+import { resolveConnectedAccountForCharges, getStripeForMode } from "@/lib/payments/stripe-connect";
 import { getServerEnv } from "@/lib/env";
 import { logGivingEvent } from "@/lib/giving/telemetry";
 
@@ -34,43 +34,50 @@ export async function POST(request: Request) {
       amount: input.amount,
     });
 
-    const stripe = getStripe();
+    // CONNECT-C (§14): public giving NEVER falls back to the platform
+    // account — a 409 here surfaces as "not accepting online gifts" upstream.
+    const { stripeConnectedAccountId, accountMode } = await resolveConnectedAccountForCharges(organizationId);
+    const stripe = await getStripeForMode(accountMode as "test" | "live");
     const env = getServerEnv();
     const baseUrl = env.NEXTAUTH_URL.replace(/\/$/, "");
 
     logGivingEvent("GIVING_CHECKOUT_STARTED", { organizationId: organizationId, fundId: fund.id, amountCents: Math.round(amount * 100) });
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      // CORE-GIVE-K: also stamp the PAYMENT INTENT so intents are
-      // org-searchable in Stripe (session metadata does not propagate).
-      payment_intent_data: {
-        metadata: { organizationId: organizationId, paymentType: "public-giving" },
-      },
-      line_items: [
-        {
-          price_data: {
-            currency: "usd",
-            product_data: { name: fund.name, description: "Contribution" },
-            unit_amount: Math.round(amount * 100),
-          },
-          quantity: 1,
+    const session = await stripe.checkout.sessions.create(
+      {
+        mode: "payment",
+        // CORE-GIVE-K: also stamp the PAYMENT INTENT so intents are
+        // org-searchable in Stripe (session metadata does not propagate).
+        payment_intent_data: {
+          metadata: { organizationId: organizationId, paymentType: "public-giving" },
         },
-      ],
-      ...(input.guestEmail ? { customer_email: input.guestEmail } : {}),
-      success_url: `${baseUrl}/give/${encodeURIComponent(input.slug)}/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${baseUrl}/give/${encodeURIComponent(input.slug)}`,
-      metadata: {
-        product: "Unestra",
-        platformOwner: "APH Technologies, LLC",
-        paymentType: "public-giving",
-        organizationId,
-        givingFundId: fund.id,
-        guestName: input.guestName?.trim().slice(0, 120) ?? "",
-        guestEmail: input.guestEmail?.trim().slice(0, 200) ?? "",
-        anonymityMode: input.anonymous ? "PUBLICLY_ANONYMOUS" : "NONE",
-        environment: process.env.NODE_ENV ?? "development",
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: { name: fund.name, description: "Contribution" },
+              unit_amount: Math.round(amount * 100),
+            },
+            quantity: 1,
+          },
+        ],
+        ...(input.guestEmail ? { customer_email: input.guestEmail } : {}),
+        success_url: `${baseUrl}/give/${encodeURIComponent(input.slug)}/success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${baseUrl}/give/${encodeURIComponent(input.slug)}`,
+        metadata: {
+          product: "Unestra",
+          platformOwner: "APH Technologies, LLC",
+          paymentType: "public-giving",
+          organizationId,
+          stripeConnectedAccountId,
+          givingFundId: fund.id,
+          guestName: input.guestName?.trim().slice(0, 120) ?? "",
+          guestEmail: input.guestEmail?.trim().slice(0, 200) ?? "",
+          anonymityMode: input.anonymous ? "PUBLICLY_ANONYMOUS" : "NONE",
+          environment: process.env.NODE_ENV ?? "development",
+        },
       },
-    });
+      { stripeAccount: stripeConnectedAccountId }
+    );
     if (!session.url) throw new Error("Stripe did not return a checkout URL");
     return Response.json({ ok: true, url: session.url });
   });

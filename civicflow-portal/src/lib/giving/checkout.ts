@@ -93,6 +93,11 @@ export interface RecordGivingInput {
   currency: string;
   providerPaymentIntentId: string | null;
   providerSessionId: string;
+  /** CONNECT-C (§56): the connected account that was the merchant of record
+   * for this charge — from `event.account`, never from metadata. Stamped
+   * immutably on the Contribution row; refunds resolve the account from
+   * THIS row, never from the organization's current Stripe settings. */
+  stripeConnectedAccountId: string;
 }
 
 export type RecordGivingResult =
@@ -166,6 +171,8 @@ export async function recordGivingContribution(input: RecordGivingInput): Promis
         paymentMethod: "STRIPE",
         source: "MEMBER_PROFILE",
         providerPaymentIntentId: reference,
+        stripeConnectedAccountId: input.stripeConnectedAccountId,
+        providerAccountContext: "CONNECTED_ACCOUNT_PAYMENT",
         anonymityMode,
         statementEligible: true,
         taxDeductibilityClassification: program?.taxDeductibility ?? "DEDUCTIBILITY_NOT_CONFIGURED",

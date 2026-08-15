@@ -239,72 +239,16 @@ export async function POST(request: Request) {
           await upsertSubscriptionFromStripe(sub, orgId ?? undefined);
         }
 
-        // CORE-GIVE-B: fund-designated member giving. Handled BEFORE the
-        // legacy payment-link branch; the recorder does the §50 tenant
-        // cross-check (fund must exist inside the metadata organization) and
-        // the payment-intent idempotency belt, and records NOTHING on any
-        // linkage inconsistency.
-        if (session.metadata?.paymentType === "giving" && orgId && session.payment_status === "paid") {
-          const { recordGivingContribution } = await import("@/lib/giving/checkout");
-          const result = await recordGivingContribution({
-            organizationId: orgId,
-            fundId: session.metadata?.givingFundId ?? "",
-            programId: session.metadata?.givingProgramId || null,
-            memberId: session.metadata?.memberId || null,
-            contributorUserId: session.metadata?.contributorUserId || null,
-            pledgeId: session.metadata?.givingPledgeId || null,
-            anonymityMode: session.metadata?.anonymityMode || null,
-            memo: session.metadata?.givingMemo || null,
-            amountTotalCents: session.amount_total ?? 0,
-            currency: session.currency ?? "usd",
-            providerPaymentIntentId: typeof session.payment_intent === "string" ? session.payment_intent : (session.payment_intent?.id ?? null),
-            providerSessionId: session.id,
-          });
-          if (result.outcome === "REJECTED") {
-            console.error(
-              JSON.stringify({ event: "giving_webhook_rejected", reason: result.reason, sessionId: session.id, orgId })
-            );
-          }
-          await createAuditEvent({
-            organizationId: orgId,
-            action: "update",
-            entityType: "stripe_webhook",
-            entityId: session.id,
-            metadata: { eventType: event.type, giving: true, outcome: result.outcome },
-          });
-          break;
-        }
-
-        // CORE-GIVE-J: guest gifts from the public /give/[slug] page. Same
-        // discipline as the member branch: §50 cross-check, idempotency
-        // belt, provider-truth amounts; email matching only ever SUGGESTS.
-        if (session.metadata?.paymentType === "public-giving" && orgId && session.payment_status === "paid") {
-          const { recordPublicGivingContribution } = await import("@/lib/giving/public-giving");
-          const result = await recordPublicGivingContribution({
-            organizationId: orgId,
-            fundId: session.metadata?.givingFundId ?? "",
-            guestName: session.metadata?.guestName || null,
-            guestEmail: session.metadata?.guestEmail || null,
-            anonymityMode: session.metadata?.anonymityMode || null,
-            amountTotalCents: session.amount_total ?? 0,
-            currency: session.currency ?? "usd",
-            providerPaymentIntentId: typeof session.payment_intent === "string" ? session.payment_intent : (session.payment_intent?.id ?? null),
-            providerSessionId: session.id,
-          });
-          if (result.outcome === "REJECTED") {
-            console.error(
-              JSON.stringify({ event: "public_giving_webhook_rejected", reason: result.reason, sessionId: session.id, orgId })
-            );
-          }
-          await createAuditEvent({
-            organizationId: orgId,
-            action: "update",
-            entityType: "stripe_webhook",
-            entityId: session.id,
-            metadata: { eventType: event.type, publicGiving: true, outcome: result.outcome },
-          });
-          break;
-        }
+        // CONNECT-C: one-time member Giving and public Giving now create
+        // their checkout sessions against the organization's OWN connected
+        // account (direct charges — see src/app/api/giving/checkout/route.ts
+        // and src/app/api/public/give/route.ts). Their
+        // checkout.session.completed events therefore arrive ONLY on
+        // /api/webhooks/stripe-connect (subscribed to "Events on connected
+        // accounts"), never here (this endpoint is "Events on your account"
+        // only) — the paymentType === "giving" / "public-giving" branches
+        // that used to live here were removed rather than left as dead code.
+        // See docs/stripe-connect-architecture.md's CONNECT-C entry.
 
         // Record a Contribution (or, for dues, a DuesPayment applied to the
         // member's balance) when a payment link checkout completes.

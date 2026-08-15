@@ -28,6 +28,16 @@ export async function getPublicGivingPage(slug: string) {
   });
   if (!settings?.contributionsEnabled || !settings.publicGivingEnabled) return null;
 
+  // CONNECT-C (§14): public giving NEVER falls back to the platform Stripe
+  // account. Without a charges-enabled connected account, the page still
+  // renders (name, message, campaign progress) but shows no give form —
+  // the same "not accepting online gifts" state as zero published funds.
+  const stripeAccount = await prisma.organizationStripeAccount.findUnique({
+    where: { organizationId: organization.id },
+    select: { chargesEnabled: true, disabledAt: true },
+  });
+  const givingAvailable = Boolean(stripeAccount?.chargesEnabled && !stripeAccount.disabledAt);
+
   const [funds, campaigns] = await Promise.all([
     prisma.fund.findMany({
       where: { organizationId: organization.id, isPublic: true, status: "ACTIVE", allowOneTime: true },
@@ -70,7 +80,8 @@ export async function getPublicGivingPage(slug: string) {
     organization,
     terminology: settings.contributionTerminology?.trim() || "Contributions",
     message: settings.publicGivingMessage,
-    funds: funds.map((fund) => ({
+    givingAvailable,
+    funds: !givingAvailable ? [] : funds.map((fund) => ({
       id: fund.id,
       name: fund.name,
       description: fund.description,
@@ -115,6 +126,9 @@ export interface RecordPublicGivingInput {
   currency: string;
   providerPaymentIntentId: string | null;
   providerSessionId: string;
+  /** CONNECT-C (§56): the connected account that was the merchant of record
+   * — from `event.account`, never from metadata. Immutable attribution. */
+  stripeConnectedAccountId: string;
 }
 
 export type RecordPublicGivingResult =
@@ -168,6 +182,8 @@ export async function recordPublicGivingContribution(input: RecordPublicGivingIn
         paymentMethod: "STRIPE",
         source: "PUBLIC_PAGE",
         providerPaymentIntentId: reference,
+        stripeConnectedAccountId: input.stripeConnectedAccountId,
+        providerAccountContext: "CONNECTED_ACCOUNT_PAYMENT",
         contributorName: input.guestName?.trim().slice(0, 120) || null,
         guestEmail,
         guestMatchStatus: matchStatus,

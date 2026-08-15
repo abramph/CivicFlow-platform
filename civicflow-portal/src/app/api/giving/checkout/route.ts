@@ -3,7 +3,7 @@ import { requireMemberWebSession } from "@/lib/member-web-session";
 import { validateGivingRequest } from "@/lib/giving/checkout";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { parseJsonBody, z } from "@/lib/validation";
-import { getStripe } from "@/lib/stripe";
+import { resolveConnectedAccountForCharges, getStripeForMode } from "@/lib/payments/stripe-connect";
 import { getServerEnv } from "@/lib/env";
 import { logGivingEvent } from "@/lib/giving/telemetry";
 
@@ -39,49 +39,58 @@ export async function POST(request: Request) {
       contributorUserId: memberSession.userId,
     });
 
-    const stripe = getStripe();
+    // CONNECT-C (§10/§55): resolved SERVER-SIDE from the organization — the
+    // org's OWN connected account or a clean 409, never the platform account.
+    const { stripeConnectedAccountId, accountMode } = await resolveConnectedAccountForCharges(memberSession.organizationId);
+    const stripe = await getStripeForMode(accountMode as "test" | "live");
     const env = getServerEnv();
     const baseUrl = env.NEXTAUTH_URL.replace(/\/$/, "");
     const orgSuffix = `&org=${encodeURIComponent(memberSession.organizationId)}`;
 
     logGivingEvent("GIVING_CHECKOUT_STARTED", { organizationId: memberSession.organizationId, fundId: fund.id, amountCents: Math.round(amount * 100) });
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      // CORE-GIVE-K: also stamp the PAYMENT INTENT so intents are
-      // org-searchable in Stripe (session metadata does not propagate).
-      payment_intent_data: {
-        metadata: { organizationId: memberSession.organizationId, paymentType: "giving" },
-      },
-      line_items: [
-        {
-          price_data: {
-            currency: "usd",
-            product_data: {
-              name: program ? `${program.name} — ${fund.name}` : fund.name,
-              description: "Contribution",
-            },
-            unit_amount: Math.round(amount * 100),
-          },
-          quantity: 1,
+    const session = await stripe.checkout.sessions.create(
+      {
+        mode: "payment",
+        // CORE-GIVE-K: also stamp the PAYMENT INTENT so intents are
+        // org-searchable in Stripe (session metadata does not propagate).
+        payment_intent_data: {
+          metadata: { organizationId: memberSession.organizationId, paymentType: "giving" },
         },
-      ],
-      success_url: `${baseUrl}/m/giving/success?session_id={CHECKOUT_SESSION_ID}${orgSuffix}`,
-      cancel_url: `${baseUrl}/m/giving?org=${encodeURIComponent(memberSession.organizationId)}`,
-      metadata: {
-        product: "Unestra",
-        platformOwner: "APH Technologies, LLC",
-        paymentType: "giving",
-        organizationId: memberSession.organizationId,
-        givingFundId: fund.id,
-        givingProgramId: program?.id ?? "",
-        memberId: memberSession.memberId,
-        contributorUserId: memberSession.userId,
-        givingPledgeId: pledge?.id ?? "",
-        anonymityMode: input.anonymityMode ?? "NONE",
-        givingMemo: input.memo?.slice(0, 200) ?? "",
-        environment: process.env.NODE_ENV ?? "development",
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: {
+                name: program ? `${program.name} — ${fund.name}` : fund.name,
+                description: "Contribution",
+              },
+              unit_amount: Math.round(amount * 100),
+            },
+            quantity: 1,
+          },
+        ],
+        success_url: `${baseUrl}/m/giving/success?session_id={CHECKOUT_SESSION_ID}${orgSuffix}`,
+        cancel_url: `${baseUrl}/m/giving?org=${encodeURIComponent(memberSession.organizationId)}`,
+        metadata: {
+          product: "Unestra",
+          platformOwner: "APH Technologies, LLC",
+          paymentType: "giving",
+          organizationId: memberSession.organizationId,
+          // CONNECT-C (§20): cross-checked against event.account in the
+          // connected-account webhook — never trusted alone.
+          stripeConnectedAccountId,
+          givingFundId: fund.id,
+          givingProgramId: program?.id ?? "",
+          memberId: memberSession.memberId,
+          contributorUserId: memberSession.userId,
+          givingPledgeId: pledge?.id ?? "",
+          anonymityMode: input.anonymityMode ?? "NONE",
+          givingMemo: input.memo?.slice(0, 200) ?? "",
+          environment: process.env.NODE_ENV ?? "development",
+        },
       },
-    });
+      { stripeAccount: stripeConnectedAccountId }
+    );
     if (!session.url) throw new Error("Stripe did not return a checkout URL");
 
     return Response.json({ ok: true, url: session.url });

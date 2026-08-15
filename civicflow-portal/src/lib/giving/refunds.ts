@@ -49,13 +49,34 @@ export async function issueRefund(input: {
     );
   }
 
-  const { getStripe } = await import("@/lib/stripe");
-  const stripe = getStripe();
-  const refund = await stripe.refunds.create({
-    payment_intent: contribution.providerPaymentIntentId,
-    amount: Math.round(requested * 100),
-    metadata: { organizationId: input.organizationId, contributionId: contribution.id, paymentType: "giving-refund" },
-  });
+  // CONNECT-C (§17/§56): refund against the SAME connected account that
+  // owns the original charge, resolved from the contribution's own
+  // immutable stripeConnectedAccountId — never from the organization's
+  // CURRENT Stripe settings (which may have changed since the charge).
+  const stripeAccountOptions =
+    contribution.providerAccountContext === "CONNECTED_ACCOUNT_PAYMENT" && contribution.stripeConnectedAccountId
+      ? { stripeAccount: contribution.stripeConnectedAccountId }
+      : undefined;
+  let stripe;
+  if (stripeAccountOptions) {
+    const { getStripeForMode } = await import("@/lib/payments/stripe-connect");
+    const accountRow = await prisma.organizationStripeAccount.findUnique({
+      where: { stripeAccountId: contribution.stripeConnectedAccountId as string },
+      select: { accountMode: true },
+    });
+    stripe = await getStripeForMode((accountRow?.accountMode as "test" | "live") ?? "live");
+  } else {
+    const { getStripe } = await import("@/lib/stripe");
+    stripe = getStripe();
+  }
+  const refund = await stripe.refunds.create(
+    {
+      payment_intent: contribution.providerPaymentIntentId,
+      amount: Math.round(requested * 100),
+      metadata: { organizationId: input.organizationId, contributionId: contribution.id, paymentType: "giving-refund" },
+    },
+    stripeAccountOptions
+  );
 
   // §34: mark ONLY on provider confirmation. Stripe card refunds usually
   // confirm synchronously; anything else waits for charge.refunded.
