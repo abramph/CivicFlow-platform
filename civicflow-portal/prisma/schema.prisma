@@ -1759,9 +1759,28 @@ model OrgSettings {
   /// slug and disabled page 404 identically (no tenant enumeration).
   publicGivingEnabled            Boolean       @default(false)
   publicGivingMessage            String?
+  /// CONNECT-F (§28-47): optional processing-cost coverage on giving only
+  /// (one-time, public, recurring — not dues/payment links, see the
+  /// architecture doc §5/§13). Default OFF. STRIPE_SURCHARGE is reserved for
+  /// a future compliance-gated program and has no implementation yet.
+  processingCostCoverageMode        ProcessingCostCoverageMode @default(OFF)
+  /// Basis points (1/100 of a percent) used in the gross-up formula. No
+  /// hardcoded default rate — an org must configure this themselves before
+  /// the mode can be turned on (§30: never assume Stripe's real rate).
+  processingCostCoveragePercentBps  Int                        @default(0)
+  processingCostCoverageFixedCents  Int                        @default(0)
   updatedAt                      DateTime      @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+enum ProcessingCostCoverageMode {
+  OFF
+  OPTIONAL_CONTRIBUTOR_COVERAGE
+  /// Reserved (§5) — not implemented. Would apply a surcharge unconditionally
+  /// rather than as a contributor's opt-in choice; ships behind compliance
+  /// validation in a future program, never silently.
+  STRIPE_SURCHARGE
 }
 
 /// SMS is a paid add-on, never bundled free into any plan — this row tracks
@@ -2306,6 +2325,16 @@ model Contribution {
   /// CORE-GIVE-E: at most ONE pledge is credited per contribution (§23 —
   /// no double counting by construction).
   pledgeId                       String?
+  /// CONNECT-F (§36/§37): `amount` above stays the base/fund-principal
+  /// figure always — coverage is NEVER fund principal, so every existing
+  /// fund/campaign/org total that sums `amount` keeps working unchanged.
+  /// This is the additional amount the contributor opted to add on top, in
+  /// the SAME snapshot-at-checkout-time style as stripeConnectedAccountId.
+  /// Null = no coverage was offered or chosen (legacy rows + coverage-off).
+  processingCostCoverageAmount   Decimal?                       @db.Decimal(12, 2)
+  /// The exact total actually charged by the processor (amount + coverage).
+  /// Null when no processor total exists (manual/offline rows).
+  totalChargedAmount             Decimal?                       @db.Decimal(12, 2)
 
   organization       Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   member             OrgMember?                 @relation(fields: [memberId], references: [id], onDelete: SetNull)
@@ -2532,6 +2561,11 @@ model RecurringContributionSchedule {
   resumedAt                    DateTime?
   cancelledAt                  DateTime?
   cancelReason                 String?
+  /// CONNECT-F (§40): the member's CURRENT opt-in state — recomputed against
+  /// the org's live coverage rate at every checkout-side change (setup,
+  /// amount/frequency change, explicit toggle) and at invoice time. Never a
+  /// frozen dollar amount; `amount` above stays the base figure always.
+  coverProcessingCosts         Boolean                 @default(false)
   createdAt                    DateTime                @default(now())
   updatedAt                    DateTime                @updatedAt
 

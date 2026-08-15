@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { FinanceError } from "@/lib/finance-errors";
 import { validateGivingRequest } from "./checkout";
 import { logGivingEvent } from "./telemetry";
+import { resolveCoverageSplit } from "./processing-cost-coverage";
 
 /**
  * CORE-GIVE-J — the public giving page (docs/core-contributions-giving.md
@@ -24,7 +25,15 @@ export async function getPublicGivingPage(slug: string) {
   if (!organization) return null;
   const settings = await prisma.orgSettings.findUnique({
     where: { organizationId: organization.id },
-    select: { contributionsEnabled: true, publicGivingEnabled: true, publicGivingMessage: true, contributionTerminology: true },
+    select: {
+      contributionsEnabled: true,
+      publicGivingEnabled: true,
+      publicGivingMessage: true,
+      contributionTerminology: true,
+      processingCostCoverageMode: true,
+      processingCostCoveragePercentBps: true,
+      processingCostCoverageFixedCents: true,
+    },
   });
   if (!settings?.contributionsEnabled || !settings.publicGivingEnabled) return null;
 
@@ -81,6 +90,11 @@ export async function getPublicGivingPage(slug: string) {
     terminology: settings.contributionTerminology?.trim() || "Contributions",
     message: settings.publicGivingMessage,
     givingAvailable,
+    coverage: {
+      offered: settings.processingCostCoverageMode === "OPTIONAL_CONTRIBUTOR_COVERAGE",
+      percentBps: settings.processingCostCoveragePercentBps,
+      fixedCents: settings.processingCostCoverageFixedCents,
+    },
     funds: !givingAvailable ? [] : funds.map((fund) => ({
       id: fund.id,
       name: fund.name,
@@ -129,6 +143,10 @@ export interface RecordPublicGivingInput {
   /** CONNECT-C (§56): the connected account that was the merchant of record
    * — from `event.account`, never from metadata. Immutable attribution. */
   stripeConnectedAccountId: string;
+  /** CONNECT-F (§36): the base/coverage split snapshotted at checkout time —
+   * see the identical field on RecordGivingInput for the full rationale. */
+  baseAmountCents?: number | null;
+  coverageAmountCents?: number | null;
 }
 
 export type RecordPublicGivingResult =
@@ -145,6 +163,8 @@ export async function recordPublicGivingContribution(input: RecordPublicGivingIn
   if (!Number.isInteger(input.amountTotalCents) || input.amountTotalCents <= 0) {
     return { outcome: "REJECTED", reason: "invalid_amount" };
   }
+  const { baseAmountCents, coverageAmountCents } = resolveCoverageSplit(input.amountTotalCents, input.baseAmountCents, input.coverageAmountCents);
+  if (baseAmountCents === null) return { outcome: "REJECTED", reason: "coverage_split_mismatch" };
 
   const reference = input.providerPaymentIntentId ?? input.providerSessionId;
   const existing = await prisma.contribution.findFirst({
@@ -176,7 +196,9 @@ export async function recordPublicGivingContribution(input: RecordPublicGivingIn
         organizationId: input.organizationId,
         contributionNumber,
         fundId: input.fundId,
-        amount: input.amountTotalCents / 100,
+        amount: baseAmountCents / 100,
+        processingCostCoverageAmount: coverageAmountCents > 0 ? coverageAmountCents / 100 : null,
+        totalChargedAmount: input.amountTotalCents / 100,
         currency: input.currency.toUpperCase(),
         contributionDate: new Date(),
         paymentMethod: "STRIPE",

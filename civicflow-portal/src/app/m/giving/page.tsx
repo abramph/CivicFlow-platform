@@ -165,7 +165,13 @@ export default async function MemberGivingPage({ searchParams }: { searchParams:
           status: schedule.status,
           nextContributionDate: schedule.nextContributionDate?.toISOString() ?? null,
           paymentMethodDescriptor: schedule.paymentMethodDescriptor,
+          coverProcessingCosts: schedule.coverProcessingCosts,
         }))}
+        coverage={{
+          offered: settings.processingCostCoverageMode === "OPTIONAL_CONTRIBUTOR_COVERAGE",
+          percentBps: settings.processingCostCoveragePercentBps,
+          fixedCents: settings.processingCostCoverageFixedCents,
+        }}
         statements={myStatements.map((statement) => ({
           id: statement.id,
           year: statement.year,

@@ -38,7 +38,12 @@ export async function issueRefund(input: {
     throw new FinanceError("Only provider (card) contributions can be refunded here — correct offline entries in Giving Operations.", 409);
   }
 
-  const original = Number(contribution.amount);
+  // CONNECT-F (§45): the refundable ceiling is what was actually CHARGED
+  // (base + any processing-cost coverage), not just the fund-principal
+  // `amount` — otherwise a covered contributor's coverage could never be
+  // refunded. Falls back to `amount` on rows with no totalChargedAmount
+  // (legacy/manual — identical to pre-CONNECT-F behavior).
+  const original = Number(contribution.totalChargedAmount ?? contribution.amount);
   const alreadyRefunded = Number(contribution.refundedAmount ?? 0);
   const requested = input.amount != null ? Math.round(input.amount * 100) / 100 : original - alreadyRefunded;
   if (!(requested > 0)) throw new FinanceError("Refund amount must be greater than zero.");
@@ -133,7 +138,7 @@ export async function applyProviderRefund(input: {
   if (!contribution) return "NOT_FOUND";
   if (contribution.providerRefundId === input.providerRefundId && contribution.refundedAt) return "DUPLICATE";
 
-  const originalCents = Math.round(Number(contribution.amount) * 100);
+  const originalCents = Math.round(Number(contribution.totalChargedAmount ?? contribution.amount) * 100);
   const priorCents = Math.round(Number(contribution.refundedAmount ?? 0) * 100);
   const cumulativeCents =
     input.mode === "cumulative"

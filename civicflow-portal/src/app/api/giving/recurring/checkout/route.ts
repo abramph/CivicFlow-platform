@@ -3,6 +3,7 @@ import { requireMemberWebSession } from "@/lib/member-web-session";
 import { createPendingSchedule } from "@/lib/giving/recurring";
 import { getOrCreateConnectedGivingCustomer, getOrCreateConnectedGivingProduct, stripeIntervalFor } from "@/lib/giving/giving-stripe";
 import { resolveConnectedAccountForCharges, getStripeForMode } from "@/lib/payments/stripe-connect";
+import { quoteProcessingCostCoverage } from "@/lib/giving/processing-cost-coverage";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { parseJsonBody, z } from "@/lib/validation";
 import { getServerEnv } from "@/lib/env";
@@ -17,6 +18,9 @@ const bodySchema = z.object({
   pledgeId: z.string().max(64).nullable().optional(),
   /** §92: the duplicate-schedule guard 409s unless this is explicitly true. */
   confirmDuplicate: z.boolean().optional(),
+  /** CONNECT-F (§41): opt-in only — ignored server-side unless the org's
+   * mode is OPTIONAL_CONTRIBUTOR_COVERAGE. */
+  coverProcessingCosts: z.boolean().optional(),
 });
 
 /**
@@ -44,7 +48,16 @@ export async function POST(request: Request) {
       confirmDuplicate: input.confirmDuplicate ?? false,
       contributorUserId: memberSession.userId,
       memberId: memberSession.memberId,
+      coverProcessingCosts: input.coverProcessingCosts ?? false,
     });
+
+    // CONNECT-F: gross-up happens AFTER the schedule's own `amount` is fixed
+    // (fund principal, immutable) — the subscription item is priced at the
+    // grossed-up total only when the (now-persisted, org-gated) toggle is on.
+    const { coverageCents } = schedule.coverProcessingCosts
+      ? await quoteProcessingCostCoverage(memberSession.organizationId, Math.round(amount * 100))
+      : { coverageCents: 0 };
+    const chargeUnitAmount = Math.round(amount * 100) + coverageCents;
 
     // CONNECT-D (§10/§55): resolved SERVER-SIDE from the organization — the
     // org's OWN connected account or a clean 409, never the platform account.
@@ -92,7 +105,7 @@ export async function POST(request: Request) {
               currency: "usd",
               product: productId,
               recurring,
-              unit_amount: Math.round(amount * 100),
+              unit_amount: chargeUnitAmount,
             },
             quantity: 1,
           },

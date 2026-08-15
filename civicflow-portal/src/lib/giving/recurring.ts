@@ -31,6 +31,10 @@ export interface RecurringRequestInput {
   pledgeId?: string | null;
   confirmDuplicate?: boolean;
   contributorUserId: string;
+  /** CONNECT-F (§40): member's opt-in at setup time. Ignored (stored false)
+   * if the org's mode isn't OPTIONAL_CONTRIBUTOR_COVERAGE — never silently
+   * charges a coverage the org didn't configure. */
+  coverProcessingCosts?: boolean;
 }
 
 export async function validateRecurringRequest(input: RecurringRequestInput) {
@@ -99,6 +103,13 @@ export async function createPendingSchedule(input: RecurringRequestInput & { mem
       fundId: fund.id,
     });
   }
+  // CONNECT-F (§40): the toggle only ever takes effect if the org currently
+  // offers it — requesting it while OFF (or the older STRIPE_SURCHARGE-only
+  // future state) silently stores false rather than erroring, since this is
+  // a best-effort UI preference, not a validated financial input.
+  const { getProcessingCostCoverageSettings } = await import("./processing-cost-coverage");
+  const coverageSettings = await getProcessingCostCoverageSettings(input.organizationId);
+  const coverProcessingCosts = Boolean(input.coverProcessingCosts) && coverageSettings.mode === "OPTIONAL_CONTRIBUTOR_COVERAGE";
   const schedule = await prisma.recurringContributionSchedule.create({
     data: {
       organizationId: input.organizationId,
@@ -111,6 +122,7 @@ export async function createPendingSchedule(input: RecurringRequestInput & { mem
       currency: SUPPORTED_CURRENCY,
       frequency: input.frequency,
       status: "PENDING_SETUP",
+      coverProcessingCosts,
     },
   });
   const { createAuditEvent } = await import("@/lib/audit");
@@ -198,6 +210,15 @@ export async function recordRecurringInvoicePaid(input: RecurringInvoiceInput): 
   });
   if (existing) return { outcome: "DUPLICATE" };
 
+  // CONNECT-F (§40): the schedule's own `amount` is the immutable
+  // fund-principal figure — whatever Stripe actually invoiced beyond that
+  // is coverage, however it was computed (the org's rate at the time the
+  // subscription item was last priced). No recomputation from a possibly
+  // different CURRENT rate.
+  const baseCents = Math.round(Number(schedule.amount) * 100);
+  const coverageCents = schedule.coverProcessingCosts ? Math.max(input.amountPaidCents - baseCents, 0) : 0;
+  const recordedBaseCents = input.amountPaidCents - coverageCents;
+
   const { withContributionNumber } = await import("./contribution-numbers");
   const contribution = await withContributionNumber(schedule.organizationId, (contributionNumber) =>
     prisma.contribution.create({
@@ -210,7 +231,9 @@ export async function recordRecurringInvoicePaid(input: RecurringInvoiceInput): 
         pledgeId: schedule.pledgeId,
         memberId: schedule.memberId,
         contributorUserId: schedule.contributorUserId,
-        amount: input.amountPaidCents / 100,
+        amount: recordedBaseCents / 100,
+        processingCostCoverageAmount: coverageCents > 0 ? coverageCents / 100 : null,
+        totalChargedAmount: input.amountPaidCents / 100,
         currency: input.currency.toUpperCase(),
         contributionDate: new Date(),
         paymentMethod: "STRIPE",

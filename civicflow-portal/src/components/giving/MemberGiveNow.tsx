@@ -6,6 +6,15 @@ function money(value: number): string {
   return value.toLocaleString("en-US", { style: "currency", currency: "USD" });
 }
 
+/** CONNECT-F: client-side ESTIMATE only, for display — the server always
+ * recomputes and snapshots the authoritative figure at checkout time. */
+function estimateCoverageCents(baseCents: number, percentBps: number, fixedCents: number): number {
+  if (baseCents <= 0 || (percentBps <= 0 && fixedCents <= 0)) return 0;
+  const p = Math.min(Math.max(percentBps, 0), 9999) / 10000;
+  const gross = Math.ceil((baseCents + fixedCents) / (1 - p));
+  return gross - baseCents;
+}
+
 interface FundView {
   id: string;
   name: string;
@@ -54,6 +63,7 @@ interface ScheduleView {
   status: string;
   nextContributionDate: string | null;
   paymentMethodDescriptor: string | null;
+  coverProcessingCosts?: boolean;
 }
 
 const FREQUENCY_LABELS: Record<string, string> = {
@@ -86,6 +96,7 @@ export function MemberGiveNow({
   statements = [],
   householdGiving = null,
   householdStatements = [],
+  coverage = { offered: false, percentBps: 0, fixedCents: 0 },
 }: {
   organizationId: string;
   terminology: string;
@@ -97,12 +108,16 @@ export function MemberGiveNow({
   statements?: StatementView[];
   householdGiving?: HouseholdGivingView | null;
   householdStatements?: StatementView[];
+  /** CONNECT-F: whether this org offers optional processing-cost coverage,
+   * and the rate to preview it at (server recomputes authoritatively). */
+  coverage?: { offered: boolean; percentBps: number; fixedCents: number };
 }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fundId, setFundId] = useState(funds[0]?.id ?? "");
   const [amount, setAmount] = useState("");
   const [memo, setMemo] = useState("");
+  const [coverProcessingCosts, setCoverProcessingCosts] = useState(false);
   const [frequency, setFrequency] = useState<string>("");
   const [confirmDuplicate, setConfirmDuplicate] = useState(false);
   const [manageId, setManageId] = useState<string | null>(null);
@@ -130,7 +145,13 @@ export function MemberGiveNow({
       const res = await fetch("/api/giving/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ organizationId, fundId: fund.id, amount: value, memo: memo.trim() || null }),
+        body: JSON.stringify({
+          organizationId,
+          fundId: fund.id,
+          amount: value,
+          memo: memo.trim() || null,
+          coverProcessingCosts,
+        }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok || !data.url) {
@@ -158,7 +179,14 @@ export function MemberGiveNow({
       const res = await fetch("/api/giving/recurring/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ organizationId, fundId: fund.id, amount: value, frequency, confirmDuplicate }),
+        body: JSON.stringify({
+          organizationId,
+          fundId: fund.id,
+          amount: value,
+          frequency,
+          confirmDuplicate,
+          coverProcessingCosts,
+        }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok || !data.url) {
@@ -374,6 +402,23 @@ export function MemberGiveNow({
                 className="block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base"
               />
             </label>
+            {coverage.offered && amount && Number(amount) > 0 ? (
+              <label className="flex items-start gap-2 rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={coverProcessingCosts}
+                  onChange={(event) => setCoverProcessingCosts(event.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>
+                  Add{" "}
+                  <span className="font-semibold">
+                    {money(estimateCoverageCents(Math.round(Number(amount) * 100), coverage.percentBps, coverage.fixedCents) / 100)}
+                  </span>{" "}
+                  to cover estimated processing costs, so {money(Number(amount))} goes to {fund?.name ?? "the fund"} in full.
+                </span>
+              </label>
+            ) : null}
             <label className="block space-y-1 text-sm font-medium text-slate-900">
               <span>Note (optional)</span>
               <input
@@ -434,7 +479,21 @@ export function MemberGiveNow({
                 </span>{" "}
                 to <span className="font-semibold">{fund.name}</span>, starting today. Your card is saved securely by Stripe
                 for future contributions.
+                {coverProcessingCosts
+                  ? " You've chosen to also cover estimated processing costs on each contribution, recalculated at the org's current rate each time."
+                  : ""}
               </p>
+            ) : null}
+            {coverage.offered && amount && Number(amount) > 0 ? (
+              <label className="flex items-start gap-2 rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={coverProcessingCosts}
+                  onChange={(event) => setCoverProcessingCosts(event.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>Cover estimated processing costs on each contribution too (applies to this Give Now amount above).</span>
+              </label>
             ) : null}
             <button
               type="button"
@@ -563,6 +622,30 @@ export function MemberGiveNow({
                         >
                           Update payment method
                         </button>
+                        {coverage.offered ? (
+                          <button
+                            type="button"
+                            disabled={pending}
+                            onClick={async () => {
+                              if (
+                                await manage(schedule.id, {
+                                  action: "coverage",
+                                  coverProcessingCosts: !schedule.coverProcessingCosts,
+                                })
+                              ) {
+                                setNotice(
+                                  schedule.coverProcessingCosts
+                                    ? "Stopped covering processing costs — takes effect next contribution."
+                                    : "Now covering processing costs — takes effect next contribution."
+                                );
+                                setTimeout(() => window.location.reload(), 1200);
+                              }
+                            }}
+                            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 hover:bg-slate-100 disabled:opacity-50"
+                          >
+                            {schedule.coverProcessingCosts ? "Stop covering processing costs" : "Cover processing costs"}
+                          </button>
+                        ) : null}
                         {schedule.status === "PAYMENT_FAILED" || schedule.status === "PAYMENT_ACTION_REQUIRED" ? (
                           <button
                             type="button"

@@ -148,4 +148,44 @@ describe("recordGivingContribution (webhook side)", () => {
     await recordGivingContribution({ ...baseRecord, anonymityMode: "FULLY_SECRET" });
     expect(createContribution.mock.calls[0][0].data.anonymityMode).toBe("NONE");
   });
+
+  describe("CONNECT-F: processing-cost coverage split", () => {
+    it("records the snapshotted base/coverage split, keeping `amount` as the base figure", async () => {
+      findFirstFund.mockResolvedValueOnce({ id: "f1", status: "ACTIVE" });
+      findFirstContribution.mockResolvedValueOnce(null);
+      const result = await recordGivingContribution({
+        ...baseRecord,
+        amountTotalCents: 10330,
+        baseAmountCents: 10000,
+        coverageAmountCents: 330,
+      });
+      expect(result.outcome).toBe("RECORDED");
+      const data = createContribution.mock.calls[0][0].data;
+      expect(data.amount).toBe(100);
+      expect(data.processingCostCoverageAmount).toBe(3.3);
+      expect(data.totalChargedAmount).toBe(103.3);
+    });
+
+    it("a split that doesn't add up to the provider truth is REJECTED and records nothing", async () => {
+      findFirstFund.mockResolvedValueOnce({ id: "f1", status: "ACTIVE" });
+      const result = await recordGivingContribution({
+        ...baseRecord,
+        amountTotalCents: 10330,
+        baseAmountCents: 10000,
+        coverageAmountCents: 999, // doesn't sum to amountTotalCents
+      });
+      expect(result).toEqual({ outcome: "REJECTED", reason: "coverage_split_mismatch" });
+      expect(createContribution).not.toHaveBeenCalled();
+    });
+
+    it("no coverage metadata (legacy sessions / coverage never offered) treats the full total as base, 0 coverage", async () => {
+      findFirstFund.mockResolvedValueOnce({ id: "f1", status: "ACTIVE" });
+      findFirstContribution.mockResolvedValueOnce(null);
+      await recordGivingContribution(baseRecord);
+      const data = createContribution.mock.calls[0][0].data;
+      expect(data.amount).toBe(100);
+      expect(data.processingCostCoverageAmount).toBeNull();
+      expect(data.totalChargedAmount).toBe(100);
+    });
+  });
 });

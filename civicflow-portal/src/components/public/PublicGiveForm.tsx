@@ -11,14 +11,35 @@ interface PublicFund {
   maximumAmount: number | null;
 }
 
+/** CONNECT-F: client-side ESTIMATE only — the server always recomputes and
+ * snapshots the authoritative figure at checkout time. */
+function estimateCoverageCents(baseCents: number, percentBps: number, fixedCents: number): number {
+  if (baseCents <= 0 || (percentBps <= 0 && fixedCents <= 0)) return 0;
+  const p = Math.min(Math.max(percentBps, 0), 9999) / 10000;
+  const gross = Math.ceil((baseCents + fixedCents) / (1 - p));
+  return gross - baseCents;
+}
+function money(cents: number): string {
+  return (cents / 100).toLocaleString("en-US", { style: "currency", currency: "USD" });
+}
+
 /** CORE-GIVE-J — guest gift form. The server re-validates everything; this
  * form never sees or reveals anything about the organization's roster. */
-export function PublicGiveForm({ slug, funds }: { slug: string; funds: PublicFund[] }) {
+export function PublicGiveForm({
+  slug,
+  funds,
+  coverage = { offered: false, percentBps: 0, fixedCents: 0 },
+}: {
+  slug: string;
+  funds: PublicFund[];
+  coverage?: { offered: boolean; percentBps: number; fixedCents: number };
+}) {
   const [fundId, setFundId] = useState(funds[0]?.id ?? "");
   const [amount, setAmount] = useState("");
   const [guestName, setGuestName] = useState("");
   const [guestEmail, setGuestEmail] = useState("");
   const [anonymous, setAnonymous] = useState(false);
+  const [coverProcessingCosts, setCoverProcessingCosts] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,6 +59,7 @@ export function PublicGiveForm({ slug, funds }: { slug: string; funds: PublicFun
           guestName: guestName.trim() || null,
           guestEmail: guestEmail.trim() || null,
           anonymous,
+          coverProcessingCosts,
         }),
       });
       const data = await res.json().catch(() => null);
@@ -111,6 +133,25 @@ export function PublicGiveForm({ slug, funds }: { slug: string; funds: PublicFun
           className={inputClass}
         />
       </label>
+
+      {coverage.offered && amount && Number(amount) > 0 ? (
+        <label className="flex items-start gap-2 rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            checked={coverProcessingCosts}
+            onChange={(event) => setCoverProcessingCosts(event.target.checked)}
+            className="mt-0.5"
+          />
+          <span>
+            Add{" "}
+            <span className="font-semibold">
+              {money(estimateCoverageCents(Math.round(Number(amount) * 100), coverage.percentBps, coverage.fixedCents))}
+            </span>{" "}
+            to cover estimated processing costs, so the full {money(Math.round(Number(amount) * 100))} goes to{" "}
+            {fund?.name ?? "the fund"}.
+          </span>
+        </label>
+      ) : null}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="block space-y-1 text-sm font-medium text-slate-900">

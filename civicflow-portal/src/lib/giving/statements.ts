@@ -44,6 +44,7 @@ export async function collectStatementData(organizationId: string, subject: Stat
       contributionDate: true,
       amount: true,
       goodsServicesValue: true,
+      processingCostCoverageAmount: true,
       taxDeductibilityClassification: true,
       notes: true,
       fund: { select: { name: true } },
@@ -114,6 +115,15 @@ async function buildStatementPdf(input: {
       const goods = Number(row.goodsServicesValue);
       line(
         `              Amount received $${Number(row.amount).toFixed(2)} · Goods/services $${goods.toFixed(2)} · Potential contribution component $${(Number(row.amount) - goods).toFixed(2)}`,
+        { gray: true, size: 8 }
+      );
+    }
+    // CONNECT-F (§38/§39): disclosed for transparency, never counted toward
+    // the statement total or the deductible amount — `amount` above is
+    // already the base/fund-principal figure with coverage excluded.
+    if (row.processingCostCoverageAmount !== null && Number(row.processingCostCoverageAmount) > 0) {
+      line(
+        `              Plus $${Number(row.processingCostCoverageAmount).toFixed(2)} processing-cost coverage you chose to add (not a contribution; not included above)`,
         { gray: true, size: 8 }
       );
     }

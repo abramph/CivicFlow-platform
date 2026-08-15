@@ -3,6 +3,7 @@ import { requireMobileMembership } from "@/lib/mobile-auth";
 import { createPendingSchedule } from "@/lib/giving/recurring";
 import { getOrCreateConnectedGivingCustomer, getOrCreateConnectedGivingProduct, stripeIntervalFor } from "@/lib/giving/giving-stripe";
 import { resolveConnectedAccountForCharges, getStripeForMode } from "@/lib/payments/stripe-connect";
+import { quoteProcessingCostCoverage } from "@/lib/giving/processing-cost-coverage";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { parseJsonBody, z } from "@/lib/validation";
 import { getServerEnv } from "@/lib/env";
@@ -14,6 +15,9 @@ const bodySchema = z.object({
   amount: z.number().positive().max(1_000_000),
   frequency: z.enum(["WEEKLY", "BIWEEKLY", "MONTHLY", "QUARTERLY", "ANNUALLY"]),
   confirmDuplicate: z.boolean().optional(),
+  /** CONNECT-F: optional, absent on the frozen vc4 binary — behaves exactly
+   * as before when omitted (§71 backward-compat). */
+  coverProcessingCosts: z.boolean().optional(),
 });
 
 /**
@@ -39,7 +43,13 @@ export async function POST(request: Request) {
       confirmDuplicate: input.confirmDuplicate ?? false,
       contributorUserId: mobileSession.userId,
       memberId,
+      coverProcessingCosts: input.coverProcessingCosts ?? false,
     });
+
+    const { coverageCents } = schedule.coverProcessingCosts
+      ? await quoteProcessingCostCoverage(organizationId, Math.round(amount * 100))
+      : { coverageCents: 0 };
+    const chargeUnitAmount = Math.round(amount * 100) + coverageCents;
 
     const { stripeConnectedAccountId, accountMode } = await resolveConnectedAccountForCharges(organizationId);
     const mode = accountMode as "test" | "live";
@@ -82,7 +92,7 @@ export async function POST(request: Request) {
               currency: "usd",
               product: productId,
               recurring: stripeIntervalFor(input.frequency),
-              unit_amount: Math.round(amount * 100),
+              unit_amount: chargeUnitAmount,
             },
             quantity: 1,
           },

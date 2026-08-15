@@ -166,6 +166,9 @@ export async function POST(request: Request) {
               typeof session.payment_intent === "string" ? session.payment_intent : (session.payment_intent?.id ?? null),
             providerSessionId: session.id,
             stripeConnectedAccountId: connectedAccountId,
+            // CONNECT-F: base/coverage split snapshotted at checkout time.
+            baseAmountCents: session.metadata?.givingBaseAmountCents ? Number(session.metadata.givingBaseAmountCents) : null,
+            coverageAmountCents: session.metadata?.givingCoverageAmountCents ? Number(session.metadata.givingCoverageAmountCents) : null,
           });
           if (result.outcome === "REJECTED") {
             console.error(
@@ -196,6 +199,8 @@ export async function POST(request: Request) {
               typeof session.payment_intent === "string" ? session.payment_intent : (session.payment_intent?.id ?? null),
             providerSessionId: session.id,
             stripeConnectedAccountId: connectedAccountId,
+            baseAmountCents: session.metadata?.givingBaseAmountCents ? Number(session.metadata.givingBaseAmountCents) : null,
+            coverageAmountCents: session.metadata?.givingCoverageAmountCents ? Number(session.metadata.givingCoverageAmountCents) : null,
           });
           if (result.outcome === "REJECTED") {
             console.error(
