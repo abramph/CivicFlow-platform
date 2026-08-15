@@ -3,6 +3,7 @@ import { validatePublicGivingRequest } from "@/lib/giving/public-giving";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { parseJsonBody, z } from "@/lib/validation";
 import { resolveConnectedAccountForCharges, getStripeForMode } from "@/lib/payments/stripe-connect";
+import { quoteProcessingCostCoverage } from "@/lib/giving/processing-cost-coverage";
 import { getServerEnv } from "@/lib/env";
 import { logGivingEvent } from "@/lib/giving/telemetry";
 
@@ -13,6 +14,9 @@ const bodySchema = z.object({
   guestName: z.string().max(120).nullable().optional(),
   guestEmail: z.string().email().max(200).nullable().optional(),
   anonymous: z.boolean().optional(),
+  /** CONNECT-F (§41): opt-in only — ignored server-side unless the org's
+   * mode is OPTIONAL_CONTRIBUTOR_COVERAGE. */
+  coverProcessingCosts: z.boolean().optional(),
 });
 
 /**
@@ -41,7 +45,12 @@ export async function POST(request: Request) {
     const env = getServerEnv();
     const baseUrl = env.NEXTAUTH_URL.replace(/\/$/, "");
 
-    logGivingEvent("GIVING_CHECKOUT_STARTED", { organizationId: organizationId, fundId: fund.id, amountCents: Math.round(amount * 100) });
+    const baseAmountCents = Math.round(amount * 100);
+    const { coverageCents } = input.coverProcessingCosts
+      ? await quoteProcessingCostCoverage(organizationId, baseAmountCents)
+      : { coverageCents: 0 };
+
+    logGivingEvent("GIVING_CHECKOUT_STARTED", { organizationId: organizationId, fundId: fund.id, amountCents: baseAmountCents });
     const session = await stripe.checkout.sessions.create(
       {
         mode: "payment",
@@ -55,7 +64,7 @@ export async function POST(request: Request) {
             price_data: {
               currency: "usd",
               product_data: { name: fund.name, description: "Contribution" },
-              unit_amount: Math.round(amount * 100),
+              unit_amount: baseAmountCents + coverageCents,
             },
             quantity: 1,
           },
@@ -69,6 +78,8 @@ export async function POST(request: Request) {
           paymentType: "public-giving",
           organizationId,
           stripeConnectedAccountId,
+          givingBaseAmountCents: String(baseAmountCents),
+          givingCoverageAmountCents: String(coverageCents),
           givingFundId: fund.id,
           guestName: input.guestName?.trim().slice(0, 120) ?? "",
           guestEmail: input.guestEmail?.trim().slice(0, 200) ?? "",

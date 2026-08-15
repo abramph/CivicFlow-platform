@@ -186,6 +186,68 @@ describe("webhook lifecycle — the SaaS/giving split", () => {
     expect(createContribution).toHaveBeenCalledTimes(1);
   });
 
+  it("CONNECT-F: when coverProcessingCosts is on, whatever was charged beyond the schedule's own base amount is recorded as coverage", async () => {
+    findUniqueSchedule.mockResolvedValueOnce({
+      id: "s1",
+      organizationId: "org-1",
+      fundId: "f1",
+      contributionProgramId: null,
+      memberId: "m1",
+      contributorUserId: "u1",
+      contributionProgram: null,
+      amount: 100,
+      coverProcessingCosts: true,
+      stripeConnectedAccountId: "acct_connected1",
+      providerAccountContext: "CONNECTED_ACCOUNT_PAYMENT",
+    });
+    findFirstContribution.mockResolvedValueOnce(null);
+    const result = await recordRecurringInvoicePaid({
+      providerSubscriptionId: "sub_1",
+      providerInvoiceId: "in_covered",
+      amountPaidCents: 10330,
+      currency: "usd",
+      periodEnd: null,
+      paymentIntentId: "pi_covered",
+    });
+    expect(result.outcome).toBe("RECORDED");
+    expect(createContribution.mock.calls[0][0].data).toMatchObject({
+      amount: 100,
+      processingCostCoverageAmount: 3.3,
+      totalChargedAmount: 103.3,
+    });
+  });
+
+  it("CONNECT-F: coverProcessingCosts off records 0 coverage even if amountPaid somehow exceeds the base", async () => {
+    findUniqueSchedule.mockResolvedValueOnce({
+      id: "s1",
+      organizationId: "org-1",
+      fundId: "f1",
+      contributionProgramId: null,
+      memberId: "m1",
+      contributorUserId: "u1",
+      contributionProgram: null,
+      amount: 100,
+      coverProcessingCosts: false,
+      stripeConnectedAccountId: "acct_connected1",
+      providerAccountContext: "CONNECTED_ACCOUNT_PAYMENT",
+    });
+    findFirstContribution.mockResolvedValueOnce(null);
+    const result = await recordRecurringInvoicePaid({
+      providerSubscriptionId: "sub_1",
+      providerInvoiceId: "in_uncovered",
+      amountPaidCents: 10000,
+      currency: "usd",
+      periodEnd: null,
+      paymentIntentId: "pi_uncovered",
+    });
+    expect(result.outcome).toBe("RECORDED");
+    expect(createContribution.mock.calls[0][0].data).toMatchObject({
+      amount: 100,
+      processingCostCoverageAmount: null,
+      totalChargedAmount: 100,
+    });
+  });
+
   it("an unknown subscription id is NOT_GIVING — the SaaS path handles it, we record nothing", async () => {
     findUniqueSchedule.mockResolvedValueOnce(null);
     const result = await recordRecurringInvoicePaid({

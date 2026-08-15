@@ -5,6 +5,7 @@ import { getStripe } from "@/lib/stripe";
 import { FinanceError } from "@/lib/finance-errors";
 import { logGivingEvent } from "./telemetry";
 import { stripeIntervalFor } from "./giving-stripe";
+import { quoteProcessingCostCoverage, getProcessingCostCoverageSettings } from "./processing-cost-coverage";
 
 /**
  * CORE-GIVE-D — member self-service on their OWN recurring schedules
@@ -74,6 +75,17 @@ async function getStripeForSchedule(schedule: {
   return { stripe, stripeAccountOptions: { stripeAccount: schedule.stripeConnectedAccountId } };
 }
 
+/** CONNECT-F (§40): what Stripe should actually charge for a given
+ * fund-principal amount on THIS schedule — grossed-up at the org's CURRENT
+ * rate when coverage is on, otherwise the base amount unchanged. Every
+ * self-service action that touches unit_amount must go through this rather
+ * than using the raw amount directly. */
+async function chargeUnitAmountCents(organizationId: string, baseCents: number, coverProcessingCosts: boolean): Promise<number> {
+  if (!coverProcessingCosts) return baseCents;
+  const { coverageCents } = await quoteProcessingCostCoverage(organizationId, baseCents);
+  return baseCents + coverageCents;
+}
+
 async function getSubscriptionItemId(schedule: {
   stripeConnectedAccountId: string | null;
   providerSubscriptionId: string;
@@ -109,6 +121,7 @@ export async function changeAmount(input: {
     stripeConnectedAccountId: schedule.stripeConnectedAccountId,
     providerSubscriptionId: schedule.providerSubscriptionId,
   });
+  const unitAmount = await chargeUnitAmountCents(input.organizationId, Math.round(newAmount * 100), schedule.coverProcessingCosts);
   await stripe.subscriptionItems.update(
     itemId,
     {
@@ -116,7 +129,7 @@ export async function changeAmount(input: {
         currency: "usd",
         product: productId,
         recurring: stripeIntervalFor(schedule.frequency),
-        unit_amount: Math.round(newAmount * 100),
+        unit_amount: unitAmount,
       },
       proration_behavior: "none",
     },
@@ -159,6 +172,11 @@ export async function changeFrequency(input: {
     stripeConnectedAccountId: schedule.stripeConnectedAccountId,
     providerSubscriptionId: schedule.providerSubscriptionId,
   });
+  const unitAmount = await chargeUnitAmountCents(
+    input.organizationId,
+    Math.round(Number(schedule.amount) * 100),
+    schedule.coverProcessingCosts
+  );
   await stripe.subscriptionItems.update(
     itemId,
     {
@@ -166,7 +184,7 @@ export async function changeFrequency(input: {
         currency: "usd",
         product: productId,
         recurring: stripeIntervalFor(input.newFrequency),
-        unit_amount: Math.round(Number(schedule.amount) * 100),
+        unit_amount: unitAmount,
       },
       proration_behavior: "none",
     },
@@ -184,6 +202,62 @@ export async function changeFrequency(input: {
   await notifyMember(input.contributorUserId, "Your recurring contribution frequency was updated", [
     `Your recurring contribution to ${schedule.fund.name} is now ${input.newFrequency.toLowerCase()}.`,
     "Your next contribution date is unchanged; the new frequency applies after it.",
+  ]);
+  return updated;
+}
+
+/** CONNECT-F (§41) — member toggles coverage on their OWN schedule without
+ * cancelling. Turning it OFF always works (never traps a member into a
+ * coverage they can't undo); turning it ON requires the org to currently
+ * offer OPTIONAL_CONTRIBUTOR_COVERAGE — an org that has since turned the
+ * feature off can't be silently re-enabled by a stale client request. */
+export async function setProcessingCostCoverage(input: {
+  organizationId: string;
+  contributorUserId: string;
+  scheduleId: string;
+  coverProcessingCosts: boolean;
+}) {
+  const schedule = await authorizeOwnSchedule(input.organizationId, input.contributorUserId, input.scheduleId);
+  if (!schedule.providerSubscriptionId) throw new FinanceError("This schedule is not active with the payment provider.", 409);
+  if (schedule.status === "CANCELLED" || schedule.status === "COMPLETED") {
+    throw new FinanceError("A cancelled schedule cannot be changed — set up a new one instead.", 409);
+  }
+  if (schedule.coverProcessingCosts === input.coverProcessingCosts) return schedule;
+
+  if (input.coverProcessingCosts) {
+    const coverageSettings = await getProcessingCostCoverageSettings(input.organizationId);
+    if (coverageSettings.mode !== "OPTIONAL_CONTRIBUTOR_COVERAGE") {
+      throw new FinanceError("This organization does not currently offer processing-cost coverage.", 409);
+    }
+  }
+
+  const { stripe, stripeAccountOptions } = await getStripeForSchedule(schedule);
+  const { itemId, productId } = await getSubscriptionItemId({
+    stripeConnectedAccountId: schedule.stripeConnectedAccountId,
+    providerSubscriptionId: schedule.providerSubscriptionId,
+  });
+  const baseCents = Math.round(Number(schedule.amount) * 100);
+  const unitAmount = await chargeUnitAmountCents(input.organizationId, baseCents, input.coverProcessingCosts);
+  await stripe.subscriptionItems.update(
+    itemId,
+    {
+      price_data: { currency: "usd", product: productId, recurring: stripeIntervalFor(schedule.frequency), unit_amount: unitAmount },
+      proration_behavior: "none",
+    },
+    stripeAccountOptions
+  );
+
+  const updated = await prisma.recurringContributionSchedule.update({
+    where: { id: schedule.id },
+    data: { coverProcessingCosts: input.coverProcessingCosts },
+  });
+  await audit(input.organizationId, input.contributorUserId, "giving.recurring_coverage_toggled", schedule.id, {
+    coverProcessingCosts: input.coverProcessingCosts,
+  });
+  await notifyMember(input.contributorUserId, "Your recurring contribution was updated", [
+    input.coverProcessingCosts
+      ? `You're now covering the estimated processing costs on your recurring contribution to ${schedule.fund.name}, starting with your next scheduled contribution.`
+      : `You've stopped covering processing costs on your recurring contribution to ${schedule.fund.name}, starting with your next scheduled contribution.`,
   ]);
   return updated;
 }

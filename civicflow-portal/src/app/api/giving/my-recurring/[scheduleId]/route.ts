@@ -7,16 +7,18 @@ import {
   pauseSchedule,
   resumeSchedule,
   retryFailedPayment,
+  setProcessingCostCoverage,
 } from "@/lib/giving/recurring-self-service";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { parseJsonBody, z } from "@/lib/validation";
 
 const bodySchema = z.object({
   organizationId: z.string().min(1),
-  action: z.enum(["amount", "frequency", "pause", "resume", "cancel", "retry"]),
+  action: z.enum(["amount", "frequency", "pause", "resume", "cancel", "retry", "coverage"]),
   amount: z.number().positive().max(1_000_000).optional(),
   frequency: z.enum(["WEEKLY", "BIWEEKLY", "MONTHLY", "QUARTERLY", "ANNUALLY"]).optional(),
   reason: z.string().max(40).nullable().optional(),
+  coverProcessingCosts: z.boolean().optional(),
 });
 
 /**
@@ -58,6 +60,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ sc
         return Response.json({ ok: true, data: await cancelSchedule({ ...base, reason: input.reason ?? null }) });
       case "retry":
         return Response.json({ ok: true, data: await retryFailedPayment(base) });
+      case "coverage": {
+        if (input.coverProcessingCosts === undefined) {
+          return Response.json({ ok: false, error: "coverProcessingCosts is required." }, { status: 400 });
+        }
+        const schedule = await setProcessingCostCoverage({ ...base, coverProcessingCosts: input.coverProcessingCosts });
+        return Response.json({ ok: true, data: schedule });
+      }
     }
   });
 }

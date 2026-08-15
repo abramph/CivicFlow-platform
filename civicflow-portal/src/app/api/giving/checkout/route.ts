@@ -4,6 +4,7 @@ import { validateGivingRequest } from "@/lib/giving/checkout";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { parseJsonBody, z } from "@/lib/validation";
 import { resolveConnectedAccountForCharges, getStripeForMode } from "@/lib/payments/stripe-connect";
+import { quoteProcessingCostCoverage } from "@/lib/giving/processing-cost-coverage";
 import { getServerEnv } from "@/lib/env";
 import { logGivingEvent } from "@/lib/giving/telemetry";
 
@@ -15,6 +16,9 @@ const bodySchema = z.object({
   pledgeId: z.string().max(64).nullable().optional(),
   anonymityMode: z.enum(["NONE", "PUBLICLY_ANONYMOUS"]).optional(),
   memo: z.string().max(280).nullable().optional(),
+  /** CONNECT-F (§41): opt-in only — ignored server-side unless the org's
+   * mode is OPTIONAL_CONTRIBUTOR_COVERAGE. */
+  coverProcessingCosts: z.boolean().optional(),
 });
 
 /**
@@ -47,7 +51,12 @@ export async function POST(request: Request) {
     const baseUrl = env.NEXTAUTH_URL.replace(/\/$/, "");
     const orgSuffix = `&org=${encodeURIComponent(memberSession.organizationId)}`;
 
-    logGivingEvent("GIVING_CHECKOUT_STARTED", { organizationId: memberSession.organizationId, fundId: fund.id, amountCents: Math.round(amount * 100) });
+    const baseAmountCents = Math.round(amount * 100);
+    const { coverageCents } = input.coverProcessingCosts
+      ? await quoteProcessingCostCoverage(memberSession.organizationId, baseAmountCents)
+      : { coverageCents: 0 };
+
+    logGivingEvent("GIVING_CHECKOUT_STARTED", { organizationId: memberSession.organizationId, fundId: fund.id, amountCents: baseAmountCents });
     const session = await stripe.checkout.sessions.create(
       {
         mode: "payment",
@@ -64,7 +73,7 @@ export async function POST(request: Request) {
                 name: program ? `${program.name} — ${fund.name}` : fund.name,
                 description: "Contribution",
               },
-              unit_amount: Math.round(amount * 100),
+              unit_amount: baseAmountCents + coverageCents,
             },
             quantity: 1,
           },
@@ -79,6 +88,10 @@ export async function POST(request: Request) {
           // CONNECT-C (§20): cross-checked against event.account in the
           // connected-account webhook — never trusted alone.
           stripeConnectedAccountId,
+          // CONNECT-F (§36): snapshotted split — the webhook records exactly
+          // this, never a value recomputed from a possibly-changed rate.
+          givingBaseAmountCents: String(baseAmountCents),
+          givingCoverageAmountCents: String(coverageCents),
           givingFundId: fund.id,
           givingProgramId: program?.id ?? "",
           memberId: memberSession.memberId,

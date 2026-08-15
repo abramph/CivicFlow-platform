@@ -61,6 +61,9 @@ export function GivingSetupManager({
     householdGivingPrivacyMode: string;
     publicGivingEnabled: boolean;
     publicGivingMessage: string | null;
+    processingCostCoverageMode: string;
+    processingCostCoveragePercentBps: number;
+    processingCostCoverageFixedCents: number;
   };
   slug?: string;
   funds: FundView[];
@@ -77,6 +80,8 @@ export function GivingSetupManager({
   const [fundSuggested, setFundSuggested] = useState("");
 
   const [publicMessage, setPublicMessage] = useState(settings.publicGivingMessage ?? "");
+  const [coveragePercent, setCoveragePercent] = useState((settings.processingCostCoveragePercentBps / 100).toFixed(2));
+  const [coverageFixed, setCoverageFixed] = useState((settings.processingCostCoverageFixedCents / 100).toFixed(2));
   const [publicCampaigns, setPublicCampaigns] = useState<
     { id: string; name: string; goal: number | null; showPublicProgress: boolean }[] | null
   >(null);
@@ -374,6 +379,89 @@ export function GivingSetupManager({
               </div>
             </div>
           ) : null}
+        </div>
+      ) : null}
+
+      {settings.contributionsEnabled && viewer.canManageFunds ? (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <h3 className="text-sm font-semibold text-slate-900">Processing-cost coverage</h3>
+          <p className="mt-1 text-xs text-slate-600">
+            Let contributors optionally add a bit extra to cover estimated processing costs — entirely their choice,
+            shown at checkout as &ldquo;Estimated processing costs,&rdquo; never as a required fee. Applies to giving
+            only (one-time, public, and recurring) — not dues or payment links. Off by default; you set the rate,
+            we never assume Stripe&apos;s.
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() =>
+                saveSettings({
+                  processingCostCoverageMode:
+                    settings.processingCostCoverageMode === "OPTIONAL_CONTRIBUTOR_COVERAGE" ? "OFF" : "OPTIONAL_CONTRIBUTOR_COVERAGE",
+                })
+              }
+              className={`rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-50 ${
+                settings.processingCostCoverageMode === "OPTIONAL_CONTRIBUTOR_COVERAGE"
+                  ? "border border-slate-300 bg-white text-slate-900 hover:bg-slate-50"
+                  : "bg-emerald-700 text-white hover:bg-emerald-800"
+              }`}
+            >
+              {settings.processingCostCoverageMode === "OPTIONAL_CONTRIBUTOR_COVERAGE" ? "Turn off" : "Turn on"}
+            </button>
+          </div>
+          <div className="mt-3 flex flex-wrap items-end gap-3">
+            <label className="space-y-1 text-sm font-medium text-slate-900">
+              <span>Percentage rate</span>
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  min="0"
+                  max="10"
+                  step="0.01"
+                  value={coveragePercent}
+                  onChange={(event) => setCoveragePercent(event.target.value)}
+                  className={inputClass + " w-24"}
+                />
+                <span className="text-slate-600">%</span>
+              </div>
+            </label>
+            <label className="space-y-1 text-sm font-medium text-slate-900">
+              <span>Fixed amount</span>
+              <div className="flex items-center gap-1">
+                <span className="text-slate-600">$</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="5"
+                  step="0.01"
+                  value={coverageFixed}
+                  onChange={(event) => setCoverageFixed(event.target.value)}
+                  className={inputClass + " w-24"}
+                />
+              </div>
+            </label>
+            <button
+              type="button"
+              disabled={
+                pending ||
+                (Math.round(Number(coveragePercent) * 100) === settings.processingCostCoveragePercentBps &&
+                  Math.round(Number(coverageFixed) * 100) === settings.processingCostCoverageFixedCents)
+              }
+              onClick={() =>
+                saveSettings({
+                  processingCostCoveragePercentBps: Math.round(Number(coveragePercent) * 100),
+                  processingCostCoverageFixedCents: Math.round(Number(coverageFixed) * 100),
+                })
+              }
+              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Save rate
+            </button>
+          </div>
+          <p className="mt-2 text-xs text-slate-500">
+            Ask your payment processor for your real per-transaction rate — this is never assumed for you.
+          </p>
         </div>
       ) : null}
 

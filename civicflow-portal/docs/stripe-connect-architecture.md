@@ -404,6 +404,87 @@ Each PR merges + deploys + production-verifies before the next.
   exactly. This is the same public/anonymous-checkout path used for C's
   own live verification, now proven on the E-added `paymentLinkId` branch.
 
+## 14. CONNECT-F — optional processing-cost coverage (implemented)
+
+- **Scope, per E's own note:** giving only — one-time (member web/mobile,
+  public `/give/[slug]`) and recurring (member web/mobile setup, plus
+  self-service amount/frequency changes and a new coverage toggle). NOT
+  dues, NOT payment links — those stay untouched, exactly as E's decisions
+  log flagged as deferred.
+- **Config (additive):** `OrgSettings` gained `processingCostCoverageMode`
+  (`OFF | OPTIONAL_CONTRIBUTOR_COVERAGE | STRIPE_SURCHARGE`, default OFF),
+  `processingCostCoveragePercentBps`, `processingCostCoverageFixedCents`
+  (both default 0 — an org must explicitly configure its own real rate;
+  §30 no hardcoded 2.9%+30¢ anywhere). `STRIPE_SURCHARGE` is rejected at
+  the settings-write layer with a 409 — reserved for a future
+  compliance-gated program, never silently available. Bounds-checked at
+  write time (0–10% / 0–$5) purely as a fat-finger guard, not a real limit
+  on Stripe's actual rate.
+- **Math (`src/lib/giving/processing-cost-coverage.ts`):** pure
+  `calculateProcessingCostCoverageCents(netCents, percentBps, fixedCents)`
+  computes `gross = ceil((net + fixed) / (1 − p))`, returns `gross − net`.
+  `resolveCoverageSplit` is the webhook-side counterpart: validates a
+  snapshotted (base, coverage) pair against Stripe's own `amount_total`,
+  rejecting (recording nothing) if they don't add up — the same rigor as
+  every other §50-style cross-check in this program. Absent metadata
+  (legacy sessions, or coverage never offered) falls back to "full amount
+  is base, 0 coverage" — the exact pre-CONNECT-F behavior.
+- **Snapshot-at-checkout discipline (same pattern as
+  `stripeConnectedAccountId`):** the checkout route computes the quote
+  ONCE against the org's current rate, bakes the grossed-up total into the
+  Stripe session's `unit_amount`, and stamps the (base, coverage) split
+  into session metadata. The webhook records exactly that snapshot — never
+  a value recomputed from a rate that may have changed between checkout
+  and webhook delivery.
+- **Schema (additive):** `Contribution.amount` is UNCHANGED semantically —
+  it stays the base/fund-principal figure always (§37: coverage is never
+  fund principal), so every existing fund/campaign/org aggregate that sums
+  `amount` (dashboard totals, campaign progress, statements, pledge
+  progress — audited file-by-file before this PR) keeps working with zero
+  changes. Two new nullable fields carry the rest:
+  `processingCostCoverageAmount` (null = no coverage) and
+  `totalChargedAmount` (the exact processor total; null on manual/offline
+  rows). `RecurringContributionSchedule` gained `coverProcessingCosts`
+  (boolean, default false) — per §40 this is a live preference, NEVER a
+  frozen dollar amount: every self-service action that touches the
+  subscription item's `unit_amount` (setup, amount change, frequency
+  change, and the new explicit coverage toggle) recomputes the grossed-up
+  total against the org's CURRENT rate at that moment.
+- **Recurring invoice recording:** `recordRecurringInvoicePaid` derives the
+  split as `coverage = amountPaidCents − scheduleBaseCents` (only when
+  `coverProcessingCosts` is on) rather than re-deriving from any rate —
+  correct regardless of which rate was in effect when the subscription
+  item was last priced, with no dependency on snapshotting a rate value
+  anywhere on the schedule.
+- **Self-service toggle (§41 — never traps a member):** turning coverage
+  OFF always succeeds. Turning it ON requires the org's mode to currently
+  be `OPTIONAL_CONTRIBUTOR_COVERAGE` — a stale client can't silently
+  re-enable a coverage the org has since turned off. New `PATCH
+  /api/giving/my-recurring/[scheduleId]` action `"coverage"`.
+- **Refunds (§45):** `issueRefund`/`applyProviderRefund`'s ceiling changed
+  from `contribution.amount` to `contribution.totalChargedAmount ??
+  contribution.amount` — a covered contributor's coverage is refundable as
+  part of a full refund (it was actually charged, Stripe will refund it),
+  while legacy/manual rows with no `totalChargedAmount` keep the exact
+  pre-CONNECT-F ceiling.
+- **Receipts/statements (§38/§39):** `Contribution.amount` already being
+  base-only means every existing total is correct with NO changes. Added
+  one disclosure line to the itemized individual statement PDF (mirroring
+  the existing `goodsServicesValue` treatment) showing the coverage amount
+  as explicitly NOT counted toward the statement total — transparency
+  without touching deductibility math. The formal tax `ContributionReceipt`
+  PDF deliberately still shows `amount` only (the correct deductible
+  figure) — coverage disclosure lives on the giving-summary statement, not
+  the tax receipt.
+- **UI wording (§33):** every surface says "Estimated processing costs" or
+  "processing costs" — never "Stripe fee," per the org settings copy, the
+  Give Now/public-give checkboxes, and the recurring-schedule toggle.
+- **Mobile:** the frozen vc4 native binary's checkout requests gained an
+  OPTIONAL `coverProcessingCosts` field it will simply never send — §71
+  backward-compat, identical charge behavior to before this PR for that
+  binary. No native UI was built (out of scope; a future mobile release
+  can adopt the same already-wired backend).
+
 ## Decisions log
 
 - **2026-08-14 (A):** Standard accounts + direct charges (rationale §2).
@@ -452,3 +533,21 @@ Each PR merges + deploys + production-verifies before the next.
   rows support `issueRefund`; payment-link campaign/event contributions
   already inherit correct connected-account refund resolution from C's fix
   since that function is source-agnostic.
+- **2026-08-15 (F):** Scoped to giving only (one-time/public/recurring),
+  per E's own decisions-log note — dues and payment links stay untouched.
+  Not revisited as a business decision; the scope was already fixed when E
+  shipped.
+- **2026-08-15 (F):** `Contribution.amount` keeps its existing meaning
+  (base/fund-principal) rather than being redefined to the total charged —
+  avoids touching every existing aggregate/report in the codebase (audited
+  file-by-file) at the cost of two new nullable columns instead of one
+  redefined one. Judged the safer trade for a money-adjacent field with
+  this many existing readers.
+- **2026-08-15 (F):** STRIPE_SURCHARGE is rejected server-side (409) if
+  requested — the doc's own §5 already reserves it for a future
+  compliance-gated program; shipping even a settings-layer acceptance of
+  it now would be a silent scope expansion beyond what was actually built.
+- **2026-08-15 (F):** No native mobile UI for the coverage checkbox — the
+  vc4 binary is frozen (§71) and the backend change is purely additive/
+  optional, so there is no functional gap for existing mobile users, only
+  a missing opt-in surface deferred to a future mobile release.

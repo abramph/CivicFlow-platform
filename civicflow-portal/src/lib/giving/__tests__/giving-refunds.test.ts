@@ -79,6 +79,53 @@ describe("issueRefund (§34)", () => {
     expect(stripeRefundsCreate).not.toHaveBeenCalled();
   });
 
+  describe("CONNECT-F: coverage-inclusive refund ceiling", () => {
+    it("a covered contribution can be refunded up to totalChargedAmount, not just the base `amount`", async () => {
+      findFirstContribution.mockResolvedValueOnce({
+        ...PROVIDER_ROW,
+        amount: 100,
+        processingCostCoverageAmount: 3.3,
+        totalChargedAmount: 103.3,
+      });
+      stripeRefundsCreate.mockResolvedValueOnce({ id: "re_full", status: "succeeded", amount: 10330 });
+      findFirstContribution.mockResolvedValueOnce({
+        ...PROVIDER_ROW,
+        amount: 100,
+        processingCostCoverageAmount: 3.3,
+        totalChargedAmount: 103.3,
+      });
+      const result = await issueRefund({
+        organizationId: "org-1",
+        contributionId: "c-1",
+        amount: 103.3,
+        reason: "full refund including coverage",
+        actorUserId: "fin",
+      });
+      expect(result.marked).toBe(true);
+      expect(stripeRefundsCreate.mock.calls[0][0]).toMatchObject({ amount: 10330 });
+    });
+
+    it("a covered contribution's refund still caps at totalChargedAmount — cannot exceed what was actually charged", async () => {
+      findFirstContribution.mockResolvedValueOnce({
+        ...PROVIDER_ROW,
+        amount: 100,
+        processingCostCoverageAmount: 3.3,
+        totalChargedAmount: 103.3,
+      });
+      await expect(
+        issueRefund({ organizationId: "org-1", contributionId: "c-1", amount: 110, reason: "too much", actorUserId: "fin" })
+      ).rejects.toMatchObject({ status: 409 });
+      expect(stripeRefundsCreate).not.toHaveBeenCalled();
+    });
+
+    it("a legacy row with no totalChargedAmount still caps at `amount` — unchanged pre-CONNECT-F behavior", async () => {
+      findFirstContribution.mockResolvedValueOnce({ ...PROVIDER_ROW, amount: 100, totalChargedAmount: null });
+      await expect(
+        issueRefund({ organizationId: "org-1", contributionId: "c-1", amount: 101, reason: "too much", actorUserId: "fin" })
+      ).rejects.toMatchObject({ status: 409 });
+    });
+  });
+
   it("a synchronous provider success marks the row from provider truth", async () => {
     findFirstContribution.mockResolvedValueOnce(PROVIDER_ROW);
     stripeRefundsCreate.mockResolvedValueOnce({ id: "re_1", status: "succeeded", amount: 2500 });

@@ -22,6 +22,9 @@ const putSchema = z.object({
     .optional(),
   publicGivingEnabled: z.boolean().optional(),
   publicGivingMessage: z.string().max(600).nullable().optional(),
+  processingCostCoverageMode: z.enum(["OFF", "OPTIONAL_CONTRIBUTOR_COVERAGE", "STRIPE_SURCHARGE"]).optional(),
+  processingCostCoveragePercentBps: z.number().int().min(0).max(1000).optional(),
+  processingCostCoverageFixedCents: z.number().int().min(0).max(500).optional(),
 });
 
 /** PUT — enable/disable the module and set terminology. Deliberately held to

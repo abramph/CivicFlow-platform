@@ -65,7 +65,7 @@ export default async function PublicGivePage({ params }: { params: Promise<{ slu
           {page.funds.length === 0 ? (
             <p className="text-sm text-slate-600">This organization is not accepting online gifts right now.</p>
           ) : (
-            <PublicGiveForm slug={slug} funds={page.funds} />
+            <PublicGiveForm slug={slug} funds={page.funds} coverage={page.coverage} />
           )}
         </div>
         <p className="text-center text-xs text-slate-400">

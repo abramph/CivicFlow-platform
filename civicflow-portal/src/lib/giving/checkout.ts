@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { FinanceError } from "@/lib/finance-errors";
 import { ensureContributionsEnabled } from "./module";
 import { logGivingEvent } from "./telemetry";
+import { resolveCoverageSplit } from "./processing-cost-coverage";
 
 /**
  * CORE-GIVE-B — one-time giving checkout validation + the webhook-side
@@ -98,6 +99,13 @@ export interface RecordGivingInput {
    * immutably on the Contribution row; refunds resolve the account from
    * THIS row, never from the organization's current Stripe settings. */
   stripeConnectedAccountId: string;
+  /** CONNECT-F (§36): the base/coverage split SNAPSHOTTED at checkout time
+   * (session metadata) — never recomputed from the org's current rate,
+   * which may have changed since. Missing/malformed metadata (legacy
+   * sessions, or coverage never offered) means base = full amount, 0
+   * coverage — the pre-CONNECT-F behavior, unchanged. */
+  baseAmountCents?: number | null;
+  coverageAmountCents?: number | null;
 }
 
 export type RecordGivingResult =
@@ -124,6 +132,12 @@ export async function recordGivingContribution(input: RecordGivingInput): Promis
   if (!Number.isInteger(input.amountTotalCents) || input.amountTotalCents <= 0) {
     return { outcome: "REJECTED", reason: "invalid_amount" };
   }
+
+  // CONNECT-F: the snapshotted split must add up to what Stripe actually
+  // charged — a mismatch means the metadata was tampered with or stale, and
+  // is treated the same as any other §50 linkage inconsistency.
+  const { baseAmountCents, coverageAmountCents } = resolveCoverageSplit(input.amountTotalCents, input.baseAmountCents, input.coverageAmountCents);
+  if (baseAmountCents === null) return { outcome: "REJECTED", reason: "coverage_split_mismatch" };
 
   // Idempotency belt beyond StripeWebhookEvent dedup: one contribution per
   // payment intent / session, ever.
@@ -165,7 +179,9 @@ export async function recordGivingContribution(input: RecordGivingInput): Promis
         contributionProgramId: input.programId ?? null,
         memberId: input.memberId || null,
         contributorUserId: input.contributorUserId || null,
-        amount: input.amountTotalCents / 100,
+        amount: baseAmountCents / 100,
+        processingCostCoverageAmount: coverageAmountCents > 0 ? coverageAmountCents / 100 : null,
+        totalChargedAmount: input.amountTotalCents / 100,
         currency: input.currency.toUpperCase(),
         contributionDate: new Date(),
         paymentMethod: "STRIPE",
