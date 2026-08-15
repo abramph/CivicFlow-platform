@@ -97,7 +97,22 @@ export async function getReconciliationReport(organizationId: string): Promise<{
   }
 
   // ── Provider-side sweep (last 7 days) ─────────────────────────────────────
-  const stripe = getStripe();
+  // CONNECT-H: this org's giving now lives on ITS OWN connected account
+  // (once connected/charges-enabled) — sweeping the platform account alone
+  // would be blind to everything created since CONNECT-C/D. Falls back to
+  // the platform client for orgs never connected (nothing to find there
+  // either, but the sweep still runs rather than erroring the whole report).
+  const stripeAccountRow = await prisma.organizationStripeAccount.findUnique({
+    where: { organizationId },
+    select: { stripeAccountId: true, accountMode: true, chargesEnabled: true, disabledAt: true },
+  });
+  const stripeAccountOptions =
+    stripeAccountRow?.chargesEnabled && !stripeAccountRow.disabledAt
+      ? { stripeAccount: stripeAccountRow.stripeAccountId }
+      : undefined;
+  const stripe = stripeAccountOptions
+    ? await (await import("@/lib/payments/stripe-connect")).getStripeForMode(stripeAccountRow!.accountMode as "test" | "live")
+    : getStripe();
   const since = Math.floor((now - 7 * dayMs) / 1000);
   try {
     // CORE-GIVE-K hardening: bounded auto-pagination instead of a single
@@ -108,11 +123,14 @@ export async function getReconciliationReport(organizationId: string): Promise<{
     let truncated = false;
     let startingAfter: string | undefined;
     for (;;) {
-      const page = await stripe.checkout.sessions.list({
-        created: { gte: since },
-        limit: 100,
-        ...(startingAfter ? { starting_after: startingAfter } : {}),
-      });
+      const page = await stripe.checkout.sessions.list(
+        {
+          created: { gte: since },
+          limit: 100,
+          ...(startingAfter ? { starting_after: startingAfter } : {}),
+        },
+        stripeAccountOptions
+      );
       sessions.push(...page.data);
       if (sessions.length >= SWEEP_CAP) {
         truncated = sessions.length > SWEEP_CAP || Boolean(page.has_more);
@@ -160,7 +178,7 @@ export async function getReconciliationReport(organizationId: string): Promise<{
       select: { providerSubscriptionId: true },
     });
     const ourSubscriptionIds = new Set(schedules.map((schedule) => schedule.providerSubscriptionId));
-    const invoices = await stripe.invoices.list({ created: { gte: since }, status: "paid", limit: 100 });
+    const invoices = await stripe.invoices.list({ created: { gte: since }, status: "paid", limit: 100 }, stripeAccountOptions);
     for (const invoice of invoices.data) {
       const subId = typeof invoice.subscription === "string" ? invoice.subscription : null;
       if (!subId || !ourSubscriptionIds.has(subId)) continue;
