@@ -9,6 +9,7 @@ import { PtaError } from "@/lib/labs/pta/errors";
 import { EventRsvpError } from "@/lib/event-rsvp";
 import { MeetingRsvpError } from "@/lib/meeting-rsvp";
 import { HoaError } from "@/lib/hoa/errors";
+import { UnionError } from "@/lib/union/errors";
 import { ImportError } from "@/lib/imports/errors";
 import { MemberLifecycleError } from "@/lib/member-lifecycle-errors";
 import { SupportAssistantError } from "@/lib/support-assistant/errors";
@@ -64,6 +65,9 @@ export async function withApiErrorHandling(
         return Response.json({ ok: false, error: error.message, code: error.code }, { status: error.status });
       }
       if (error instanceof HoaError) {
+        return Response.json({ ok: false, error: error.message, code: error.code }, { status: error.status });
+      }
+      if (error instanceof UnionError) {
         return Response.json({ ok: false, error: error.message, code: error.code }, { status: error.status });
       }
       if (error instanceof ImportError) {
