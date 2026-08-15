@@ -344,6 +344,52 @@ Each PR merges + deploys + production-verifies before the next.
   recurring schedule actually exists (the legacy-coexistence code handles it
   either way, but the question itself is unresolved).
 
+## 13. CONNECT-E — dues, campaign/event, and payment-link contributions (implemented)
+
+- **Real-usage audit (before writing any code, mirroring §1's own discipline):**
+  unlike C and D, payment links are the OLDER feature — the audit couldn't
+  assume zero real usage by construction. Checked all 14 platform orgs: 4
+  are explicitly internal/billing-exempt (the Demo orgs + APH itself); of
+  the remaining 10, every one checked (Harris PTA, Pine Grove School PTA)
+  showed either zero payment links or clear synthetic-QA signatures
+  (`.example` email domains — the RFC 2606 reserved test TLD, fictional
+  names, audit events clustered in single QA-walkthrough sessions). No real
+  Stripe revenue exists on the platform account via payment links. Same
+  conclusion as C's audit, reached independently rather than assumed —
+  confirmed with the user before proceeding. Cleared the same hard
+  §14/§55 gate (409-only, no platform fallback) for immediate use, matching
+  C and D — no soft transition period needed.
+- **Scope:** the two Stripe-session-creating checkout routes —
+  `/api/pay/[slug]/checkout` (public campaign/event/dues via a public
+  payment link; ONLY invoked for the STRIPE payment method specifically —
+  manual/offline methods on the same link are untouched by this gate) and
+  `/api/member-portal/dues/checkout` (authenticated member "pay dues now")
+  — both gate on `resolveConnectedAccountForCharges` and pass
+  `{stripeAccount}`, identical discipline to C/D.
+- **Schema (additive):** `DuesPayment` gained the same
+  `stripeConnectedAccountId` + `providerAccountContext` pair as
+  Contribution/RecurringContributionSchedule (migration
+  `20260815180000_connect_e_dues_payment_attribution`). `recordDuesPayment`
+  takes them as optional params — offline/manual entries (the vast
+  majority of callers: staff manual entry, payment-report approval, mobile
+  admin) simply omit them and stay null; only the Stripe webhook path
+  stamps them.
+- **Webhook — same legacy-coexistence pattern as D, more strongly
+  warranted here:** the `paymentLinkId` branch (dues via
+  `recordDuesPayment`, campaign/event/general via a Contribution create)
+  was ADDED to `/api/webhooks/stripe-connect` for new payment-link
+  checkouts, and the OLD platform webhook's identical branch was left in
+  place untouched — payment links are the platform's oldest revenue
+  feature, so "no pre-existing usage" is a weaker assumption here than for
+  C or D even though this audit's finding was the same (zero).
+- **Not covered here:** processing-cost coverage on payment-link
+  contributions (F — not built for this flow at all yet, one-time/recurring
+  giving only), and no refund mechanism exists for `DuesPayment` today
+  (confirmed pre-existing gap, not introduced or fixed by this PR — only
+  `Contribution` rows support `issueRefund`, and payment-link
+  campaign/event Contributions already get that for free via C's own fix
+  since `issueRefund` works on any Contribution row regardless of source).
+
 ## Decisions log
 
 - **2026-08-14 (A):** Standard accounts + direct charges (rationale §2).
@@ -381,3 +427,14 @@ Each PR merges + deploys + production-verifies before the next.
   the existing `OrgSettings.givingStripeProductId` field under the
   assumption of one connected account per org's active lifetime (true today
   per CONNECT-A §26 — accounts are disabled, never replaced).
+- **2026-08-15 (E):** Ran the real-usage audit E's own scope demanded
+  (payment links predate this whole program) rather than assuming C's
+  zero-usage finding carried over. Same conclusion, reached independently:
+  no real org has payment-link Stripe revenue today, confirmed via a live
+  platform-admin check (not just inference) before proceeding with the
+  same hard gate as C/D.
+- **2026-08-15 (E):** `DuesPayment` has no refund mechanism at all
+  (pre-existing gap) — not built as part of this PR. Only `Contribution`
+  rows support `issueRefund`; payment-link campaign/event contributions
+  already inherit correct connected-account refund resolution from C's fix
+  since that function is source-agnostic.

@@ -2187,6 +2187,10 @@ model DuesPayment {
   correctedById  String?
   revisionNumber Int               @default(1)
   editReason     String?
+  /// CONNECT-E (§56): immutable account attribution (see Contribution).
+  /// Null for offline/manual payments — only Stripe-sourced rows are stamped.
+  stripeConnectedAccountId String?
+  providerAccountContext   ProviderAccountContext?
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
 

@@ -3,7 +3,7 @@ import { requireMemberWebSession } from "@/lib/member-web-session";
 import { findActivePaymentLink } from "@/lib/payment-links";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { parseJsonBody, ValidationError, z } from "@/lib/validation";
-import { getStripe } from "@/lib/stripe";
+import { resolveConnectedAccountForCharges, getStripeForMode } from "@/lib/payments/stripe-connect";
 import { getServerEnv } from "@/lib/env";
 
 const bodySchema = z.object({
@@ -52,35 +52,40 @@ export async function POST(request: Request) {
       throw new ValidationError(`Minimum payment is $${(minCents / 100).toFixed(2)}.`);
     }
 
-    const stripe = getStripe();
+    const { stripeConnectedAccountId, accountMode } = await resolveConnectedAccountForCharges(organizationId);
+    const stripe = await getStripeForMode(accountMode as "test" | "live");
     const env = getServerEnv();
     const baseUrl = env.NEXTAUTH_URL.replace(/\/$/, "");
     const orgSuffix = `?org=${encodeURIComponent(organizationId)}`;
 
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      line_items: [
-        {
-          price_data: {
-            currency: "usd",
-            product_data: { name: link.title, description: "Membership dues" },
-            unit_amount: amountCents,
+    const session = await stripe.checkout.sessions.create(
+      {
+        mode: "payment",
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: { name: link.title, description: "Membership dues" },
+              unit_amount: amountCents,
+            },
+            quantity: 1,
           },
-          quantity: 1,
+        ],
+        success_url: `${baseUrl}/m/dues${orgSuffix}`,
+        cancel_url: `${baseUrl}/m/make-payment/dues${orgSuffix}`,
+        metadata: {
+          product: "Unestra",
+          platformOwner: "APH Technologies, LLC",
+          paymentType: "dues",
+          paymentLinkId: link.id,
+          organizationId,
+          memberId,
+          stripeConnectedAccountId,
+          environment: process.env.NODE_ENV ?? "development",
         },
-      ],
-      success_url: `${baseUrl}/m/dues${orgSuffix}`,
-      cancel_url: `${baseUrl}/m/make-payment/dues${orgSuffix}`,
-      metadata: {
-        product: "Unestra",
-        platformOwner: "APH Technologies, LLC",
-        paymentType: "dues",
-        paymentLinkId: link.id,
-        organizationId,
-        memberId,
-        environment: process.env.NODE_ENV ?? "development",
       },
-    });
+      { stripeAccount: stripeConnectedAccountId }
+    );
 
     if (!session.url) throw new Error("Stripe did not return a checkout URL");
 

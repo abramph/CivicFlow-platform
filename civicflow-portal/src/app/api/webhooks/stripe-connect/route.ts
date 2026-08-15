@@ -217,6 +217,80 @@ export async function POST(request: Request) {
           break;
         }
 
+        // CONNECT-E: dues / campaign / event contributions collected via a
+        // payment link. Mirrors the platform webhook's own paymentLinkId
+        // branch exactly (§8 legacy coexistence — that branch stays in
+        // place for anything predating this migration); this copy runs for
+        // every NEW payment link checkout, which now creates its session on
+        // the org's connected account.
+        {
+          const paymentLinkId = session.metadata?.paymentLinkId;
+          const linkPaymentType = session.metadata?.paymentType || null;
+          const payingMemberId = session.metadata?.memberId || null;
+
+          if (paymentLinkId && session.payment_status === "paid") {
+            const amountTotal = session.amount_total ?? 0;
+            const amountDollars = amountTotal / 100;
+
+            if (linkPaymentType === "dues" && payingMemberId) {
+              const charge = await prisma.duesCharge.findFirst({
+                where: { organizationId, memberId: payingMemberId, status: { in: ["PENDING", "PARTIAL"] } },
+                orderBy: [{ dueDate: "asc" }],
+              });
+
+              const { recordDuesPayment } = await import("@/lib/dues-payments");
+              await recordDuesPayment({
+                organizationId,
+                memberId: payingMemberId,
+                duesChargeId: charge?.id ?? null,
+                amount: amountDollars,
+                paymentDate: new Date(),
+                method: "STRIPE",
+                reference: session.id,
+                notes: `Paid by card via payment link ${paymentLinkId}`,
+                stripeConnectedAccountId: connectedAccountId,
+                providerAccountContext: "CONNECTED_ACCOUNT_PAYMENT",
+                charge,
+              });
+            } else {
+              const campaignId = session.metadata?.campaignId || null;
+              const eventId = session.metadata?.eventId || null;
+              const contributorName = session.metadata?.contributorName || null;
+              const contributorEmail =
+                typeof session.customer_details?.email === "string" ? session.customer_details.email : null;
+
+              await prisma.contribution.create({
+                data: {
+                  organizationId,
+                  amount: amountDollars,
+                  contributionDate: new Date(),
+                  paymentMethod: "STRIPE",
+                  source: campaignId ? "CAMPAIGN_PAGE" : eventId ? "EVENT_PAGE" : "MANUAL",
+                  campaignId: campaignId || null,
+                  eventId: eventId || null,
+                  contributorName: contributorName || (contributorEmail ? contributorEmail : null),
+                  notes: `Payment link: ${paymentLinkId}`,
+                  receiptRequested: Boolean(contributorEmail),
+                  stripeConnectedAccountId: connectedAccountId,
+                  providerAccountContext: "CONNECTED_ACCOUNT_PAYMENT",
+                },
+              });
+            }
+
+            await prisma.paymentLink.update({
+              where: { id: paymentLinkId },
+              data: { useCount: { increment: 1 } },
+            });
+            await createAuditEvent({
+              organizationId,
+              action: "update",
+              entityType: "stripe_webhook",
+              entityId: session.id,
+              metadata: { eventType: event.type, paymentLinkId, connected: true },
+            });
+          }
+        }
+
         break;
       }
 

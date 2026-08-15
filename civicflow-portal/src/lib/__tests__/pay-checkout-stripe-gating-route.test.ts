@@ -13,10 +13,13 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 const sessionsCreate = vi.fn();
-vi.mock("@/lib/stripe", () => ({
-  getStripe: () => ({ checkout: { sessions: { create: (...args: unknown[]) => sessionsCreate(...args) } } }),
+const resolveConnectedAccountForCharges = vi.fn();
+vi.mock("@/lib/payments/stripe-connect", () => ({
+  resolveConnectedAccountForCharges: (...args: unknown[]) => resolveConnectedAccountForCharges(...args),
+  getStripeForMode: async () => ({ checkout: { sessions: { create: (...args: unknown[]) => sessionsCreate(...args) } } }),
 }));
 
+import { FinanceError } from "@/lib/finance-errors";
 import { POST } from "@/app/api/pay/[slug]/checkout/route";
 
 function buildRequest(body: object) {
@@ -52,6 +55,8 @@ describe("POST /api/pay/[slug]/checkout (Stripe gating)", () => {
     findUniquePaymentLink.mockReset();
     findFirstPaymentLinkMethod.mockReset();
     sessionsCreate.mockReset();
+    resolveConnectedAccountForCharges.mockReset();
+    resolveConnectedAccountForCharges.mockResolvedValue({ stripeConnectedAccountId: "acct_connected1", accountMode: "test" });
   });
 
   it("rejects checkout when the link has no active STRIPE PaymentLinkMethod attached", async () => {
@@ -79,5 +84,20 @@ describe("POST /api/pay/[slug]/checkout (Stripe gating)", () => {
         where: { paymentLinkId: "link-1", paymentMethodConfig: { method: "STRIPE", isActive: true } },
       })
     );
+    // CONNECT-E (§10/§55): the connected account, never the platform.
+    expect(sessionsCreate.mock.calls[0][1]).toEqual({ stripeAccount: "acct_connected1" });
+  });
+
+  it("CONNECT-E §14/§55: an org without a connected/charges-enabled account gets a clean error, never a platform fallback", async () => {
+    findUniquePaymentLink.mockResolvedValueOnce(baseLink);
+    findFirstPaymentLinkMethod.mockResolvedValueOnce({ id: "plm-1" });
+    resolveConnectedAccountForCharges.mockRejectedValueOnce(
+      new FinanceError("Payments are not set up for this organization yet.", 409)
+    );
+
+    const response = await POST(buildRequest({}), params());
+
+    expect(response.status).toBe(409);
+    expect(sessionsCreate).not.toHaveBeenCalled();
   });
 });
