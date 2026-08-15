@@ -389,6 +389,20 @@ Each PR merges + deploys + production-verifies before the next.
   `Contribution` rows support `issueRefund`, and payment-link
   campaign/event Contributions already get that for free via C's own fix
   since `issueRefund` works on any Contribution row regardless of source).
+- **Live verification (2026-08-15):** created a real `general`-type payment
+  link on Demo Church (Stripe method only, $5.00, no campaign/event
+  attribution) via impersonation, then completed the public `/pay/[slug]`
+  checkout as an anonymous payer with a real Stripe test card. Confirmed
+  end-to-end: (1) the Stripe Checkout page rendered "Demo-church" as the
+  merchant and "Pay securely at Demo-church" — proving the session was
+  created on the connected account, not the platform; (2) after payment,
+  the link's `Total Uses` incremented 0 → 1; (3) a new `Contribution` row
+  appeared in Demo Church's ledger with `source: MANUAL` (no
+  campaign/eventId, as expected for a general link), payment method
+  Stripe, receipt requested (email was supplied), and
+  `notes: "Payment link: <id>"` — matching the new connect-webhook branch
+  exactly. This is the same public/anonymous-checkout path used for C's
+  own live verification, now proven on the E-added `paymentLinkId` branch.
 
 ## Decisions log
 
