@@ -4,10 +4,11 @@ The last major pre-launch Union feature program (per the 2026-08-15 program spec
 case-management workflow for union orgs (members, stewards, representatives, authorized officers).
 **This is deliberately not a full legal case-management platform and does not duplicate
 UnionFlow** — Unestra Union stays thin and reuses existing Unestra infrastructure wherever
-possible (see "Reused infrastructure" below). `UNION-CASE-A` (this PR) ships the foundation:
-schema, RBAC, the status state machine, member intake, and basic staff read. `UNION-CASE-B`
-through `E` (steward dashboard/assignment, timeline/notes/contract references, deadlines/
-reminders, member mobile experience) are separate, sequential PRs — each merged, deployed, and
+possible (see "Reused infrastructure" below). `UNION-CASE-A` shipped the foundation: schema, RBAC,
+the status state machine, member intake, and basic staff read. `UNION-CASE-B` (this PR) ships the
+steward/officer dashboard, assignment, and case management (notes, contract references,
+deadlines) — both API and UI. `UNION-CASE-C`/`D` (deadline reminder dispatch, member mobile
+experience + hardening) remain separate, sequential PRs — each merged, deployed, and
 production-smoke-tested before the next begins.
 
 ## Discovery (why this design)
@@ -156,18 +157,28 @@ the destination status is `RESOLVED`/`CLOSED`, so those cases are directly filte
 name), `UNION_CASE_DEADLINE_CREATED`, `UNION_CASE_DEADLINE_COMPLETED`. Metadata carries only
 ids/enums/dates — never case narratives, comment bodies, or resolution text.
 
-## API surface shipped in this PR
+## API surface
 
-Member (`requireUnionCaseSubmitterAccess`/`requireUnionCaseMemberAccess`, no RBAC permission):
-`GET/POST /api/union/cases/my`, `GET /api/union/cases/my/[caseId]`,
-`POST /api/union/cases/my/[caseId]/withdraw`.
+**UNION-CASE-A** — member (`requireUnionCaseSubmitterAccess`/`requireUnionCaseMemberAccess`, no
+RBAC permission): `GET/POST /api/union/cases/my`, `GET /api/union/cases/my/[caseId]`,
+`POST /api/union/cases/my/[caseId]/withdraw`. Staff (`requireUnionCaseRead`):
+`GET /api/union/cases` (directory), `GET /api/union/cases/[caseId]` (detail). API + service layer
+only, no UI.
 
-Staff (`requireUnionCaseRead`): `GET /api/union/cases` (directory, filterable by
-status/assignee), `GET /api/union/cases/[caseId]` (detail with comments/status history/contract
-references/deadlines).
-
-No staff-facing POST/PATCH yet — assignment, status transitions, internal notes, and deadline
-management are `UNION-CASE-B`'s job. No pages/UI ship in this PR (API + service layer only).
+**UNION-CASE-B** — staff writes, each gated by the tier the program spec assigns:
+`POST /api/union/cases/[caseId]/assign` (`union:cases:manage`),
+`POST /api/union/cases/[caseId]/transition` (`union:cases:manage` for
+TRIAGE/ACTIVE/PENDING/WITHDRAWN, `union:cases:close` for RESOLVED/CLOSED — permission picked by
+destination status, mirroring the HOA architectural-requests transition route),
+`POST /api/union/cases/[caseId]/comments` (`union:cases:notes:internal` for an internal note,
+`union:cases:manage` for a member-visible one), `POST /api/union/cases/[caseId]/contract-references`
+(`union:cases:manage`), `POST /api/union/cases/[caseId]/deadlines` +
+`POST /api/union/cases/[caseId]/deadlines/[deadlineId]/complete` (`union:cases:deadlines:manage`).
+`GET /api/union/cases` gained `unassigned`/`caseType`/`deadlineWindow`/`search` filters. Plus the
+first UI: `/union/cases` (steward/officer dashboard — bucket chips backed by
+`getUnionCaseDashboardCounts()`/`listUnionCasesByBucket()`, and a plain filtered directory) and
+`/union/cases/[caseId]` (status, assignment, transition actions, notes, contract references,
+deadlines, status history), wired into the UNION nav as "Case Center."
 
 ## Deliberately not built (scope guard — see the 2026-08-15 program spec verbatim)
 
@@ -178,13 +189,21 @@ this scope discovered during the program gets recorded as POST-LAUNCH, not built
 
 ## PR sequence status
 
-- **UNION-CASE-A** (this PR) — foundation: schema, RBAC, state machine, member intake, basic
-  staff read. Tests: 34 (state machine, tenant isolation, note-visibility adversarial).
-- UNION-CASE-B — steward/officer dashboard, assignment, case management endpoints. Not started.
-- UNION-CASE-C — timeline UI, notes UI, contract references UI. Not started.
-- UNION-CASE-D — deadlines/reminders dispatch (the `EmailReminderLog`-queuing scanner). Not
-  started.
-- UNION-CASE-E — member mobile experience + hardening pass. Not started.
+- **UNION-CASE-A** — DONE, merged, deployed, production-smoke-verified 2026-08-15. Foundation:
+  schema, RBAC, state machine, member intake, basic staff read. 34 tests (state machine, tenant
+  isolation, note-visibility adversarial).
+- **UNION-CASE-B** — DONE (this PR). Steward/officer dashboard, assignment, status transitions,
+  notes, contract references, and deadline management — both the API and the UI (the detail page
+  needed notes/contract-references/deadlines to be usable and testable, so B absorbed what was
+  originally sketched as UNION-CASE-C's UI scope; see "Adjust the boundaries if the repository
+  architecture strongly suggests a better split" in the program spec). 14 additional tests
+  (dashboard bucket/filter correctness). Live-verified in the browser against a real UNION demo
+  org (assign → auto-bump to ASSIGNED → start active work → add an internal note → add a
+  member-visible note → add a contract reference → add an overdue deadline → dashboard's Overdue
+  chip picks it up correctly).
+- **UNION-CASE-C** (renumbered) — deadlines/reminders dispatch: the `EmailReminderLog`-queuing
+  cron scanner mirroring `sendDeadlineReminders()` in `lib/hoa/violations.ts`. Not started.
+- **UNION-CASE-D** (renumbered) — member mobile experience + hardening pass. Not started.
 
 Once the full program is complete, the next phase is full regression/security testing and
 store-submission readiness, not another major feature program.
