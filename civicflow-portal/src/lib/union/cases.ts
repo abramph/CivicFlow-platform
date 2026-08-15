@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import type { UnionCase, UnionCaseStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { createAuditEvent } from "@/lib/audit";
@@ -713,4 +714,137 @@ export function toMemberSafeUnionCase(unionCase: {
       .filter((d) => !d.completedAt)
       .map((d) => ({ id: d.id, deadlineType: d.deadlineType, description: d.description, dueAt: d.dueAt })),
   };
+}
+
+// ── Deadline reminders (UNION-CASE-C) ────────────────────────────────────
+//
+// Mirrors sendDeadlineReminders() in lib/hoa/violations.ts exactly: a
+// dedicated dedup-log table's unique constraint IS the claim mechanism
+// (INSERT, catch P2002 = "already sent"), not a preceding read -- safe
+// under real concurrency (overlapping cron runs, retries, multiple app
+// instances racing the same claim). dueOffsetDays = floor((dueAt - now) /
+// 1 day) via absolute UTC epoch math, so it's timezone/DST-independent and
+// naturally re-fires once per calendar day as a deadline gets closer (or,
+// once overdue, further negative) -- a deliberately simple self-healing/
+// escalation property rather than a separate retry or nagging schedule.
+// Unlike Violations (which fans a single deadline out to every ACTIVE
+// resident of a property), a UnionCaseDeadline has exactly one recipient
+// -- its responsible party -- so there's no violation-level claim layer
+// needed here, just the one per-(deadline, recipient, offset) claim.
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const DEADLINE_REMINDER_TYPE = "DEADLINE_REMINDER";
+
+function isUniqueConstraintViolation(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+}
+
+/** Never throws: logs and swallows delivery failures, same reasoning as
+ * notifyMemberSafely above -- the claim row already committed, so a
+ * transient failure gets a fresh chance once dueOffsetDays advances
+ * tomorrow rather than looping forever today. Deep-links to the STAFF
+ * detail page (/union/cases/[caseId]), unlike notifyMemberSafely's member
+ * deep link -- the recipient here is always the responsible steward/rep,
+ * never the case's own member. */
+async function notifyResponsibleOrgMember(
+  organizationId: string,
+  orgMemberId: string,
+  notification: { title: string; body: string; caseId: string }
+): Promise<void> {
+  try {
+    const recipient = await prisma.orgMember.findFirst({
+      where: { id: orgMemberId, organizationId },
+      select: { userId: true, email: true, commsEmailEnabled: true, commsPushEnabled: true },
+    });
+    if (!recipient) return;
+
+    if (recipient.email && recipient.commsEmailEnabled) {
+      await sendEmail({ to: recipient.email, subject: notification.title, text: notification.body });
+    }
+    if (recipient.userId && recipient.commsPushEnabled) {
+      const tokens = await prisma.mobileDeviceToken.findMany({ where: { userId: recipient.userId }, select: { token: true } });
+      if (tokens.length > 0) {
+        await sendPushToTokens(
+          tokens.map((t) => t.token),
+          { title: notification.title, body: notification.body, deepLink: `/union/cases/${notification.caseId}` }
+        );
+      }
+    }
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: "union_case_deadline_reminder_notification_failed",
+        organizationId,
+        caseId: notification.caseId,
+        orgMemberId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    );
+  }
+}
+
+/**
+ * Scans for open (not completed) deadlines on non-terminal cases due
+ * within `reminderWindowDays`, or already overdue, and sends one reminder
+ * to each deadline's responsible party -- called by a dedicated cron route
+ * (src/app/api/cron/union-case-deadline-reminders/route.ts), mirroring
+ * processPendingReminderLogs's cron-worker pattern.
+ */
+export async function sendUnionCaseDeadlineReminders(reminderWindowDays = 3): Promise<{ remindersSent: number }> {
+  const now = new Date();
+  const windowEnd = new Date(now.getTime() + reminderWindowDays * MS_PER_DAY);
+
+  const dueSoon = await prisma.unionCaseDeadline.findMany({
+    where: {
+      completedAt: null,
+      dueAt: { lte: windowEnd },
+      case: { status: { notIn: TERMINAL_STATUSES } },
+    },
+    select: {
+      id: true,
+      organizationId: true,
+      caseId: true,
+      deadlineType: true,
+      description: true,
+      dueAt: true,
+      responsibleOrgMemberId: true,
+      case: { select: { assignedToOrgMemberId: true, caseNumber: true, title: true } },
+    },
+  });
+  if (dueSoon.length === 0) return { remindersSent: 0 };
+
+  let remindersSent = 0;
+  for (const deadline of dueSoon) {
+    const recipientOrgMemberId = deadline.responsibleOrgMemberId ?? deadline.case.assignedToOrgMemberId;
+    if (!recipientOrgMemberId) continue; // no one to notify -- deadline predates assignment
+
+    const dueOffsetDays = Math.floor((deadline.dueAt.getTime() - now.getTime()) / MS_PER_DAY);
+    const overdue = dueOffsetDays < 0;
+
+    try {
+      await prisma.unionCaseDeadlineReminderLog.create({
+        data: {
+          organizationId: deadline.organizationId,
+          deadlineId: deadline.id,
+          orgMemberId: recipientOrgMemberId,
+          reminderType: DEADLINE_REMINDER_TYPE,
+          dueOffsetDays,
+        },
+      });
+    } catch (error) {
+      if (isUniqueConstraintViolation(error)) continue; // already reminded this recipient for this offset
+      throw error;
+    }
+    remindersSent++;
+
+    const caseLabel = `UC-${deadline.case.caseNumber} ("${deadline.case.title}")`;
+    const title = overdue ? "Overdue: Union case deadline" : "Union case deadline approaching";
+    const body = overdue
+      ? `${deadline.deadlineType} for ${caseLabel} was due ${deadline.dueAt.toLocaleDateString()} and is now overdue.`
+      : `${deadline.deadlineType} for ${caseLabel} is due ${deadline.dueAt.toLocaleDateString()}.`;
+
+    await notifyResponsibleOrgMember(deadline.organizationId, recipientOrgMemberId, { title, body, caseId: deadline.caseId });
+  }
+
+  return { remindersSent };
 }
