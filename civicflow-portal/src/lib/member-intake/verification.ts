@@ -89,15 +89,27 @@ export async function requestVerification(organizationId: string, submissionId: 
 export type VerifyCodeResult = { ok: true } | { ok: false; error: string };
 
 /**
+ * MEMBER-QR-E hardening: the token-scoped attempt cap §15 explicitly
+ * requires ("attempt limited" is listed as a property of the token itself,
+ * not just something the route enforces). A route-level IP rate limit alone
+ * is insufficient -- it's trivially bypassed by rotating source IPs, and a
+ * 6-digit code has only 1,000,000 possibilities, brute-forceable well
+ * within its 10-minute window without a per-token cap. Once a token hits
+ * this many wrong guesses it is burned (see below) -- the submitter must
+ * request a fresh code, not keep guessing against the dead one.
+ */
+const MAX_VERIFICATION_ATTEMPTS = 5;
+
+/**
  * Checks a submitted code against the most recent unconsumed token for this
  * submission. On success, marks the token consumed and flips the
  * submission's verificationStatus to VERIFIED -- it does NOT apply any
  * member changes itself (see update-engine.ts's applySubmission, called
- * separately by the route once this returns ok). Per-submission attempt/
- * rate limiting is enforced at the route layer via requireRateLimit, the
- * same pattern already used by every other OTP-confirm route in this
- * codebase (see member-portal/notifications/confirm/route.ts) -- not
- * duplicated here.
+ * separately by the route once this returns ok). Per-IP request-rate
+ * limiting is enforced at the route layer via requireRateLimit, same as
+ * every other OTP-confirm route in this codebase (see member-portal/
+ * notifications/confirm/route.ts); the token-scoped attempt cap here is the
+ * complementary backstop that survives IP rotation.
  */
 export async function verifySubmissionCode(organizationId: string, submissionId: string, code: string): Promise<VerifyCodeResult> {
   const submission = await prisma.memberIntakeSubmission.findFirst({ where: { id: submissionId, organizationId } });
@@ -112,7 +124,19 @@ export async function verifySubmissionCode(organizationId: string, submissionId:
   });
   if (!token) return { ok: false, error: "No verification code is pending for this submission. Request a new one." };
   if (token.expiresAt < new Date()) return { ok: false, error: "This code has expired. Request a new one." };
+
   if (hashOtpCode(code.trim().replace(/\s/g, "")) !== token.codeHash) {
+    // An atomic DB-level increment (not read-token.attempts-then-write) so
+    // concurrent guesses against the same token can't race past the cap via
+    // a lost-update.
+    const updated = await prisma.memberIntakeVerificationToken.update({
+      where: { id: token.id },
+      data: { attempts: { increment: 1 } },
+    });
+    if (updated.attempts >= MAX_VERIFICATION_ATTEMPTS) {
+      await prisma.memberIntakeVerificationToken.update({ where: { id: token.id }, data: { consumedAt: new Date() } });
+      return { ok: false, error: "Too many incorrect attempts. Request a new code." };
+    }
     return { ok: false, error: "Invalid code. Please try again." };
   }
 
