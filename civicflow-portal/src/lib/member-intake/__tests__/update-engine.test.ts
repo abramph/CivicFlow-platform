@@ -1,17 +1,20 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 /**
- * MEMBER-QR-A — update-engine.ts. Covers the sensitivity-gating rule (HIGH
- * never auto-applies regardless of org policy; MODERATE only when policy
- * explicitly allows it), the all-or-nothing-per-submission apply decision,
- * §17's "blank never erases" rule, and that every write goes through the
- * existing createMember/updateMember business logic rather than a raw
- * prisma call.
+ * MEMBER-QR-A/E — update-engine.ts. Covers the sensitivity-gating rule
+ * (HIGH never auto-applies regardless of org policy; MODERATE only when
+ * policy explicitly allows it), the all-or-nothing-per-submission apply
+ * decision, §17's "blank never erases" rule, that every write goes through
+ * the existing createMember/updateMember business logic rather than a raw
+ * prisma call, and (MEMBER-QR-E) the atomic claim that prevents a
+ * concurrent/retried call from creating a duplicate member or double-
+ * applying an update.
  */
 
 const findFirstSubmission = vi.fn();
 const findFirstOrgMember = vi.fn();
 const updateSubmission = vi.fn();
+const updateManySubmission = vi.fn();
 const updateMember = vi.fn();
 const createMember = vi.fn();
 
@@ -20,6 +23,7 @@ vi.mock("@/lib/prisma", () => ({
     memberIntakeSubmission: {
       findFirst: (...a: unknown[]) => findFirstSubmission(...a),
       update: (...a: unknown[]) => updateSubmission(...a),
+      updateMany: (...a: unknown[]) => updateManySubmission(...a),
     },
     orgMember: { findFirst: (...a: unknown[]) => findFirstOrgMember(...a) },
   },
@@ -32,6 +36,7 @@ vi.mock("@/lib/member-mutations", () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   updateSubmission.mockImplementation((args: { data: Record<string, unknown> }) => ({ status: args.data.status ?? "APPLIED", ...args.data }));
+  updateManySubmission.mockResolvedValue({ count: 1 });
   updateMember.mockResolvedValue({ ok: true, data: { id: "m-1" } });
   createMember.mockResolvedValue({ ok: true, data: { id: "m-new" } });
 });
@@ -68,6 +73,7 @@ describe("applySubmission — status eligibility", () => {
     await expect(applySubmission("org-a", "sub-1", ACTOR)).rejects.toMatchObject({ code: "MEMBER_INTAKE_INVALID_STATUS_TRANSITION" });
     expect(updateMember).not.toHaveBeenCalled();
     expect(createMember).not.toHaveBeenCalled();
+    expect(updateManySubmission).not.toHaveBeenCalled();
   });
 
   it("refuses a VERIFICATION_REQUIRED submission whose identity was never actually verified", async () => {
@@ -81,6 +87,39 @@ describe("applySubmission — status eligibility", () => {
     });
     const { applySubmission } = await import("../update-engine");
     await expect(applySubmission("org-a", "sub-1", ACTOR)).rejects.toMatchObject({ code: "MEMBER_INTAKE_INVALID_STATUS_TRANSITION" });
+    expect(updateMember).not.toHaveBeenCalled();
+    expect(updateManySubmission).not.toHaveBeenCalled();
+  });
+});
+
+describe("applySubmission — MEMBER-QR-E atomic claim", () => {
+  it("claims the submission via a compare-and-swap keyed on the status it just read", async () => {
+    findFirstSubmission.mockResolvedValue({
+      id: "sub-1",
+      status: "SUBMITTED",
+      matchedMemberId: "m-1",
+      fieldValues: {},
+      form: { fields: [], autoCreateNewMember: false, autoApplySafeUpdates: true, requireReviewForSensitiveUpdates: false },
+    });
+    findFirstOrgMember.mockResolvedValue({ id: "m-1" });
+    const { applySubmission } = await import("../update-engine");
+    await applySubmission("org-a", "sub-1", ACTOR);
+    expect(updateManySubmission).toHaveBeenCalledWith({ where: { id: "sub-1", status: "SUBMITTED" }, data: { status: "APPLIED" } });
+  });
+
+  it("fails fast, without ever calling createMember/updateMember, when a concurrent call already claimed it (count: 0)", async () => {
+    findFirstSubmission.mockResolvedValue({
+      id: "sub-1",
+      status: "SUBMITTED",
+      matchedMemberId: null,
+      fieldValues: { firstName: "New", lastName: "Person" },
+      form: { fields: [], autoCreateNewMember: true, autoApplySafeUpdates: false, requireReviewForSensitiveUpdates: true },
+    });
+    updateManySubmission.mockResolvedValue({ count: 0 });
+
+    const { applySubmission } = await import("../update-engine");
+    await expect(applySubmission("org-a", "sub-1", ACTOR)).rejects.toMatchObject({ code: "MEMBER_INTAKE_INVALID_STATUS_TRANSITION" });
+    expect(createMember).not.toHaveBeenCalled();
     expect(updateMember).not.toHaveBeenCalled();
   });
 });
@@ -265,7 +304,7 @@ describe("applySubmission — new-member creation path", () => {
     expect(result.status).toBe("APPLIED");
   });
 
-  it("refuses to create a new member without a first and last name", async () => {
+  it("refuses to create a new member without a first and last name, and rolls the claim back to REVIEW_REQUIRED", async () => {
     findFirstSubmission.mockResolvedValue({
       id: "sub-1",
       status: "SUBMITTED",
@@ -281,6 +320,7 @@ describe("applySubmission — new-member creation path", () => {
     const { applySubmission } = await import("../update-engine");
     await expect(applySubmission("org-a", "sub-1", ACTOR)).rejects.toMatchObject({ code: "MEMBER_INTAKE_VALIDATION_ERROR" });
     expect(createMember).not.toHaveBeenCalled();
+    expect(updateSubmission).toHaveBeenCalledWith({ where: { id: "sub-1" }, data: { status: "REVIEW_REQUIRED" } });
   });
 
   it("refuses to create a new member when the form doesn't allow it and no admin approval happened", async () => {
@@ -299,5 +339,6 @@ describe("applySubmission — new-member creation path", () => {
     const { applySubmission } = await import("../update-engine");
     await expect(applySubmission("org-a", "sub-1", ACTOR)).rejects.toMatchObject({ code: "MEMBER_INTAKE_INVALID_STATUS_TRANSITION" });
     expect(createMember).not.toHaveBeenCalled();
+    expect(updateManySubmission).not.toHaveBeenCalled();
   });
 });

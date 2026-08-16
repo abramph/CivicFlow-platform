@@ -5,11 +5,12 @@ import { MemberIntakeError } from "./errors";
 import type { MemberIntakeFormField, MemberIntakeSubmissionStatus } from "@prisma/client";
 
 /**
- * Member Intake & Profile Update (MEMBER-QR-A) — the diff-based update/
- * create engine. The ONE place a submission's validated fieldValues are
- * ever turned into an actual OrgMember write, and it always goes through
- * the existing createMember/updateMember business logic (plan gating,
- * validation, audit, timeline) -- never a raw prisma.orgMember.update.
+ * Member Intake & Profile Update (MEMBER-QR-A, race-hardened in
+ * MEMBER-QR-E) -- the diff-based update/create engine. The ONE place a
+ * submission's validated fieldValues are ever turned into an actual
+ * OrgMember write, and it always goes through the existing createMember/
+ * updateMember business logic (plan gating, validation, audit, timeline) --
+ * never a raw prisma.orgMember.update.
  *
  * Sensitivity gating happens HERE, at apply time, not at submission-routing
  * time (see submissions.ts) -- a submission can be identity-verified
@@ -26,6 +27,19 @@ import type { MemberIntakeFormField, MemberIntakeSubmissionStatus } from "@prism
  * HIGH-sensitivity fields are never auto-applied, full stop, regardless of
  * any org policy flag -- enforced below independent of autoApplySafeUpdates/
  * requireReviewForSensitiveUpdates.
+ *
+ * MEMBER-QR-E hardening: applySubmission() now atomically CLAIMS a
+ * submission (a compare-and-swap status transition keyed on the status it
+ * just read, same CAS idiom updateMember() already uses for
+ * membershipStatus) before doing any actual work. Without this, two
+ * concurrent calls -- a network-retried "verify" request being the
+ * realistic trigger, since the public route calls applySubmission()
+ * immediately after a successful code check -- could both pass the
+ * eligibility check before either had written anything, and both proceed
+ * to call createMember(), creating two duplicate member records from one
+ * submission. The claim makes the second caller's own compare-and-swap
+ * affect zero rows, so it fails fast instead of doing the work twice --
+ * §27's "retry must not create a second member," enforced structurally.
  */
 
 function canAutoApplyField(sensitivity: "LOW" | "MODERATE" | "HIGH", autoApplySafeUpdates: boolean, requireReviewForSensitiveUpdates: boolean): boolean {
@@ -66,6 +80,21 @@ export async function applySubmission(organizationId: string, submissionId: stri
   if (submission.status === "VERIFICATION_REQUIRED" && submission.verificationStatus !== "VERIFIED") {
     throw new MemberIntakeError("MEMBER_INTAKE_INVALID_STATUS_TRANSITION", "This submission has not completed identity verification yet.");
   }
+  if (!submission.matchedMemberId && !submission.form.autoCreateNewMember && submission.status !== "APPROVED") {
+    throw new MemberIntakeError("MEMBER_INTAKE_INVALID_STATUS_TRANSITION", "This form does not allow creating new members without admin approval.");
+  }
+
+  // Atomic claim -- see the file-level doc comment. A concurrent duplicate
+  // call (e.g. a retried request) reads a status that's no longer eligible
+  // by the time its own claim attempt runs, so `count` is 0 and it fails
+  // fast here instead of doing the create/update work twice.
+  const claim = await prisma.memberIntakeSubmission.updateMany({
+    where: { id: submission.id, status: submission.status },
+    data: { status: "APPLIED" },
+  });
+  if (claim.count === 0) {
+    throw new MemberIntakeError("MEMBER_INTAKE_INVALID_STATUS_TRANSITION", "This submission is already being processed or was already applied.");
+  }
 
   const fieldValues = submission.fieldValues as Record<string, unknown>;
   const memberFields = submission.form.fields.filter(
@@ -75,10 +104,6 @@ export async function applySubmission(organizationId: string, submissionId: stri
 
   if (submission.matchedMemberId) {
     return applyUpdate(organizationId, submission.matchedMemberId, submission, memberFields, fieldValues, actor);
-  }
-
-  if (!submission.form.autoCreateNewMember && submission.status !== "APPROVED") {
-    throw new MemberIntakeError("MEMBER_INTAKE_INVALID_STATUS_TRANSITION", "This form does not allow creating new members without admin approval.");
   }
   return applyCreate(organizationId, submission, memberFields, fieldValues, actor);
 }
@@ -118,6 +143,8 @@ async function applyUpdate(
   }
 
   if (blockedBySensitivity) {
+    // Already claimed as APPLIED by the caller's CAS -- correct that here,
+    // this submission needs a human, not an auto-apply.
     await prisma.memberIntakeSubmission.update({ where: { id: submission.id }, data: { status: "REVIEW_REQUIRED" } });
     return { status: "REVIEW_REQUIRED", memberId, appliedFieldCount: 0 };
   }
@@ -131,7 +158,7 @@ async function applyUpdate(
 
   const applied = await prisma.memberIntakeSubmission.update({
     where: { id: submission.id },
-    data: { status: "APPLIED", appliedAt: new Date(), matchedMemberId: memberId },
+    data: { appliedAt: new Date(), matchedMemberId: memberId },
   });
   return { status: applied.status, memberId, appliedFieldCount: changedCount };
 }
@@ -151,6 +178,10 @@ async function applyCreate(
   }
 
   if (!createInput.firstName || !createInput.lastName) {
+    // Already claimed as APPLIED by the caller's CAS -- roll that back since
+    // nothing was actually created; the org's form configuration needs
+    // fixing, not a retry.
+    await prisma.memberIntakeSubmission.update({ where: { id: submission.id }, data: { status: "REVIEW_REQUIRED" } });
     throw new MemberIntakeError(
       "MEMBER_INTAKE_VALIDATION_ERROR",
       "This form must collect first and last name before a new member can be created."
@@ -159,12 +190,13 @@ async function applyCreate(
 
   const result = await createMember(organizationId, actor, createInput as CreateMemberInput);
   if (!result.ok) {
+    await prisma.memberIntakeSubmission.update({ where: { id: submission.id }, data: { status: "REVIEW_REQUIRED" } });
     throw new MemberIntakeError("MEMBER_INTAKE_VALIDATION_ERROR", result.error);
   }
 
   const applied = await prisma.memberIntakeSubmission.update({
     where: { id: submission.id },
-    data: { status: "APPLIED", appliedAt: new Date(), createdMemberId: result.data.id },
+    data: { appliedAt: new Date(), createdMemberId: result.data.id },
   });
   return { status: applied.status, memberId: result.data.id, appliedFieldCount: memberFields.length };
 }

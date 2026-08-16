@@ -1,10 +1,14 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 /**
- * MEMBER-QR-A — verification.ts. The single most security-critical test
+ * MEMBER-QR-A/E — verification.ts. The single most security-critical test
  * here is "never verify using the newly-submitted email/phone" (§15's
  * explicit rule): a submission's own fieldValues must never be consulted
  * for the destination -- only the matched OrgMember's own existing columns.
+ * MEMBER-QR-E adds the token-scoped attempt cap: a route-level IP rate
+ * limit alone is trivially bypassed by rotating source IPs, so a 6-digit
+ * code needs its own per-token guess limit to resist brute force within its
+ * 10-minute window.
  */
 
 const findFirstSubmission = vi.fn();
@@ -126,7 +130,7 @@ describe("verifySubmissionCode", () => {
   it("accepts a correct, unexpired, unconsumed code and marks it consumed + verified", async () => {
     findFirstSubmission.mockResolvedValue({ id: "sub-1", status: "VERIFICATION_REQUIRED" });
     const { hashOtpCode: realHash } = await import("@/lib/sms-otp");
-    findFirstToken.mockResolvedValue({ id: "tok-1", codeHash: realHash("123456"), expiresAt: new Date(Date.now() + 60_000) });
+    findFirstToken.mockResolvedValue({ id: "tok-1", codeHash: realHash("123456"), expiresAt: new Date(Date.now() + 60_000), attempts: 0 });
 
     const { verifySubmissionCode } = await import("../verification");
     const result = await verifySubmissionCode("org-a", "sub-1", "123456");
@@ -136,22 +140,47 @@ describe("verifySubmissionCode", () => {
     expect(updateSubmission).toHaveBeenCalledWith(expect.objectContaining({ data: { verificationStatus: "VERIFIED" } }));
   });
 
-  it("rejects an incorrect code without consuming the token", async () => {
+  it("rejects an incorrect code and increments the token's attempt counter (never the consumedAt path)", async () => {
     findFirstSubmission.mockResolvedValue({ id: "sub-1", status: "VERIFICATION_REQUIRED" });
     const { hashOtpCode: realHash } = await import("@/lib/sms-otp");
-    findFirstToken.mockResolvedValue({ id: "tok-1", codeHash: realHash("123456"), expiresAt: new Date(Date.now() + 60_000) });
+    findFirstToken.mockResolvedValue({ id: "tok-1", codeHash: realHash("123456"), expiresAt: new Date(Date.now() + 60_000), attempts: 0 });
+    updateToken.mockResolvedValue({ id: "tok-1", attempts: 1 });
 
     const { verifySubmissionCode } = await import("../verification");
     const result = await verifySubmissionCode("org-a", "sub-1", "000000");
 
-    expect(result.ok).toBe(false);
-    expect(updateToken).not.toHaveBeenCalled();
+    expect(result).toEqual({ ok: false, error: "Invalid code. Please try again." });
+    expect(updateToken).toHaveBeenCalledWith({ where: { id: "tok-1" }, data: { attempts: { increment: 1 } } });
+    expect(updateToken).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ consumedAt: expect.anything() }) }));
+    expect(updateSubmission).not.toHaveBeenCalled();
+  });
+
+  it("burns the token (sets consumedAt) once the attempt cap is reached, even though the code was never correct", async () => {
+    findFirstSubmission.mockResolvedValue({ id: "sub-1", status: "VERIFICATION_REQUIRED" });
+    const { hashOtpCode: realHash } = await import("@/lib/sms-otp");
+    findFirstToken.mockResolvedValue({ id: "tok-1", codeHash: realHash("123456"), expiresAt: new Date(Date.now() + 60_000), attempts: 4 });
+    // The 5th wrong guess -- the atomic increment returns attempts: 5, which hits the cap.
+    updateToken.mockResolvedValue({ id: "tok-1", attempts: 5 });
+
+    const { verifySubmissionCode } = await import("../verification");
+    const result = await verifySubmissionCode("org-a", "sub-1", "000000");
+
+    expect(result).toEqual({ ok: false, error: "Too many incorrect attempts. Request a new code." });
+    expect(updateToken).toHaveBeenCalledWith({ where: { id: "tok-1" }, data: { consumedAt: expect.any(Date) } });
+  });
+
+  it("a burned token no longer resolves via findFirst's consumedAt: null filter -- a subsequent attempt sees no pending code", async () => {
+    findFirstSubmission.mockResolvedValue({ id: "sub-1", status: "VERIFICATION_REQUIRED" });
+    findFirstToken.mockResolvedValue(null); // simulates the burned token being excluded by consumedAt: null
+    const { verifySubmissionCode } = await import("../verification");
+    const result = await verifySubmissionCode("org-a", "sub-1", "123456");
+    expect(result).toEqual({ ok: false, error: "No verification code is pending for this submission. Request a new one." });
   });
 
   it("rejects an expired code", async () => {
     findFirstSubmission.mockResolvedValue({ id: "sub-1", status: "VERIFICATION_REQUIRED" });
     const { hashOtpCode: realHash } = await import("@/lib/sms-otp");
-    findFirstToken.mockResolvedValue({ id: "tok-1", codeHash: realHash("123456"), expiresAt: new Date(Date.now() - 1000) });
+    findFirstToken.mockResolvedValue({ id: "tok-1", codeHash: realHash("123456"), expiresAt: new Date(Date.now() - 1000), attempts: 0 });
 
     const { verifySubmissionCode } = await import("../verification");
     const result = await verifySubmissionCode("org-a", "sub-1", "123456");

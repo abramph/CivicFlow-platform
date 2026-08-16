@@ -4272,6 +4272,16 @@ model MemberIntakeVerificationToken {
   codeHash     String
   expiresAt    DateTime
   consumedAt   DateTime?
+  /// MEMBER-QR-E: incremented on every WRONG code check against this token.
+  /// At MAX_VERIFICATION_ATTEMPTS (see verification.ts), the token is burned
+  /// (consumedAt is set, same as a successful use) so the remaining
+  /// possibility space of a 6-digit code can never be exhausted by brute
+  /// force within its 10-minute window -- a submitter who runs out of
+  /// attempts must request a fresh code, not keep guessing against this one.
+  /// A route-level IP rate limit alone is insufficient here since it's
+  /// trivially bypassed by rotating source IPs; this is the token-scoped
+  /// backstop §15 explicitly calls "attempt limited" as a token property.
+  attempts     Int                              @default(0)
   createdAt    DateTime                         @default(now())
 
   submission MemberIntakeSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
