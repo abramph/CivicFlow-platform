@@ -170,3 +170,33 @@ export async function listMyUnionCases(organizationId: string) {
     orderBy: { createdAt: "desc" },
   });
 }
+
+/** Mobile counterpart to listMyUnionCases()/requireUnionCaseMemberAccess() --
+ * the native app authenticates with its own bearer-token scheme
+ * (requireMobileMembership), never a NextAuth web session, so these take an
+ * already-verified memberId instead of re-deriving one from
+ * requireMemberWebSession(). Never accepts a memberId from client input. */
+export async function listMyUnionCasesForMobileMember(organizationId: string, memberId: string) {
+  return prisma.unionCase.findMany({
+    where: { organizationId, memberOrgMemberId: memberId },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
+export async function requireUnionCaseMobileMemberAccess(
+  organizationId: string,
+  caseId: string,
+  memberId: string
+): Promise<{ caseId: string }> {
+  const unionCase = await prisma.unionCase.findFirst({
+    where: { id: caseId, organizationId },
+    select: { id: true, memberOrgMemberId: true },
+  });
+  if (!unionCase) {
+    throw new UnionError("UNION_CASE_NOT_FOUND", "Case not found.");
+  }
+  if (unionCase.memberOrgMemberId !== memberId) {
+    throw new UnionError("UNION_CASE_NOT_YOURS", "You do not have access to this case.");
+  }
+  return { caseId: unionCase.id };
+}
