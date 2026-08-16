@@ -158,15 +158,20 @@ export default function DashboardScreen() {
     .flatMap((c) => c.upcomingDates)
     .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime())[0] ?? null;
 
-  // Recurring-gift summary for the Church Home card (§4) -- earliest
-  // upcoming contribution across all of the member's active schedules.
+  // Recurring-gift summary for the Church Home card (§4). An ACTIVE
+  // schedule with no computed nextContributionDate yet is still an active
+  // recurring gift -- filtering it out here (as an earlier version did)
+  // wrongly told the member "No recurring gift yet" while the Give tab
+  // correctly showed it as ACTIVE, a real mismatch caught in native smoke
+  // testing.
+  const churchActiveSchedules = givingSummary?.enabled
+    ? givingSummary.schedules.filter((s) => s.status === 'ACTIVE')
+    : [];
   const churchNextGiftDate =
-    givingSummary?.enabled
-      ? givingSummary.schedules
-          .filter((s) => s.status === 'ACTIVE' && s.nextContributionDate)
-          .map((s) => s.nextContributionDate as string)
-          .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())[0] ?? null
-      : null;
+    churchActiveSchedules
+      .map((s) => s.nextContributionDate)
+      .filter((date): date is string => Boolean(date))
+      .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())[0] ?? null;
 
   return (
     <ScrollView
@@ -218,7 +223,13 @@ export default function DashboardScreen() {
             accessibilityRole="button"
             accessibilityLabel={
               givingSummary?.enabled
-                ? `This year's giving, ${formatCurrency(givingSummary.yearTotal)}${churchNextGiftDate ? `, next gift ${new Date(churchNextGiftDate).toLocaleDateString()}` : ', no recurring gift yet'}`
+                ? `This year's giving, ${formatCurrency(givingSummary.yearTotal)}, ${
+                    churchNextGiftDate
+                      ? `next gift ${new Date(churchNextGiftDate).toLocaleDateString()}`
+                      : churchActiveSchedules.length > 0
+                        ? 'recurring gift active'
+                        : 'no recurring gift yet'
+                  }`
                 : 'Give Now'
             }
           >
@@ -228,7 +239,11 @@ export default function DashboardScreen() {
                   <ThemedText type="small" themeColor="textSecondary">This year&apos;s giving</ThemedText>
                   <ThemedText type="subtitle">{formatCurrency(givingSummary.yearTotal)}</ThemedText>
                   <ThemedText type="small" themeColor="textSecondary">
-                    {churchNextGiftDate ? `Next gift ${new Date(churchNextGiftDate).toLocaleDateString()}` : 'No recurring gift yet'}
+                    {churchNextGiftDate
+                      ? `Next gift ${new Date(churchNextGiftDate).toLocaleDateString()}`
+                      : churchActiveSchedules.length > 0
+                        ? 'Recurring gift active'
+                        : 'No recurring gift yet'}
                   </ThemedText>
                 </>
               ) : (
