@@ -164,7 +164,7 @@ export function SmsCredentialsPanel({ credentials }: { credentials: MaskedSmsCre
         ) : null}
       </div>
 
-      <form className="space-y-3" onSubmit={handleSave}>
+      <form className="space-y-3" method="post" onSubmit={handleSave}>
         <p className="text-sm font-medium text-slate-900">Update credentials</p>
         <p className={helperTextClassName}>Leave a field blank to keep its current value.</p>
         <div className="grid gap-3 md:grid-cols-2">
