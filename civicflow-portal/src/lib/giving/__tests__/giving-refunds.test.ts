@@ -8,6 +8,7 @@ const findFirstFund = vi.fn();
 const findFirstOrgMember = vi.fn();
 const createAdjustment = vi.fn();
 const createRefundEvent = vi.fn();
+const queryRawLocked = vi.fn();
 const transaction = vi.fn();
 const findUniqueOrgSettings = vi.fn();
 const findUniqueStripeAccount = vi.fn();
@@ -70,7 +71,21 @@ function uniqueConstraintViolation() {
 beforeEach(() => {
   vi.clearAllMocks();
   findUniqueOrgSettings.mockResolvedValue({ contributionsEnabled: true });
-  transaction.mockImplementation(async (ops: Promise<unknown>[]) => Promise.all(ops));
+  // Array-form $transaction([...]) (adjustContribution) vs. callback-form
+  // $transaction(async (tx) => {...}) (applyProviderRefund's row-locked
+  // read-modify-write) — the real Prisma client supports both, so the mock
+  // has to dispatch on the argument shape the same way.
+  transaction.mockImplementation(async (arg: unknown) => {
+    if (typeof arg === "function") {
+      const tx = {
+        $queryRaw: (...a: unknown[]) => queryRawLocked(...a),
+        contributionRefundEvent: { create: (...a: unknown[]) => createRefundEvent(...a) },
+        contribution: { update: (...a: unknown[]) => updateContribution(...a) },
+      };
+      return arg(tx);
+    }
+    return Promise.all(arg as Promise<unknown>[]);
+  });
   createAdjustment.mockResolvedValue({ id: "adj-1" });
   createRefundEvent.mockResolvedValue({ id: "cre-1" });
   updateContribution.mockResolvedValue({});
@@ -108,6 +123,7 @@ describe("issueRefund (§34)", () => {
         processingCostCoverageAmount: 3.3,
         totalChargedAmount: 103.3,
       });
+      queryRawLocked.mockResolvedValueOnce([{ id: "c-1", totalChargedAmount: 103.3, amount: 100, refundedAmount: null }]);
       const result = await issueRefund({
         organizationId: "org-1",
         contributionId: "c-1",
@@ -144,6 +160,7 @@ describe("issueRefund (§34)", () => {
     findFirstContribution.mockResolvedValueOnce(PROVIDER_ROW);
     stripeRefundsCreate.mockResolvedValueOnce({ id: "re_1", status: "succeeded", amount: 2500 });
     findFirstContribution.mockResolvedValueOnce(PROVIDER_ROW); // applyProviderRefund lookup
+    queryRawLocked.mockResolvedValueOnce([{ id: "c-1", totalChargedAmount: null, amount: 100, refundedAmount: null }]);
     const result = await issueRefund({
       organizationId: "org-1",
       contributionId: "c-1",
@@ -171,6 +188,7 @@ describe("issueRefund (§34)", () => {
       stripeConnectedAccountId: "acct_connected1",
       providerAccountContext: "CONNECTED_ACCOUNT_PAYMENT",
     }); // applyProviderRefund lookup
+    queryRawLocked.mockResolvedValueOnce([{ id: "c-1", totalChargedAmount: null, amount: 100, refundedAmount: null }]);
     await issueRefund({ organizationId: "org-1", contributionId: "c-1", amount: 25, reason: "duplicate gift", actorUserId: "fin" });
     expect(stripeRefundsCreate).not.toHaveBeenCalled();
     expect(stripeRefundsCreateConnected.mock.calls[0][0]).toMatchObject({ payment_intent: "pi_1", amount: 2500 });
@@ -182,6 +200,7 @@ describe("issueRefund (§34)", () => {
     findFirstContribution.mockResolvedValueOnce({ ...PROVIDER_ROW, stripeConnectedAccountId: null, providerAccountContext: null });
     stripeRefundsCreate.mockResolvedValueOnce({ id: "re_legacy1", status: "succeeded", amount: 2500 });
     findFirstContribution.mockResolvedValueOnce({ ...PROVIDER_ROW, stripeConnectedAccountId: null, providerAccountContext: null });
+    queryRawLocked.mockResolvedValueOnce([{ id: "c-1", totalChargedAmount: null, amount: 100, refundedAmount: null }]);
     await issueRefund({ organizationId: "org-1", contributionId: "c-1", amount: 25, reason: "duplicate gift", actorUserId: "fin" });
     expect(stripeRefundsCreateConnected).not.toHaveBeenCalled();
     expect(stripeRefundsCreate.mock.calls[0][1]).toBeUndefined();
@@ -213,6 +232,7 @@ describe("applyProviderRefund — idempotency keyed on the real Stripe refund.id
 
   it("a replayed delivery of the SAME refund.id → DUPLICATE via the unique-constraint catch, no second row and no double count", async () => {
     findFirstContribution.mockResolvedValueOnce({ ...PROVIDER_ROW, refundedAmount: 20 });
+    queryRawLocked.mockResolvedValueOnce([{ id: "c-1", totalChargedAmount: null, amount: 100, refundedAmount: 20 }]);
     createRefundEvent.mockRejectedValueOnce(uniqueConstraintViolation());
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
@@ -232,6 +252,7 @@ describe("applyProviderRefund — idempotency keyed on the real Stripe refund.id
   it("two DIFFERENT refund ids on the same contribution both apply — $20 then $15 → cumulative $35, net $65 of $100, each individually recorded", async () => {
     // First refund: $20 of $100.
     findFirstContribution.mockResolvedValueOnce({ ...PROVIDER_ROW, amount: 100, refundedAmount: null });
+    queryRawLocked.mockResolvedValueOnce([{ id: "c-1", totalChargedAmount: null, amount: 100, refundedAmount: null }]);
     const first = await apply({ providerRefundId: "re_first_20", amountRefundedCents: 2000 });
     expect(first).toBe("APPLIED");
     expect(Number(updateContribution.mock.calls[0][0].data.refundedAmount)).toBe(20);
@@ -240,8 +261,11 @@ describe("applyProviderRefund — idempotency keyed on the real Stripe refund.id
     // Second, DIFFERENT refund: $15 more — must be independently applied and
     // additive, not collapsed into the first (the exact bug this replaces:
     // a synthetic charge-derived id made this second refund indistinguishable
-    // from the first and it was silently dropped).
+    // from the first and it was silently dropped). Reads the LOCKED row's
+    // now-current total (as if the first transaction's row lock released
+    // and this one re-read it), not a stale pre-first-refund snapshot.
     findFirstContribution.mockResolvedValueOnce({ ...PROVIDER_ROW, amount: 100, refundedAmount: 20 });
+    queryRawLocked.mockResolvedValueOnce([{ id: "c-1", totalChargedAmount: null, amount: 100, refundedAmount: 20 }]);
     const second = await apply({ providerRefundId: "re_second_15", amountRefundedCents: 1500 });
     expect(second).toBe("APPLIED");
     expect(Number(updateContribution.mock.calls[1][0].data.refundedAmount)).toBe(35);
@@ -253,12 +277,14 @@ describe("applyProviderRefund — idempotency keyed on the real Stripe refund.id
 
   it("a full refund (cumulative = original) is exact, not clamped short", async () => {
     findFirstContribution.mockResolvedValueOnce({ ...PROVIDER_ROW, amount: 100, refundedAmount: null });
+    queryRawLocked.mockResolvedValueOnce([{ id: "c-1", totalChargedAmount: null, amount: 100, refundedAmount: null }]);
     await apply({ providerRefundId: "re_full", amountRefundedCents: 10000 });
     expect(Number(updateContribution.mock.calls[0][0].data.refundedAmount)).toBe(100);
   });
 
   it("financial invariant: cumulative refunded is clamped at the original amount even if a malformed/replayed amount would push it over", async () => {
     findFirstContribution.mockResolvedValueOnce({ ...PROVIDER_ROW, amount: 100, refundedAmount: 90 });
+    queryRawLocked.mockResolvedValueOnce([{ id: "c-1", totalChargedAmount: null, amount: 100, refundedAmount: 90 }]);
     await apply({ providerRefundId: "re_overshoot", amountRefundedCents: 5000 }); // 90 + 50 > 100
     expect(Number(updateContribution.mock.calls[0][0].data.refundedAmount)).toBe(100);
   });
@@ -285,6 +311,22 @@ describe("applyProviderRefund — idempotency keyed on the real Stripe refund.id
     const result = await apply({ organizationId: "org-b", providerPaymentIntentId: "pi_1" });
     expect(result).toBe("NOT_FOUND");
     expect(updateContribution).not.toHaveBeenCalled();
+  });
+
+  it("concurrency fix: the cumulative total is computed from the FOR-UPDATE-locked row read, not the earlier unlocked existence-check read — proves a concurrent racer's committed write isn't lost", async () => {
+    // Simulates the exact race this hardened: existence-check `findFirst`
+    // sees a STALE snapshot (as if read before another in-flight refund
+    // committed), but the row-locked `$queryRaw` inside the transaction
+    // sees the CURRENT total (as if this call's lock only acquired after
+    // that other transaction committed and released it). The correct
+    // cumulative math must come from the locked read, not the stale one —
+    // using the stale $0 prior would silently understate the total exactly
+    // like the pre-fix lost-update race did.
+    findFirstContribution.mockResolvedValueOnce({ ...PROVIDER_ROW, amount: 100, refundedAmount: 0 });
+    queryRawLocked.mockResolvedValueOnce([{ id: "c-1", totalChargedAmount: null, amount: 100, refundedAmount: 20 }]);
+    const result = await apply({ providerRefundId: "re_after_race", amountRefundedCents: 1500 });
+    expect(result).toBe("APPLIED");
+    expect(Number(updateContribution.mock.calls[0][0].data.refundedAmount)).toBe(35); // 20 (locked) + 15, NOT 0 (stale) + 15
   });
 
   it("a pending (not-yet-succeeded) refund status does not move money — the row stays untouched until it actually succeeds", async () => {
