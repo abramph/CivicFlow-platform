@@ -202,7 +202,7 @@ export function UsersAndRolesManager({
   return (
     <div className="space-y-6">
       {canManage ? (
-        <form className="space-y-5" onSubmit={handleInvite}>
+        <form className="space-y-5" method="post" onSubmit={handleInvite}>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <label className="space-y-2 text-sm font-medium text-slate-900">
               <span>Display name</span>
