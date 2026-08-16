@@ -56,6 +56,11 @@ export default function DashboardScreen() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const unreadCount = useUnreadConversationCount(selectedOrganizationId);
   const hasMemberIdentity = Boolean(selectedOrganization?.memberId);
+  // Most unions collect dues via employer payroll checkoff rather than
+  // member-initiated payment, so the payment-first layout the other
+  // verticals use (Balance tile, Make a Payment) doesn't fit -- Union
+  // members see Cases and Announcements foregrounded instead.
+  const isUnion = selectedOrganization?.capability?.primaryVertical === 'UNION';
   const pta = selectedOrganization?.pta ?? null;
   const hasPtaIdentity = Boolean(pta?.householdAdultId);
   // A pure PTA parent (household link, no OrgMember) reads announcements,
@@ -135,7 +140,7 @@ export default function DashboardScreen() {
 
       <LoadErrorBanner message={loadError} onRetry={load} />
 
-      {hasMemberIdentity ? (
+      {hasMemberIdentity && !isUnion ? (
         <ThemedView style={styles.summaryRow}>
           <Pressable
             style={styles.summaryTile}
@@ -147,6 +152,33 @@ export default function DashboardScreen() {
               <ThemedText type="small" themeColor="textSecondary">Balance</ThemedText>
               <ThemedText type="subtitle">{dues ? formatCurrency(dues.outstandingBalance) : '—'}</ThemedText>
               {dues?.isDelinquent ? <ThemedText type="small" style={styles.delinquent}>Past due</ThemedText> : null}
+            </ThemedView>
+          </Pressable>
+          <Pressable
+            style={styles.summaryTile}
+            onPress={() => router.push('/inbox')}
+            accessibilityRole="button"
+            accessibilityLabel={`Unread messages, ${unreadCount}`}
+          >
+            <ThemedView type="backgroundElement" style={styles.card}>
+              <ThemedText type="small" themeColor="textSecondary">Unread Messages</ThemedText>
+              <ThemedText type="subtitle">{unreadCount}</ThemedText>
+            </ThemedView>
+          </Pressable>
+        </ThemedView>
+      ) : null}
+
+      {hasMemberIdentity && isUnion ? (
+        <ThemedView style={styles.summaryRow}>
+          <Pressable
+            style={styles.summaryTile}
+            onPress={() => WebBrowser.openBrowserAsync(`${API_BASE_URL}/m/union/cases`)}
+            accessibilityRole="button"
+            accessibilityLabel="My Cases"
+          >
+            <ThemedView type="backgroundElement" style={styles.card}>
+              <ThemedText type="small" themeColor="textSecondary">Cases</ThemedText>
+              <ThemedText type="subtitle">My Cases</ThemedText>
             </ThemedView>
           </Pressable>
           <Pressable
@@ -256,7 +288,7 @@ export default function DashboardScreen() {
 
       <ThemedText type="smallBold" style={styles.sectionLabel}>Quick Actions</ThemedText>
       <ThemedView style={styles.quickActionsRow}>
-        {hasMemberIdentity ? (
+        {hasMemberIdentity && !isUnion ? (
           <Pressable style={styles.actionButton} onPress={() => router.push('/make-payment')} accessibilityRole="button" accessibilityLabel="Make a payment">
             <ThemedText style={styles.actionButtonText}>Make a Payment</ThemedText>
           </Pressable>
