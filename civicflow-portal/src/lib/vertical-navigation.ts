@@ -43,6 +43,29 @@ function sharedNavigation(vertical: "COMMUNITY" | "UNION" | "HOA" | "CHURCH"): N
   const communicationsLabel = vertical === "HOA" ? "Announcements" : "Communications";
   const usersLabel = vertical === "UNION" ? "Officers" : vertical === "HOA" ? "Board" : "Users & Roles";
 
+  // UNION-WEB-DASH: split out so their relative ORDER (not their contents)
+  // can differ by vertical below, without duplicating any item definition.
+  const financeCluster = (): NavItem[] => [
+    { href: "/contributions", label: "Contributions" },
+    // Church does not collect dues -- giving is voluntary (Fund/
+    // ContributionProgram), never a fixed obligation, so these three
+    // dues-specific nav items would only ever dead-end for a Church org.
+    // Real access control for a HYBRID church that genuinely wants fixed
+    // dues still lives at the route/permission layer; this conditional only
+    // keeps a Church admin from seeing a nav link to an empty dues UI.
+    ...(vertical === "CHURCH" ? [] : [{ href: "/dues", label: duesLabel }]),
+    ...(vertical === "CHURCH" ? [] : [{ href: "/dues/reminders", label: "Dues Campaigns" }]),
+    { href: "/payment-reports", label: "Payment Reports" },
+  ];
+  const activityCluster = (): NavItem[] => [
+    { href: "/campaigns", label: campaignsLabel },
+    { href: "/events", label: "Events" },
+    { href: "/meetings", label: "Meetings", permission: "meetings:read" },
+    { href: "/communications", label: communicationsLabel, permission: "communications:read" },
+    { href: "/communications/campaigns", label: "Communication Campaigns", permission: "communications:read" },
+    { href: "/attendance", label: "Attendance", permission: "attendance:read" },
+  ];
+
   return [
     { href: "/dashboard", label: dashboardLabel },
     { href: "/inbox", label: "Inbox", permission: "messages:read" },
@@ -71,22 +94,14 @@ function sharedNavigation(vertical: "COMMUNITY" | "UNION" | "HOA" | "CHURCH"): N
     // this conditional only prevents a dead-end nav link on organizations
     // that could never see the page.
     ...(vertical === "UNION" ? [{ href: "/union/cases", label: "Case Center", permission: "union:cases:read" as const }] : []),
-    { href: "/contributions", label: "Contributions" },
-    // Church does not collect dues -- giving is voluntary (Fund/
-    // ContributionProgram), never a fixed obligation, so these three
-    // dues-specific nav items would only ever dead-end for a Church org.
-    // Real access control for a HYBRID church that genuinely wants fixed
-    // dues still lives at the route/permission layer; this conditional only
-    // keeps a Church admin from seeing a nav link to an empty dues UI.
-    ...(vertical === "CHURCH" ? [] : [{ href: "/dues", label: duesLabel }]),
-    ...(vertical === "CHURCH" ? [] : [{ href: "/dues/reminders", label: "Dues Campaigns" }]),
-    { href: "/payment-reports", label: "Payment Reports" },
-    { href: "/campaigns", label: campaignsLabel },
-    { href: "/events", label: "Events" },
-    { href: "/meetings", label: "Meetings", permission: "meetings:read" },
-    { href: "/communications", label: communicationsLabel, permission: "communications:read" },
-    { href: "/communications/campaigns", label: "Communication Campaigns", permission: "communications:read" },
-    { href: "/attendance", label: "Attendance", permission: "attendance:read" },
+    // UNION-WEB-DASH: Union's primary areas (membership, case center,
+    // activity/communications) come before financial administration in the
+    // nav, same as the dashboard -- most Union members pay dues via
+    // employer payroll checkoff, not Unestra, so dues-cluster nav items are
+    // secondary here. Every other vertical keeps the existing order
+    // (finance cluster first) — the two clusters below are the exact same
+    // item objects either way, only their relative order changes.
+    ...(vertical === "UNION" ? [...activityCluster(), ...financeCluster()] : [...financeCluster(), ...activityCluster()]),
     { href: "/expenditures", label: "Expenditures" },
     // CORE-GIVE-A: module setup — appears only for holders of the new giving
     // capabilities (FINANCE+); the module itself is default-off per org.

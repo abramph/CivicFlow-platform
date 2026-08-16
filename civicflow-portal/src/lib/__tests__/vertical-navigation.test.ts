@@ -23,6 +23,25 @@ describe("getNavigationProfile", () => {
     expect(caseCenterItem?.permission).toBe("union:cases:read");
   });
 
+  // UNION-WEB-DASH: Union's primary areas (membership, case center,
+  // activity/communications) must come before financial administration in
+  // the nav -- most Union members pay dues via employer payroll checkoff,
+  // not Unestra. Community keeps its existing order (finance cluster
+  // first) unchanged -- same item set, just a different relative order.
+  it("orders Union's nav with Events/Communications before the dues/finance cluster, unlike Community", () => {
+    const union = getNavigationProfile("UNION").map((n) => n.href);
+    const unionEventsIndex = union.indexOf("/events");
+    const unionDuesIndex = union.indexOf("/dues");
+    expect(unionEventsIndex).toBeGreaterThan(-1);
+    expect(unionDuesIndex).toBeGreaterThan(-1);
+    expect(unionEventsIndex).toBeLessThan(unionDuesIndex);
+
+    const community = getNavigationProfile("COMMUNITY").map((n) => n.href);
+    const communityEventsIndex = community.indexOf("/events");
+    const communityDuesIndex = community.indexOf("/dues");
+    expect(communityEventsIndex).toBeGreaterThan(communityDuesIndex);
+  });
+
   it("HOA shares Community's routes plus three additions: /hoa/properties (PR #43), /hoa/violations (HOA Violations MVP), and /hoa/architectural-requests", () => {
     const community = getNavigationProfile("COMMUNITY").map((n) => n.href).sort();
     const hoa = getNavigationProfile("HOA").map((n) => n.href).sort();

@@ -221,6 +221,13 @@ const QUICK_ACTIONS: Record<OrganizationVertical, QuickAction[]> = {
     { href: "/labs/pta/events", label: "Create Event" },
     { href: "/labs/pta/dues", label: "Create Membership Dues" },
   ],
+  // UNION-WEB-DASH: Case Center/Review New Requests are deliberately NOT
+  // listed here even though they're Union's primary actions -- this array
+  // is vertical-generic with no notion of the caller's capabilities, and
+  // "do not render an action the user cannot execute" (a FINANCE-role
+  // viewer holds zero union:cases:* permissions, see rbac.ts) means they
+  // must be permission-gated. They're appended in the dashboard page
+  // itself, where can() is available, instead.
   UNION: [
     { href: "/members/new", label: "Invite Member" },
     { href: "/settings/organization", label: "Upload Contract" },
@@ -269,10 +276,11 @@ const HELP_TOPICS: Record<OrganizationVertical, HelpTopic[]> = {
   ],
   UNION: [
     { title: "Add members and officers", description: "Bring your roster into Unestra.", href: "/members" },
-    { title: "Track dues", description: "Set up and collect union dues.", href: "/dues" },
+    { title: "Handle representation cases", description: "Triage, assign, and track member cases in the Case Center.", href: "/union/cases" },
     { title: "Manage meetings", description: "Schedule membership meetings and record minutes.", href: "/meetings" },
-    { title: "Share contract documents", description: "Attach contract and governance documents to your organization profile.", href: "/settings/organization" },
     { title: "Communicate with members", description: "Send announcements by email.", href: "/communications" },
+    { title: "Share contract documents", description: "Attach contract and governance documents to your organization profile.", href: "/settings/organization" },
+    { title: "Track dues", description: "Set up and collect union dues, if collected through Unestra.", href: "/dues" },
   ],
   HOA: [
     { title: "Add residents or members", description: "Bring your resident roster into Unestra.", href: "/members" },

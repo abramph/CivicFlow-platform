@@ -111,6 +111,7 @@ export default async function DuesSettingsPage() {
             requireReasonForFinancialEdits: settings.requireReasonForFinancialEdits,
             allowFinanceCorrections: settings.allowFinanceCorrections,
             lockReceiptsAfterIssue: settings.lockReceiptsAfterIssue,
+            duesCollectionMethod: settings.duesCollectionMethod,
           }}
           canWrite={canOrgSettingsWrite}
         />

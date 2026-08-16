@@ -323,6 +323,31 @@ enum DuesStartRule {
   MANUAL
 }
 
+/// UNION-WEB-DASH: how an organization's members actually pay dues in the
+/// real world. Presentation-only — never drives a payroll integration.
+/// Most relevant to Union (employer payroll checkoff is common there), but
+/// left generic since any vertical could conceivably collect dues outside
+/// Unestra.
+enum DuesCollectionMethod {
+  /// Dues are deducted from members' paychecks by their employer and
+  /// remitted to the union in bulk — Unestra never collects payment
+  /// directly from these members. The UI must not show "Pay Dues" as a
+  /// primary CTA or imply an owed balance from this alone.
+  PAYROLL_DEDUCTION
+  /// Members pay dues directly through Unestra (Stripe or recorded manual
+  /// payments) — the existing dues/payment UI applies as-is.
+  UNESTRA_DIRECT
+  /// Dues are collected entirely outside Unestra by some other means
+  /// (e.g. a separate billing system) — Unestra is not the source of
+  /// truth for payment status.
+  EXTERNAL
+  /// A mix of the above across the membership — the UI shows whatever is
+  /// actually true per member/record rather than a single blanket message.
+  MIXED
+  /// This organization does not collect dues at all.
+  NONE
+}
+
 enum DuesAdjustmentType {
   WAIVER
   DISCOUNT
@@ -1804,6 +1829,13 @@ model OrgSettings {
   /// the mode can be turned on (§30: never assume Stripe's real rate).
   processingCostCoveragePercentBps Int                        @default(0)
   processingCostCoverageFixedCents Int                        @default(0)
+  /// UNION-WEB-DASH: presentation-only signal for how this organization's
+  /// members actually pay dues in the real world — NOT a payroll
+  /// integration (see docs on the dues dashboard section). Prevents the UI
+  /// from implying "you owe Unestra money" when dues are collected outside
+  /// Unestra entirely (most commonly PAYROLL_DEDUCTION for unions). Null
+  /// means unconfigured; the UI must not guess a value on the org's behalf.
+  duesCollectionMethod             DuesCollectionMethod?
   updatedAt                        DateTime                   @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)

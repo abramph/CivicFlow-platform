@@ -18,6 +18,10 @@ const updateDuesSettingsSchema = z.object({
   requireReasonForFinancialEdits: z.boolean(),
   allowFinanceCorrections: z.boolean(),
   lockReceiptsAfterIssue: z.boolean(),
+  // UNION-WEB-DASH: presentation-only -- null means "unconfigured," never
+  // guessed on the org's behalf (see schema.prisma's DuesCollectionMethod
+  // doc comment).
+  duesCollectionMethod: z.union([z.enum(["PAYROLL_DEDUCTION", "UNESTRA_DIRECT", "EXTERNAL", "MIXED", "NONE"]), z.null()]).optional(),
 });
 
 export async function GET() {
