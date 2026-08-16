@@ -163,6 +163,19 @@ export const LAB_FEATURES = {
     helpText: "Visible only to billing-exempt internal organizations (APH Technologies) at this stage.",
     riskClassification: "medium",
   },
+  memberIntake: {
+    key: "memberIntake",
+    name: "Member Intake & Profile Update",
+    description:
+      "QR code/link-based public forms that let a person join or update their own information without installing the app -- Unestra intelligently determines whether the submission is a new person, an update to an existing member (after identity verification), or a possible duplicate requiring admin review (see docs on the identity-matching engine, src/lib/member-intake/matching.ts). A shared platform capability, not forked per vertical. Staged out the same way mobileAdmin was: INTERNAL (APH-only) -> ALPHA/BETA/PREVIEW pilots -> GENERAL_AVAILABILITY, advanced by registry/enrollment changes only, never a new binary. Public submission routes never rely on this Labs gate for authorization by themselves -- it only controls whether an organization's ADMIN UI can create/publish forms at all; real RBAC (memberIntake:* permissions) is the actual security boundary underneath.",
+    lifecycle: "INTERNAL",
+    requiresEntitlement: false,
+    requiresEnrollment: true,
+    internalOnly: true,
+    metered: false,
+    helpText: "Visible only to billing-exempt internal organizations (APH Technologies) at this stage.",
+    riskClassification: "high",
+  },
   // RETIRED, not deleted (PR #40 — PTA/PTO graduation from Labs to a
   // first-class vertical; see docs/pta-access-architecture.md and
   // docs/labs-feature-lifecycle.md). Core PTA access is now gated

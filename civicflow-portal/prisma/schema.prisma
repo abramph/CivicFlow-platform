@@ -701,6 +701,8 @@ model Organization {
   attachments                 Attachment[]
   memberInvites               MemberInvite[]
   ptaHouseholdAdultInvites    PtaHouseholdAdultInvite[]
+  memberIntakeForms           MemberIntakeForm[]
+  memberIntakeSubmissions     MemberIntakeSubmission[]
   mobileDeviceTokens          MobileDeviceToken[]
   paymentReports              PaymentReport[]
   paymentLinkOfflineReports   PaymentLinkOfflineReport[]
@@ -848,6 +850,8 @@ model User {
   memberProfiles                    OrgMember[]                        @relation("OrgMemberLogin")
   sentMemberInvites                 MemberInvite[]                     @relation("MemberInviteCreatedBy")
   sentPtaHouseholdAdultInvites      PtaHouseholdAdultInvite[]          @relation("PtaHouseholdAdultInviteCreatedBy")
+  memberIntakeFormsCreated          MemberIntakeForm[]                 @relation("MemberIntakeFormCreatedBy")
+  memberIntakeSubmissionsReviewed   MemberIntakeSubmission[]           @relation("MemberIntakeSubmissionReviewedBy")
   ptaOfficerAssignmentsCreated      PtaOfficerAssignment[]             @relation("PtaOfficerAssignmentCreatedBy")
   meetingMotionsCreated             MeetingMotion[]                    @relation("MeetingMotionCreatedBy")
   meetingActionItemsCreated         MeetingActionItem[]                @relation("MeetingActionItemCreatedBy")
@@ -1254,6 +1258,8 @@ model OrgMember {
   attendanceRecords              AttendanceRecord[]
   timelineEvents                 MemberTimelineEvent[]
   invites                        MemberInvite[]
+  matchedIntakeSubmissions       MemberIntakeSubmission[] @relation("MemberIntakeMatched")
+  createdViaIntakeSubmissions    MemberIntakeSubmission[] @relation("MemberIntakeCreated")
   paymentReports                 PaymentReport[]
   smsMessages                    SmsMessage[]
   whatsappMessages               WhatsAppMessage[]
@@ -3979,6 +3985,298 @@ model MemberInvite {
 
   @@index([organizationId])
   @@index([memberId])
+  @@index([expiresAt])
+}
+
+// ── MEMBER-QR-A: Member Intake & Profile Update ────────────────────────────
+// A shared platform capability (never forked per vertical): an admin builds
+// a configurable public form, generates a QR code/link for it, and an
+// unauthenticated person can submit info that either creates a new member,
+// updates an existing one (after identity verification), or is routed to
+// admin review as a possible duplicate. See docs on the identity-matching
+// engine in src/lib/member-intake/matching.ts for the non-negotiable rule:
+// never match on name alone, never auto-apply a change without either a
+// confident match + verification, or explicit admin approval.
+
+enum MemberIntakeFormPurpose {
+  NEW_MEMBER
+  PROFILE_UPDATE
+  NEW_OR_UPDATE
+  CONTACT_UPDATE
+  HOUSEHOLD_UPDATE
+  VISITOR_CONNECT
+  CUSTOM
+}
+
+enum MemberIntakeFormStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+/// REVIEW (default/safe): every possible-duplicate or new-member submission
+/// is routed to admin review regardless of confidence. AUTO_LINK_CONFIDENT:
+/// a CONFIDENT_MATCH (see MatchResult in matching.ts) may auto-link without
+/// review, but POSSIBLE_MATCH/MULTIPLE_MATCHES always still go to review --
+/// this setting never weakens the confidence bar itself, only whether a
+/// confident match still needs a human to look at it.
+enum MemberIntakeDuplicateMode {
+  REVIEW
+  AUTO_LINK_CONFIDENT
+}
+
+enum MemberIntakeFieldType {
+  TEXT
+  TEXTAREA
+  EMAIL
+  PHONE
+  ADDRESS
+  DATE
+  SELECT
+  MULTISELECT
+  CHECKBOX
+  RADIO
+  BOOLEAN
+  NUMBER
+}
+
+/// MEMBER: maps to a real OrgMember column (targetField names it).
+/// CUSTOM: stored only in the submission's fieldValues JSON and, once
+/// applied, is not written to any OrgMember column -- there is no
+/// dynamic-custom-field system on OrgMember itself (deliberate: this
+/// program does not introduce one). Custom answers stay retrievable from
+/// the submission record and are surfaced in review/reporting, not lost.
+enum MemberIntakeTargetEntity {
+  MEMBER
+  CUSTOM
+}
+
+/// Drives what a form's requireReviewForSensitiveUpdates policy actually
+/// gates. LOW: safe to auto-apply per org policy (e.g. preferred name,
+/// secondary phone). MODERATE: address, primary phone, alternate email.
+/// HIGH: primary email, legal name, date of birth, member identifier,
+/// household relationship, role/status, membership type, anything with
+/// financial/RBAC implications -- HIGH fields are never auto-applied
+/// regardless of org policy; they always require admin approval. See
+/// src/lib/member-intake/sensitivity.ts for the authoritative field list.
+enum MemberIntakeFieldSensitivity {
+  LOW
+  MODERATE
+  HIGH
+}
+
+enum MemberIntakeSubmissionStatus {
+  SUBMITTED
+  MATCH_PENDING
+  VERIFICATION_REQUIRED
+  REVIEW_REQUIRED
+  APPROVED
+  APPLIED
+  REJECTED
+  DUPLICATE
+  EXPIRED
+}
+
+enum MemberIntakeVerificationStatus {
+  NOT_REQUIRED
+  PENDING
+  VERIFIED
+  FAILED
+}
+
+enum MemberIntakeVerificationChannel {
+  EMAIL
+  SMS
+}
+
+model MemberIntakeForm {
+  id                                String                    @id @default(cuid())
+  organizationId                    String
+  name                              String
+  /// Public, globally-unique, cryptographically strong -- the URL is
+  /// /f/{publicToken}, deliberately with no organizationId in the path (see
+  /// resolvePublicIntakeForm() in src/lib/member-intake/forms.ts, which
+  /// mirrors public-giving.ts's single-gate-function, identical-404
+  /// no-enumeration discipline). Deliberately NOT @default(cuid()) -- that
+  /// generator is the same one used for ordinary internal primary keys
+  /// throughout this schema, not designed to resist guessing. Always
+  /// generated explicitly via generateIntakeToken() (crypto.randomBytes) in
+  /// application code -- see createIntakeForm()/regenerateIntakeFormToken().
+  publicToken                       String                    @unique
+  /// Bump to instantly invalidate every previously issued QR/link for this
+  /// form without a denylist -- same "regenerate = bump an integer" idiom
+  /// as AttendanceSession's tokenVersion (src/lib/attendance-token.ts).
+  tokenVersion                      Int                       @default(1)
+  purpose                           MemberIntakeFormPurpose
+  status                            MemberIntakeFormStatus    @default(DRAFT)
+  title                             String
+  description                       String?
+  successMessage                    String?
+  /// Default true: an existing-member match is never auto-applied without
+  /// verifying the submitter actually controls a trusted channel already on
+  /// file for that member (see verification.ts). Turning this off is an
+  /// explicit, audited organization choice, never the default.
+  requireVerificationForExisting    Boolean                   @default(true)
+  /// Default false: creating a brand-new member from an unauthenticated
+  /// public submission is opt-in per form, never silent-by-default.
+  autoCreateNewMember               Boolean                   @default(false)
+  /// Default false: even a verified existing-member update goes to review
+  /// until an org explicitly opts a form into auto-applying LOW/MODERATE
+  /// (never HIGH -- see MemberIntakeFieldSensitivity) changes.
+  autoApplySafeUpdates              Boolean                   @default(false)
+  requireReviewForSensitiveUpdates  Boolean                   @default(true)
+  duplicateHandlingMode             MemberIntakeDuplicateMode @default(REVIEW)
+  expiresAt                         DateTime?
+  createdByUserId                   String?
+  createdAt                         DateTime                  @default(now())
+  updatedAt                         DateTime                  @updatedAt
+  archivedAt                        DateTime?
+
+  organization Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    User?                    @relation("MemberIntakeFormCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  fields       MemberIntakeFormField[]
+  sources      MemberIntakeFormSource[]
+  submissions  MemberIntakeSubmission[]
+
+  @@index([organizationId])
+  @@index([status])
+}
+
+model MemberIntakeFormField {
+  id            String                        @id @default(cuid())
+  formId        String
+  fieldKey      String
+  label         String
+  fieldType     MemberIntakeFieldType
+  required      Boolean                       @default(false)
+  order         Int                           @default(0)
+  placeholder   String?
+  helpText      String?
+  /// For SELECT/MULTISELECT/RADIO. Empty for every other fieldType.
+  options       String[]
+  targetEntity  MemberIntakeTargetEntity
+  /// Required (and must name a real, allow-listed OrgMember column -- see
+  /// ALLOWED_MEMBER_TARGET_FIELDS in forms.ts) when targetEntity is MEMBER;
+  /// null when CUSTOM. Never resolved from client input -- always validated
+  /// server-side against the allow-list at field-creation time, so a
+  /// tampered submission can never redirect a value onto an arbitrary
+  /// column (see §25/§40's explicit "never trust target field mappings
+  /// from browser").
+  targetField   String?
+  sensitivity   MemberIntakeFieldSensitivity  @default(LOW)
+  isCustomField Boolean                       @default(false)
+  createdAt     DateTime                      @default(now())
+  updatedAt     DateTime                      @updatedAt
+
+  form MemberIntakeForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+
+  @@unique([formId, fieldKey])
+  @@index([formId])
+}
+
+/// QR "campaigns" -- multiple attributed entry points into the same
+/// underlying form (e.g. "Sunday Service" vs. "Fall Open House"), each with
+/// its own QR/link so submissions can be attributed without trusting a
+/// client-supplied source id (resolved server-side from `token`, same
+/// discipline as the form's own publicToken).
+model MemberIntakeFormSource {
+  id         String    @id @default(cuid())
+  formId     String
+  name       String
+  /// Same non-cuid-default reasoning as MemberIntakeForm.publicToken above.
+  token      String    @unique
+  active     Boolean   @default(true)
+  createdAt  DateTime  @default(now())
+  archivedAt DateTime?
+
+  form        MemberIntakeForm         @relation(fields: [formId], references: [id], onDelete: Cascade)
+  submissions MemberIntakeSubmission[]
+
+  @@index([formId])
+}
+
+model MemberIntakeSubmission {
+  id                 String                          @id @default(cuid())
+  organizationId     String
+  formId             String
+  sourceId           String?
+  status             MemberIntakeSubmissionStatus    @default(SUBMITTED)
+  submittedAt        DateTime                        @default(now())
+  /// Hashed, never raw -- see hashSubmitterIp() in submissions.ts. Privacy-
+  /// safe rate-limiting/abuse-signal use only, never displayed to staff.
+  submittedIpHash    String?
+  userAgent          String?
+  /// { [fieldKey]: string | string[] | boolean | number } -- validated
+  /// against the form's own MemberIntakeFormField definitions server-side
+  /// before storage; never trusted as pre-validated from the client.
+  fieldValues        Json
+  /// Set only for CONFIDENT_MATCH (and AUTO_LINK_CONFIDENT/verified
+  /// submissions that go on to apply) -- the one member this submission is
+  /// confidently about. Never set for POSSIBLE_MATCH/MULTIPLE_MATCHES, where
+  /// candidateMemberIds below holds every option instead; an admin decision
+  /// is what turns a candidate into this field (see review-queue "link to
+  /// existing" action, milestone G).
+  matchedMemberId    String?
+  /// Populated only for POSSIBLE_MATCH/MULTIPLE_MATCHES -- every candidate
+  /// member id an admin should be shown in the review queue. Always empty
+  /// for NO_MATCH/CONFIDENT_MATCH (matchedMemberId is the single source of
+  /// truth there instead). Never used to auto-select between candidates.
+  candidateMemberIds String[]                        @default([])
+  /// 0-100. See matching.ts's MatchResult -- NO_MATCH has no confidence
+  /// value (null); CONFIDENT_MATCH/POSSIBLE_MATCH/MULTIPLE_MATCHES always
+  /// carry one, informing REVIEW-queue triage even though only
+  /// CONFIDENT_MATCH can ever be eligible for auto-link.
+  matchConfidence    Int?
+  /// Free-text description of which signal(s) matched (e.g. "exact_email",
+  /// "phone+name"), for admin-review transparency -- never itself a
+  /// security decision, only an explanation of one already made.
+  matchMethod        String?
+  verificationStatus MemberIntakeVerificationStatus @default(NOT_REQUIRED)
+  reviewedByUserId   String?
+  reviewedAt         DateTime?
+  createdMemberId    String?
+  appliedAt          DateTime?
+  rejectedAt         DateTime?
+  rejectionReason    String?
+  createdAt          DateTime                        @default(now())
+  updatedAt           DateTime                        @updatedAt
+
+  organization    Organization                    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  form            MemberIntakeForm                @relation(fields: [formId], references: [id], onDelete: Restrict)
+  source          MemberIntakeFormSource?          @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  matchedMember   OrgMember?                       @relation("MemberIntakeMatched", fields: [matchedMemberId], references: [id], onDelete: SetNull)
+  createdMember   OrgMember?                       @relation("MemberIntakeCreated", fields: [createdMemberId], references: [id], onDelete: SetNull)
+  reviewedBy      User?                            @relation("MemberIntakeSubmissionReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  verificationTokens MemberIntakeVerificationToken[]
+
+  @@index([organizationId])
+  @@index([formId])
+  @@index([sourceId])
+  @@index([status])
+  @@index([matchedMemberId])
+}
+
+/// Anonymous-submitter-keyed OTP -- deliberately NOT MfaChallengeToken
+/// (which is userId-keyed; a public intake submitter has no User row yet).
+/// Same generate/hash/expire idiom as src/lib/sms-otp.ts. `destination` is
+/// always the TRUSTED value already on file for the matched member -- never
+/// the newly-submitted replacement value, so a submission that changes an
+/// email can never use the new email to authorize its own change (§15's
+/// explicit rule).
+model MemberIntakeVerificationToken {
+  id           String                           @id @default(cuid())
+  submissionId String
+  channel      MemberIntakeVerificationChannel
+  destination  String
+  codeHash     String
+  expiresAt    DateTime
+  consumedAt   DateTime?
+  createdAt    DateTime                         @default(now())
+
+  submission MemberIntakeSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@index([submissionId])
   @@index([expiresAt])
 }
 

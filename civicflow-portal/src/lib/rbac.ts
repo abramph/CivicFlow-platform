@@ -347,6 +347,22 @@ export const PERMISSIONS = {
   UNION_CASES_NOTES_INTERNAL:   "union:cases:notes:internal",
   UNION_CASES_DEADLINES_MANAGE: "union:cases:deadlines:manage",
   UNION_CASES_CLOSE:            "union:cases:close",
+
+  // Member Intake & Profile Update (MEMBER-QR-A) — a shared platform
+  // capability (QR/link-based public forms that create or update members),
+  // never forked per vertical. view/review are the day-to-day operational
+  // tier (mirrors STAFF's MEMBERS_WRITE-level authority); manage/publish/
+  // export are reserved for ORG_ADMIN+ since they define what PII a
+  // public, unauthenticated surface collects and control bulk export of
+  // freshly-submitted PII — a materially bigger blast radius than
+  // reviewing one submission at a time. Deliberately NO grant to FINANCE:
+  // membership intake is an ops/membership function, not a financial one,
+  // same reasoning as FINANCE holding zero UNION_CASES_* permission above.
+  MEMBER_INTAKE_VIEW:    "memberIntake:view",
+  MEMBER_INTAKE_MANAGE:  "memberIntake:manage",
+  MEMBER_INTAKE_PUBLISH: "memberIntake:publish",
+  MEMBER_INTAKE_REVIEW:  "memberIntake:review",
+  MEMBER_INTAKE_EXPORT:  "memberIntake:export",
 } as const;
 
 // Parent/household-adult self-service (view own household, RSVP, pay own
@@ -493,6 +509,11 @@ const ORG_OWNER_PERMISSIONS: Permission[] = [
   PERMISSIONS.UNION_CASES_NOTES_INTERNAL,
   PERMISSIONS.UNION_CASES_DEADLINES_MANAGE,
   PERMISSIONS.UNION_CASES_CLOSE,
+  PERMISSIONS.MEMBER_INTAKE_VIEW,
+  PERMISSIONS.MEMBER_INTAKE_MANAGE,
+  PERMISSIONS.MEMBER_INTAKE_PUBLISH,
+  PERMISSIONS.MEMBER_INTAKE_REVIEW,
+  PERMISSIONS.MEMBER_INTAKE_EXPORT,
 ];
 
 const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
@@ -623,6 +644,11 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.UNION_CASES_NOTES_INTERNAL,
     PERMISSIONS.UNION_CASES_DEADLINES_MANAGE,
     PERMISSIONS.UNION_CASES_CLOSE,
+    PERMISSIONS.MEMBER_INTAKE_VIEW,
+    PERMISSIONS.MEMBER_INTAKE_MANAGE,
+    PERMISSIONS.MEMBER_INTAKE_PUBLISH,
+    PERMISSIONS.MEMBER_INTAKE_REVIEW,
+    PERMISSIONS.MEMBER_INTAKE_EXPORT,
   ],
 
   // Maps naturally onto "Treasurer" via OrgRolePermissionSet if an org wants
@@ -790,6 +816,13 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     // terminal, record-closing action, reserved for ORG_OWNER/ORG_ADMIN
     // (board-level authority), same reasoning as HOA_VIOLATIONS_RESOLVE and
     // HOA_ARCHITECTURAL_REQUESTS_DECIDE being withheld above.
+    // Member Intake -- day-to-day review tier only (view submissions,
+    // approve/reject/link individual ones). Deliberately NOT MANAGE/
+    // PUBLISH/EXPORT -- defining what a public form collects, publishing
+    // it, and bulk-exporting freshly-submitted PII stay ORG_ADMIN+, same
+    // authority-tier reasoning as UNION_CASES_CLOSE just above.
+    PERMISSIONS.MEMBER_INTAKE_VIEW,
+    PERMISSIONS.MEMBER_INTAKE_REVIEW,
   ],
 
   // Maps onto "General Member" (an officer viewing without editing rights) —
@@ -822,6 +855,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.HOA_ARCHITECTURAL_REQUESTS_READ,
     PERMISSIONS.IMPORTS_READ,
     PERMISSIONS.UNION_CASES_READ,
+    PERMISSIONS.MEMBER_INTAKE_VIEW,
   ],
 
   // Members never get staff permissions — a MEMBER role must never see other
