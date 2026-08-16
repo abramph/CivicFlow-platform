@@ -12,10 +12,11 @@ import { DismissSetupBannerButton } from "@/components/app/DismissSetupBannerBut
 import { getVerticalTerminology, getQuickActions, getHelpTopics, getEmptyStateCopy } from "@/lib/vertical-terminology";
 import { getFinanceDashboard } from "@/lib/giving/finance-dashboard";
 import { getLandingRoute } from "@/lib/vertical-navigation";
+import { getUnionCaseDashboardCounts } from "@/lib/union/cases";
 import type { OrganizationVertical } from "@prisma/client";
 import {
   Users, Calendar, DollarSign, TrendingDown, AlertCircle, UserCheck,
-  Target, Receipt, ChevronRight, Mail, Shield, FileText, Home,
+  Target, Receipt, ChevronRight, Mail, Shield, FileText, Home, Scale,
 } from "lucide-react";
 
 /** Community and Church show the full widget set (both reuse the exact same
@@ -28,14 +29,33 @@ function dashboardWidgets(vertical: OrganizationVertical) {
   const showFundraisingAndGovernance = vertical === "COMMUNITY" || vertical === "CHURCH";
   return {
     fundraising: showFundraisingAndGovernance,
-    governance: showFundraisingAndGovernance,
+    // UNION-WEB-DASH: Union gets a membership-status breakdown too (same
+    // underlying data every vertical already computes) even though it
+    // doesn't get campaign fundraising or payment-method breakdown.
+    governance: showFundraisingAndGovernance || vertical === "UNION",
     paymentMethodBreakdown: showFundraisingAndGovernance,
     // CHURCH-VERT-B: Church giving is voluntary -- a Delinquent/Past
     // Due/Outstanding-balance framing across the whole admin dashboard
     // contradicts "Church giving is not automatically a debt" just as much
     // for staff as it does for members (see the mobile Home reshape's same
-    // reasoning). These cards stay for the other dues-based verticals.
+    // reasoning). This still drives the setup banner's dues-vs-giving
+    // nudge for every vertical except Church (Union genuinely does use
+    // dues, just de-emphasized -- see duesSecondary below).
     duesFocused: vertical !== "CHURCH",
+    // UNION-WEB-DASH: where the five dues/delinquency stat cards render.
+    // Community/HOA keep them in the primary KPI grid (unchanged). Union
+    // members typically pay via employer payroll checkoff, not Unestra, so
+    // those cards move into their own secondary "Dues & Financial
+    // Administration" section instead of leading the dashboard. Church
+    // gets neither -- giving there is a separate, non-dues concept.
+    duesInTopGrid: vertical === "COMMUNITY" || vertical === "HOA",
+    duesSecondary: vertical === "UNION",
+    // UNION-WEB-DASH: Case Center summary -- Union's actual primary
+    // dashboard content (representation/grievance cases), reusing the same
+    // getUnionCaseDashboardCounts() the Case Center's own page already
+    // uses. Capability-gated separately at render time (union:cases:read),
+    // not just vertical.
+    unionCaseCenter: vertical === "UNION",
     // PR #43 -- HOA Property/Resident foundation widgets.
     hoaProperties: vertical === "HOA",
     // HOA Violations MVP.
@@ -183,8 +203,23 @@ export default async function DashboardPage() {
   // receive organizational contribution totals accidentally.
   const canSeeGivingSummary = can("contributions:summary:view");
   const canSeeGroups = can("groups:view");
+  // UNION-WEB-DASH: Case Center summary and financial-administration
+  // visibility are capability-gated independently of each other -- e.g. a
+  // FINANCE-role viewer deliberately holds zero union:cases:* permissions
+  // (see rbac.ts's own comment on the FINANCE bundle) and must never see
+  // case counts, while a STAFF-role steward holds case permissions but not
+  // necessarily dues:read.
+  const canSeeUnionCases = can("union:cases:read");
+  const canSeeUnionCaseManage = can("union:cases:manage");
+  const canSeeDues = can("dues:read");
   const widgets = dashboardWidgets(vertical);
-  const quickActionDefs = getQuickActions(vertical);
+  const quickActionDefs = [...getQuickActions(vertical)];
+  if (vertical === "UNION" && canSeeUnionCases) {
+    quickActionDefs.push({ href: "/union/cases", label: "Case Center" });
+  }
+  if (vertical === "UNION" && canSeeUnionCaseManage) {
+    quickActionDefs.push({ href: "/union/cases?bucket=unassigned", label: "Review New Requests" });
+  }
   const helpTopics = getHelpTopics(vertical);
 
   const now = new Date();
@@ -304,7 +339,7 @@ export default async function DashboardPage() {
     }),
     prisma.orgSettings.findUnique({
       where: { organizationId: orgId },
-      select: { openingBalanceCents: true, openingBalanceDate: true },
+      select: { openingBalanceCents: true, openingBalanceDate: true, duesCollectionMethod: true },
     }),
   ]);
 
@@ -381,6 +416,23 @@ export default async function DashboardPage() {
           }),
         ]);
         return { submittedCount, inReviewCount, changesRequestedCount, approvedThisPeriodCount, recentRequests };
+      })()
+    : null;
+
+  // UNION-WEB-DASH: Case Center summary counts, queried only for Union
+  // orgs whose viewer actually holds union:cases:read (a FINANCE-role
+  // viewer, for example, deliberately never triggers this query at all --
+  // see rbac.ts's own comment on why FINANCE holds no union:cases:*
+  // permission). Reuses the exact same getUnionCaseDashboardCounts() the
+  // Case Center's own page (/union/cases) already calls -- no new
+  // aggregation logic, no N+1, just the existing scoped count() queries.
+  const unionCaseCounts = vertical === "UNION" && canSeeUnionCases
+    ? await (async () => {
+        const viewerMember = await prisma.orgMember.findFirst({
+          where: { organizationId: orgId, userId: String(session?.userId || "") },
+          select: { id: true },
+        });
+        return getUnionCaseDashboardCounts(orgId, viewerMember?.id ?? "");
       })()
     : null;
 
@@ -477,15 +529,39 @@ export default async function DashboardPage() {
       {/* Stat Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard label={`Total ${terminology.memberPlural}`} value={memberCount}             subtext={`All ${terminology.memberPlural.toLowerCase()}`}        icon={Users}       color="emerald" href="/members" />
-        {widgets.duesFocused && <StatCard label={`Total ${terminology.duesLabel}`}    value={toCurrency(totalDuesCents)}    subtext="All time"     icon={DollarSign}  color="emerald" href="/dues" />}
+        {widgets.duesInTopGrid && <StatCard label={`Total ${terminology.duesLabel}`}    value={toCurrency(totalDuesCents)}    subtext="All time"     icon={DollarSign}  color="emerald" href="/dues" />}
         <StatCard label="Total Contributions"     value={toCurrency(totalContribCents)} subtext="All time"     icon={DollarSign}  color="sky"     href="/contributions" />
         {widgets.fundraising && <StatCard label="Campaign Contributions"  value={toCurrency(campaignCents)}     subtext="All time"     icon={Target}      color="emerald" href="/campaigns" />}
         <StatCard label="Event Revenue"           value={toCurrency(eventCents)}        subtext="All time"     icon={Calendar}    color="sky"     href="/events" />
         <StatCard label={`Current ${terminology.memberPlural}`} value={statusCounts["active"] ?? 0}   subtext="Active status" icon={UserCheck}  color="emerald" />
-        {widgets.duesFocused && <StatCard label="Delinquent"              value={delinquentCount}               subtext={`Behind on ${terminology.duesLabel.toLowerCase()}`} icon={AlertCircle} color="red"   href="/dues" />}
-        {widgets.duesFocused && <StatCard label="Past Due"                value={pastDueCount}                  subtext="Pending action" icon={AlertCircle} color="amber" href="/dues" />}
-        {widgets.duesFocused && <StatCard label={`${terminology.duesLabel} Outstanding`} value={toCurrency(outstandingCents)}  subtext="Unpaid charges" icon={DollarSign} color="amber" href="/dues" />}
-        {widgets.duesFocused && <StatCard label={`${terminology.duesLabel} Collected (30d)`} value={toCurrency(dues30dCents)}      subtext="Last 30 days"  icon={DollarSign}  color="emerald" href="/dues" />}
+        {/* UNION-WEB-DASH: Union's primary KPIs -- representation activity,
+            not payment collection. Never rendered for a viewer without
+            union:cases:read (e.g. FINANCE), same gate as the Case Center
+            section below. */}
+        {widgets.unionCaseCenter && unionCaseCounts && (
+          <StatCard
+            label="Open Cases"
+            value={unionCaseCounts.active + unionCaseCounts.pending}
+            subtext={`${unionCaseCounts.newUnassigned} new / unassigned`}
+            icon={Scale}
+            color="sky"
+            href="/union/cases"
+          />
+        )}
+        {widgets.unionCaseCenter && unionCaseCounts && (
+          <StatCard
+            label="Upcoming Deadlines"
+            value={unionCaseCounts.deadlinesApproaching}
+            subtext={unionCaseCounts.overdue > 0 ? `${unionCaseCounts.overdue} overdue` : "Due within 7 days"}
+            icon={AlertCircle}
+            color={unionCaseCounts.overdue > 0 ? "red" : "sky"}
+            href="/union/cases?bucket=deadlines-approaching"
+          />
+        )}
+        {widgets.duesInTopGrid && <StatCard label="Delinquent"              value={delinquentCount}               subtext={`Behind on ${terminology.duesLabel.toLowerCase()}`} icon={AlertCircle} color="red"   href="/dues" />}
+        {widgets.duesInTopGrid && <StatCard label="Past Due"                value={pastDueCount}                  subtext="Pending action" icon={AlertCircle} color="amber" href="/dues" />}
+        {widgets.duesInTopGrid && <StatCard label={`${terminology.duesLabel} Outstanding`} value={toCurrency(outstandingCents)}  subtext="Unpaid charges" icon={DollarSign} color="amber" href="/dues" />}
+        {widgets.duesInTopGrid && <StatCard label={`${terminology.duesLabel} Collected (30d)`} value={toCurrency(dues30dCents)}      subtext="Last 30 days"  icon={DollarSign}  color="emerald" href="/dues" />}
         {canSeeExpenditures && <StatCard label="Expenses (30d)"          value={toCurrency(exp30dCents)}       subtext="Last 30 days"  icon={TrendingDown} color="amber" href="/expenditures" />}
         {canSeeExpenditures && <StatCard label="Ledger Total"            value={toCurrency(ledgerCents)}       subtext="Income minus expenses" icon={DollarSign} color="sky" />}
         {canSeeExpenditures && <StatCard label="Expenditures (Month)"    value={toCurrency(expMonthCents)}     subtext="Current month" icon={Receipt}     color="red"     href="/expenditures" />}
@@ -499,7 +575,56 @@ export default async function DashboardPage() {
         {canSeeGroups && activeGroupsCount > 0 && <StatCard label="Active Groups" value={activeGroupsCount} subtext="Ministries, committees, chapters" icon={Users} color="sky" href="/groups" />}
       </div>
 
-      {/* Membership Governance — Community only; Union/HOA don't have a
+      {/* UNION-WEB-DASH: Case Center summary -- Union's actual primary
+          dashboard content, positioned right after the KPI row per the
+          Membership → Representation → Communication → Activity →
+          Administration → Finances priority order. Reuses the exact same
+          bucket counts /union/cases's own dashboard already computes. */}
+      {widgets.unionCaseCenter && canSeeUnionCases && unionCaseCounts && (
+        <div className="rounded-xl border-2 border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+              <Scale className="h-5 w-5 text-sky-600" />
+              Case Center
+            </h3>
+            <Link href="/union/cases" className="text-sm font-semibold text-emerald-700 hover:underline">
+              View Case Center →
+            </Link>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <Link href="/union/cases?bucket=unassigned" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-center hover:bg-amber-100">
+              <p className="text-3xl font-bold text-amber-700">{unionCaseCounts.newUnassigned}</p>
+              <p className="text-sm font-medium text-amber-600 mt-1">New / unassigned</p>
+            </Link>
+            <Link href="/union/cases?bucket=assigned-to-me" className="rounded-lg border border-sky-200 bg-sky-50 p-4 text-center hover:bg-sky-100">
+              <p className="text-3xl font-bold text-sky-700">{unionCaseCounts.assignedToMe}</p>
+              <p className="text-sm font-medium text-sky-600 mt-1">Assigned to me</p>
+            </Link>
+            <Link href="/union/cases?bucket=active" className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-center hover:bg-slate-100">
+              <p className="text-3xl font-bold text-slate-700">{unionCaseCounts.active}</p>
+              <p className="text-sm font-medium text-slate-600 mt-1">Active</p>
+            </Link>
+            <Link href="/union/cases?bucket=pending" className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-center hover:bg-slate-100">
+              <p className="text-3xl font-bold text-slate-700">{unionCaseCounts.pending}</p>
+              <p className="text-sm font-medium text-slate-600 mt-1">Pending</p>
+            </Link>
+            <Link href="/union/cases?bucket=deadlines-approaching" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-center hover:bg-amber-100">
+              <p className="text-3xl font-bold text-amber-700">{unionCaseCounts.deadlinesApproaching}</p>
+              <p className="text-sm font-medium text-amber-600 mt-1">Deadlines approaching</p>
+            </Link>
+            <Link href="/union/cases?bucket=overdue" className="rounded-lg border border-red-200 bg-red-50 p-4 text-center hover:bg-red-100">
+              <p className="text-3xl font-bold text-red-700">{unionCaseCounts.overdue}</p>
+              <p className="text-sm font-medium text-red-600 mt-1">Overdue</p>
+            </Link>
+            <Link href="/union/cases?bucket=recently-resolved" className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-center hover:bg-emerald-100">
+              <p className="text-3xl font-bold text-emerald-700">{unionCaseCounts.recentlyResolved}</p>
+              <p className="text-sm font-medium text-emerald-600 mt-1">Recently resolved</p>
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {/* Membership Governance — Community/Union; HOA doesn't have a
           distinct governance-status breakdown concept yet (no fake metrics). */}
       {widgets.governance && (
       <div className="rounded-xl border-2 border-slate-200 bg-white p-6 shadow-sm">
@@ -743,6 +868,52 @@ export default async function DashboardPage() {
           ))}
         </ul>
       </div>
+
+      {/* UNION-WEB-DASH: dues/financial administration, demoted to a
+          secondary section below Case Center/Communications/Events per
+          "Unestra Union is a membership and representation platform that
+          can also handle dues -- not a dues-collection application with
+          Union features attached." Never removed, never hidden from a
+          holder of dues:read -- just no longer the dashboard's centerpiece.
+          duesCollectionMethod is presentation-only (§11): it changes what
+          copy renders here, never what data exists. */}
+      {widgets.duesSecondary && canSeeDues && (
+        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h3 className="font-semibold text-slate-800 mb-3">Dues &amp; Financial Administration</h3>
+          {openingBalance?.duesCollectionMethod === "PAYROLL_DEDUCTION" ? (
+            <div className="rounded-lg bg-slate-50 px-4 py-3">
+              <p className="text-sm font-semibold text-slate-800">Dues Collection Method: Payroll Deduction</p>
+              <p className="mt-1 text-xs text-slate-600">
+                Members pay dues through employer payroll deduction, not through Unestra. Unestra does not
+                track individual payroll-deducted payment status for this organization.
+              </p>
+            </div>
+          ) : openingBalance?.duesCollectionMethod === "EXTERNAL" ? (
+            <div className="rounded-lg bg-slate-50 px-4 py-3">
+              <p className="text-sm font-semibold text-slate-800">Dues Collection Method: Collected Outside Unestra</p>
+              <p className="mt-1 text-xs text-slate-600">Unestra is not the source of truth for this organization&apos;s dues payment status.</p>
+            </div>
+          ) : openingBalance?.duesCollectionMethod === "NONE" ? (
+            <p className="text-sm text-slate-600">This organization does not collect dues.</p>
+          ) : (
+            <>
+              {openingBalance?.duesCollectionMethod === "MIXED" && (
+                <p className="mb-3 text-xs text-slate-600">Dues collection varies by member — some pay through Unestra, others through other means.</p>
+              )}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <StatCard label={`Total ${terminology.duesLabel}`} value={toCurrency(totalDuesCents)} subtext="All time" icon={DollarSign} color="emerald" href="/dues" />
+                <StatCard label="Delinquent" value={delinquentCount} subtext={`Behind on ${terminology.duesLabel.toLowerCase()}`} icon={AlertCircle} color="red" href="/dues" />
+                <StatCard label="Past Due" value={pastDueCount} subtext="Pending action" icon={AlertCircle} color="amber" href="/dues" />
+                <StatCard label={`${terminology.duesLabel} Outstanding`} value={toCurrency(outstandingCents)} subtext="Unpaid charges" icon={DollarSign} color="amber" href="/dues" />
+                <StatCard label={`${terminology.duesLabel} Collected (30d)`} value={toCurrency(dues30dCents)} subtext="Last 30 days" icon={DollarSign} color="emerald" href="/dues" />
+              </div>
+            </>
+          )}
+          <Link href="/settings/dues" className="mt-4 inline-block text-sm font-semibold text-emerald-700 hover:underline">
+            Dues Setup →
+          </Link>
+        </div>
+      )}
 
       {/* Recent Activity */}
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">

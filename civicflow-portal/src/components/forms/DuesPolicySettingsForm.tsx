@@ -4,6 +4,8 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { fieldClassName } from "@/components/forms/formStyles";
 
+type DuesCollectionMethod = "PAYROLL_DEDUCTION" | "UNESTRA_DIRECT" | "EXTERNAL" | "MIXED" | "NONE";
+
 type DuesPolicySettings = {
   duesStartRule: "JOIN_DATE" | "FIRST_OF_NEXT_MONTH" | "MANUAL";
   delinquentAfterMonths: number;
@@ -17,6 +19,7 @@ type DuesPolicySettings = {
   requireReasonForFinancialEdits: boolean;
   allowFinanceCorrections: boolean;
   lockReceiptsAfterIssue: boolean;
+  duesCollectionMethod: DuesCollectionMethod | null;
 };
 
 function optionalNumber(value: string) {
@@ -60,6 +63,7 @@ export function DuesPolicySettingsForm({ settings, canWrite }: { settings: DuesP
         requireReasonForFinancialEdits: form.requireReasonForFinancialEdits,
         allowFinanceCorrections: form.allowFinanceCorrections,
         lockReceiptsAfterIssue: form.lockReceiptsAfterIssue,
+        duesCollectionMethod: form.duesCollectionMethod || null,
       }),
     });
 
@@ -75,6 +79,26 @@ export function DuesPolicySettingsForm({ settings, canWrite }: { settings: DuesP
 
   return (
     <form className="space-y-5" onSubmit={handleSubmit}>
+      <label className="block space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm font-medium text-slate-900">
+        <span>How do members actually pay dues?</span>
+        <select
+          className={fieldClassName}
+          value={form.duesCollectionMethod ?? ""}
+          onChange={(event) => setForm((current) => ({ ...current, duesCollectionMethod: (event.target.value || null) as DuesCollectionMethod | null }))}
+        >
+          <option value="">Not configured</option>
+          <option value="PAYROLL_DEDUCTION">Payroll deduction (employer withholds and remits)</option>
+          <option value="UNESTRA_DIRECT">Direct payment through Unestra</option>
+          <option value="EXTERNAL">Collected outside Unestra entirely</option>
+          <option value="MIXED">Mixed — varies by member</option>
+          <option value="NONE">Dues are not collected</option>
+        </select>
+        <p className="text-xs font-normal text-slate-600">
+          Presentation only — this never sets up payroll processing. When dues are collected outside Unestra
+          (most commonly payroll deduction), the dashboard and member views stop implying members owe Unestra
+          a payment.
+        </p>
+      </label>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <label className="space-y-2 text-sm font-medium text-slate-900">
           <span>Dues begin</span>
