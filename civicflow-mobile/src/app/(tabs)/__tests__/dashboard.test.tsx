@@ -12,6 +12,11 @@ jest.mock('@/lib/auth-context', () => ({
   useAuth: () => mockUseAuth(),
 }));
 
+const mockOpenBrowserAsync = jest.fn();
+jest.mock('expo-web-browser', () => ({
+  openBrowserAsync: (...args: unknown[]) => mockOpenBrowserAsync(...args),
+}));
+
 jest.mock('@/lib/unread-count', () => ({
   useUnreadConversationCount: () => 0,
 }));
@@ -81,6 +86,18 @@ function staffOnlyOrg() {
     firstName: null,
     lastName: null,
     pta: null,
+  };
+}
+
+function unionMemberOrg() {
+  return {
+    organizationId: 'org-union',
+    organizationName: 'Unestra Demo Union',
+    memberId: 'member-union-1',
+    firstName: 'Alex',
+    lastName: 'Reyes',
+    pta: null,
+    capability: { primaryVertical: 'UNION' },
   };
 }
 
@@ -156,5 +173,54 @@ describe('Dashboard "Report a Payment" quick action', () => {
     expect(mockRouterPush).not.toHaveBeenCalledWith('/report-payment');
     expect(mockRouterPush).not.toHaveBeenCalledWith('/pta-report-payment');
     expect(mockGetPtaDues).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Union members pay dues via employer payroll checkoff, not member-initiated
+ * payment, so the dashboard swaps the payment-first layout (Balance tile,
+ * Make a Payment) for a Cases-first one instead.
+ */
+describe('Dashboard Union vertical layout', () => {
+  beforeEach(() => {
+    mockRouterPush.mockReset();
+    mockOpenBrowserAsync.mockReset();
+    mockGetAnnouncementsForIdentity.mockReset().mockResolvedValue([]);
+    mockGetEventsForOrganization.mockReset().mockResolvedValue([]);
+    mockGetDues.mockReset().mockResolvedValue({ outstandingBalance: 0, isDelinquent: false, delinquentSince: null, charges: [] });
+    mockGetPaymentHistory.mockReset().mockResolvedValue({ payments: [], reports: [] });
+  });
+
+  it('shows a My Cases tile instead of Balance, and hides Make a Payment', async () => {
+    mockUseAuth.mockReturnValue({ selectedOrganization: unionMemberOrg(), selectedOrganizationId: 'org-union' });
+
+    await render(<DashboardScreen />);
+    await waitFor(() => expect(mockGetDues).toHaveBeenCalled());
+
+    expect(screen.getByLabelText('My Cases')).toBeTruthy();
+    expect(screen.queryByLabelText(/^Balance,/)).toBeNull();
+    expect(screen.queryByLabelText('Make a payment')).toBeNull();
+  });
+
+  it('opens the member web case center in the system browser', async () => {
+    mockUseAuth.mockReturnValue({ selectedOrganization: unionMemberOrg(), selectedOrganizationId: 'org-union' });
+
+    await render(<DashboardScreen />);
+    await waitFor(() => expect(mockGetDues).toHaveBeenCalled());
+
+    fireEvent.press(screen.getByLabelText('My Cases'));
+
+    expect(mockOpenBrowserAsync).toHaveBeenCalledWith(expect.stringContaining('/m/union/cases'));
+  });
+
+  it('still shows Balance and Make a Payment for a non-Union member', async () => {
+    mockUseAuth.mockReturnValue({ selectedOrganization: conventionalMemberOrg(), selectedOrganizationId: 'org-a' });
+
+    await render(<DashboardScreen />);
+    await waitFor(() => expect(mockGetDues).toHaveBeenCalled());
+
+    expect(screen.queryByLabelText('My Cases')).toBeNull();
+    expect(screen.getByLabelText(/^Balance,/)).toBeTruthy();
+    expect(screen.getByLabelText('Make a payment')).toBeTruthy();
   });
 });
