@@ -72,8 +72,14 @@ function sharedNavigation(vertical: "COMMUNITY" | "UNION" | "HOA" | "CHURCH"): N
     // that could never see the page.
     ...(vertical === "UNION" ? [{ href: "/union/cases", label: "Case Center", permission: "union:cases:read" as const }] : []),
     { href: "/contributions", label: "Contributions" },
-    { href: "/dues", label: duesLabel },
-    { href: "/dues/reminders", label: "Dues Campaigns" },
+    // Church does not collect dues -- giving is voluntary (Fund/
+    // ContributionProgram), never a fixed obligation, so these three
+    // dues-specific nav items would only ever dead-end for a Church org.
+    // Real access control for a HYBRID church that genuinely wants fixed
+    // dues still lives at the route/permission layer; this conditional only
+    // keeps a Church admin from seeing a nav link to an empty dues UI.
+    ...(vertical === "CHURCH" ? [] : [{ href: "/dues", label: duesLabel }]),
+    ...(vertical === "CHURCH" ? [] : [{ href: "/dues/reminders", label: "Dues Campaigns" }]),
     { href: "/payment-reports", label: "Payment Reports" },
     { href: "/campaigns", label: campaignsLabel },
     { href: "/events", label: "Events" },
@@ -102,7 +108,7 @@ function sharedNavigation(vertical: "COMMUNITY" | "UNION" | "HOA" | "CHURCH"): N
     { href: "/settings", label: "Settings" },
     { href: "/settings/organization", label: "Organization", permission: "org_settings:read" },
     { href: "/settings/categories", label: "Categories", permission: "org_settings:read" },
-    { href: "/settings/dues", label: "Dues Setup", permission: "dues:read" },
+    ...(vertical === "CHURCH" ? [] : [{ href: "/settings/dues", label: "Dues Setup", permission: "dues:read" as const }]),
     { href: "/settings/payment-methods", label: "Payment Methods", permission: "org_settings:read" },
     // CONNECT-B: the organization's own Stripe connected account (§24).
     { href: "/settings/payments", label: "Payments", permission: "payments:stripe:view" },
