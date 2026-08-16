@@ -739,6 +739,7 @@ model Organization {
   households                     Household[]
   orgGroups                      OrgGroup[]
   contributionAdjustments        ContributionAdjustment[]
+  contributionRefundEvents       ContributionRefundEvent[]
   stripeAccount                  OrganizationStripeAccount?
   memberStripeCustomers          OrganizationMemberStripeCustomer[]
   ptaElections                   PtaElection[]
@@ -2371,6 +2372,7 @@ model Contribution {
   recurringSchedule   RecurringContributionSchedule? @relation(fields: [recurringScheduleId], references: [id], onDelete: SetNull)
   pledge              Pledge?                        @relation(fields: [pledgeId], references: [id], onDelete: SetNull)
   adjustments         ContributionAdjustment[]
+  refundEvents        ContributionRefundEvent[]
   receipts            ContributionReceipt[]
   paymentImportItems  PaymentImportItem[]
   fromOfflineReport   PaymentLinkOfflineReport[]
@@ -2701,6 +2703,32 @@ model ContributionAdjustment {
   contribution Contribution @relation(fields: [contributionId], references: [id], onDelete: Restrict)
 
   @@index([organizationId, createdAt])
+  @@index([contributionId])
+}
+
+/// CORE-GIVE-K refund-idempotency hardening (2026-08): one row per Stripe
+/// refund object, keyed on the provider's OWN `refund.id`. This is the real
+/// dedup/idempotency mechanism — Contribution.refundedAmount/refundedAt/
+/// providerRefundId stay as the cumulative rollup for reporting, but the
+/// unique constraint here is what makes applying a refund twice (event
+/// replay) a no-op while two DIFFERENT refunds on the same charge each land.
+/// A synthetic `charge-${chargeId}` fallback id (still supported for
+/// reconciliation-only charge.refunded handling) is deliberately NOT unique
+/// enough for this table — every row here must carry a real `re_...` id.
+model ContributionRefundEvent {
+  id               String   @id @default(cuid())
+  organizationId   String
+  contributionId   String
+  providerRefundId String   @unique
+  amountCents      Int
+  status           String
+  source           String
+  createdAt        DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contribution Contribution @relation(fields: [contributionId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
   @@index([contributionId])
 }
 

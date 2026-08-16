@@ -21,6 +21,7 @@ const ALLOWED_KEYS = new Set([
   "matchStatus",
   "truncated",
   "count",
+  "source",
 ]);
 
 export type GivingEventName =
@@ -33,6 +34,9 @@ export type GivingEventName =
   | "GIVING_RECURRING_RESUMED"
   | "GIVING_RECURRING_CANCELLED"
   | "GIVING_REFUND_COMPLETED"
+  | "GIVING_REFUND_DUPLICATE_IGNORED"
+  | "GIVING_REFUND_UNMATCHED"
+  | "GIVING_REFUND_NOT_SUCCEEDED"
   | "GIVING_STATEMENT_GENERATED"
   | "GIVING_RECONCILIATION_MISMATCH"
   | "GIVING_RECONCILIATION_TRUNCATED";

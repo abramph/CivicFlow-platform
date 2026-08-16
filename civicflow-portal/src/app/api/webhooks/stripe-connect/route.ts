@@ -314,25 +314,44 @@ export async function POST(request: Request) {
         // OUR contribution, scoped to both the resolved org AND the resolved
         // connected account — a refund event can only apply to a
         // contribution that was actually charged on that same account.
+        //
+        // The event payload's own `charge.refunds` is expand-only and comes
+        // back EMPTY on our real webhook delivery (confirmed against a live
+        // test-mode connected-account charge, 2026-08). Re-fetch the charge
+        // (on the connected account) with an explicit expand so every
+        // refund is applied under its OWN real `refund.id` instead of a
+        // synthetic charge-derived fallback that can't distinguish two
+        // different refunds on the same charge — the exact bug this
+        // replaces. applyProviderRefund's unique constraint makes
+        // re-processing already-applied refunds on every delivery a safe
+        // no-op, so this is also naturally replay- and reorder-safe.
         const charge = event.data.object as Stripe.Charge;
         const paymentIntentId =
           typeof charge.payment_intent === "string" ? charge.payment_intent : (charge.payment_intent?.id ?? null);
         if (paymentIntentId) {
-          const refundList = (charge as { refunds?: { data?: { id: string }[] } }).refunds?.data ?? [];
-          const latestRefundId = refundList[0]?.id ?? `charge-${charge.id}`;
           const contribution = await prisma.contribution.findFirst({
             where: { organizationId, providerPaymentIntentId: paymentIntentId, stripeConnectedAccountId: connectedAccountId },
             select: { id: true },
           });
           if (contribution) {
+            // `stripe` (used above only for the mode-agnostic signature
+            // check) is the platform's fixed-mode key — wrong for a real
+            // API call against a connected account that may itself be in
+            // Stripe test mode. Use the account's OWN recorded mode instead.
+            const { getStripeForMode } = await import("@/lib/payments/stripe-connect");
+            const modeStripe = await getStripeForMode((accountRow.accountMode as "test" | "live") ?? "live");
+            const fullCharge = await modeStripe.charges.retrieve(charge.id, { expand: ["refunds"] }, { stripeAccount: connectedAccountId });
             const { applyProviderRefund } = await import("@/lib/giving/refunds");
-            await applyProviderRefund({
-              organizationId,
-              providerPaymentIntentId: paymentIntentId,
-              providerRefundId: latestRefundId,
-              amountRefundedCents: charge.amount_refunded ?? 0,
-              mode: "cumulative",
-            });
+            for (const refund of fullCharge.refunds?.data ?? []) {
+              await applyProviderRefund({
+                organizationId,
+                providerPaymentIntentId: paymentIntentId,
+                providerRefundId: refund.id,
+                amountRefundedCents: refund.amount,
+                status: refund.status ?? "unknown",
+                source: "charge.refunded",
+              });
+            }
           }
         }
         break;

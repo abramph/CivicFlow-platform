@@ -487,24 +487,38 @@ export async function POST(request: Request) {
         // CORE-GIVE-K (§34): provider-truth refund state. The charge's
         // payment intent locates OUR contribution; org comes from the
         // contribution row itself, never from unverified metadata.
+        //
+        // The event payload's own `charge.refunds` is expand-only and comes
+        // back EMPTY on our real webhook delivery (confirmed against a live
+        // test-mode charge, 2026-08) — Stripe's own docs say as much:
+        // "Listen to refund.created for information about the refund."
+        // Rather than fall back to a synthetic charge-derived id (which
+        // can't distinguish two different refunds on the same charge — the
+        // exact bug this replaces), re-fetch the charge with an explicit
+        // expand so every refund is applied under its OWN real `refund.id`.
+        // applyProviderRefund's unique constraint makes re-processing
+        // already-applied refunds on every charge.refunded delivery a safe
+        // no-op, so this is also naturally replay- and reorder-safe.
         const charge = event.data.object as Stripe.Charge;
         const paymentIntentId = typeof charge.payment_intent === "string" ? charge.payment_intent : (charge.payment_intent?.id ?? null);
         if (paymentIntentId) {
-          const refundList = (charge as { refunds?: { data?: { id: string }[] } }).refunds?.data ?? [];
-          const latestRefundId = refundList[0]?.id ?? `charge-${charge.id}`;
           const contribution = await prisma.contribution.findFirst({
             where: { providerPaymentIntentId: paymentIntentId },
             select: { organizationId: true },
           });
           if (contribution) {
+            const fullCharge = await stripe.charges.retrieve(charge.id, { expand: ["refunds"] });
             const { applyProviderRefund } = await import("@/lib/giving/refunds");
-            await applyProviderRefund({
-              organizationId: contribution.organizationId,
-              providerPaymentIntentId: paymentIntentId,
-              providerRefundId: latestRefundId,
-              amountRefundedCents: charge.amount_refunded ?? 0,
-              mode: "cumulative",
-            });
+            for (const refund of fullCharge.refunds?.data ?? []) {
+              await applyProviderRefund({
+                organizationId: contribution.organizationId,
+                providerPaymentIntentId: paymentIntentId,
+                providerRefundId: refund.id,
+                amountRefundedCents: refund.amount,
+                status: refund.status ?? "unknown",
+                source: "charge.refunded",
+              });
+            }
           }
         }
         break;
