@@ -1,5 +1,5 @@
 import * as WebBrowser from 'expo-web-browser';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, TextInput } from 'react-native';
 
 import { LoadErrorBanner } from '@/components/load-error-banner';
@@ -14,6 +14,7 @@ import {
   manageRecurringGiving,
   startGivingCheckout,
   startRecurringGivingCheckout,
+  type GivingPledge,
   type GivingSummary,
 } from '@/lib/mobile-api';
 
@@ -69,6 +70,13 @@ export function GivingContent({
   const [amount, setAmount] = useState('');
   const [recurring, setRecurring] = useState(false);
   const [frequency, setFrequency] = useState<'WEEKLY' | 'BIWEEKLY' | 'MONTHLY' | 'QUARTERLY' | 'ANNUALLY'>('MONTHLY');
+  // CORE-GIVE-E give-toward-pledge -- the backend has always supported this
+  // (see checkout.ts's pledgeId validation), but no client ever surfaced it.
+  // Recurring schedules never accept a pledgeId (the recurring checkout
+  // route hardcodes pledgeId: null), so entering pledge mode always forces
+  // a one-time gift.
+  const [pledgeId, setPledgeId] = useState<string | null>(null);
+  const scrollRef = useRef<ScrollView>(null);
 
   const load = useCallback(async () => {
     if (!selectedOrganizationId) return;
@@ -103,9 +111,10 @@ export function GivingContent({
     try {
       const { url } = recurring
         ? await startRecurringGivingCheckout(selectedOrganizationId, selectedFund.id, value, frequency)
-        : await startGivingCheckout(selectedOrganizationId, selectedFund.id, value);
+        : await startGivingCheckout(selectedOrganizationId, selectedFund.id, value, pledgeId);
       await WebBrowser.openBrowserAsync(url);
       setAmount('');
+      setPledgeId(null);
       await load();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to start your gift.';
@@ -131,6 +140,14 @@ export function GivingContent({
     } finally {
       setBusy(false);
     }
+  }
+
+  function giveTowardPledge(pledge: GivingPledge) {
+    setFundId(pledge.fundId);
+    setPledgeId(pledge.id);
+    setRecurring(false);
+    setAmount(pledge.remainingTowardPledge > 0 ? String(pledge.remainingTowardPledge) : '');
+    scrollRef.current?.scrollTo({ y: 0, animated: true });
   }
 
   async function manage(scheduleId: string, action: 'pause' | 'resume' | 'cancel' | 'retry') {
@@ -204,6 +221,7 @@ export function GivingContent({
   return (
     <ThemedView type="background" style={styles.container}>
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={[styles.scroll, containerStyle]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
       >
@@ -235,12 +253,22 @@ export function GivingContent({
             {enabled.funds.length > 0 && selectedFund ? (
               <ThemedView type="backgroundElement" style={styles.card}>
                 <ThemedText type="subtitle">Give Now</ThemedText>
+                {pledgeId ? (
+                  <ThemedView style={styles.pledgeBanner}>
+                    <ThemedText type="small" style={styles.pledgeBannerText}>
+                      Giving toward your {selectedFund.name} pledge
+                    </ThemedText>
+                    <Pressable onPress={() => setPledgeId(null)} accessibilityRole="button" accessibilityLabel="Stop giving toward pledge">
+                      <ThemedText type="small" style={styles.pledgeBannerClear}>Clear</ThemedText>
+                    </Pressable>
+                  </ThemedView>
+                ) : null}
                 {enabled.funds.length > 1 ? (
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
                     {enabled.funds.map((fund) => (
                       <Pressable
                         key={fund.id}
-                        onPress={() => setFundId(fund.id)}
+                        onPress={() => { setFundId(fund.id); setPledgeId(null); }}
                         style={[styles.chip, fund.id === selectedFund.id && styles.chipActive]}
                         accessibilityRole="button"
                       >
@@ -277,12 +305,12 @@ export function GivingContent({
                   style={styles.input}
                   accessibilityLabel="Gift amount in dollars"
                 />
-                {selectedFund.allowRecurring ? (
+                {selectedFund.allowRecurring && !pledgeId ? (
                   <Pressable onPress={() => setRecurring(!recurring)} style={styles.toggleRow} accessibilityRole="switch" accessibilityState={{ checked: recurring }}>
                     <ThemedText type="small">{recurring ? '◉' : '○'} Make this recurring</ThemedText>
                   </Pressable>
                 ) : null}
-                {recurring ? (
+                {recurring && !pledgeId ? (
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
                     {(Object.keys(FREQUENCY_LABELS) as (keyof typeof FREQUENCY_LABELS)[]).map((value) => (
                       <Pressable
@@ -309,7 +337,7 @@ export function GivingContent({
                     {busy ? 'Preparing…' : 'Continue to secure payment'}
                   </ThemedText>
                 </Pressable>
-                {selectedFund.allowPledges ? (
+                {selectedFund.allowPledges && !pledgeId ? (
                   <Pressable style={styles.secondaryButton} disabled={busy} onPress={makePledge} accessibilityRole="button">
                     <ThemedText type="smallBold">Pledge this amount instead</ThemedText>
                   </Pressable>
@@ -380,6 +408,16 @@ export function GivingContent({
                         ? ` · ${formatCurrency(pledge.remainingTowardPledge)} remaining toward your pledge`
                         : ' · fulfilled — thank you!'}
                     </ThemedText>
+                    {pledge.remainingTowardPledge > 0 ? (
+                      <Pressable
+                        style={styles.smallButton}
+                        onPress={() => giveTowardPledge(pledge)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Give toward your ${pledge.fundName} pledge`}
+                      >
+                        <ThemedText type="small">Give toward this pledge</ThemedText>
+                      </Pressable>
+                    ) : null}
                   </ThemedView>
                 ))}
               </>
@@ -448,6 +486,23 @@ const styles = StyleSheet.create({
   },
   sectionLabel: {
     marginTop: Spacing.two,
+  },
+  pledgeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#D1FAE5',
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+  },
+  pledgeBannerText: {
+    color: '#047857',
+    flex: 1,
+  },
+  pledgeBannerClear: {
+    color: '#047857',
+    fontWeight: '600',
   },
   empty: {
     textAlign: 'center',

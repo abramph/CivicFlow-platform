@@ -1914,10 +1914,10 @@ export function getGiving(organizationId: string) {
   return apiFetch<GivingSummary>(`/api/mobile/giving?organizationId=${encodeURIComponent(organizationId)}`);
 }
 
-export function startGivingCheckout(organizationId: string, fundId: string, amount: number) {
+export function startGivingCheckout(organizationId: string, fundId: string, amount: number, pledgeId?: string | null) {
   return apiFetch<{ url: string }>(`/api/mobile/giving/checkout`, {
     method: 'POST',
-    body: JSON.stringify({ organizationId, fundId, amount }),
+    body: JSON.stringify({ organizationId, fundId, amount, pledgeId: pledgeId ?? null }),
   });
 }
 

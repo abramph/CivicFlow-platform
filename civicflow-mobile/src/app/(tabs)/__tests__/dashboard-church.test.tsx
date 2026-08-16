@@ -112,6 +112,32 @@ describe('Dashboard Church vertical layout', () => {
     expect(screen.getByLabelText(`This year's giving, $250.00, next gift ${expectedDate}`)).toBeTruthy();
   });
 
+  // Real bug caught in native smoke testing: an ACTIVE schedule whose
+  // nextContributionDate hasn't been computed yet (null) was filtered out
+  // entirely, so Home said "No recurring gift yet" while the Give tab
+  // correctly showed the same schedule as ACTIVE -- a real mismatch.
+  it('shows "Recurring gift active" (not "No recurring gift yet") when an active schedule has no computed next date', async () => {
+    mockGetGiving.mockResolvedValue({
+      enabled: true,
+      terminology: 'Giving',
+      yearTotal: 100,
+      funds: [],
+      history: [],
+      schedules: [
+        { id: 's1', fundName: 'General Fund', amount: 5, frequency: 'MONTHLY', status: 'ACTIVE', nextContributionDate: null, paymentMethodDescriptor: null },
+      ],
+      pledges: [],
+      statements: [],
+    });
+    mockUseAuth.mockReturnValue({ selectedOrganization: churchMemberOrg(), selectedOrganizationId: 'org-church' });
+
+    await render(<DashboardScreen />);
+    await waitFor(() => expect(mockGetGiving).toHaveBeenCalled());
+
+    expect(screen.getByText('Recurring gift active')).toBeTruthy();
+    expect(screen.queryByText('No recurring gift yet')).toBeNull();
+  });
+
   it('navigates the giving tile to the Give tab', async () => {
     mockUseAuth.mockReturnValue({ selectedOrganization: churchMemberOrg(), selectedOrganizationId: 'org-church' });
 
