@@ -86,6 +86,30 @@ describe("getNavigationProfile", () => {
     expect(communityDues?.permission).toBe("dues:read");
     expect(unionDues?.permission).toBe("dues:read");
   });
+
+  // CHURCH-VERT-B: church does not collect dues -- giving is voluntary, not
+  // a fixed obligation, so the dues-specific nav items would only ever
+  // dead-end for a Church org (same reasoning as the HOA/Union additions
+  // above, just in reverse: an omission instead of an addition).
+  it("Church shares Community's routes minus the three dues-specific items (/dues, /dues/reminders, /settings/dues)", () => {
+    const community = getNavigationProfile("COMMUNITY").map((n) => n.href).sort();
+    const church = getNavigationProfile("CHURCH").map((n) => n.href).sort();
+    const duesOnlyRoutes = ["/dues", "/dues/reminders", "/settings/dues"];
+    expect(church).toEqual(community.filter((href) => !duesOnlyRoutes.includes(href)).sort());
+  });
+
+  it("never points a Church org at a dues-specific nav item", () => {
+    const church = getNavigationProfile("CHURCH");
+    expect(church.some((n) => n.href === "/dues")).toBe(false);
+    expect(church.some((n) => n.href === "/dues/reminders")).toBe(false);
+    expect(church.some((n) => n.href === "/settings/dues")).toBe(false);
+  });
+
+  it("still gives Church its own dashboard label and the shared Giving Setup item", () => {
+    const church = getNavigationProfile("CHURCH");
+    expect(church.find((n) => n.href === "/dashboard")?.label).toBe("Church Dashboard");
+    expect(church.find((n) => n.href === "/settings/giving")?.label).toBe("Giving Setup");
+  });
 });
 
 describe("getLandingRoute", () => {
@@ -97,6 +121,7 @@ describe("getLandingRoute", () => {
     expect(getLandingRoute("COMMUNITY")).toBe("/dashboard");
     expect(getLandingRoute("UNION")).toBe("/dashboard");
     expect(getLandingRoute("HOA")).toBe("/dashboard");
+    expect(getLandingRoute("CHURCH")).toBe("/dashboard");
   });
 });
 
@@ -105,9 +130,10 @@ describe("getOnboardingRoute", () => {
     expect(getOnboardingRoute("PTA")).toBe("/labs/pta/onboarding");
   });
 
-  it("sends Community, Union, and HOA to the shared generic onboarding checklist", () => {
+  it("sends Community, Union, HOA, and Church to the shared generic onboarding checklist", () => {
     expect(getOnboardingRoute("COMMUNITY")).toBe("/onboarding/checklist");
     expect(getOnboardingRoute("UNION")).toBe("/onboarding/checklist");
     expect(getOnboardingRoute("HOA")).toBe("/onboarding/checklist");
+    expect(getOnboardingRoute("CHURCH")).toBe("/onboarding/checklist");
   });
 });

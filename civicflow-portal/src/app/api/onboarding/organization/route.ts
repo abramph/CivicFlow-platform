@@ -18,7 +18,7 @@ function normalizeOptionalText(value: string | null | undefined) {
 const createOrganizationSchema = z.object({
   name: z.string().trim().min(1).max(200),
   slug: z.string().trim().regex(/^[a-z0-9-]+$/).max(120),
-  primaryVertical: z.enum(["COMMUNITY", "PTA", "UNION", "HOA"]),
+  primaryVertical: z.enum(["COMMUNITY", "PTA", "UNION", "HOA", "CHURCH"]),
   organizationType: optionalTextField(120),
   email: z.union([z.string().trim().email(), z.literal(""), z.null()]).optional(),
   phone: optionalTextField(50),

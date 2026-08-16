@@ -24,6 +24,11 @@ export default function ProfileScreen() {
   // capability, just moves it out of the payment-first spot other
   // verticals use.
   const isUnion = selectedOrganization?.capability?.primaryVertical === 'UNION';
+  // CHURCH-VERT-B -- Give is already the primary tab for Church members (see
+  // (tabs)/give.tsx), so Profile only needs a secondary shortcut into it
+  // (§14), not a duplicated rich giving UI the way Union's dues section is
+  // (Union has no Payments tab to link to instead).
+  const isChurch = selectedOrganization?.capability?.primaryVertical === 'CHURCH';
   const [profile, setProfile] = useState<MobileProfile | null>(null);
   const [dues, setDues] = useState<DuesSummary | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
@@ -101,6 +106,15 @@ export default function ProfileScreen() {
         <Pressable style={styles.secondaryButton} onPress={() => router.push('/attendance-history')} accessibilityRole="button" accessibilityLabel="Attendance history">
           <ThemedText type="link">Attendance History</ThemedText>
         </Pressable>
+      ) : null}
+
+      {hasMemberIdentity && isChurch ? (
+        <>
+          <ThemedText type="smallBold" style={styles.sectionLabel}>Giving</ThemedText>
+          <Pressable style={styles.secondaryButton} onPress={() => router.push('/give' as never)} accessibilityRole="button" accessibilityLabel="Manage my giving">
+            <ThemedText type="link">Manage My Giving</ThemedText>
+          </Pressable>
+        </>
       ) : null}
 
       {hasMemberIdentity && isUnion ? (

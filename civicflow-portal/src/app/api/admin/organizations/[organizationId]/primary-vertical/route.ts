@@ -8,7 +8,7 @@ import {
 } from "@/lib/platform-operations/organizations";
 import { parseJsonBody, ValidationError, z } from "@/lib/validation";
 
-const verticalEnum = z.enum(["COMMUNITY", "PTA", "UNION", "HOA"]);
+const verticalEnum = z.enum(["COMMUNITY", "PTA", "UNION", "HOA", "CHURCH"]);
 
 /** GET: read-only impact preview for a proposed vertical change (Phase 7's
  * "preview the impact before changing") — takes ?to=<vertical>. */

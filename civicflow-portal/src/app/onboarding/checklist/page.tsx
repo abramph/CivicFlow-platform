@@ -40,6 +40,7 @@ export default async function OnboardingChecklistPage() {
     propertyResidentCount,
     meetingCount,
     governingDocumentCount,
+    fundCount,
   ] =
     await Promise.all([
       prisma.organization.findUnique({
@@ -57,13 +58,16 @@ export default async function OnboardingChecklistPage() {
       prisma.propertyResident.count({ where: { organizationId } }),
       prisma.meeting.count({ where: { organizationId } }),
       prisma.attachment.count({ where: { organizationId, entityType: "ORGANIZATION" } }),
+      // CHURCH-VERT-A: giving-setup step tracks real Funds, not the
+      // fixed-obligation dues Category count used by Community/Union.
+      prisma.fund.count({ where: { organizationId } }),
     ]);
 
   const profileComplete = Boolean(
     organization?.email && organization?.phone && organization?.addressLine1 && organization?.city && organization?.state && organization?.zipCode
   );
 
-  const stepsByVertical: Record<"COMMUNITY" | "UNION" | "HOA", Step[]> = {
+  const stepsByVertical: Record<"COMMUNITY" | "UNION" | "HOA" | "CHURCH", Step[]> = {
     COMMUNITY: [
       { title: "Complete your organization profile", description: "Add contact details and address.", href: "/settings/organization", linkLabel: "Go to Profile", done: profileComplete },
       { title: "Invite members", description: "Add your first members to the roster.", href: "/members/new", linkLabel: "Add a Member", done: memberCount > 0 },
@@ -95,6 +99,17 @@ export default async function OnboardingChecklistPage() {
       { title: "Schedule your first board meeting", description: "Set a date, agenda, and location.", href: "/meetings/new", linkLabel: "Schedule Meeting", done: meetingCount > 0 },
       { title: "Send your first announcement", description: "Reach residents by email.", href: "/communications/campaigns", linkLabel: "Go to Communications", done: campaignCount > 0 },
       { title: "Upload governing documents", description: "Add your CC&Rs, bylaws, or budget for residents to reference.", href: "/settings/organization", linkLabel: "Go to Documents", done: governingDocumentCount > 0 },
+    ],
+    // CHURCH-VERT-A: giving-first steps -- no dues-category step by default,
+    // since Church giving is voluntary (Fund/ContributionProgram), not a
+    // fixed obligation. A church that also wants fixed dues can still set
+    // that up under Dues Setup; it's just not the primary onboarding path.
+    CHURCH: [
+      { title: "Complete your organization profile", description: "Add contact details and address.", href: "/settings/organization", linkLabel: "Go to Profile", done: profileComplete },
+      { title: "Invite members", description: "Add your first members to the congregation.", href: "/members/new", linkLabel: "Add a Member", done: memberCount > 0 },
+      { title: "Set up giving", description: "Create a fund so members can start giving.", href: "/settings/giving", linkLabel: "Go to Giving Setup", done: fundCount > 0 },
+      { title: "Create your first event", description: "Schedule a service or ministry event members can attend.", href: "/events/new", linkLabel: "Create Event", done: eventCount > 0 },
+      { title: "Send your first announcement", description: "Reach your congregation by email.", href: "/communications/campaigns", linkLabel: "Go to Communications", done: campaignCount > 0 },
     ],
   };
 

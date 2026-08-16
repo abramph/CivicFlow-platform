@@ -59,7 +59,12 @@ export const CATEGORY_INFO: Record<OrganizationCategory, CategoryInfo> = {
   CHURCH_RELIGIOUS: {
     label: "Church / Religious Organization",
     description: "Churches, congregations, and religious communities.",
-    experienceVertical: "COMMUNITY",
+    // CHURCH-VERT-A: was COMMUNITY (Church had no experience engine of its
+    // own yet). Now that CHURCH is a first-class OrganizationVertical, this
+    // category should run on that engine so its nav/terminology/Give tab
+    // actually apply -- see schema.prisma's OrganizationVertical doc comment
+    // on why vertical and category are deliberately separate concepts.
+    experienceVertical: "CHURCH",
     givingTerminology: "Giving",
     memberLabel: "Member",
     groupsLabel: "Ministries",
@@ -139,6 +144,8 @@ export function deriveCategoryFromVertical(vertical: OrganizationVertical): Orga
       return "UNION";
     case "HOA":
       return "HOA";
+    case "CHURCH":
+      return "CHURCH_RELIGIOUS";
     case "COMMUNITY":
       return "COMMUNITY";
   }

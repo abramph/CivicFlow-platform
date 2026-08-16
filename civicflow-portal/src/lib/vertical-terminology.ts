@@ -67,6 +67,24 @@ const TERMINOLOGY: Record<OrganizationVertical, VerticalTerminology> = {
     dashboardTitle: "HOA Dashboard",
     dashboardWelcome: "Welcome to Unestra for HOAs. Resident and assessment activity below.",
   },
+  CHURCH: {
+    productLabel: "Church",
+    member: "Member",
+    memberPlural: "Members",
+    officer: "Church Staff",
+    // Deliberately plain "Dues" (not "Giving") -- this label is the staff
+    // nav item for the fixed-obligation /dues feature (CHURCH-VERT-A §7
+    // HYBRID support), a different feature from the voluntary
+    // Contribution/Fund/Pledge giving system, which already has its own
+    // "Giving" terminology (see organization-category.ts's
+    // CHURCH_RELIGIOUS.givingTerminology). Conflating the two labels would
+    // mislabel whichever route it doesn't point to.
+    duesLabel: "Dues",
+    meetingLabel: "Meeting",
+    documentsLabel: "Documents",
+    dashboardTitle: "Church Dashboard",
+    dashboardWelcome: "Welcome to Unestra for Churches. Giving, events, and congregation activity below.",
+  },
 };
 
 export function getVerticalTerminology(vertical: OrganizationVertical): VerticalTerminology {
@@ -96,8 +114,8 @@ export const VERTICAL_SELECTION_CARDS: VerticalCardCopy[] = [
     vertical: "COMMUNITY",
     title: "Community Organization",
     icon: "Building2",
-    description: "Civic associations, nonprofits, churches, clubs, and cultural organizations.",
-    examples: ["Civic associations", "Nonprofits", "Churches", "Clubs", "Cultural organizations", "Alumni groups"],
+    description: "Civic associations, nonprofits, clubs, and cultural organizations.",
+    examples: ["Civic associations", "Nonprofits", "Clubs", "Cultural organizations", "Alumni groups"],
     terminologyPreview: "Members pay Dues & Contributions.",
     highlights: ["Members", "Communications", "Events", "Committees", "Dues and contributions", "Meetings"],
   },
@@ -127,6 +145,15 @@ export const VERTICAL_SELECTION_CARDS: VerticalCardCopy[] = [
     examples: ["Homeowners associations", "Condominium communities", "Neighborhood associations", "Residential boards"],
     terminologyPreview: "Residents pay Assessments; a Board governs.",
     highlights: ["Residents", "Board meetings", "Announcements", "Events", "Documents", "Assessments"],
+  },
+  {
+    vertical: "CHURCH",
+    title: "Church / Faith Community",
+    icon: "Church",
+    description: "Churches and faith communities managing giving, events, ministries, and communication.",
+    examples: ["Churches", "Congregations", "Faith communities", "Ministries"],
+    terminologyPreview: "Members give through Funds; Events include services and ministry activities.",
+    highlights: ["Members", "Giving and funds", "Events", "Ministries and groups", "Communications", "Pledges"],
   },
 ];
 
@@ -161,6 +188,13 @@ const EMPTY_STATES: Record<OrganizationVertical, Record<EmptyStateKey, string>> 
     events: "No community events have been created yet.",
     meetings: "No board meetings have been scheduled yet.",
     documents: "No community documents have been uploaded yet.",
+    communications: "No announcements have been sent yet.",
+  },
+  CHURCH: {
+    members: "No members have been added yet.",
+    events: "No events have been created yet.",
+    meetings: "No meetings have been scheduled yet.",
+    documents: "No documents have been uploaded yet.",
     communications: "No announcements have been sent yet.",
   },
 };
@@ -198,6 +232,12 @@ const QUICK_ACTIONS: Record<OrganizationVertical, QuickAction[]> = {
     { href: "/meetings/new", label: "Schedule Board Meeting" },
     { href: "/communications", label: "Post Announcement" },
     { href: "/settings/organization", label: "Upload Governing Document" },
+  ],
+  CHURCH: [
+    { href: "/members/new", label: "Invite Member" },
+    { href: "/settings/giving", label: "Set Up Giving" },
+    { href: "/events/new", label: "Create Event" },
+    { href: "/communications", label: "Send Announcement" },
   ],
 };
 
@@ -240,6 +280,12 @@ const HELP_TOPICS: Record<OrganizationVertical, HelpTopic[]> = {
     { title: "Schedule meetings", description: "Schedule board meetings and record minutes.", href: "/meetings" },
     { title: "Share community documents", description: "Attach governance documents to your organization profile.", href: "/settings/organization" },
     { title: "Send community announcements", description: "Reach residents by email.", href: "/communications" },
+  ],
+  CHURCH: [
+    { title: "Add and manage members", description: "Bring your congregation into Unestra and keep it current.", href: "/members" },
+    { title: "Set up giving", description: "Create funds and enable one-time and recurring giving.", href: "/settings/giving" },
+    { title: "Create events", description: "Schedule services, ministry events, and track attendance.", href: "/events" },
+    { title: "Send announcements", description: "Reach your congregation by email.", href: "/communications" },
   ],
 };
 

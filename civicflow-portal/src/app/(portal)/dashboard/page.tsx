@@ -18,17 +18,24 @@ import {
   Target, Receipt, ChevronRight, Mail, Shield, FileText, Home,
 } from "lucide-react";
 
-/** Community shows the full widget set (unchanged, existing behavior). Union
- * and HOA reuse the same underlying data but only the widgets the spec calls
- * for — "no fake metrics," so campaign/expenditure/governance-breakdown
- * widgets (which have no Union/HOA equivalent yet) are hidden rather than
- * relabeled into something they aren't. */
+/** Community and Church show the full widget set (both reuse the exact same
+ * underlying data model -- see vertical-navigation.ts's CHURCH-VERT-A
+ * comment). Union and HOA reuse the same underlying data but only the
+ * widgets the spec calls for — "no fake metrics," so campaign/expenditure/
+ * governance-breakdown widgets (which have no Union/HOA equivalent yet) are
+ * hidden rather than relabeled into something they aren't. */
 function dashboardWidgets(vertical: OrganizationVertical) {
-  const showFundraisingAndGovernance = vertical === "COMMUNITY";
+  const showFundraisingAndGovernance = vertical === "COMMUNITY" || vertical === "CHURCH";
   return {
     fundraising: showFundraisingAndGovernance,
     governance: showFundraisingAndGovernance,
     paymentMethodBreakdown: showFundraisingAndGovernance,
+    // CHURCH-VERT-B: Church giving is voluntary -- a Delinquent/Past
+    // Due/Outstanding-balance framing across the whole admin dashboard
+    // contradicts "Church giving is not automatically a debt" just as much
+    // for staff as it does for members (see the mobile Home reshape's same
+    // reasoning). These cards stay for the other dues-based verticals.
+    duesFocused: vertical !== "CHURCH",
     // PR #43 -- HOA Property/Resident foundation widgets.
     hoaProperties: vertical === "HOA",
     // HOA Violations MVP.
@@ -406,9 +413,14 @@ export default async function DashboardPage() {
 
   const profileIncomplete = !organization?.email || !organization?.phone || !organization?.addressLine1 || !organization?.city || !organization?.state || !organization?.zipCode;
   const noMembersYet = memberCount === 0;
-  const noDuesSetUpYet = duesAccountCount === 0;
+  // CHURCH-VERT-B: a church's setup nudge is "set up giving" (Fund), not
+  // "set up a dues plan" -- giving is voluntary, so a DuesAccount is not the
+  // right completeness signal for this vertical (mirrors the onboarding
+  // checklist's fundCount-based Church step).
+  const noGivingSetUpYet = widgets.duesFocused ? false : (await prisma.fund.count({ where: { organizationId: orgId } })) === 0;
+  const noDuesSetUpYet = widgets.duesFocused && duesAccountCount === 0;
   const setupBannerDismissed = Boolean((await cookies()).get(setupBannerDismissCookieName(orgId))?.value);
-  const showSetupBanner = !setupBannerDismissed && (profileIncomplete || noMembersYet || noDuesSetUpYet);
+  const showSetupBanner = !setupBannerDismissed && (profileIncomplete || noMembersYet || noDuesSetUpYet || noGivingSetUpYet);
 
   const campaignProgress = activeCampaigns.map((c) => ({
     id: c.id,
@@ -448,11 +460,16 @@ export default async function DashboardPage() {
             {profileIncomplete && <li>Complete the organization profile with contact and address details.</li>}
             {noMembersYet && <li>Add your first member.</li>}
             {noDuesSetUpYet && <li>Set up a dues plan for at least one member.</li>}
+            {noGivingSetUpYet && <li>Create a fund so members can start giving.</li>}
           </ul>
           <div className="mt-4 flex flex-wrap gap-3">
             <Link href="/settings/organization" className="rounded-lg bg-amber-600 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-700">Organization Profile</Link>
             <Link href="/members/new" className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-950 hover:bg-amber-100">Add a Member</Link>
-            <Link href="/settings/dues" className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-950 hover:bg-amber-100">Dues Setup</Link>
+            {widgets.duesFocused ? (
+              <Link href="/settings/dues" className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-950 hover:bg-amber-100">Dues Setup</Link>
+            ) : (
+              <Link href="/settings/giving" className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-950 hover:bg-amber-100">Giving Setup</Link>
+            )}
           </div>
         </div>
       )}
@@ -460,15 +477,15 @@ export default async function DashboardPage() {
       {/* Stat Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard label={`Total ${terminology.memberPlural}`} value={memberCount}             subtext={`All ${terminology.memberPlural.toLowerCase()}`}        icon={Users}       color="emerald" href="/members" />
-        <StatCard label={`Total ${terminology.duesLabel}`}    value={toCurrency(totalDuesCents)}    subtext="All time"     icon={DollarSign}  color="emerald" href="/dues" />
+        {widgets.duesFocused && <StatCard label={`Total ${terminology.duesLabel}`}    value={toCurrency(totalDuesCents)}    subtext="All time"     icon={DollarSign}  color="emerald" href="/dues" />}
         <StatCard label="Total Contributions"     value={toCurrency(totalContribCents)} subtext="All time"     icon={DollarSign}  color="sky"     href="/contributions" />
         {widgets.fundraising && <StatCard label="Campaign Contributions"  value={toCurrency(campaignCents)}     subtext="All time"     icon={Target}      color="emerald" href="/campaigns" />}
         <StatCard label="Event Revenue"           value={toCurrency(eventCents)}        subtext="All time"     icon={Calendar}    color="sky"     href="/events" />
         <StatCard label={`Current ${terminology.memberPlural}`} value={statusCounts["active"] ?? 0}   subtext="Active status" icon={UserCheck}  color="emerald" />
-        <StatCard label="Delinquent"              value={delinquentCount}               subtext={`Behind on ${terminology.duesLabel.toLowerCase()}`} icon={AlertCircle} color="red"   href="/dues" />
-        <StatCard label="Past Due"                value={pastDueCount}                  subtext="Pending action" icon={AlertCircle} color="amber" href="/dues" />
-        <StatCard label={`${terminology.duesLabel} Outstanding`} value={toCurrency(outstandingCents)}  subtext="Unpaid charges" icon={DollarSign} color="amber" href="/dues" />
-        <StatCard label={`${terminology.duesLabel} Collected (30d)`} value={toCurrency(dues30dCents)}      subtext="Last 30 days"  icon={DollarSign}  color="emerald" href="/dues" />
+        {widgets.duesFocused && <StatCard label="Delinquent"              value={delinquentCount}               subtext={`Behind on ${terminology.duesLabel.toLowerCase()}`} icon={AlertCircle} color="red"   href="/dues" />}
+        {widgets.duesFocused && <StatCard label="Past Due"                value={pastDueCount}                  subtext="Pending action" icon={AlertCircle} color="amber" href="/dues" />}
+        {widgets.duesFocused && <StatCard label={`${terminology.duesLabel} Outstanding`} value={toCurrency(outstandingCents)}  subtext="Unpaid charges" icon={DollarSign} color="amber" href="/dues" />}
+        {widgets.duesFocused && <StatCard label={`${terminology.duesLabel} Collected (30d)`} value={toCurrency(dues30dCents)}      subtext="Last 30 days"  icon={DollarSign}  color="emerald" href="/dues" />}
         {canSeeExpenditures && <StatCard label="Expenses (30d)"          value={toCurrency(exp30dCents)}       subtext="Last 30 days"  icon={TrendingDown} color="amber" href="/expenditures" />}
         {canSeeExpenditures && <StatCard label="Ledger Total"            value={toCurrency(ledgerCents)}       subtext="Income minus expenses" icon={DollarSign} color="sky" />}
         {canSeeExpenditures && <StatCard label="Expenditures (Month)"    value={toCurrency(expMonthCents)}     subtext="Current month" icon={Receipt}     color="red"     href="/expenditures" />}

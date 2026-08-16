@@ -30,8 +30,8 @@ export default async function PlatformOrganizationsPage({
   const sortField = (SORT_FIELDS.includes(get("sort") as OrganizationSortField) ? get("sort") : "createdAt") as OrganizationSortField;
   const page = Number(get("page")) || 1;
 
-  const validVertical = ["COMMUNITY", "PTA", "UNION", "HOA"].includes(primaryVertical)
-    ? (primaryVertical as "COMMUNITY" | "PTA" | "UNION" | "HOA")
+  const validVertical = ["COMMUNITY", "PTA", "UNION", "HOA", "CHURCH"].includes(primaryVertical)
+    ? (primaryVertical as "COMMUNITY" | "PTA" | "UNION" | "HOA" | "CHURCH")
     : undefined;
 
   const result = await listOrganizations(
@@ -84,6 +84,7 @@ export default async function PlatformOrganizationsPage({
               <option value="PTA">PTA / PTO</option>
               <option value="UNION">Union</option>
               <option value="HOA">HOA</option>
+              <option value="CHURCH">Church</option>
             </select>
           </label>
           <label className="space-y-2 text-sm font-medium text-slate-900">

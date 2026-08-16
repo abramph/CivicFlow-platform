@@ -157,3 +157,65 @@ describe('Profile screen — Union Membership & Dues (relocated from primary nav
     expect(mockGetDues).not.toHaveBeenCalled();
   });
 });
+
+describe('Profile screen — Church Giving shortcut (CHURCH-VERT-B §14)', () => {
+  beforeEach(() => {
+    mockPush.mockReset();
+    mockGetProfile.mockReset().mockResolvedValue({ commsPushEnabled: false, commsEmailEnabled: false, commsSmsEnabled: false, smsOptedOutAt: null });
+    mockGetDues.mockReset();
+  });
+
+  function churchAuth() {
+    return {
+      user: { id: 'user-1', email: 'member@example.com', displayName: 'Member' },
+      organizations: [{ organizationId: 'org-church', organizationName: 'Unestra Demo Church' }],
+      selectedOrganization: {
+        organizationName: 'Unestra Demo Church',
+        memberId: 'member-1',
+        firstName: 'Morgan',
+        lastName: 'Ellis',
+        capability: { primaryVertical: 'CHURCH' },
+      },
+      selectedOrganizationId: 'org-church',
+      logout: mockLogout,
+    };
+  }
+
+  it('shows a Giving section with a shortcut into the Give tab, and never fetches dues', async () => {
+    mockUseAuth.mockReturnValue(churchAuth());
+
+    await render(<ProfileScreen />);
+    await waitFor(() => expect(mockGetProfile).toHaveBeenCalled());
+
+    expect(screen.getByText('Giving')).toBeTruthy();
+    expect(screen.getByLabelText('Manage my giving')).toBeTruthy();
+    expect(mockGetDues).not.toHaveBeenCalled();
+  });
+
+  it('navigates the Giving shortcut to the Give tab, not a duplicated giving UI', async () => {
+    mockUseAuth.mockReturnValue(churchAuth());
+
+    await render(<ProfileScreen />);
+    await waitFor(() => expect(screen.getByLabelText('Manage my giving')).toBeTruthy());
+
+    await fireEvent.press(screen.getByLabelText('Manage my giving'));
+
+    expect(mockPush).toHaveBeenCalledWith('/give');
+  });
+
+  it('does not show the Church Giving section or Union Membership & Dues section for a non-Church, non-Union member', async () => {
+    mockUseAuth.mockReturnValue({
+      user: { id: 'user-1', email: 'member@example.com', displayName: 'Member' },
+      organizations: [{ organizationId: 'org-a', organizationName: 'Riverdale Community Association' }],
+      selectedOrganization: { organizationName: 'Riverdale Community Association', memberId: 'member-1', firstName: 'Jamie', lastName: 'Lee' },
+      selectedOrganizationId: 'org-a',
+      logout: mockLogout,
+    });
+
+    await render(<ProfileScreen />);
+    await waitFor(() => expect(mockGetProfile).toHaveBeenCalled());
+
+    expect(screen.queryByText('Giving')).toBeNull();
+    expect(screen.queryByLabelText('Manage my giving')).toBeNull();
+  });
+});

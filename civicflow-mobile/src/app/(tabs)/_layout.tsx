@@ -27,6 +27,11 @@ export default function TabsLayout() {
   // dashboard.tsx: caseManagement is unconditionally on for the whole
   // UNION vertical, not a separate per-org toggle.
   const isUnion = selectedOrganization?.capability?.primaryVertical === 'UNION';
+  // CHURCH-VERT-A — a church member opens Unestra to give, not to browse a
+  // generic payment tab (see docs on the Give tab in giving-content.tsx).
+  // Same live-read-every-render reasoning as isUnion above: switching
+  // organizations mid-session updates the tab bar immediately.
+  const isChurch = selectedOrganization?.capability?.primaryVertical === 'CHURCH';
 
   if (status === 'loading') {
     return (
@@ -58,6 +63,18 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="give"
+        options={{
+          title: 'Give',
+          // Church-only primary tab -- Give, not Payments, is the member
+          // financial hub (§3/§6). Other verticals still reach the exact
+          // same giving flow via the dashboard's "Giving" Quick Action.
+          href: isChurch ? undefined : null,
+          tabBarAccessibilityLabel: 'Give',
+          tabBarIcon: ({ color, focused }) => <TabIcon name="give" color={color} focused={focused} />,
+        }}
+      />
+      <Tabs.Screen
         name="inbox"
         options={{
           title: 'Inbox',
@@ -70,10 +87,11 @@ export default function TabsLayout() {
         name="announcements"
         options={{
           title: 'Announcements',
-          // Union foregrounds Cases instead — Announcements stays a real,
-          // reachable screen (the dashboard's "Recent Announcements"
-          // section still links into it), just not primary nav.
-          href: isUnion ? null : undefined,
+          // Union foregrounds Cases and Church foregrounds Give instead —
+          // Announcements stays a real, reachable screen (the dashboard's
+          // "Recent Announcements" section still links into it), just not
+          // primary nav for either.
+          href: isUnion || isChurch ? null : undefined,
           tabBarAccessibilityLabel: 'Announcements',
           tabBarIcon: ({ color, focused }) => <TabIcon name="announcements" color={color} focused={focused} />,
         }}
@@ -85,7 +103,9 @@ export default function TabsLayout() {
           // Most Union members pay dues via employer payroll checkoff, not
           // member-initiated payment (see dashboard.tsx's isUnion comment) —
           // relocated to Profile → Membership & Dues instead of primary nav.
-          href: isUnion ? null : undefined,
+          // Church members give voluntarily through the Give tab above
+          // instead of a fixed-obligation Payments tab (§3/§5).
+          href: isUnion || isChurch ? null : undefined,
           tabBarAccessibilityLabel: 'Payments',
           tabBarIcon: ({ color, focused }) => <TabIcon name="payments" color={color} focused={focused} />,
         }}
@@ -120,7 +140,7 @@ export default function TabsLayout() {
   );
 }
 
-type TabIconName = 'home' | 'inbox' | 'announcements' | 'payments' | 'events' | 'volunteer' | 'admin' | 'profile' | 'cases';
+type TabIconName = 'home' | 'inbox' | 'announcements' | 'payments' | 'events' | 'volunteer' | 'admin' | 'profile' | 'cases' | 'give';
 
 function TabIcon({ name, color, focused }: { name: TabIconName; color: string; focused: boolean }) {
   return (
@@ -138,6 +158,7 @@ function TabIcon({ name, color, focused }: { name: TabIconName; color: string; f
       {name === 'admin' ? <View style={[styles.adminLine, { backgroundColor: color }]} /> : null}
       {name === 'profile' ? <View style={[styles.profileDot, { backgroundColor: color }]} /> : null}
       {name === 'cases' ? <View style={[styles.casesFolder, { borderColor: color }]} /> : null}
+      {name === 'give' ? <View style={[styles.giveHeart, { backgroundColor: color }]} /> : null}
     </View>
   );
 }
@@ -213,5 +234,10 @@ const styles = StyleSheet.create({
     height: 11,
     borderWidth: 2,
     borderRadius: 2,
+  },
+  giveHeart: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
   },
 });

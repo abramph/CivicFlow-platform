@@ -26,12 +26,16 @@ export interface NavItem {
  * category; Architectural Requests and Union Case Center (see
  * docs/union-case-center.md) both shipped and are included below.
  *
- * COMMUNITY/UNION/HOA share the exact same underlying route set (they are,
- * today, the same generic feature set under different branding) — only
- * labels differ. PTA is architecturally its own surface (Unestra Labs) and
+ * COMMUNITY/UNION/HOA/CHURCH share the exact same underlying route set (they
+ * are, today, the same generic feature set under different branding) — only
+ * labels differ. CHURCH-VERT-A confirmed the admin-side giving routes
+ * (/contributions, /settings/giving, /giving/dashboard, /giving/reports,
+ * /giving/operations, /groups, /payment-links, /settings/payments) already
+ * cover everything a church admin needs, so it reuses this list rather than
+ * duplicating it. PTA is architecturally its own surface (Unestra Labs) and
  * gets a fully distinct list; a PTA org must never see Community wording.
  */
-function sharedNavigation(vertical: "COMMUNITY" | "UNION" | "HOA"): NavItem[] {
+function sharedNavigation(vertical: "COMMUNITY" | "UNION" | "HOA" | "CHURCH"): NavItem[] {
   const t = getVerticalTerminology(vertical);
   const dashboardLabel = t.dashboardTitle;
   const campaignsLabel = vertical === "COMMUNITY" ? "Fundraising" : "Campaigns";
@@ -68,8 +72,14 @@ function sharedNavigation(vertical: "COMMUNITY" | "UNION" | "HOA"): NavItem[] {
     // that could never see the page.
     ...(vertical === "UNION" ? [{ href: "/union/cases", label: "Case Center", permission: "union:cases:read" as const }] : []),
     { href: "/contributions", label: "Contributions" },
-    { href: "/dues", label: duesLabel },
-    { href: "/dues/reminders", label: "Dues Campaigns" },
+    // Church does not collect dues -- giving is voluntary (Fund/
+    // ContributionProgram), never a fixed obligation, so these three
+    // dues-specific nav items would only ever dead-end for a Church org.
+    // Real access control for a HYBRID church that genuinely wants fixed
+    // dues still lives at the route/permission layer; this conditional only
+    // keeps a Church admin from seeing a nav link to an empty dues UI.
+    ...(vertical === "CHURCH" ? [] : [{ href: "/dues", label: duesLabel }]),
+    ...(vertical === "CHURCH" ? [] : [{ href: "/dues/reminders", label: "Dues Campaigns" }]),
     { href: "/payment-reports", label: "Payment Reports" },
     { href: "/campaigns", label: campaignsLabel },
     { href: "/events", label: "Events" },
@@ -98,7 +108,7 @@ function sharedNavigation(vertical: "COMMUNITY" | "UNION" | "HOA"): NavItem[] {
     { href: "/settings", label: "Settings" },
     { href: "/settings/organization", label: "Organization", permission: "org_settings:read" },
     { href: "/settings/categories", label: "Categories", permission: "org_settings:read" },
-    { href: "/settings/dues", label: "Dues Setup", permission: "dues:read" },
+    ...(vertical === "CHURCH" ? [] : [{ href: "/settings/dues", label: "Dues Setup", permission: "dues:read" as const }]),
     { href: "/settings/payment-methods", label: "Payment Methods", permission: "org_settings:read" },
     // CONNECT-B: the organization's own Stripe connected account (§24).
     { href: "/settings/payments", label: "Payments", permission: "payments:stripe:view" },
@@ -116,6 +126,7 @@ const NAVIGATION: Record<OrganizationVertical, NavItem[]> = {
   COMMUNITY: sharedNavigation("COMMUNITY"),
   UNION: sharedNavigation("UNION"),
   HOA: sharedNavigation("HOA"),
+  CHURCH: sharedNavigation("CHURCH"),
   // Do NOT expose Community terminology/nav for a PTA/PTO organization —
   // this list replaces the shared one entirely rather than adding to it.
   PTA: [
