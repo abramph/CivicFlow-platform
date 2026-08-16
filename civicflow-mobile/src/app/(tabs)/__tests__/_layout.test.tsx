@@ -139,3 +139,63 @@ describe('TabsLayout — Union vertical navigation', () => {
     expect(screen.getByText('Payments')).toBeTruthy();
   });
 });
+
+describe('TabsLayout — Church vertical navigation (CHURCH-VERT-A)', () => {
+  beforeEach(() => {
+    mockUseAuth.mockReset();
+  });
+
+  function churchOrg(overrides: Record<string, unknown> = {}) {
+    return { pta: null, capability: { primaryVertical: 'CHURCH', adminCapabilities: [] }, ...overrides };
+  }
+
+  function unionOrg(overrides: Record<string, unknown> = {}) {
+    return { pta: null, capability: { primaryVertical: 'UNION', adminCapabilities: [] }, ...overrides };
+  }
+
+  it('shows Give and hides Cases/Announcements/Payments for a Church organization', async () => {
+    mockUseAuth.mockReturnValue(baseAuth({ selectedOrganization: churchOrg() }));
+
+    await render(<TabsLayout />);
+
+    await waitFor(() => expect(screen.getByText('Give')).toBeTruthy());
+    expect(screen.queryByText('Cases')).toBeNull();
+    expect(screen.queryByText('Announcements')).toBeNull();
+    expect(screen.queryByText('Payments')).toBeNull();
+    // Still present: Home, Inbox, Events, Profile.
+    expect(screen.getByText('Home')).toBeTruthy();
+    expect(screen.getByText('Inbox')).toBeTruthy();
+    expect(screen.getByText('Events')).toBeTruthy();
+    expect(screen.getByText('Profile')).toBeTruthy();
+  });
+
+  it('hides Give for a non-Church organization', async () => {
+    mockUseAuth.mockReturnValue(
+      baseAuth({ selectedOrganization: { pta: null, capability: { primaryVertical: 'COMMUNITY', adminCapabilities: [] } } })
+    );
+
+    await render(<TabsLayout />);
+
+    await waitFor(() => expect(screen.getByText('Home')).toBeTruthy());
+    expect(screen.queryByText('Give')).toBeNull();
+  });
+
+  it('re-renders the tab set with no stale tabs when switching between Union and Church orgs (§18)', async () => {
+    mockUseAuth.mockReturnValue(baseAuth({ selectedOrganization: unionOrg() }));
+    const { rerender } = await render(<TabsLayout />);
+    await waitFor(() => expect(screen.getByText('Cases')).toBeTruthy());
+    expect(screen.queryByText('Give')).toBeNull();
+
+    mockUseAuth.mockReturnValue(baseAuth({ selectedOrganization: churchOrg() }));
+    rerender(<TabsLayout />);
+
+    await waitFor(() => expect(screen.queryByText('Cases')).toBeNull());
+    expect(screen.getByText('Give')).toBeTruthy();
+
+    mockUseAuth.mockReturnValue(baseAuth({ selectedOrganization: unionOrg() }));
+    rerender(<TabsLayout />);
+
+    await waitFor(() => expect(screen.queryByText('Give')).toBeNull());
+    expect(screen.getByText('Cases')).toBeTruthy();
+  });
+});

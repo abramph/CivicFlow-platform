@@ -3,12 +3,13 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-type Vertical = "COMMUNITY" | "PTA" | "UNION" | "HOA";
+type Vertical = "COMMUNITY" | "PTA" | "UNION" | "HOA" | "CHURCH";
 const VERTICAL_OPTIONS: { value: Vertical; label: string }[] = [
   { value: "COMMUNITY", label: "Community" },
   { value: "PTA", label: "PTA / PTO" },
   { value: "UNION", label: "Union" },
   { value: "HOA", label: "HOA" },
+  { value: "CHURCH", label: "Church" },
 ];
 
 interface Preview {

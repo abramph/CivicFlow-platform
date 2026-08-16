@@ -33,11 +33,16 @@ describe("vertical-capabilities: Community/PTA/Union never get HOA property capa
     expect(hasVerticalCapability("UNION", "propertyResidents")).toBe(false);
     expect(hasVerticalCapability("UNION", "payrollCheckoff")).toBe(true);
   });
+
+  it("Church has no vertical-level capability flags -- giving is gated by real Fund/ContributionProgram data, same as Community", () => {
+    const capabilities = getVerticalCapabilities("CHURCH");
+    expect(Object.values(capabilities).every((v) => v === false)).toBe(true);
+  });
 });
 
 describe("vertical-capabilities: getVerticalCapabilities always returns every known flag", () => {
   it("never requires an ?? false fallback from the caller", () => {
-    for (const vertical of ["COMMUNITY", "PTA", "UNION", "HOA"] as const) {
+    for (const vertical of ["COMMUNITY", "PTA", "UNION", "HOA", "CHURCH"] as const) {
       const capabilities = getVerticalCapabilities(vertical);
       expect(typeof capabilities.properties).toBe("boolean");
       expect(typeof capabilities.propertyResidents).toBe("boolean");

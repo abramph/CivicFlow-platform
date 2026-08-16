@@ -50,6 +50,7 @@ export function getRsvpMode(vertical: OrganizationVertical): RsvpMode {
       return "household";
     case "COMMUNITY":
     case "UNION":
+    case "CHURCH":
       return "individual";
     case "HOA":
       return "none";

@@ -26,12 +26,16 @@ export interface NavItem {
  * category; Architectural Requests and Union Case Center (see
  * docs/union-case-center.md) both shipped and are included below.
  *
- * COMMUNITY/UNION/HOA share the exact same underlying route set (they are,
- * today, the same generic feature set under different branding) — only
- * labels differ. PTA is architecturally its own surface (Unestra Labs) and
+ * COMMUNITY/UNION/HOA/CHURCH share the exact same underlying route set (they
+ * are, today, the same generic feature set under different branding) — only
+ * labels differ. CHURCH-VERT-A confirmed the admin-side giving routes
+ * (/contributions, /settings/giving, /giving/dashboard, /giving/reports,
+ * /giving/operations, /groups, /payment-links, /settings/payments) already
+ * cover everything a church admin needs, so it reuses this list rather than
+ * duplicating it. PTA is architecturally its own surface (Unestra Labs) and
  * gets a fully distinct list; a PTA org must never see Community wording.
  */
-function sharedNavigation(vertical: "COMMUNITY" | "UNION" | "HOA"): NavItem[] {
+function sharedNavigation(vertical: "COMMUNITY" | "UNION" | "HOA" | "CHURCH"): NavItem[] {
   const t = getVerticalTerminology(vertical);
   const dashboardLabel = t.dashboardTitle;
   const campaignsLabel = vertical === "COMMUNITY" ? "Fundraising" : "Campaigns";
@@ -116,6 +120,7 @@ const NAVIGATION: Record<OrganizationVertical, NavItem[]> = {
   COMMUNITY: sharedNavigation("COMMUNITY"),
   UNION: sharedNavigation("UNION"),
   HOA: sharedNavigation("HOA"),
+  CHURCH: sharedNavigation("CHURCH"),
   // Do NOT expose Community terminology/nav for a PTA/PTO organization —
   // this list replaces the shared one entirely rather than adding to it.
   PTA: [

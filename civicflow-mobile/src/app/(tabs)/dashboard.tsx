@@ -28,6 +28,7 @@ import {
   type PtaVolunteerHours,
   type UnionCaseSummary,
   getGiving,
+  type GivingSummary,
 } from '@/lib/mobile-api';
 import { useUnreadConversationCount } from '@/lib/unread-count';
 
@@ -56,7 +57,8 @@ export default function DashboardScreen() {
   const [pendingReportCount, setPendingReportCount] = useState(0);
   const [ptaHours, setPtaHours] = useState<PtaVolunteerHours | null>(null);
   const [ptaUpcoming, setPtaUpcoming] = useState<PtaVolunteerCommitment | null>(null);
-  const [givingEnabled, setGivingEnabled] = useState(false);
+  const [givingSummary, setGivingSummary] = useState<GivingSummary | null>(null);
+  const givingEnabled = givingSummary?.enabled === true;
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const unreadCount = useUnreadConversationCount(selectedOrganizationId);
@@ -66,6 +68,11 @@ export default function DashboardScreen() {
   // verticals use (Balance tile, Make a Payment) doesn't fit -- Union
   // members see Cases and Announcements foregrounded instead.
   const isUnion = selectedOrganization?.capability?.primaryVertical === 'UNION';
+  // CHURCH-VERT-B -- a church member opens the app to give, communicate, and
+  // participate, not to browse a payment-first balance/delinquency layout
+  // (see docs on the Give tab). Same live-read-every-render reasoning as
+  // isUnion above.
+  const isChurch = selectedOrganization?.capability?.primaryVertical === 'CHURCH';
   const pta = selectedOrganization?.pta ?? null;
   const hasPtaIdentity = Boolean(pta?.householdAdultId);
   // A pure PTA parent (household link, no OrgMember) reads announcements,
@@ -91,15 +98,23 @@ export default function DashboardScreen() {
           getGiving(selectedOrganizationId).catch(() => ({ enabled: false as const })),
           getUnionCases(selectedOrganizationId),
         ]);
-        setGivingEnabled(givingData.enabled);
+        setGivingSummary(givingData);
         setUnionCases(casesData);
+      } else if (hasMemberIdentity && isChurch) {
+        // No getDues/getPaymentHistory here -- Church giving is voluntary
+        // (Fund/ContributionProgram), not the fixed-balance dues model those
+        // calls describe. A church that also configures fixed dues can still
+        // reach that via Profile -> Dues (rare/HYBRID case, not the default
+        // dashboard experience per §5).
+        const givingData = await getGiving(selectedOrganizationId).catch(() => ({ enabled: false as const }));
+        setGivingSummary(givingData);
       } else if (hasMemberIdentity) {
         const [givingData, duesData, historyData] = await Promise.all([
           getGiving(selectedOrganizationId).catch(() => ({ enabled: false as const })),
           getDues(selectedOrganizationId),
           getPaymentHistory(selectedOrganizationId),
         ]);
-        setGivingEnabled(givingData.enabled);
+        setGivingSummary(givingData);
         setDues(duesData);
         setPendingReportCount(historyData.reports.filter((r) => r.status === 'pending').length);
       } else if (hasPtaIdentity) {
@@ -120,7 +135,7 @@ export default function DashboardScreen() {
     } catch {
       setLoadError('Unable to load your dashboard. Check your connection and try again.');
     }
-  }, [selectedOrganizationId, hasAnyIdentity, hasMemberIdentity, hasPtaIdentity, isUnion, pta?.householdAdultId, selectedOrganization?.capability?.rsvp]);
+  }, [selectedOrganizationId, hasAnyIdentity, hasMemberIdentity, hasPtaIdentity, isUnion, isChurch, pta?.householdAdultId, selectedOrganization?.capability?.rsvp]);
 
   useEffect(() => {
     (async () => {
@@ -143,6 +158,16 @@ export default function DashboardScreen() {
     .flatMap((c) => c.upcomingDates)
     .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime())[0] ?? null;
 
+  // Recurring-gift summary for the Church Home card (§4) -- earliest
+  // upcoming contribution across all of the member's active schedules.
+  const churchNextGiftDate =
+    givingSummary?.enabled
+      ? givingSummary.schedules
+          .filter((s) => s.status === 'ACTIVE' && s.nextContributionDate)
+          .map((s) => s.nextContributionDate as string)
+          .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())[0] ?? null
+      : null;
+
   return (
     <ScrollView
       contentContainerStyle={[styles.container, topPadding]}
@@ -157,7 +182,7 @@ export default function DashboardScreen() {
 
       <LoadErrorBanner message={loadError} onRetry={load} />
 
-      {hasMemberIdentity && !isUnion ? (
+      {hasMemberIdentity && !isUnion && !isChurch ? (
         <ThemedView style={styles.summaryRow}>
           <Pressable
             style={styles.summaryTile}
@@ -169,6 +194,49 @@ export default function DashboardScreen() {
               <ThemedText type="small" themeColor="textSecondary">Balance</ThemedText>
               <ThemedText type="subtitle">{dues ? formatCurrency(dues.outstandingBalance) : '—'}</ThemedText>
               {dues?.isDelinquent ? <ThemedText type="small" style={styles.delinquent}>Past due</ThemedText> : null}
+            </ThemedView>
+          </Pressable>
+          <Pressable
+            style={styles.summaryTile}
+            onPress={() => router.push('/inbox')}
+            accessibilityRole="button"
+            accessibilityLabel={`Unread messages, ${unreadCount}`}
+          >
+            <ThemedView type="backgroundElement" style={styles.card}>
+              <ThemedText type="small" themeColor="textSecondary">Unread Messages</ThemedText>
+              <ThemedText type="subtitle">{unreadCount}</ThemedText>
+            </ThemedView>
+          </Pressable>
+        </ThemedView>
+      ) : null}
+
+      {hasMemberIdentity && isChurch ? (
+        <ThemedView style={styles.summaryRow}>
+          <Pressable
+            style={styles.summaryTile}
+            onPress={() => router.push('/give' as never)}
+            accessibilityRole="button"
+            accessibilityLabel={
+              givingSummary?.enabled
+                ? `This year's giving, ${formatCurrency(givingSummary.yearTotal)}${churchNextGiftDate ? `, next gift ${new Date(churchNextGiftDate).toLocaleDateString()}` : ', no recurring gift yet'}`
+                : 'Give Now'
+            }
+          >
+            <ThemedView type="backgroundElement" style={styles.card}>
+              {givingSummary?.enabled ? (
+                <>
+                  <ThemedText type="small" themeColor="textSecondary">This year&apos;s giving</ThemedText>
+                  <ThemedText type="subtitle">{formatCurrency(givingSummary.yearTotal)}</ThemedText>
+                  <ThemedText type="small" themeColor="textSecondary">
+                    {churchNextGiftDate ? `Next gift ${new Date(churchNextGiftDate).toLocaleDateString()}` : 'No recurring gift yet'}
+                  </ThemedText>
+                </>
+              ) : (
+                <>
+                  <ThemedText type="small" themeColor="textSecondary">Giving</ThemedText>
+                  <ThemedText type="subtitle">Give Now</ThemedText>
+                </>
+              )}
             </ThemedView>
           </Pressable>
           <Pressable
@@ -326,12 +394,14 @@ export default function DashboardScreen() {
 
       <ThemedText type="smallBold" style={styles.sectionLabel}>Quick Actions</ThemedText>
       <ThemedView style={styles.quickActionsRow}>
-        {hasMemberIdentity && !isUnion ? (
+        {hasMemberIdentity && !isUnion && !isChurch ? (
           <Pressable style={styles.actionButton} onPress={() => router.push('/make-payment')} accessibilityRole="button" accessibilityLabel="Make a payment">
             <ThemedText style={styles.actionButtonText}>Make a Payment</ThemedText>
           </Pressable>
         ) : null}
-        {givingEnabled ? (
+        {/* Church already leads with a Give summary tile above and has a
+            primary Give tab -- a duplicate Quick Action would be redundant. */}
+        {givingEnabled && !isChurch ? (
           <Pressable style={styles.actionButton} onPress={() => router.push('/giving' as never)} accessibilityRole="button" accessibilityLabel="Giving">
             <ThemedText style={styles.actionButtonText}>Giving</ThemedText>
           </Pressable>
@@ -351,7 +421,7 @@ export default function DashboardScreen() {
             <ThemedText style={styles.actionButtonSecondaryText}>Scan Attendance Code</ThemedText>
           </Pressable>
         ) : null}
-        {hasAnyIdentity ? (
+        {hasAnyIdentity && !isChurch ? (
           <Pressable
             style={styles.actionButtonSecondary}
             onPress={() => router.push(hasPtaIdentity && !hasMemberIdentity ? '/pta-report-payment' : '/report-payment')}

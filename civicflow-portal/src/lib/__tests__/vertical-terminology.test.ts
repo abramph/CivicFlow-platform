@@ -7,7 +7,7 @@ import {
   VERTICAL_SELECTION_CARDS,
 } from "@/lib/vertical-terminology";
 
-const VERTICALS = ["COMMUNITY", "PTA", "UNION", "HOA"] as const;
+const VERTICALS = ["COMMUNITY", "PTA", "UNION", "HOA", "CHURCH"] as const;
 
 describe("getVerticalTerminology", () => {
   it("never exposes internal terms (OrgMember, tenant, feature flag, Prisma model names)", () => {
@@ -26,7 +26,7 @@ describe("getVerticalTerminology", () => {
 
   it("gives each vertical a distinct dashboard title", () => {
     const titles = new Set(VERTICALS.map((v) => getVerticalTerminology(v).dashboardTitle));
-    expect(titles.size).toBe(4);
+    expect(titles.size).toBe(5);
   });
 });
 
@@ -70,8 +70,8 @@ describe("getEmptyStateCopy", () => {
 });
 
 describe("VERTICAL_SELECTION_CARDS", () => {
-  it("has exactly the four required verticals in the required order", () => {
-    expect(VERTICAL_SELECTION_CARDS.map((c) => c.vertical)).toEqual(["COMMUNITY", "PTA", "UNION", "HOA"]);
+  it("has exactly the five required verticals in the required order", () => {
+    expect(VERTICAL_SELECTION_CARDS.map((c) => c.vertical)).toEqual(["COMMUNITY", "PTA", "UNION", "HOA", "CHURCH"]);
   });
 
   it("never claims unimplemented Union/HOA functionality", () => {
@@ -81,6 +81,12 @@ describe("VERTICAL_SELECTION_CARDS", () => {
     const hoaText = `${hoa.description} ${hoa.highlights.join(" ")}`;
     expect(unionText).not.toMatch(/grievance|arbitration/i);
     expect(hoaText).not.toMatch(/violation|maintenance ticket|architectural review/i);
+  });
+
+  it("never claims unimplemented Church functionality (sermon streaming, check-in/kiosk, payroll)", () => {
+    const church = VERTICAL_SELECTION_CARDS.find((c) => c.vertical === "CHURCH")!;
+    const churchText = `${church.description} ${church.highlights.join(" ")}`;
+    expect(churchText).not.toMatch(/sermon|livestream|check-?in|kiosk|payroll|childcare/i);
   });
 
   it("every card has an icon, examples, and a terminology preview (PR #39)", () => {

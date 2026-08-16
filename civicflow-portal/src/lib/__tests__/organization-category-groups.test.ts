@@ -38,7 +38,7 @@ import { monthlyRunRate } from "@/lib/giving/finance-dashboard";
 describe("organization categories (§2/§3)", () => {
   it("every category maps to a real experience vertical with complete presets", () => {
     for (const info of Object.values(CATEGORY_INFO)) {
-      expect(["COMMUNITY", "PTA", "UNION", "HOA"]).toContain(info.experienceVertical);
+      expect(["COMMUNITY", "PTA", "UNION", "HOA", "CHURCH"]).toContain(info.experienceVertical);
       expect(info.label.length).toBeGreaterThan(0);
       expect(info.givingTerminology.length).toBeGreaterThan(0);
       expect(info.memberLabel.length).toBeGreaterThan(0);
@@ -46,15 +46,20 @@ describe("organization categories (§2/§3)", () => {
     }
   });
 
-  it("a church runs on the COMMUNITY experience with Giving/Ministries presets", () => {
+  // CHURCH-VERT-A: Church was promoted to its own first-class
+  // OrganizationVertical (previously it ran on COMMUNITY, relabeled via
+  // this category). CHURCH_RELIGIOUS now runs on that dedicated engine so
+  // its nav/terminology/Give tab actually apply.
+  it("a church runs on the CHURCH experience with Giving/Ministries presets", () => {
     const church = CATEGORY_INFO.CHURCH_RELIGIOUS;
-    expect(church.experienceVertical).toBe("COMMUNITY");
+    expect(church.experienceVertical).toBe("CHURCH");
     expect(church.givingTerminology).toBe("Giving");
     expect(church.groupsLabel).toBe("Ministries");
   });
 
   it("legacy organizations derive their category from the vertical", () => {
     expect(deriveCategoryFromVertical("PTA")).toBe("PTA_PTO");
+    expect(deriveCategoryFromVertical("CHURCH")).toBe("CHURCH_RELIGIOUS");
     expect(getEffectiveCategory("COMMUNITY", null)).toBe("COMMUNITY");
     expect(getEffectiveCategory("COMMUNITY", "CHURCH_RELIGIOUS")).toBe("CHURCH_RELIGIOUS");
   });
@@ -63,8 +68,9 @@ describe("organization categories (§2/§3)", () => {
     // The route only accepts categories from categoriesForVertical(current).
     expect(categoriesForVertical("PTA")).toEqual(["PTA_PTO"]);
     expect(categoriesForVertical("UNION")).toEqual(["UNION"]);
+    expect(categoriesForVertical("CHURCH")).toEqual(["CHURCH_RELIGIOUS"]);
     expect(categoriesForVertical("COMMUNITY")).not.toContain("PTA_PTO");
-    expect(categoriesForVertical("COMMUNITY")).toContain("CHURCH_RELIGIOUS");
+    expect(categoriesForVertical("COMMUNITY")).not.toContain("CHURCH_RELIGIOUS");
   });
 });
 

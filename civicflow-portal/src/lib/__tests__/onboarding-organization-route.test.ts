@@ -104,8 +104,8 @@ describe("POST /api/onboarding/organization — primaryVertical requirement", ()
     );
   });
 
-  it("accepts each of the four supported verticals", async () => {
-    for (const vertical of ["COMMUNITY", "PTA", "UNION", "HOA"]) {
+  it("accepts each of the five supported verticals", async () => {
+    for (const vertical of ["COMMUNITY", "PTA", "UNION", "HOA", "CHURCH"]) {
       requireAuth.mockResolvedValueOnce({ userId: "u1", userEmail: "a@example.org" });
       findFirstMembership.mockResolvedValueOnce(null);
       createOrganization.mockResolvedValueOnce({ id: `org-${vertical}`, slug: "x", name: "X", primaryVertical: vertical });

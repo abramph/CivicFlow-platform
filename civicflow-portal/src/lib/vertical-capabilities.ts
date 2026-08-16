@@ -57,6 +57,12 @@ const VERTICAL_CAPABILITIES: Record<OrganizationVertical, Partial<Record<Capabil
     // to begin it yet). Flipping it on without the underlying model/routes
     // would advertise a capability that doesn't work.
   },
+  // CHURCH-VERT-A: no vertical-level capability flags -- giving is already
+  // gated by real data (whether the org has Funds/ContributionPrograms
+  // configured, see mobile getGiving()'s enabled boolean), not a capability
+  // flag, exactly like COMMUNITY. Adding a flag here would just duplicate
+  // that existing data-driven gate.
+  CHURCH: {},
 };
 
 /** Always returns every known flag, explicit `false` for anything not

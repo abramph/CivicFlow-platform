@@ -95,6 +95,7 @@ enum OrganizationVertical {
   PTA
   UNION
   HOA
+  CHURCH
 }
 
 /// CORE-GIVE-I (§2): presentation-layer organization categorization.
