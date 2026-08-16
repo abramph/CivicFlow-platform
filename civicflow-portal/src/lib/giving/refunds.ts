@@ -133,7 +133,20 @@ export async function issueRefund(input: {
  * `providerRefundId` via ContributionRefundEvent's unique constraint: a
  * replay of the same refund.id is a guaranteed no-op regardless of how many
  * OTHER refunds have landed on this contribution since. Never call this with
- * a synthetic/charge-derived id — it must be Stripe's own `refund.id`. */
+ * a synthetic/charge-derived id — it must be Stripe's own `refund.id`.
+ *
+ * Concurrency (launch-audit hardening, 2026-08): the cumulative-total
+ * read-then-write is done inside a `SELECT ... FOR UPDATE`-locked
+ * transaction, not against an earlier unlocked snapshot. Two DIFFERENT
+ * refunds racing on the same contribution (e.g. two close-together webhook
+ * deliveries, or a webhook racing issueRefund's synchronous path) would
+ * otherwise both read the same prior total and the second commit would
+ * silently clobber the first's contribution.refundedAmount, even though
+ * both ContributionRefundEvent rows landed correctly — the unique
+ * constraint alone only guards against the SAME refund id being applied
+ * twice, not this lost-update race between different ids. The row lock
+ * makes the second racer wait, then recompute off the first's committed
+ * total instead. */
 export async function applyProviderRefund(input: {
   organizationId: string;
   providerPaymentIntentId: string;
@@ -150,10 +163,11 @@ export async function applyProviderRefund(input: {
   reason?: string | null;
   refundedByUserId?: string | null;
 }): Promise<"APPLIED" | "DUPLICATE" | "NOT_FOUND" | "NOT_SUCCEEDED"> {
-  const contribution = await prisma.contribution.findFirst({
+  const existing = await prisma.contribution.findFirst({
     where: { organizationId: input.organizationId, providerPaymentIntentId: input.providerPaymentIntentId },
+    select: { id: true },
   });
-  if (!contribution) {
+  if (!existing) {
     // A refund event that can't be matched to any contribution — never
     // fabricate a financial record for it. Observable, never fatal: the
     // webhook still 200s (nothing to retry).
@@ -163,33 +177,37 @@ export async function applyProviderRefund(input: {
   if (input.status !== "succeeded") {
     logGivingEvent("GIVING_REFUND_NOT_SUCCEEDED", {
       organizationId: input.organizationId,
-      contributionId: contribution.id,
+      contributionId: existing.id,
       status: input.status,
       source: input.source,
     });
     return "NOT_SUCCEEDED";
   }
 
-  const originalCents = Math.round(Number(contribution.totalChargedAmount ?? contribution.amount) * 100);
-  const priorCents = Math.round(Number(contribution.refundedAmount ?? 0) * 100);
-  // Financial invariant: 0 <= totalRefunded <= originalAmount, always —
-  // clamp even if a malformed/duplicate-in-substance amount reached here.
-  const nextCents = Math.min(priorCents + Math.max(0, input.amountRefundedCents), originalCents);
-
   try {
-    await prisma.$transaction([
-      prisma.contributionRefundEvent.create({
+    await prisma.$transaction(async (tx) => {
+      const [locked] = await tx.$queryRaw<
+        { id: string; totalChargedAmount: Prisma.Decimal | null; amount: Prisma.Decimal; refundedAmount: Prisma.Decimal | null }[]
+      >`SELECT id, "totalChargedAmount", amount, "refundedAmount" FROM "Contribution" WHERE id = ${existing.id} FOR UPDATE`;
+
+      const originalCents = Math.round(Number(locked.totalChargedAmount ?? locked.amount) * 100);
+      const priorCents = Math.round(Number(locked.refundedAmount ?? 0) * 100);
+      // Financial invariant: 0 <= totalRefunded <= originalAmount, always —
+      // clamp even if a malformed/duplicate-in-substance amount reached here.
+      const nextCents = Math.min(priorCents + Math.max(0, input.amountRefundedCents), originalCents);
+
+      await tx.contributionRefundEvent.create({
         data: {
           organizationId: input.organizationId,
-          contributionId: contribution.id,
+          contributionId: locked.id,
           providerRefundId: input.providerRefundId,
           amountCents: input.amountRefundedCents,
           status: input.status,
           source: input.source,
         },
-      }),
-      prisma.contribution.update({
-        where: { id: contribution.id },
+      });
+      await tx.contribution.update({
+        where: { id: locked.id },
         data: {
           refundedAmount: new Prisma.Decimal((nextCents / 100).toFixed(2)),
           refundedAt: new Date(),
@@ -197,8 +215,8 @@ export async function applyProviderRefund(input: {
           ...(input.reason ? { refundReason: input.reason } : {}),
           ...(input.refundedByUserId ? { refundedByUserId: input.refundedByUserId } : {}),
         },
-      }),
-    ]);
+      });
+    });
   } catch (err) {
     // Unique-constraint violation on providerRefundId: this exact Stripe
     // refund was already applied (event replay). A DIFFERENT refund.id on
@@ -206,7 +224,7 @@ export async function applyProviderRefund(input: {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
       logGivingEvent("GIVING_REFUND_DUPLICATE_IGNORED", {
         organizationId: input.organizationId,
-        contributionId: contribution.id,
+        contributionId: existing.id,
         source: input.source,
       });
       return "DUPLICATE";
@@ -216,7 +234,7 @@ export async function applyProviderRefund(input: {
 
   logGivingEvent("GIVING_REFUND_COMPLETED", {
     organizationId: input.organizationId,
-    contributionId: contribution.id,
+    contributionId: existing.id,
     amountCents: input.amountRefundedCents,
     source: input.source,
   });
