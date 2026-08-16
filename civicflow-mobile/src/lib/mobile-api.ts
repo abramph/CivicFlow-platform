@@ -1958,3 +1958,38 @@ export function getGivingStatementUrl(organizationId: string, statementId: strin
     `/api/mobile/giving/statements/${encodeURIComponent(statementId)}?organizationId=${encodeURIComponent(organizationId)}`
   );
 }
+
+// ── Union Case Center (member self-service) ─────────────────────────────
+
+export type UnionCaseStatus = 'NEW' | 'TRIAGE' | 'ASSIGNED' | 'ACTIVE' | 'PENDING' | 'RESOLVED' | 'CLOSED' | 'WITHDRAWN';
+
+export interface UnionCaseSummary {
+  id: string;
+  caseNumber: number;
+  caseType: string;
+  title: string;
+  description: string;
+  status: UnionCaseStatus;
+  isFormalGrievance: boolean;
+  representationRequested: boolean;
+  incidentDate: string | null;
+  openedAt: string;
+  resolvedAt: string | null;
+  resolutionSummary: string | null;
+  closedAt: string | null;
+  assignedToOrgMemberId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  comments: { id: string; body: string; createdAt: string }[];
+  upcomingDates: { id: string; deadlineType: string; description: string | null; dueAt: string }[];
+}
+
+export function getUnionCases(organizationId: string) {
+  return apiFetch<UnionCaseSummary[]>(`/api/mobile/union/cases?organizationId=${encodeURIComponent(organizationId)}`);
+}
+
+export function getUnionCase(organizationId: string, caseId: string) {
+  return apiFetch<UnionCaseSummary>(
+    `/api/mobile/union/cases/${encodeURIComponent(caseId)}?organizationId=${encodeURIComponent(organizationId)}`
+  );
+}

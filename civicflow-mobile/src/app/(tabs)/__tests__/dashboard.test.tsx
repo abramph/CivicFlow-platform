@@ -202,7 +202,7 @@ describe('Dashboard Union vertical layout', () => {
     expect(screen.queryByLabelText('Make a payment')).toBeNull();
   });
 
-  it('opens the member web case center in the system browser', async () => {
+  it('navigates to the native case list, not the system browser', async () => {
     mockUseAuth.mockReturnValue({ selectedOrganization: unionMemberOrg(), selectedOrganizationId: 'org-union' });
 
     await render(<DashboardScreen />);
@@ -210,7 +210,8 @@ describe('Dashboard Union vertical layout', () => {
 
     fireEvent.press(screen.getByLabelText('My Cases'));
 
-    expect(mockOpenBrowserAsync).toHaveBeenCalledWith(expect.stringContaining('/m/union/cases'));
+    expect(mockRouterPush).toHaveBeenCalledWith('/union-cases');
+    expect(mockOpenBrowserAsync).not.toHaveBeenCalled();
   });
 
   it('still shows Balance and Make a Payment for a non-Union member', async () => {

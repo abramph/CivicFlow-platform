@@ -172,7 +172,7 @@ export default function DashboardScreen() {
         <ThemedView style={styles.summaryRow}>
           <Pressable
             style={styles.summaryTile}
-            onPress={() => WebBrowser.openBrowserAsync(`${API_BASE_URL}/m/union/cases`)}
+            onPress={() => router.push('/union-cases')}
             accessibilityRole="button"
             accessibilityLabel="My Cases"
           >
