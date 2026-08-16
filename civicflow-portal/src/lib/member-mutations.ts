@@ -87,12 +87,23 @@ export const updateMemberSchema = z.object({
   householdName: optionalTextField(160),
   emergencyContactName: optionalTextField(160),
   emergencyContactPhone: optionalTextField(50),
+  commsPushEnabled: z.boolean().optional(),
+  commsEmailEnabled: z.boolean().optional(),
   commsSmsEnabled: z.boolean().optional(),
 });
 export type UpdateMemberInput = z.infer<typeof updateMemberSchema>;
 
 export interface MemberMutationActor {
-  userId: string;
+  /**
+   * Null represents an automated, policy-gated system action with no human
+   * on the other end (e.g. a Member Intake submission auto-applied under an
+   * org's own configured policy after successful identity verification --
+   * see src/lib/member-intake/update-engine.ts). Every downstream sink here
+   * (createAuditEvent, createMemberTimelineEvent, statusChangedByUserId) is
+   * already nullable for exactly this reason -- never invent a synthetic
+   * "system user" row just to satisfy a non-null type.
+   */
+  userId: string | null;
   userEmail?: string | null;
 }
 
@@ -255,6 +266,8 @@ export async function updateMember(
     ...(input.emergencyContactPhone !== undefined
       ? { emergencyContactPhone: normalizeOptionalText(input.emergencyContactPhone) }
       : {}),
+    ...(input.commsPushEnabled !== undefined ? { commsPushEnabled: input.commsPushEnabled } : {}),
+    ...(input.commsEmailEnabled !== undefined ? { commsEmailEnabled: input.commsEmailEnabled } : {}),
     ...(input.commsSmsEnabled !== undefined ? { commsSmsEnabled: input.commsSmsEnabled } : {}),
   };
 
