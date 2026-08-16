@@ -30,10 +30,12 @@ const createSubmission = vi.fn();
 const matchIntakeSubmission = vi.fn();
 const resolvePublicIntakeSourceId = vi.fn();
 
+const findFirstSubmission = vi.fn();
+
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     memberIntakeForm: { findUnique: (...a: unknown[]) => findUniqueForm(...a) },
-    memberIntakeSubmission: { create: (...a: unknown[]) => createSubmission(...a) },
+    memberIntakeSubmission: { create: (...a: unknown[]) => createSubmission(...a), findFirst: (...a: unknown[]) => findFirstSubmission(...a) },
   },
 }));
 vi.mock("@/lib/env", () => ({ getServerEnv: () => ({ NEXTAUTH_SECRET: "test-secret" }) }));
@@ -175,5 +177,24 @@ describe("recordSubmission — status routing", () => {
       { status: "MULTIPLE_MATCHES", memberId: null, candidateMemberIds: ["m-1", "m-2"], confidence: 100, method: "exact_email" }
     );
     expect(data.status).toBe("REVIEW_REQUIRED");
+  });
+});
+
+describe("resolvePublicSubmissionOrgId — MEMBER-QR-C", () => {
+  it("returns null when the submission doesn't belong to a form matching the given token (cross-token replay)", async () => {
+    findFirstSubmission.mockResolvedValue(null);
+    const { resolvePublicSubmissionOrgId } = await import("../submissions");
+    const result = await resolvePublicSubmissionOrgId("wrong-token", "sub-1");
+    expect(result).toBeNull();
+    expect(findFirstSubmission).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "sub-1", form: { publicToken: "wrong-token" } } })
+    );
+  });
+
+  it("returns the submission's organizationId when the token matches its form", async () => {
+    findFirstSubmission.mockResolvedValue({ organizationId: "org-a" });
+    const { resolvePublicSubmissionOrgId } = await import("../submissions");
+    const result = await resolvePublicSubmissionOrgId("tok-abc", "sub-1");
+    expect(result).toBe("org-a");
   });
 });

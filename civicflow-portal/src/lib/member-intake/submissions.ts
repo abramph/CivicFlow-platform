@@ -153,6 +153,11 @@ export interface RecordSubmissionInput {
 export interface RecordedSubmission {
   submissionId: string;
   status: MemberIntakeSubmissionStatus;
+  /** Non-null only for a CONFIDENT_MATCH submission -- lets a caller (the
+   * public submit route) distinguish "this will create a new member" from
+   * "this will update an existing one" for outcome messaging, without a
+   * second database round-trip. */
+  matchedMemberId: string | null;
 }
 
 /**
@@ -230,5 +235,21 @@ export async function recordSubmission(input: RecordSubmissionInput): Promise<Re
     },
   });
 
-  return { submissionId: submission.id, status: submission.status };
+  return { submissionId: submission.id, status: submission.status, matchedMemberId: submission.matchedMemberId };
+}
+
+/**
+ * Resolves the organizationId for a (formToken, submissionId) pair without
+ * requiring the form to still be ACTIVE -- used by the public verification
+ * endpoints, which must keep working through a form's 10-minute OTP window
+ * even if an admin pauses/archives the form in the meantime. The single
+ * `form: { publicToken }` join is what prevents a submissionId being
+ * replayed against an unrelated form's token to fish for its organization.
+ */
+export async function resolvePublicSubmissionOrgId(formToken: string, submissionId: string): Promise<string | null> {
+  const submission = await prisma.memberIntakeSubmission.findFirst({
+    where: { id: submissionId, form: { publicToken: formToken } },
+    select: { organizationId: true },
+  });
+  return submission?.organizationId ?? null;
 }
