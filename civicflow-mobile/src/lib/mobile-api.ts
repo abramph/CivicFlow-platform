@@ -1978,6 +1978,10 @@ export interface UnionCaseSummary {
   resolutionSummary: string | null;
   closedAt: string | null;
   assignedToOrgMemberId: string | null;
+  /** Resolved server-side (route layer, never the member-safe projection
+   * itself) -- nothing about the representative beyond their display name
+   * ever reaches the client. */
+  representativeName: string | null;
   createdAt: string;
   updatedAt: string;
   comments: { id: string; body: string; createdAt: string }[];
@@ -1992,4 +1996,31 @@ export function getUnionCase(organizationId: string, caseId: string) {
   return apiFetch<UnionCaseSummary>(
     `/api/mobile/union/cases/${encodeURIComponent(caseId)}?organizationId=${encodeURIComponent(organizationId)}`
   );
+}
+
+/** Mirrors UnionCaseIntakeForm.tsx's CASE_TYPES on the web -- same
+ * free-text caseType vocabulary the staff dashboard uses, never a
+ * duplicated taxonomy. Submitting never files a formal grievance on its
+ * own (see createUnionCaseIntake); this list deliberately doesn't lead
+ * with grievance-procedure language. */
+export const UNION_CASE_TYPES: { value: string; label: string }[] = [
+  { value: 'GENERAL_ISSUE', label: 'Something else going on' },
+  { value: 'DISCIPLINE', label: 'Discipline or write-up' },
+  { value: 'SAFETY', label: 'Safety concern' },
+  { value: 'CONTRACT_VIOLATION', label: 'Contract violation' },
+  { value: 'SCHEDULING', label: 'Scheduling or hours' },
+  { value: 'HARASSMENT', label: 'Harassment or mistreatment' },
+  { value: 'GRIEVANCE', label: 'I want to file a grievance' },
+  { value: 'OTHER', label: 'Other' },
+];
+
+export function createUnionCase(input: {
+  organizationId: string;
+  caseType: string;
+  title: string;
+  description: string;
+  incidentDate?: string | null;
+  representationRequested?: boolean;
+}) {
+  return apiFetch<UnionCaseSummary>('/api/mobile/union/cases', { method: 'POST', body: JSON.stringify(input) });
 }

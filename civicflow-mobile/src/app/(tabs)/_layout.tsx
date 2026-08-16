@@ -18,6 +18,15 @@ export default function TabsLayout() {
   // string checked here). Empty array means the caller holds no admin
   // capability for this org at all, regardless of what their role is called.
   const hasAdminAccess = Boolean(selectedOrganization?.capability?.adminCapabilities?.length);
+  // Union mobile UX correction — a Union member opens the app to get help
+  // and track a case, not to browse a generic payment-first nav. This is
+  // read fresh from selectedOrganization (itself a useMemo off live auth
+  // state) on every render, so switching organizations mid-session updates
+  // the tab bar immediately with no stale tab from the previous org's
+  // vertical. Vertical-only gate, same reasoning as isUnion in
+  // dashboard.tsx: caseManagement is unconditionally on for the whole
+  // UNION vertical, not a separate per-org toggle.
+  const isUnion = selectedOrganization?.capability?.primaryVertical === 'UNION';
 
   if (status === 'loading') {
     return (
@@ -40,6 +49,15 @@ export default function TabsLayout() {
         options={{ title: 'Home', tabBarAccessibilityLabel: 'Home', tabBarIcon: ({ color, focused }) => <TabIcon name="home" color={color} focused={focused} /> }}
       />
       <Tabs.Screen
+        name="cases"
+        options={{
+          title: 'Cases',
+          href: isUnion ? undefined : null,
+          tabBarAccessibilityLabel: 'Cases',
+          tabBarIcon: ({ color, focused }) => <TabIcon name="cases" color={color} focused={focused} />,
+        }}
+      />
+      <Tabs.Screen
         name="inbox"
         options={{
           title: 'Inbox',
@@ -50,11 +68,27 @@ export default function TabsLayout() {
       />
       <Tabs.Screen
         name="announcements"
-        options={{ title: 'Announcements', tabBarAccessibilityLabel: 'Announcements', tabBarIcon: ({ color, focused }) => <TabIcon name="announcements" color={color} focused={focused} /> }}
+        options={{
+          title: 'Announcements',
+          // Union foregrounds Cases instead — Announcements stays a real,
+          // reachable screen (the dashboard's "Recent Announcements"
+          // section still links into it), just not primary nav.
+          href: isUnion ? null : undefined,
+          tabBarAccessibilityLabel: 'Announcements',
+          tabBarIcon: ({ color, focused }) => <TabIcon name="announcements" color={color} focused={focused} />,
+        }}
       />
       <Tabs.Screen
         name="dues"
-        options={{ title: 'Payments', tabBarAccessibilityLabel: 'Payments', tabBarIcon: ({ color, focused }) => <TabIcon name="payments" color={color} focused={focused} /> }}
+        options={{
+          title: 'Payments',
+          // Most Union members pay dues via employer payroll checkoff, not
+          // member-initiated payment (see dashboard.tsx's isUnion comment) —
+          // relocated to Profile → Membership & Dues instead of primary nav.
+          href: isUnion ? null : undefined,
+          tabBarAccessibilityLabel: 'Payments',
+          tabBarIcon: ({ color, focused }) => <TabIcon name="payments" color={color} focused={focused} />,
+        }}
       />
       <Tabs.Screen
         name="events"
@@ -86,7 +120,7 @@ export default function TabsLayout() {
   );
 }
 
-type TabIconName = 'home' | 'inbox' | 'announcements' | 'payments' | 'events' | 'volunteer' | 'admin' | 'profile';
+type TabIconName = 'home' | 'inbox' | 'announcements' | 'payments' | 'events' | 'volunteer' | 'admin' | 'profile' | 'cases';
 
 function TabIcon({ name, color, focused }: { name: TabIconName; color: string; focused: boolean }) {
   return (
@@ -103,6 +137,7 @@ function TabIcon({ name, color, focused }: { name: TabIconName; color: string; f
       {name === 'volunteer' ? <View style={[styles.volunteerDot, { backgroundColor: color }]} /> : null}
       {name === 'admin' ? <View style={[styles.adminLine, { backgroundColor: color }]} /> : null}
       {name === 'profile' ? <View style={[styles.profileDot, { backgroundColor: color }]} /> : null}
+      {name === 'cases' ? <View style={[styles.casesFolder, { borderColor: color }]} /> : null}
     </View>
   );
 }
@@ -172,5 +207,11 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     position: 'absolute',
     top: 4,
+  },
+  casesFolder: {
+    width: 15,
+    height: 11,
+    borderWidth: 2,
+    borderRadius: 2,
   },
 });

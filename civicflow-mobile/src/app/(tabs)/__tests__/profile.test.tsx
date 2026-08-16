@@ -16,9 +16,11 @@ jest.mock('@/lib/auth-context', () => ({
 
 const mockGetProfile = jest.fn();
 const mockUpdateProfile = jest.fn();
+const mockGetDues = jest.fn();
 jest.mock('@/lib/mobile-api', () => ({
   getProfile: (...args: unknown[]) => mockGetProfile(...args),
   updateProfile: (...args: unknown[]) => mockUpdateProfile(...args),
+  getDues: (...args: unknown[]) => mockGetDues(...args),
 }));
 
 function authWith(organizationCount: number) {
@@ -88,5 +90,70 @@ describe('Profile screen — org owner/admin without a personal member identity'
     expect(screen.getByText('owner@example.com')).toBeTruthy();
     expect(screen.queryByText('null null')).toBeNull();
     expect(mockGetProfile).not.toHaveBeenCalled();
+  });
+});
+
+describe('Profile screen — Union Membership & Dues (relocated from primary nav)', () => {
+  beforeEach(() => {
+    mockPush.mockReset();
+    mockGetProfile.mockReset().mockResolvedValue({ commsPushEnabled: false, commsEmailEnabled: false, commsSmsEnabled: false, smsOptedOutAt: null });
+    mockGetDues.mockReset().mockResolvedValue({ outstandingBalance: 42, isDelinquent: true, delinquentSince: null, charges: [] });
+  });
+
+  function unionAuth() {
+    return {
+      user: { id: 'user-1', email: 'member@example.com', displayName: 'Member' },
+      organizations: [{ organizationId: 'org-union', organizationName: 'Unestra Demo Union' }],
+      selectedOrganization: {
+        organizationName: 'Unestra Demo Union',
+        memberId: 'member-1',
+        firstName: 'Alex',
+        lastName: 'Reyes',
+        capability: { primaryVertical: 'UNION' },
+      },
+      selectedOrganizationId: 'org-union',
+      logout: mockLogout,
+    };
+  }
+
+  it('shows a Membership & Dues section with balance and payment actions for a Union member', async () => {
+    mockUseAuth.mockReturnValue(unionAuth());
+
+    await render(<ProfileScreen />);
+
+    await waitFor(() => expect(mockGetDues).toHaveBeenCalledWith('org-union'));
+    expect(screen.getByText('Membership & Dues')).toBeTruthy();
+    expect(screen.getByText('$42.00')).toBeTruthy();
+    expect(screen.getByText('Past due')).toBeTruthy();
+    expect(screen.getByLabelText('Make a payment')).toBeTruthy();
+    expect(screen.getByLabelText('Report a payment')).toBeTruthy();
+    expect(screen.getByLabelText('Payment history')).toBeTruthy();
+  });
+
+  it('navigates to the make-payment screen from the relocated section', async () => {
+    mockUseAuth.mockReturnValue(unionAuth());
+
+    await render(<ProfileScreen />);
+    await waitFor(() => expect(screen.getByLabelText('Make a payment')).toBeTruthy());
+
+    await fireEvent.press(screen.getByLabelText('Make a payment'));
+
+    expect(mockPush).toHaveBeenCalledWith('/make-payment');
+  });
+
+  it('does not show Membership & Dues or fetch dues for a non-Union member', async () => {
+    mockUseAuth.mockReturnValue({
+      user: { id: 'user-1', email: 'member@example.com', displayName: 'Member' },
+      organizations: [{ organizationId: 'org-a', organizationName: 'Riverdale Community Association' }],
+      selectedOrganization: { organizationName: 'Riverdale Community Association', memberId: 'member-1', firstName: 'Jamie', lastName: 'Lee' },
+      selectedOrganizationId: 'org-a',
+      logout: mockLogout,
+    });
+
+    await render(<ProfileScreen />);
+    await waitFor(() => expect(mockGetProfile).toHaveBeenCalled());
+
+    expect(screen.queryByText('Membership & Dues')).toBeNull();
+    expect(mockGetDues).not.toHaveBeenCalled();
   });
 });

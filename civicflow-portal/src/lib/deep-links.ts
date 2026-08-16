@@ -32,6 +32,10 @@ const ALLOWED_DEEP_LINK_PATTERNS: RegExp[] = [
   // deep-link straight to the scanner.
   /^\/attendance-scan$/,
   /^\/attendance-history$/,
+  // Union Case Center member notifications (representative assigned, status
+  // changed) — see notifyMemberSafely() in civicflow-portal's union/cases.ts.
+  /^\/union-cases$/,
+  /^\/union-cases\/[A-Za-z0-9_-]+$/,
 ];
 
 /**

@@ -17,7 +17,7 @@ jest.mock('@/lib/mobile-api', () => ({
   getUnionCase: (...args: unknown[]) => mockGetUnionCase(...args),
 }));
 
-function unionCase(overrides: Partial<{ resolutionSummary: string | null; comments: { id: string; body: string; createdAt: string }[]; upcomingDates: { id: string; deadlineType: string; description: string | null; dueAt: string }[] }> = {}) {
+function unionCase(overrides: Partial<{ resolutionSummary: string | null; representativeName: string | null; comments: { id: string; body: string; createdAt: string }[]; upcomingDates: { id: string; deadlineType: string; description: string | null; dueAt: string }[] }> = {}) {
   return {
     id: 'case-1',
     caseNumber: 42,
@@ -33,6 +33,7 @@ function unionCase(overrides: Partial<{ resolutionSummary: string | null; commen
     resolutionSummary: overrides.resolutionSummary ?? null,
     closedAt: null,
     assignedToOrgMemberId: null,
+    representativeName: overrides.representativeName ?? null,
     createdAt: '2026-08-01T00:00:00.000Z',
     updatedAt: '2026-08-01T00:00:00.000Z',
     comments: overrides.comments ?? [],
@@ -53,7 +54,7 @@ describe('Union case detail', () => {
 
     await waitFor(() => expect(screen.getByText('UC-42 · Unpaid overtime')).toBeTruthy());
     expect(screen.getByText('Filed after three unpaid shifts in July.')).toBeTruthy();
-    expect(screen.getByText('Representation requested.')).toBeTruthy();
+    expect(screen.getByText('You asked for a representative on this case.')).toBeTruthy();
     expect(mockGetUnionCase).toHaveBeenCalledWith('org-union', 'case-1');
   });
 
@@ -65,6 +66,14 @@ describe('Union case detail', () => {
     await render(<UnionCaseDetailScreen />);
 
     await waitFor(() => expect(screen.getByText('A steward has been assigned.')).toBeTruthy());
+  });
+
+  it('shows the assigned Union Representative when present', async () => {
+    mockGetUnionCase.mockResolvedValue(unionCase({ representativeName: 'Jordan Reyes' }));
+
+    await render(<UnionCaseDetailScreen />);
+
+    await waitFor(() => expect(screen.getByText('Union Representative: Jordan Reyes')).toBeTruthy());
   });
 
   it('shows a not-found message for a case the caller cannot access', async () => {

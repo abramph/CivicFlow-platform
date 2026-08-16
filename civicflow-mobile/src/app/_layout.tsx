@@ -88,7 +88,7 @@ export default function RootLayout() {
           <Stack.Screen name="admin-hoa-violations/[violationId]/index" options={{ headerTitle: 'Violation' }} />
           <Stack.Screen name="admin-hoa-architectural-requests" options={{ headerTitle: 'Architectural Requests' }} />
           <Stack.Screen name="admin-hoa-architectural-requests/[requestId]/index" options={{ headerTitle: 'Request' }} />
-          <Stack.Screen name="union-cases" options={{ headerTitle: 'My Cases' }} />
+          <Stack.Screen name="union-cases/get-help" options={{ headerTitle: 'Get Union Help' }} />
           <Stack.Screen name="union-cases/[caseId]/index" options={{ headerTitle: 'Case' }} />
         </Stack>
       </AuthProvider>

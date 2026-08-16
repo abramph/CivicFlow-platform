@@ -18,6 +18,7 @@ import {
   getPtaDues,
   getPtaVolunteerCommitments,
   getPtaVolunteerHours,
+  getUnionCases,
   type Announcement,
   type DuesSummary,
   type MobileEvent,
@@ -25,9 +26,12 @@ import {
   type PtaEvent,
   type PtaVolunteerCommitment,
   type PtaVolunteerHours,
+  type UnionCaseSummary,
   getGiving,
 } from '@/lib/mobile-api';
 import { useUnreadConversationCount } from '@/lib/unread-count';
+
+const UNION_OPEN_CASE_STATUSES = ['NEW', 'TRIAGE', 'ASSIGNED', 'ACTIVE', 'PENDING'];
 
 function formatCurrency(value: number) {
   return value.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
@@ -46,6 +50,7 @@ export default function DashboardScreen() {
   const { selectedOrganization, selectedOrganizationId } = useAuth();
   const [dues, setDues] = useState<DuesSummary | null>(null);
   const [ptaDues, setPtaDues] = useState<PtaDuesSummary | null>(null);
+  const [unionCases, setUnionCases] = useState<UnionCaseSummary[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [events, setEvents] = useState<(MobileEvent | PtaEvent)[]>([]);
   const [pendingReportCount, setPendingReportCount] = useState(0);
@@ -81,15 +86,22 @@ export default function DashboardScreen() {
       setAnnouncements(announcementsData.slice(0, 3));
       setEvents(eventsData.slice(0, 3));
 
-      if (hasMemberIdentity) {
-        const [duesData, historyData, givingData] = await Promise.all([
+      if (hasMemberIdentity && isUnion) {
+        const [givingData, casesData] = await Promise.all([
+          getGiving(selectedOrganizationId).catch(() => ({ enabled: false as const })),
+          getUnionCases(selectedOrganizationId),
+        ]);
+        setGivingEnabled(givingData.enabled);
+        setUnionCases(casesData);
+      } else if (hasMemberIdentity) {
+        const [givingData, duesData, historyData] = await Promise.all([
+          getGiving(selectedOrganizationId).catch(() => ({ enabled: false as const })),
           getDues(selectedOrganizationId),
           getPaymentHistory(selectedOrganizationId),
-          getGiving(selectedOrganizationId).catch(() => ({ enabled: false as const })),
         ]);
+        setGivingEnabled(givingData.enabled);
         setDues(duesData);
         setPendingReportCount(historyData.reports.filter((r) => r.status === 'pending').length);
-        setGivingEnabled(givingData.enabled);
       } else if (hasPtaIdentity) {
         const duesData = await getPtaDues(selectedOrganizationId);
         setPtaDues(duesData);
@@ -108,7 +120,7 @@ export default function DashboardScreen() {
     } catch {
       setLoadError('Unable to load your dashboard. Check your connection and try again.');
     }
-  }, [selectedOrganizationId, hasAnyIdentity, hasMemberIdentity, hasPtaIdentity, pta?.householdAdultId, selectedOrganization?.capability?.rsvp]);
+  }, [selectedOrganizationId, hasAnyIdentity, hasMemberIdentity, hasPtaIdentity, isUnion, pta?.householdAdultId, selectedOrganization?.capability?.rsvp]);
 
   useEffect(() => {
     (async () => {
@@ -125,6 +137,11 @@ export default function DashboardScreen() {
   const nextEvent = events[0] ?? null;
   const unreadAnnouncementCount = announcements.filter((a) => !a.isRead).length;
   const topPadding = useScreenTopPadding();
+
+  const unionOpenCases = unionCases.filter((c) => UNION_OPEN_CASE_STATUSES.includes(c.status));
+  const unionNextDate = unionOpenCases
+    .flatMap((c) => c.upcomingDates)
+    .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime())[0] ?? null;
 
   return (
     <ScrollView
@@ -169,30 +186,51 @@ export default function DashboardScreen() {
       ) : null}
 
       {hasMemberIdentity && isUnion ? (
-        <ThemedView style={styles.summaryRow}>
+        <>
+          {/* Leads the screen -- "get help -> communicate -> track" is the
+              design goal for Union, not payment-first browsing. */}
           <Pressable
-            style={styles.summaryTile}
-            onPress={() => router.push('/union-cases')}
+            style={styles.getHelpCard}
+            onPress={() => router.push('/union-cases/get-help')}
             accessibilityRole="button"
-            accessibilityLabel="My Cases"
+            accessibilityLabel="Get Union Help"
           >
-            <ThemedView type="backgroundElement" style={styles.card}>
-              <ThemedText type="small" themeColor="textSecondary">Cases</ThemedText>
-              <ThemedText type="subtitle">My Cases</ThemedText>
-            </ThemedView>
+            <ThemedText style={styles.getHelpCardTitle}>Get Union Help</ThemedText>
+            <ThemedText style={styles.getHelpCardSubtitle}>Tell us what&apos;s going on and a steward will follow up.</ThemedText>
           </Pressable>
-          <Pressable
-            style={styles.summaryTile}
-            onPress={() => router.push('/inbox')}
-            accessibilityRole="button"
-            accessibilityLabel={`Unread messages, ${unreadCount}`}
-          >
-            <ThemedView type="backgroundElement" style={styles.card}>
-              <ThemedText type="small" themeColor="textSecondary">Unread Messages</ThemedText>
-              <ThemedText type="subtitle">{unreadCount}</ThemedText>
-            </ThemedView>
-          </Pressable>
-        </ThemedView>
+
+          <ThemedView style={styles.summaryRow}>
+            <Pressable
+              style={styles.summaryTile}
+              onPress={() => router.push('/cases')}
+              accessibilityRole="button"
+              accessibilityLabel={`My Union Cases, ${unionOpenCases.length} open${unionNextDate ? `, next update ${new Date(unionNextDate.dueAt).toLocaleDateString()}` : ''}`}
+            >
+              <ThemedView type="backgroundElement" style={styles.card}>
+                <ThemedText type="small" themeColor="textSecondary">My Union Cases</ThemedText>
+                <ThemedText type="subtitle">
+                  {unionOpenCases.length} open case{unionOpenCases.length === 1 ? '' : 's'}
+                </ThemedText>
+                {unionNextDate ? (
+                  <ThemedText type="small" themeColor="textSecondary">
+                    Next update: {new Date(unionNextDate.dueAt).toLocaleDateString()}
+                  </ThemedText>
+                ) : null}
+              </ThemedView>
+            </Pressable>
+            <Pressable
+              style={styles.summaryTile}
+              onPress={() => router.push('/inbox')}
+              accessibilityRole="button"
+              accessibilityLabel={`Unread messages, ${unreadCount}`}
+            >
+              <ThemedView type="backgroundElement" style={styles.card}>
+                <ThemedText type="small" themeColor="textSecondary">Unread Messages</ThemedText>
+                <ThemedText type="subtitle">{unreadCount}</ThemedText>
+              </ThemedView>
+            </Pressable>
+          </ThemedView>
+        </>
       ) : null}
 
       {hasPtaIdentity && !hasMemberIdentity ? (
@@ -396,6 +434,21 @@ const styles = StyleSheet.create({
   container: {
     padding: Spacing.four,
     gap: Spacing.three,
+  },
+  getHelpCard: {
+    backgroundColor: '#047857',
+    borderRadius: 14,
+    padding: Spacing.four,
+    gap: 4,
+  },
+  getHelpCardTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  getHelpCardSubtitle: {
+    color: '#D1FAE5',
+    fontSize: 13,
   },
   summaryRow: {
     flexDirection: 'row',
