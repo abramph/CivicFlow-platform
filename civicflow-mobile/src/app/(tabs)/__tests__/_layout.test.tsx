@@ -75,3 +75,67 @@ describe('TabsLayout — Admin tab visibility', () => {
     expect(screen.queryByText('Admin')).toBeNull();
   });
 });
+
+describe('TabsLayout — Union vertical navigation', () => {
+  beforeEach(() => {
+    mockUseAuth.mockReset();
+  });
+
+  function unionOrg(overrides: Record<string, unknown> = {}) {
+    return { pta: null, capability: { primaryVertical: 'UNION', adminCapabilities: [] }, ...overrides };
+  }
+
+  it('shows Cases and hides Announcements/Payments for a Union organization', async () => {
+    mockUseAuth.mockReturnValue(baseAuth({ selectedOrganization: unionOrg() }));
+
+    await render(<TabsLayout />);
+
+    await waitFor(() => expect(screen.getByText('Cases')).toBeTruthy());
+    expect(screen.queryByText('Announcements')).toBeNull();
+    expect(screen.queryByText('Payments')).toBeNull();
+    // Still present: Home, Inbox, Events, Profile.
+    expect(screen.getByText('Home')).toBeTruthy();
+    expect(screen.getByText('Inbox')).toBeTruthy();
+    expect(screen.getByText('Events')).toBeTruthy();
+    expect(screen.getByText('Profile')).toBeTruthy();
+  });
+
+  it('hides Cases and keeps Announcements/Payments for a non-Union organization', async () => {
+    mockUseAuth.mockReturnValue(
+      baseAuth({ selectedOrganization: { pta: null, capability: { primaryVertical: 'COMMUNITY', adminCapabilities: [] } } })
+    );
+
+    await render(<TabsLayout />);
+
+    await waitFor(() => expect(screen.getByText('Home')).toBeTruthy());
+    expect(screen.queryByText('Cases')).toBeNull();
+    expect(screen.getByText('Announcements')).toBeTruthy();
+    expect(screen.getByText('Payments')).toBeTruthy();
+  });
+
+  it('lets an Admin-capable Union officer keep the Admin tab alongside Cases — officer capability is untouched by the vertical nav change', async () => {
+    mockUseAuth.mockReturnValue(
+      baseAuth({ selectedOrganization: unionOrg({ capability: { primaryVertical: 'UNION', adminCapabilities: ['adminDashboard'] } }) })
+    );
+
+    await render(<TabsLayout />);
+
+    await waitFor(() => expect(screen.getByText('Cases')).toBeTruthy());
+    expect(screen.getByText('Admin')).toBeTruthy();
+  });
+
+  it('re-renders the tab set with no stale tabs when switching from a Union org to a non-Union org', async () => {
+    mockUseAuth.mockReturnValue(baseAuth({ selectedOrganization: unionOrg() }));
+    const { rerender } = await render(<TabsLayout />);
+    await waitFor(() => expect(screen.getByText('Cases')).toBeTruthy());
+
+    mockUseAuth.mockReturnValue(
+      baseAuth({ selectedOrganization: { pta: null, capability: { primaryVertical: 'COMMUNITY', adminCapabilities: [] } } })
+    );
+    rerender(<TabsLayout />);
+
+    await waitFor(() => expect(screen.queryByText('Cases')).toBeNull());
+    expect(screen.getByText('Announcements')).toBeTruthy();
+    expect(screen.getByText('Payments')).toBeTruthy();
+  });
+});

@@ -88,10 +88,14 @@ export default function UnionCaseDetailScreen() {
         {unionCase.caseType} · Submitted {new Date(unionCase.createdAt).toLocaleDateString()}
       </ThemedText>
 
+      {unionCase.representativeName ? (
+        <ThemedText type="small" themeColor="textSecondary">Union Representative: {unionCase.representativeName}</ThemedText>
+      ) : null}
+
       <ThemedText type="default">{unionCase.description}</ThemedText>
 
       {unionCase.representationRequested ? (
-        <ThemedText type="small" themeColor="textSecondary">Representation requested.</ThemedText>
+        <ThemedText type="small" themeColor="textSecondary">You asked for a representative on this case.</ThemedText>
       ) : null}
 
       {unionCase.resolutionSummary ? (

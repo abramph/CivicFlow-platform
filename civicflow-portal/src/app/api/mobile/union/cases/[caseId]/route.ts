@@ -25,6 +25,20 @@ export async function GET(request: Request, { params }: { params: Promise<{ case
       where: { id: caseId, organizationId: verifiedOrgId },
       include: { comments: { orderBy: { createdAt: "desc" } }, deadlines: { orderBy: { dueAt: "asc" } } },
     });
-    return Response.json({ ok: true, data: toMemberSafeUnionCase(unionCase!) });
+
+    // Route-layer concern per toMemberSafeUnionCase's own doc comment --
+    // resolving assignedToOrgMemberId to a display name is deliberately not
+    // that function's job. Nothing about the representative beyond their
+    // display name reaches the member response.
+    let representativeName: string | null = null;
+    if (unionCase!.assignedToOrgMemberId) {
+      const assignee = await prisma.orgMember.findFirst({
+        where: { id: unionCase!.assignedToOrgMemberId, organizationId: verifiedOrgId },
+        select: { firstName: true, lastName: true, preferredName: true },
+      });
+      representativeName = assignee ? `${assignee.preferredName ?? assignee.firstName} ${assignee.lastName}` : null;
+    }
+
+    return Response.json({ ok: true, data: { ...toMemberSafeUnionCase(unionCase!), representativeName } });
   });
 }

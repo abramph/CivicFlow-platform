@@ -9,12 +9,23 @@ import { Spacing } from '@/constants/theme';
 import { useScreenTopPadding } from '@/hooks/use-screen-top-padding';
 import { useAuth } from '@/lib/auth-context';
 import { API_BASE_URL } from '@/lib/api-client';
-import { getProfile, updateProfile, type MobileProfile } from '@/lib/mobile-api';
+import { getDues, getProfile, updateProfile, type DuesSummary, type MobileProfile } from '@/lib/mobile-api';
+
+function formatCurrency(value: number) {
+  return value.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+}
 
 export default function ProfileScreen() {
   const { user, selectedOrganization, selectedOrganizationId, logout } = useAuth();
   const hasMemberIdentity = Boolean(selectedOrganization?.memberId);
+  // Union foregrounds Cases in primary nav, so Payments isn't a bottom tab
+  // for these orgs (see (tabs)/_layout.tsx) — dues/payment status and
+  // actions relocate here instead of disappearing. Never deletes the
+  // capability, just moves it out of the payment-first spot other
+  // verticals use.
+  const isUnion = selectedOrganization?.capability?.primaryVertical === 'UNION';
   const [profile, setProfile] = useState<MobileProfile | null>(null);
+  const [dues, setDues] = useState<DuesSummary | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
 
   // Comms preferences (commsPushEnabled/commsEmailEnabled/commsSmsEnabled) live
@@ -27,7 +38,8 @@ export default function ProfileScreen() {
   const load = useCallback(async () => {
     if (!selectedOrganizationId || !hasMemberIdentity) return;
     setProfile(await getProfile(selectedOrganizationId));
-  }, [selectedOrganizationId, hasMemberIdentity]);
+    if (isUnion) setDues(await getDues(selectedOrganizationId));
+  }, [selectedOrganizationId, hasMemberIdentity, isUnion]);
 
   useEffect(() => {
     (async () => {
@@ -89,6 +101,26 @@ export default function ProfileScreen() {
         <Pressable style={styles.secondaryButton} onPress={() => router.push('/attendance-history')} accessibilityRole="button" accessibilityLabel="Attendance history">
           <ThemedText type="link">Attendance History</ThemedText>
         </Pressable>
+      ) : null}
+
+      {hasMemberIdentity && isUnion ? (
+        <>
+          <ThemedText type="smallBold" style={styles.sectionLabel}>Membership &amp; Dues</ThemedText>
+          <ThemedView type="backgroundElement" style={styles.card}>
+            <ThemedText type="small" themeColor="textSecondary">Balance</ThemedText>
+            <ThemedText type="subtitle">{dues ? formatCurrency(dues.outstandingBalance) : '—'}</ThemedText>
+            {dues?.isDelinquent ? <ThemedText type="small" style={styles.delinquent}>Past due</ThemedText> : null}
+          </ThemedView>
+          <Pressable style={styles.secondaryButton} onPress={() => router.push('/make-payment')} accessibilityRole="button" accessibilityLabel="Make a payment">
+            <ThemedText type="link">Make a Payment</ThemedText>
+          </Pressable>
+          <Pressable style={styles.secondaryButton} onPress={() => router.push('/report-payment')} accessibilityRole="button" accessibilityLabel="Report a payment">
+            <ThemedText type="link">Report a Payment</ThemedText>
+          </Pressable>
+          <Pressable style={styles.secondaryButton} onPress={() => router.push('/payment-history')} accessibilityRole="button" accessibilityLabel="Payment history">
+            <ThemedText type="link">Payment History</ThemedText>
+          </Pressable>
+        </>
       ) : null}
 
       {hasMemberIdentity ? (
@@ -173,6 +205,9 @@ const styles = StyleSheet.create({
   },
   sectionLabel: {
     marginTop: Spacing.two,
+  },
+  delinquent: {
+    color: '#B42318',
   },
   toggleRow: {
     flexDirection: 'row',

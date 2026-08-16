@@ -28,6 +28,8 @@ const mockGetPaymentHistory = jest.fn();
 const mockGetPtaDues = jest.fn();
 const mockGetPtaVolunteerHours = jest.fn();
 const mockGetPtaVolunteerCommitments = jest.fn();
+const mockGetGiving = jest.fn();
+const mockGetUnionCases = jest.fn();
 jest.mock('@/lib/mobile-api', () => ({
   getAnnouncementsForIdentity: (...args: unknown[]) => mockGetAnnouncementsForIdentity(...args),
   getEventsForOrganization: (...args: unknown[]) => mockGetEventsForOrganization(...args),
@@ -36,7 +38,18 @@ jest.mock('@/lib/mobile-api', () => ({
   getPtaDues: (...args: unknown[]) => mockGetPtaDues(...args),
   getPtaVolunteerHours: (...args: unknown[]) => mockGetPtaVolunteerHours(...args),
   getPtaVolunteerCommitments: (...args: unknown[]) => mockGetPtaVolunteerCommitments(...args),
+  getGiving: (...args: unknown[]) => mockGetGiving(...args),
+  getUnionCases: (...args: unknown[]) => mockGetUnionCases(...args),
 }));
+
+// Union vertical dashboard coverage lives in dashboard-union.test.tsx. Root
+// cause of moving it: two un-awaited fireEvent.press calls back-to-back in
+// one test silently corrupts React 19's act() nesting tracking (a process-
+// global counter, not a per-file one -- surfaces as "overlapping act()
+// calls" and then every later render's initial effect never firing, even in
+// unrelated test files). Fixed at the source by never firing two presses in
+// one test without awaiting/asserting between them; kept in a separate file
+// regardless, for isolation from any other test's unrelated press sequences.
 
 /**
  * Regression coverage for the Quick Actions "Report a Payment" button
@@ -89,18 +102,6 @@ function staffOnlyOrg() {
   };
 }
 
-function unionMemberOrg() {
-  return {
-    organizationId: 'org-union',
-    organizationName: 'Unestra Demo Union',
-    memberId: 'member-union-1',
-    firstName: 'Alex',
-    lastName: 'Reyes',
-    pta: null,
-    capability: { primaryVertical: 'UNION' },
-  };
-}
-
 function memberAndPtaOrg() {
   return {
     organizationId: 'org-both',
@@ -128,6 +129,8 @@ describe('Dashboard "Report a Payment" quick action', () => {
     });
     mockGetPtaVolunteerHours.mockReset().mockResolvedValue({ approvedMinutes: 0, requiredMinutes: null, remainingMinutes: null });
     mockGetPtaVolunteerCommitments.mockReset().mockResolvedValue([]);
+    mockGetGiving.mockReset().mockResolvedValue({ enabled: false });
+    mockGetUnionCases.mockReset().mockResolvedValue([]);
   });
 
   it('routes a PTA parent (PTA identity, no MEMBER identity) to /pta-report-payment', async () => {
@@ -173,55 +176,5 @@ describe('Dashboard "Report a Payment" quick action', () => {
     expect(mockRouterPush).not.toHaveBeenCalledWith('/report-payment');
     expect(mockRouterPush).not.toHaveBeenCalledWith('/pta-report-payment');
     expect(mockGetPtaDues).not.toHaveBeenCalled();
-  });
-});
-
-/**
- * Union members pay dues via employer payroll checkoff, not member-initiated
- * payment, so the dashboard swaps the payment-first layout (Balance tile,
- * Make a Payment) for a Cases-first one instead.
- */
-describe('Dashboard Union vertical layout', () => {
-  beforeEach(() => {
-    mockRouterPush.mockReset();
-    mockOpenBrowserAsync.mockReset();
-    mockGetAnnouncementsForIdentity.mockReset().mockResolvedValue([]);
-    mockGetEventsForOrganization.mockReset().mockResolvedValue([]);
-    mockGetDues.mockReset().mockResolvedValue({ outstandingBalance: 0, isDelinquent: false, delinquentSince: null, charges: [] });
-    mockGetPaymentHistory.mockReset().mockResolvedValue({ payments: [], reports: [] });
-  });
-
-  it('shows a My Cases tile instead of Balance, and hides Make a Payment', async () => {
-    mockUseAuth.mockReturnValue({ selectedOrganization: unionMemberOrg(), selectedOrganizationId: 'org-union' });
-
-    await render(<DashboardScreen />);
-    await waitFor(() => expect(mockGetDues).toHaveBeenCalled());
-
-    expect(screen.getByLabelText('My Cases')).toBeTruthy();
-    expect(screen.queryByLabelText(/^Balance,/)).toBeNull();
-    expect(screen.queryByLabelText('Make a payment')).toBeNull();
-  });
-
-  it('navigates to the native case list, not the system browser', async () => {
-    mockUseAuth.mockReturnValue({ selectedOrganization: unionMemberOrg(), selectedOrganizationId: 'org-union' });
-
-    await render(<DashboardScreen />);
-    await waitFor(() => expect(mockGetDues).toHaveBeenCalled());
-
-    fireEvent.press(screen.getByLabelText('My Cases'));
-
-    expect(mockRouterPush).toHaveBeenCalledWith('/union-cases');
-    expect(mockOpenBrowserAsync).not.toHaveBeenCalled();
-  });
-
-  it('still shows Balance and Make a Payment for a non-Union member', async () => {
-    mockUseAuth.mockReturnValue({ selectedOrganization: conventionalMemberOrg(), selectedOrganizationId: 'org-a' });
-
-    await render(<DashboardScreen />);
-    await waitFor(() => expect(mockGetDues).toHaveBeenCalled());
-
-    expect(screen.queryByLabelText('My Cases')).toBeNull();
-    expect(screen.getByLabelText(/^Balance,/)).toBeTruthy();
-    expect(screen.getByLabelText('Make a payment')).toBeTruthy();
   });
 });

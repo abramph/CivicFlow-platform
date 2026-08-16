@@ -304,7 +304,7 @@ async function notifyMemberSafely(
       if (tokens.length > 0) {
         await sendPushToTokens(
           tokens.map((t) => t.token),
-          { title: notification.title, body: notification.body, deepLink: "/m/union/cases" }
+          { title: notification.title, body: notification.body, deepLink: `/union-cases/${notification.caseId}` }
         );
       }
     }

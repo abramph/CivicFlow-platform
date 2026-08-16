@@ -131,6 +131,24 @@ export async function requireUnionCaseSubmitterAccess(organizationId: string): P
   return { memberId: member.id };
 }
 
+/** Mobile counterpart to requireUnionCaseSubmitterAccess() -- the native app
+ * authenticates with its own bearer-token scheme (requireMobileMembership),
+ * never a NextAuth web session, so this takes an already-verified memberId
+ * instead of re-deriving one from requireMemberWebSession(). */
+export async function requireUnionCaseMobileSubmitterAccess(organizationId: string, memberId: string): Promise<{ memberId: string }> {
+  await requireUnionCaseManagementEnabled(organizationId);
+
+  const member = await prisma.orgMember.findFirst({
+    where: { id: memberId, organizationId, membershipStatus: "active" },
+    select: { id: true },
+  });
+  if (!member) {
+    throw new UnionError("UNION_CASE_MEMBER_NOT_ACTIVE", "Only an active member of this organization can submit a case.");
+  }
+
+  return { memberId: member.id };
+}
+
 /**
  * Gates reading/acting on an *existing* case: the caller must hold a real
  * MEMBER web session AND be the case's own member. Scoped by
@@ -180,6 +198,16 @@ export async function listMyUnionCasesForMobileMember(organizationId: string, me
   return prisma.unionCase.findMany({
     where: { organizationId, memberOrgMemberId: memberId },
     orderBy: { createdAt: "desc" },
+    include: {
+      // Cases tab list cards show "most recent update" and "next
+      // deadline" per card (UNION-CASES-UX). Take 10 raw comments, not 1
+      // -- toMemberSafeUnionCase's isPrivate filter runs after this, and
+      // falling back to an older public comment when the newest one is
+      // internal is correct; silently showing no update at all when a
+      // public one actually exists further back would not be.
+      comments: { orderBy: { createdAt: "desc" }, take: 10 },
+      deadlines: { orderBy: { dueAt: "asc" } },
+    },
   });
 }
 
