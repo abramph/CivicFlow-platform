@@ -131,6 +131,8 @@ export async function verifyAttachmentEntity(organizationId: string, entityType:
       return Boolean(await prisma.violation.findFirst({ where: { id: entityId, organizationId }, select: { id: true } }));
     case "HOA_ARCHITECTURAL_REQUEST":
       return Boolean(await prisma.architecturalRequest.findFirst({ where: { id: entityId, organizationId }, select: { id: true } }));
+    case "UNION_CASE":
+      return Boolean(await prisma.unionCase.findFirst({ where: { id: entityId, organizationId }, select: { id: true } }));
     case "OTHER":
       return true;
     default:
