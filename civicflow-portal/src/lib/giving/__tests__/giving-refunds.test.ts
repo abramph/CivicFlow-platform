@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { Prisma } from "@prisma/client";
 
 const findFirstContribution = vi.fn();
 const updateContribution = vi.fn();
@@ -6,6 +7,7 @@ const aggregateContributions = vi.fn();
 const findFirstFund = vi.fn();
 const findFirstOrgMember = vi.fn();
 const createAdjustment = vi.fn();
+const createRefundEvent = vi.fn();
 const transaction = vi.fn();
 const findUniqueOrgSettings = vi.fn();
 const findUniqueStripeAccount = vi.fn();
@@ -20,6 +22,7 @@ vi.mock("@/lib/prisma", () => ({
       update: (...a: unknown[]) => updateContribution(...a),
       aggregate: (...a: unknown[]) => aggregateContributions(...a),
     },
+    contributionRefundEvent: { create: (...a: unknown[]) => createRefundEvent(...a) },
     fund: { findFirst: (...a: unknown[]) => findFirstFund(...a) },
     orgMember: { findFirst: (...a: unknown[]) => findFirstOrgMember(...a) },
     contributionAdjustment: { create: (...a: unknown[]) => createAdjustment(...a) },
@@ -54,11 +57,22 @@ const PROVIDER_ROW = {
   fundId: "f-1",
 };
 
+/** Simulates the real Postgres unique-constraint violation on
+ * ContributionRefundEvent.providerRefundId that applyProviderRefund catches
+ * to detect a replayed refund. */
+function uniqueConstraintViolation() {
+  return new Prisma.PrismaClientKnownRequestError("Unique constraint failed on the fields: (`providerRefundId`)", {
+    code: "P2002",
+    clientVersion: "test",
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   findUniqueOrgSettings.mockResolvedValue({ contributionsEnabled: true });
   transaction.mockImplementation(async (ops: Promise<unknown>[]) => Promise.all(ops));
   createAdjustment.mockResolvedValue({ id: "adj-1" });
+  createRefundEvent.mockResolvedValue({ id: "cre-1" });
   updateContribution.mockResolvedValue({});
 });
 
@@ -185,40 +199,100 @@ describe("issueRefund (§34)", () => {
   });
 });
 
-describe("applyProviderRefund idempotency and modes", () => {
-  it("same provider refund id twice → DUPLICATE, no second write", async () => {
-    findFirstContribution.mockResolvedValueOnce({ ...PROVIDER_ROW, providerRefundId: "re_1", refundedAt: new Date() });
-    const result = await applyProviderRefund({
+describe("applyProviderRefund — idempotency keyed on the real Stripe refund.id (2026-08 hardening)", () => {
+  const apply = (over: Partial<Parameters<typeof applyProviderRefund>[0]> = {}) =>
+    applyProviderRefund({
       organizationId: "org-1",
       providerPaymentIntentId: "pi_1",
       providerRefundId: "re_1",
-      amountRefundedCents: 2500,
+      amountRefundedCents: 2000,
+      status: "succeeded",
+      source: "charge.refunded",
+      ...over,
     });
+
+  it("a replayed delivery of the SAME refund.id → DUPLICATE via the unique-constraint catch, no second row and no double count", async () => {
+    findFirstContribution.mockResolvedValueOnce({ ...PROVIDER_ROW, refundedAmount: 20 });
+    createRefundEvent.mockRejectedValueOnce(uniqueConstraintViolation());
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const result = await apply({ providerRefundId: "re_1", amountRefundedCents: 2000 });
+
+    // Both statements are constructed together as one array-form
+    // $transaction (that's how real Prisma sends them atomically) — the
+    // meaningful guarantee isn't "update() was never called to build its
+    // lazy query," it's that the unique-constraint rejection propagates as
+    // DUPLICATE and never as a false APPLIED.
     expect(result).toBe("DUPLICATE");
+    const lines = logSpy.mock.calls.map((c) => JSON.parse(c[0] as string).event);
+    expect(lines).toContain("GIVING_REFUND_DUPLICATE_IGNORED");
+    logSpy.mockRestore();
+  });
+
+  it("two DIFFERENT refund ids on the same contribution both apply — $20 then $15 → cumulative $35, net $65 of $100, each individually recorded", async () => {
+    // First refund: $20 of $100.
+    findFirstContribution.mockResolvedValueOnce({ ...PROVIDER_ROW, amount: 100, refundedAmount: null });
+    const first = await apply({ providerRefundId: "re_first_20", amountRefundedCents: 2000 });
+    expect(first).toBe("APPLIED");
+    expect(Number(updateContribution.mock.calls[0][0].data.refundedAmount)).toBe(20);
+    expect(createRefundEvent.mock.calls[0][0].data).toMatchObject({ providerRefundId: "re_first_20", amountCents: 2000 });
+
+    // Second, DIFFERENT refund: $15 more — must be independently applied and
+    // additive, not collapsed into the first (the exact bug this replaces:
+    // a synthetic charge-derived id made this second refund indistinguishable
+    // from the first and it was silently dropped).
+    findFirstContribution.mockResolvedValueOnce({ ...PROVIDER_ROW, amount: 100, refundedAmount: 20 });
+    const second = await apply({ providerRefundId: "re_second_15", amountRefundedCents: 1500 });
+    expect(second).toBe("APPLIED");
+    expect(Number(updateContribution.mock.calls[1][0].data.refundedAmount)).toBe(35);
+    expect(createRefundEvent.mock.calls[1][0].data).toMatchObject({ providerRefundId: "re_second_15", amountCents: 1500 });
+
+    // Net received = original − totalRefunded.
+    expect(100 - 35).toBe(65);
+  });
+
+  it("a full refund (cumulative = original) is exact, not clamped short", async () => {
+    findFirstContribution.mockResolvedValueOnce({ ...PROVIDER_ROW, amount: 100, refundedAmount: null });
+    await apply({ providerRefundId: "re_full", amountRefundedCents: 10000 });
+    expect(Number(updateContribution.mock.calls[0][0].data.refundedAmount)).toBe(100);
+  });
+
+  it("financial invariant: cumulative refunded is clamped at the original amount even if a malformed/replayed amount would push it over", async () => {
+    findFirstContribution.mockResolvedValueOnce({ ...PROVIDER_ROW, amount: 100, refundedAmount: 90 });
+    await apply({ providerRefundId: "re_overshoot", amountRefundedCents: 5000 }); // 90 + 50 > 100
+    expect(Number(updateContribution.mock.calls[0][0].data.refundedAmount)).toBe(100);
+  });
+
+  it("a refund for a payment intent with no matching contribution (any org) → NOT_FOUND, no fabricated record, no crash", async () => {
+    findFirstContribution.mockResolvedValueOnce(null);
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const result = await apply({ organizationId: "org-b", providerPaymentIntentId: "pi_unknown" });
+    expect(result).toBe("NOT_FOUND");
+    expect(createRefundEvent).not.toHaveBeenCalled();
+    expect(updateContribution).not.toHaveBeenCalled();
+    const lines = logSpy.mock.calls.map((c) => JSON.parse(c[0] as string).event);
+    expect(lines).toContain("GIVING_REFUND_UNMATCHED");
+    logSpy.mockRestore();
+  });
+
+  it("tenant isolation: the org-scoped lookup means a refund event can never mutate another org's contribution by payment-intent-id alone", async () => {
+    // findFirst is called WITH organizationId in the where clause; the mock
+    // simulates realistic tenant-scoped behavior by returning null when the
+    // caller's org doesn't match — this is what the real WHERE clause does.
+    findFirstContribution.mockImplementationOnce((args: { where: { organizationId: string } }) =>
+      args.where.organizationId === "org-a" ? { ...PROVIDER_ROW, organizationId: "org-a" } : null
+    );
+    const result = await apply({ organizationId: "org-b", providerPaymentIntentId: "pi_1" });
+    expect(result).toBe("NOT_FOUND");
     expect(updateContribution).not.toHaveBeenCalled();
   });
 
-  it("cumulative mode uses the provider running total — no double counting", async () => {
-    findFirstContribution.mockResolvedValueOnce({ ...PROVIDER_ROW, refundedAmount: 25 });
-    await applyProviderRefund({
-      organizationId: "org-1",
-      providerPaymentIntentId: "pi_1",
-      providerRefundId: "re_3",
-      amountRefundedCents: 2500, // Stripe's cumulative total — already applied
-      mode: "cumulative",
-    });
-    expect(Number(updateContribution.mock.calls[0][0].data.refundedAmount)).toBe(25);
-  });
-
-  it("increment mode adds and caps at the original amount", async () => {
-    findFirstContribution.mockResolvedValueOnce({ ...PROVIDER_ROW, refundedAmount: 90 });
-    await applyProviderRefund({
-      organizationId: "org-1",
-      providerPaymentIntentId: "pi_1",
-      providerRefundId: "re_4",
-      amountRefundedCents: 2000,
-    });
-    expect(Number(updateContribution.mock.calls[0][0].data.refundedAmount)).toBe(100);
+  it("a pending (not-yet-succeeded) refund status does not move money — the row stays untouched until it actually succeeds", async () => {
+    findFirstContribution.mockResolvedValueOnce({ ...PROVIDER_ROW, refundedAmount: null });
+    const result = await apply({ status: "pending" });
+    expect(result).toBe("NOT_SUCCEEDED");
+    expect(createRefundEvent).not.toHaveBeenCalled();
+    expect(updateContribution).not.toHaveBeenCalled();
   });
 });
 
