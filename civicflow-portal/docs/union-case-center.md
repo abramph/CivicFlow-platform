@@ -7,9 +7,9 @@ UnionFlow** — Unestra Union stays thin and reuses existing Unestra infrastruct
 possible (see "Reused infrastructure" below). `UNION-CASE-A` shipped the foundation: schema, RBAC,
 the status state machine, member intake, and basic staff read. `UNION-CASE-B` shipped the
 steward/officer dashboard, assignment, and case management (notes, contract references,
-deadlines) — both API and UI. `UNION-CASE-C` (this PR) ships deadline reminder dispatch.
-`UNION-CASE-D` (member mobile experience + hardening) remains a separate PR — each merged,
-deployed, and production-smoke-tested before the next begins.
+deadlines) — both API and UI. `UNION-CASE-C` shipped deadline reminder dispatch. `UNION-CASE-D`
+(this PR) ships the member web experience and a hardening pass, closing out the program — each
+PR merged, deployed, and production-smoke-tested before the next began.
 
 ## Discovery (why this design)
 
@@ -201,19 +201,34 @@ this scope discovered during the program gets recorded as POST-LAUNCH, not built
   against a real UNION demo org (assign → auto-bump to ASSIGNED → start active work → add an
   internal note → add a member-visible note → add a contract reference → add an overdue deadline →
   dashboard's Overdue chip picks it up correctly).
-- **UNION-CASE-C** (renumbered, this PR) — deadline reminder dispatch:
-  `sendUnionCaseDeadlineReminders()` in `src/lib/union/cases.ts`, called by
-  `POST /api/cron/union-case-deadline-reminders`. Turned out NOT to route through the generic
-  `EmailReminderLog` queue as this doc originally guessed during A's discovery pass — re-reading
-  `lib/hoa/violations.ts`'s actual `sendDeadlineReminders()` carefully showed the real, already-
-  proven precedent is a direct send plus a dedicated per-(entity, recipient, offset) dedup-log
-  table whose unique constraint IS the concurrency-safety mechanism (claim via INSERT, a P2002
-  conflict means "already sent," not a preceding read) — see the new
+- **UNION-CASE-C** (renumbered) — DONE, merged, deployed, production-smoke-verified 2026-08-15.
+  Deadline reminder dispatch: `sendUnionCaseDeadlineReminders()` in `src/lib/union/cases.ts`,
+  called by `POST /api/cron/union-case-deadline-reminders`. Turned out NOT to route through the
+  generic `EmailReminderLog` queue as this doc originally guessed during A's discovery pass —
+  re-reading `lib/hoa/violations.ts`'s actual `sendDeadlineReminders()` carefully showed the real,
+  already-proven precedent is a direct send plus a dedicated per-(entity, recipient, offset)
+  dedup-log table whose unique constraint IS the concurrency-safety mechanism (claim via INSERT, a
+  P2002 conflict means "already sent," not a preceding read) — see the
   `UnionCaseDeadlineReminderLog` model. 11 mocked unit tests plus a real-database concurrency
   integration test (8 simultaneous invocations racing the same due deadline converge on exactly
   one send), run for real against the local dev DB before committing. Not yet wired into any
   external scheduler — same as HOA's own `hoa-violation-reminders` endpoint; see `DEPLOYMENT.md`.
-- **UNION-CASE-D** (renumbered) — member mobile experience + hardening pass. Not started.
+- **UNION-CASE-D** (renumbered, this PR) — member web experience + hardening pass. `/m/union/cases`
+  (My Cases), `/m/union/cases/new` ("Get help" intake — plain-language caseType labels, never
+  exposes "formal grievance" terminology), `/m/union/cases/[caseId]` (status, upcoming dates,
+  resolution summary, member-visible updates, withdraw). Web, not native-mobile — same
+  reduced-mobile-scope reasoning `/m/architectural-requests` and `/m/violations` already
+  established (the native civicflow-mobile app is API-ready from A but has no screen of its own
+  yet; that's a separate repo/PR). Added "My Cases" to `MemberPortalShell`'s nav so it's actually
+  discoverable. Hardening pass: 8 new adversarial cross-tenant tests covering every write function
+  not already probed by A's suite (all passed on first run — the existing scoping was already
+  correct, which the tests now lock in permanently) plus a manual re-verification that all three
+  new pages only ever render through `toMemberSafeUnionCase()`. Live-verified end-to-end in the
+  browser: a real member submission via the actual intake form appeared correctly on the staff
+  dashboard, was assigned and given both an internal and a member-visible note, and the member's
+  own page was confirmed (at the raw-HTML level, not just visually) to show the member-visible
+  update while containing zero trace of the internal note's confidential content.
 
-Once the full program is complete, the next phase is full regression/security testing and
-store-submission readiness, not another major feature program.
+**Union Case Center program: COMPLETE.** All four PRs (A-D) merged, deployed, and
+production-smoke-verified. Per the program spec, the next phase is full regression/security
+testing and store-submission readiness, not another major feature program.
