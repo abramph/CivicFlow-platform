@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 
 const EMAIL_VERIFICATION_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
 const PASSWORD_RESET_EXPIRY_MS = 30 * 60 * 1000;           // 30 minutes
+const ACCOUNT_DELETION_EXPIRY_MS = 30 * 60 * 1000;         // 30 minutes — irreversible action, short-lived like a password reset
 
 function generateToken(): string {
   return crypto.randomBytes(32).toString("hex");
@@ -40,9 +41,25 @@ export async function createPasswordResetToken(userId: string): Promise<string> 
   return token;
 }
 
+export async function createAccountDeletionToken(userId: string): Promise<string> {
+  const token = generateToken();
+  await prisma.accountVerificationToken.deleteMany({
+    where: { userId, type: "account_deletion", usedAt: null },
+  });
+  await prisma.accountVerificationToken.create({
+    data: {
+      userId,
+      token,
+      type: "account_deletion",
+      expiresAt: new Date(Date.now() + ACCOUNT_DELETION_EXPIRY_MS),
+    },
+  });
+  return token;
+}
+
 export async function consumeToken(
   token: string,
-  type: "email_verification" | "password_reset"
+  type: "email_verification" | "password_reset" | "account_deletion"
 ): Promise<{ ok: true; userId: string } | { ok: false; error: string }> {
   const record = await prisma.accountVerificationToken.findUnique({ where: { token } });
   if (!record || record.type !== type) return { ok: false, error: "Invalid or expired link." };

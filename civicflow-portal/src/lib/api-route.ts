@@ -17,6 +17,7 @@ import { MeetingMinutesError, meetingMinutesErrorResponse } from "@/lib/meeting-
 import { MeetingOperationError } from "@/lib/meeting-operations";
 import { GovernanceDocumentError } from "@/lib/governance-documents";
 import { FinanceError } from "@/lib/finance-errors";
+import { AccountDeletionError } from "@/lib/account-deletion";
 
 export async function withApiErrorHandling(
   fn: () => Promise<Response>
@@ -90,6 +91,12 @@ export async function withApiErrorHandling(
       }
       if (error instanceof FinanceError) {
         return jsonError(error.message, error.status);
+      }
+      if (error instanceof AccountDeletionError) {
+        return Response.json(
+          { ok: false, error: error.message, code: error.code, blockedByOrganizations: error.blockedByOrganizations },
+          { status: error.status }
+        );
       }
       if (error instanceof MobileAuthError || error instanceof MobileForbiddenError) {
         return jsonError(error.message, error.status);

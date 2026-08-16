@@ -1,6 +1,7 @@
 import { OpenInAppBanner } from "@/components/app/OpenInAppBanner";
 import { MemberNotificationSettingsForm } from "@/components/forms/MemberNotificationSettingsForm";
 import { MemberWhatsAppSettingsForm } from "@/components/forms/MemberWhatsAppSettingsForm";
+import { DeleteAccountSection } from "@/components/DeleteAccountSection";
 import { formatSmsOptInMethod } from "@/lib/sms-consent-text";
 import { getMemberWebSession } from "@/lib/member-web-session";
 import { prisma } from "@/lib/prisma";
@@ -62,6 +63,7 @@ export default async function MemberNotificationsPage({ searchParams }: { search
           whatsappEnabled={member?.whatsappEnabled ?? false}
         />
       </div>
+      <DeleteAccountSection />
     </main>
   );
 }
