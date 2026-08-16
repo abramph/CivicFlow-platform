@@ -1,12 +1,14 @@
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch } from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { useScreenTopPadding } from '@/hooks/use-screen-top-padding';
 import { useAuth } from '@/lib/auth-context';
+import { API_BASE_URL } from '@/lib/api-client';
 import { getProfile, updateProfile, type MobileProfile } from '@/lib/mobile-api';
 
 export default function ProfileScreen() {
@@ -130,6 +132,20 @@ export default function ProfileScreen() {
         </>
       ) : null}
 
+      {/* Opens the public web deletion-request page rather than the
+          authenticated /settings/security flow -- the app's own session is
+          token-based and isn't shared with the system browser, so there's no
+          way to land the user already signed in there. The public page
+          (email + link, same as password reset) works regardless. */}
+      <Pressable
+        style={styles.secondaryButton}
+        onPress={() => WebBrowser.openBrowserAsync(`${API_BASE_URL}/delete-account`)}
+        accessibilityRole="button"
+        accessibilityLabel="Delete account"
+      >
+        <ThemedText type="link" style={styles.deleteAccountText}>Delete Account</ThemedText>
+      </Pressable>
+
       <Pressable style={styles.logoutButton} onPress={handleLogout} accessibilityRole="button" accessibilityLabel="Log out">
         <ThemedText style={styles.logoutText}>Log Out</ThemedText>
       </Pressable>
@@ -151,6 +167,9 @@ const styles = StyleSheet.create({
   },
   secondaryButton: {
     alignSelf: 'flex-start',
+  },
+  deleteAccountText: {
+    color: '#B42318',
   },
   sectionLabel: {
     marginTop: Spacing.two,

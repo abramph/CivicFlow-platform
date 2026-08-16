@@ -771,26 +771,35 @@ model Organization {
 
 /// A platform user (email + password, SaaS auth).
 model User {
-  id                 String   @id @default(cuid())
-  email              String   @unique
+  id                 String    @id @default(cuid())
+  email              String    @unique
   displayName        String?
   passwordHash       String
-  emailVerified      Boolean  @default(false)
-  mfaEnabled         Boolean  @default(false)
+  emailVerified      Boolean   @default(false)
+  mfaEnabled         Boolean   @default(false)
   mfaSecret          String?
-  mfaBackupCodes     String[] @default([])
+  mfaBackupCodes     String[]  @default([])
   /// SMS-based MFA fallback for when the authenticator app/backup codes
   /// aren't available. Only trusted once verified (a code was actually sent
   /// to and confirmed from this number) — set together, never independently.
   phone              String?
-  phoneVerified      Boolean  @default(false)
+  phoneVerified      Boolean   @default(false)
   /// Bumped to revoke every outstanding mobile access/refresh token for this
   /// user at once (password reset, mobile logout) — mobile JWTs embed the
   /// version they were issued with; a mismatch against the current value
   /// means the token is treated as invalid even if not yet expired.
-  mobileTokenVersion Int      @default(0)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  mobileTokenVersion Int       @default(0)
+  /// Submission-blocker sprint (2026-08): set by deleteUserAccount() — the
+  /// row is anonymized in place, never hard-deleted (see account-deletion.ts
+  /// module doc for why: Message/ConversationParticipant would CASCADE and
+  /// destroy other participants' history, and RecurringContributionSchedule/
+  /// Pledge/PtaConcernAssignee/OrganizationMemberStripeCustomer/
+  /// GivingCustomer are onDelete: Restrict and would simply fail). Login and
+  /// every session-resolution path must treat a non-null deletedAt exactly
+  /// like "user not found."
+  deletedAt          DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   memberships                       OrganizationMembership[]
   savedFilters                      SavedFilter[]

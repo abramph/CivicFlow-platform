@@ -157,6 +157,34 @@ export async function sendVerificationEmail(params: { to: string; verifyUrl: str
   return sendEmail({ to: params.to, subject, text, html });
 }
 
+export async function sendAccountDeletionEmail(params: { to: string; confirmUrl: string }) {
+  const subject = "Confirm account deletion — Unestra";
+  const text = [
+    "You (or someone with access to this email address) requested to permanently delete your Unestra account.",
+    "",
+    "This does not delete any organization you belong to, or its records — only your own personal login and profile data.",
+    "",
+    "Click the link below to confirm. The link expires in 30 minutes.",
+    "",
+    params.confirmUrl,
+    "",
+    "If you did not request this, you can safely ignore this email — your account will not be affected.",
+  ].join("\n");
+  const html = `
+    <p>You (or someone with access to this email address) requested to permanently delete your <strong>Unestra</strong> account.</p>
+    <p>This does not delete any organization you belong to, or its records — only your own personal login and profile data.</p>
+    <p>Click the button below to confirm. The link expires in 30 minutes.</p>
+    <p style="margin:24px 0">
+      <a href="${params.confirmUrl}" style="background:#dc2626;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:600">
+        Confirm Account Deletion
+      </a>
+    </p>
+    <p style="color:#6b7280;font-size:13px">Or copy this link: ${params.confirmUrl}</p>
+    <p style="color:#6b7280;font-size:13px">If you did not request this, you can safely ignore this email — your account will not be affected.</p>
+  `.trim();
+  return sendEmail({ to: params.to, subject, text, html });
+}
+
 export async function sendPasswordResetEmail(params: { to: string; resetUrl: string }) {
   const subject = "Reset your Unestra password";
   const text = [

@@ -22,9 +22,17 @@ async function resolveSessionIdentity(userId: string) {
   const [active, organizations, user, platformAccess] = await Promise.all([
     resolveActiveOrganization(userId),
     getUserOrgMemberships(userId),
-    prisma.user.findUnique({ where: { id: userId }, select: { email: true } }),
+    prisma.user.findUnique({ where: { id: userId }, select: { email: true, deletedAt: true } }),
     getPlatformAccessForUser(userId),
   ]);
+  // Account deletion (submission-blocker sprint, 2026-08): the JWT itself is
+  // stateless and keeps validating until it expires, but every session read
+  // re-derives identity from the DB right here — so a deleted account's
+  // outstanding JWT becomes practically unauthenticated on the very next
+  // request, the same way a permission/role revocation already does above.
+  if (!user || user.deletedAt) {
+    return { active: null, organizations: [], user: null, platformAccess: { hasPlatformAccess: false, platformRoles: [] }, permissions: [], primaryVertical: null };
+  }
   const permissions = active?.organizationId && active?.role ? await getEffectivePermissions(active.organizationId, active.role) : [];
   const activeOrgRecord = active?.organizationId
     ? await prisma.organization.findUnique({ where: { id: active.organizationId }, select: { primaryVertical: true } })
@@ -61,7 +69,7 @@ export const authOptions: NextAuthOptions = {
         if (!email || !password) return null;
 
         const user = await prisma.user.findUnique({ where: { email } });
-        if (!user) return null;
+        if (!user || user.deletedAt) return null;
 
         const valid = await bcrypt.compare(password, user.passwordHash);
         if (!valid) return null;
@@ -248,6 +256,28 @@ export const authOptions: NextAuthOptions = {
         const overlay = await resolveImpersonationOverlay(realUserId);
         const effectiveUserId = overlay?.targetUserId ?? realUserId;
         const identity = await resolveSessionIdentity(effectiveUserId);
+
+        // Account deletion: resolveSessionIdentity returns a null user for
+        // a deleted (or otherwise vanished) account. Treat exactly like no
+        // token.userId at all — session.userId itself must go away, not
+        // just organizationId/permissions, so a stale JWT for a deleted
+        // account can't be used as a bare "I'm logged in" identity by any
+        // endpoint that only checks session.userId.
+        if (!identity.user) {
+          session.userId = undefined;
+          session.userEmail = undefined;
+          session.organizationId = null;
+          session.primaryVertical = null;
+          session.role = null;
+          session.hasPlatformAccess = false;
+          session.platformRoles = [];
+          session.permissions = [];
+          session.impersonation = undefined;
+          session.org_id = String(token.org_id || "");
+          session.api_key = String(token.api_key || "");
+          session.api_base = String(token.api_base || defaultApiBase);
+          return session;
+        }
 
         session.userId = effectiveUserId;
         session.userEmail = identity.user?.email ?? (overlay ? overlay.targetEmail : String(token.userEmail || ""));

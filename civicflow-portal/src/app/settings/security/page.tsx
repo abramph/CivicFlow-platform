@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { DeleteAccountSection } from "@/components/DeleteAccountSection";
 
 type SetupState = "idle" | "loading" | "ready" | "confirming" | "done";
 
@@ -456,6 +457,8 @@ export default function SecuritySettingsPage() {
       </div>
 
       {mfaEnabled === true && <PhoneBackupSection initialMaskedPhone={maskedPhone} />}
+
+      <DeleteAccountSection />
     </main>
   );
 }
