@@ -23,7 +23,9 @@ const STATUS_LABEL: Record<string, string> = {
  * listOrganizationLabAccess() already excludes retired features from
  * `access` entirely, so this map would never be consulted for it anyway.
  */
-const FEATURE_ENTRY_HREF: Record<string, string> = {};
+const FEATURE_ENTRY_HREF: Record<string, string> = {
+  memberIntake: "/labs/member-intake/forms",
+};
 
 export default async function OrganizationLabsPage() {
   const { organizationId } = await requirePermission("labs:read");
