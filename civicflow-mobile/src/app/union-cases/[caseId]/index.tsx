@@ -110,7 +110,7 @@ export default function UnionCaseDetailScreen() {
           <ThemedText type="smallBold" style={styles.sectionLabel}>Upcoming dates</ThemedText>
           {unionCase.upcomingDates.map((d) => (
             <ThemedView key={d.id} type="backgroundElement" style={styles.card}>
-              <ThemedText type="smallBold">{d.deadlineType}</ThemedText>
+              <ThemedText type="smallBold">{d.deadlineType.replace(/_/g, ' ').toLowerCase()}</ThemedText>
               {d.description ? <ThemedText type="small" themeColor="textSecondary">{d.description}</ThemedText> : null}
               <ThemedText type="small" themeColor="textSecondary">{new Date(d.dueAt).toLocaleDateString()}</ThemedText>
             </ThemedView>
