@@ -34,6 +34,7 @@ export default async function MemberIntakeFormsPage() {
         title="Member Forms & QR"
         description="Create a public form and QR code so people can join or update their info without an admin — new members and updates land in your review queue before anything touches a member record."
         actions={[
+          { href: "/labs/member-intake/submissions", label: "Review Submissions" },
           ...(canManage ? [{ href: "/labs/member-intake/forms/new", label: "New Form", tone: "primary" as const }] : []),
           { href: "/members", label: "Back to Members" },
         ]}
