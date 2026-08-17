@@ -11,6 +11,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 const findFirstForm = vi.fn();
 const findUniqueForm = vi.fn();
+const findManyForm = vi.fn();
 const updateForm = vi.fn();
 const createForm = vi.fn();
 const findUniqueField = vi.fn();
@@ -24,6 +25,7 @@ vi.mock("@/lib/prisma", () => ({
     memberIntakeForm: {
       findFirst: (...a: unknown[]) => findFirstForm(...a),
       findUnique: (...a: unknown[]) => findUniqueForm(...a),
+      findMany: (...a: unknown[]) => findManyForm(...a),
       update: (...a: unknown[]) => updateForm(...a),
       create: (...a: unknown[]) => createForm(...a),
     },
@@ -140,6 +142,46 @@ describe("form lifecycle", () => {
     const { resumeIntakeForm } = await import("../forms");
     await expect(resumeIntakeForm("org-a", "form-1", "user-1")).rejects.toMatchObject({ code: "MEMBER_INTAKE_INVALID_STATUS_TRANSITION" });
     expect(updateForm).not.toHaveBeenCalled();
+  });
+
+  it("MEMBER-QR-K: refuses to publish the reserved self-service system form even in DRAFT with fields, so it can never accidentally become a public, unvetted, all-fields intake form", async () => {
+    countFields.mockResolvedValue(16);
+    findFirstForm.mockResolvedValue({
+      id: "form-system",
+      organizationId: "org-a",
+      status: "DRAFT",
+      name: "Member Self-Service Profile Update",
+      purpose: "PROFILE_UPDATE",
+    });
+    const { publishIntakeForm, RESERVED_SELF_SERVICE_FORM_NAME } = await import("../forms");
+    expect(RESERVED_SELF_SERVICE_FORM_NAME).toBe("Member Self-Service Profile Update");
+    await expect(publishIntakeForm("org-a", "form-system", "user-1")).rejects.toMatchObject({ code: "MEMBER_INTAKE_INVALID_STATUS_TRANSITION" });
+    expect(updateForm).not.toHaveBeenCalled();
+  });
+
+  it("still allows publishing an ordinary form that merely shares the reserved purpose (PROFILE_UPDATE) with a different name", async () => {
+    countFields.mockResolvedValue(2);
+    findFirstForm.mockResolvedValue({ id: "form-1", organizationId: "org-a", status: "DRAFT", name: "Fall Profile Update Drive", purpose: "PROFILE_UPDATE" });
+    updateForm.mockResolvedValue({ id: "form-1", status: "ACTIVE" });
+    const { publishIntakeForm } = await import("../forms");
+    const result = await publishIntakeForm("org-a", "form-1", "user-1");
+    expect(result.status).toBe("ACTIVE");
+  });
+});
+
+describe("listIntakeForms — excludes the reserved self-service system form", () => {
+  it("filters out the reserved name+purpose pair at the query level", async () => {
+    findManyForm.mockResolvedValue([]);
+    const { listIntakeForms, RESERVED_SELF_SERVICE_FORM_NAME } = await import("../forms");
+    await listIntakeForms("org-a");
+    expect(findManyForm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          organizationId: "org-a",
+          NOT: { name: RESERVED_SELF_SERVICE_FORM_NAME, purpose: "PROFILE_UPDATE" },
+        }),
+      })
+    );
   });
 });
 
