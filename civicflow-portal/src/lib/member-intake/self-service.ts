@@ -4,6 +4,7 @@ import { applySubmission, type ApplySubmissionResult } from "./update-engine";
 import { validateFieldValue, type ValidatedFieldValue } from "./submissions";
 import { ALLOWED_MEMBER_TARGET_FIELDS, type AllowedMemberTargetField } from "./sensitivity";
 import { generateIntakeToken } from "./token";
+import { RESERVED_SELF_SERVICE_FORM_NAME } from "./forms";
 import type { MemberMutationActor } from "@/lib/member-mutations";
 
 /**
@@ -28,8 +29,6 @@ import type { MemberMutationActor } from "@/lib/member-mutations";
  * queue (MEMBER-QR-G) with the SAME field-level diff, just sourced from this
  * system form instead of a published one.
  */
-
-const SELF_SERVICE_FORM_NAME = "Member Self-Service Profile Update";
 
 /** Every allow-listed member field the self-service form can touch. Excludes
  * the comms* toggles -- those already have a working, tested, more nuanced
@@ -68,7 +67,7 @@ const SELF_SERVICE_FIELDS: { targetField: Exclude<AllowedMemberTargetField, "com
  */
 async function getOrCreateSelfServiceForm(organizationId: string) {
   const existing = await prisma.memberIntakeForm.findFirst({
-    where: { organizationId, name: SELF_SERVICE_FORM_NAME, purpose: "PROFILE_UPDATE" },
+    where: { organizationId, name: RESERVED_SELF_SERVICE_FORM_NAME, purpose: "PROFILE_UPDATE" },
     include: { fields: true },
     orderBy: { createdAt: "asc" },
   });
@@ -77,7 +76,7 @@ async function getOrCreateSelfServiceForm(organizationId: string) {
   const form = await prisma.memberIntakeForm.create({
     data: {
       organizationId,
-      name: SELF_SERVICE_FORM_NAME,
+      name: RESERVED_SELF_SERVICE_FORM_NAME,
       publicToken: generateIntakeToken(),
       purpose: "PROFILE_UPDATE",
       status: "DRAFT",

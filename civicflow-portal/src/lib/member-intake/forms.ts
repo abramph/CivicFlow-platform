@@ -16,6 +16,21 @@ import { generateIntakeToken } from "./token";
 import { isAllowedMemberTargetField, effectiveFieldSensitivity } from "./sensitivity";
 
 /**
+ * MEMBER-QR-J's self-service.ts lazily provisions ONE hidden system form per
+ * organization (name+purpose below) to anchor authenticated-member
+ * submissions in the same MemberIntakeForm/Submission machinery a published
+ * form uses. It must never be reachable through the normal admin UI: not
+ * listed (see listIntakeForms below), and never publishable (see
+ * transitionFormStatus below) -- an admin accidentally publishing it would
+ * expose every allow-listed member field as an anonymous-facing public form
+ * under a real, previously-unseen URL. Defined here (not in self-service.ts)
+ * so this file's own list/publish guards don't need a circular import back
+ * to it.
+ */
+export const RESERVED_SELF_SERVICE_FORM_NAME = "Member Self-Service Profile Update";
+const RESERVED_SELF_SERVICE_FORM_PURPOSE: MemberIntakeFormPurpose = "PROFILE_UPDATE";
+
+/**
  * Member Intake & Profile Update (MEMBER-QR-A) — form lifecycle, field
  * configuration, source/campaign management, and the public-resolution gate
  * function. Mirrors the shape of src/lib/union/cases-guard.ts (staff-path
@@ -134,7 +149,10 @@ export async function getIntakeForm(organizationId: string, formId: string) {
 
 export async function listIntakeForms(organizationId: string) {
   return prisma.memberIntakeForm.findMany({
-    where: { organizationId },
+    where: {
+      organizationId,
+      NOT: { name: RESERVED_SELF_SERVICE_FORM_NAME, purpose: RESERVED_SELF_SERVICE_FORM_PURPOSE },
+    },
     orderBy: { createdAt: "desc" },
     include: { _count: { select: { submissions: true, fields: true, sources: true } } },
   });
@@ -157,6 +175,13 @@ async function transitionFormStatus(
 ) {
   const form = await prisma.memberIntakeForm.findFirst({ where: { id: formId, organizationId } });
   if (!form) throw new MemberIntakeError("MEMBER_INTAKE_FORM_NOT_FOUND", "Form not found.");
+  if (nextStatus === "ACTIVE" && form.name === RESERVED_SELF_SERVICE_FORM_NAME && form.purpose === RESERVED_SELF_SERVICE_FORM_PURPOSE) {
+    // Defense in depth beyond just hiding it from listIntakeForms -- see the
+    // reserved-name doc comment above. This form is never meant to be
+    // publicly reachable, so it can never become ACTIVE even if an admin
+    // somehow has its id.
+    throw new MemberIntakeError("MEMBER_INTAKE_INVALID_STATUS_TRANSITION", "This form cannot be published.");
+  }
   if (!STATUS_TRANSITIONS[form.status].includes(nextStatus)) {
     throw new MemberIntakeError(
       "MEMBER_INTAKE_INVALID_STATUS_TRANSITION",
