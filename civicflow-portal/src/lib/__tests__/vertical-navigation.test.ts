@@ -69,6 +69,38 @@ describe("getNavigationProfile", () => {
     expect(getNavigationProfile("UNION").some((n) => n.href === "/hoa/architectural-requests")).toBe(false);
   });
 
+  // Sync-verification follow-up: Member Intake's "Forms & QR" nav entry must
+  // never dead-end for an org that isn't specifically enrolled (Labs
+  // lifecycle INTERNAL + internalOnly) -- same discipline as the HOA items
+  // above, but keyed on Labs enrollment instead of vertical.
+  it("omits Forms & QR entirely when the org has no memberIntake enrollment (the default for every real org today)", () => {
+    for (const vertical of ["COMMUNITY", "UNION", "HOA", "CHURCH", "PTA"] as const) {
+      expect(getNavigationProfile(vertical).some((n) => n.href === "/labs/member-intake/forms")).toBe(false);
+      expect(getNavigationProfile(vertical, []).some((n) => n.href === "/labs/member-intake/forms")).toBe(false);
+    }
+  });
+
+  it("adds Forms & QR, permission-gated, when memberIntake is enrolled -- across every vertical", () => {
+    for (const vertical of ["COMMUNITY", "UNION", "HOA", "CHURCH", "PTA"] as const) {
+      const item = getNavigationProfile(vertical, ["memberIntake"]).find((n) => n.href === "/labs/member-intake/forms");
+      expect(item).toBeDefined();
+      expect(item?.label).toBe("Forms & QR");
+      expect(item?.permission).toBe("memberIntake:view");
+    }
+  });
+
+  it("places Forms & QR right after Members (or Households for PTA), not buried at the end", () => {
+    const community = getNavigationProfile("COMMUNITY", ["memberIntake"]).map((n) => n.href);
+    expect(community[community.indexOf("/members") + 1]).toBe("/labs/member-intake/forms");
+
+    const pta = getNavigationProfile("PTA", ["memberIntake"]).map((n) => n.href);
+    expect(pta[pta.indexOf("/labs/pta/households") + 1]).toBe("/labs/member-intake/forms");
+  });
+
+  it("does not add Forms & QR for an unrelated enrolled Labs feature", () => {
+    expect(getNavigationProfile("COMMUNITY", ["someOtherLabsFeature"]).some((n) => n.href === "/labs/member-intake/forms")).toBe(false);
+  });
+
   it("does not add /union/cases for Community or HOA -- same dead-end-link reasoning as the HOA items above", () => {
     expect(getNavigationProfile("COMMUNITY").some((n) => n.href === "/union/cases")).toBe(false);
     expect(getNavigationProfile("HOA").some((n) => n.href === "/union/cases")).toBe(false);

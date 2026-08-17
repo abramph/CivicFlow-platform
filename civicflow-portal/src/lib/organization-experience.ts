@@ -109,7 +109,10 @@ export async function resolveOrganizationExperience(params: {
 
   const effectiveVertical = await resolveEffectiveVertical(organizationId, org.primaryVertical);
 
-  const navigation = getNavigationProfile(effectiveVertical).filter((item) => {
+  const navigation = getNavigationProfile(
+    effectiveVertical,
+    labFeatures.map((f) => f.featureKey)
+  ).filter((item) => {
     if (item.permission && !permissions.includes(item.permission)) return false;
     if (item.minRole && roleRank(role) < roleRank(item.minRole)) return false;
     return true;

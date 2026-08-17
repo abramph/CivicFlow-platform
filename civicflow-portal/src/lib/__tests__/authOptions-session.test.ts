@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const findUniqueUser = vi.fn();
+const findManyLabFeature = vi.fn().mockResolvedValue([]);
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     user: { findUnique: (...args: unknown[]) => findUniqueUser(...args) },
@@ -9,6 +10,11 @@ vi.mock("@/lib/prisma", () => ({
     // also resolves for the active org — stub a stable default so the
     // existing multi-org assertions below are unaffected.
     organization: { findUnique: vi.fn().mockResolvedValue({ primaryVertical: "COMMUNITY" }) },
+    // This file predates enabledLabFeatures, which the session callback now
+    // also resolves for the active org (sync-verification follow-up) --
+    // defaults to empty so the existing assertions are unaffected; one
+    // dedicated test below reconfigures it to assert real population.
+    organizationLabFeature: { findMany: (...args: unknown[]) => findManyLabFeature(...args) },
   },
 }));
 
@@ -67,6 +73,48 @@ describe("authOptions session callback — multi-org resolution", () => {
     getUserOrgMemberships.mockReset();
     getEffectivePermissions.mockReset();
     getEffectivePermissions.mockResolvedValue(["members:read"]);
+    findManyLabFeature.mockReset();
+    findManyLabFeature.mockResolvedValue([]);
+  });
+
+  it("populates enabledLabFeatures from the active org's ENABLED OrganizationLabFeature rows", async () => {
+    findUniqueUser.mockResolvedValueOnce({ email: "user@example.com" });
+    resolveActiveOrganization.mockResolvedValueOnce({
+      organizationId: "org-b",
+      organizationName: "Org B",
+      organizationLogoUrl: null,
+      role: "ORG_ADMIN",
+      memberId: "member-b",
+      memberStatus: null,
+    });
+    getUserOrgMemberships.mockResolvedValueOnce([]);
+    findManyLabFeature.mockResolvedValueOnce([{ featureKey: "memberIntake" }]);
+
+    const result = await sessionCallback({
+      session: emptySession(),
+      token: { userId: "user-1", userEmail: "user@example.com" } as never,
+      user: undefined as never,
+      trigger: undefined,
+    });
+
+    expect(findManyLabFeature).toHaveBeenCalledWith({ where: { organizationId: "org-b", status: "ENABLED" }, select: { featureKey: true } });
+    expect(result.enabledLabFeatures).toEqual(["memberIntake"]);
+  });
+
+  it("resolves enabledLabFeatures to an empty array when there is no active organization", async () => {
+    findUniqueUser.mockResolvedValueOnce({ email: "user@example.com" });
+    resolveActiveOrganization.mockResolvedValueOnce(null);
+    getUserOrgMemberships.mockResolvedValueOnce([]);
+
+    const result = await sessionCallback({
+      session: emptySession(),
+      token: { userId: "user-1", userEmail: "user@example.com" } as never,
+      user: undefined as never,
+      trigger: undefined,
+    });
+
+    expect(findManyLabFeature).not.toHaveBeenCalled();
+    expect(result.enabledLabFeatures).toEqual([]);
   });
 
   it("populates organizationId/role/memberId from the resolved active org, and organizations from the full list", async () => {

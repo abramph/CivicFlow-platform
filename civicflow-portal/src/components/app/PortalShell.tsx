@@ -131,7 +131,7 @@ export function PortalShell({ children }: { children: ReactNode }) {
   // Each vertical (Community/PTA/Union/HOA) gets its own navigation profile
   // — a PTA organization sees only PTA-flavored items, never the Community
   // list with a PTA section bolted on (see getNavigationProfile).
-  const verticalNavItems = getNavigationProfile(session?.primaryVertical ?? "COMMUNITY");
+  const verticalNavItems = getNavigationProfile(session?.primaryVertical ?? "COMMUNITY", session?.enabledLabFeatures ?? []);
   const navItems = hasSaasSession ? verticalNavItems : legacyNav;
 
   const visibleNavItems = hasSaasSession

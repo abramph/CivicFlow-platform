@@ -54,6 +54,14 @@ declare module "next-auth" {
     }[];
     // Effective (org-customized) permission set for the current role
     permissions?: string[];
+    // ENABLED Unestra Labs feature keys for the active organization (e.g.
+    // "memberIntake") — resolved fresh on every session read, same
+    // discipline as permissions/primaryVertical. Drives which Labs-gated
+    // nav items appear (see vertical-navigation.ts's getNavigationProfile)
+    // so an org without a feature enrolled never sees a dead-end link to
+    // it; never itself a source of server-side authorization (routes/pages
+    // still call requireOrganizationLabFeature independently).
+    enabledLabFeatures?: string[];
     // Global platform-operator access — independent of active organization
     // (see PlatformAccess in schema.prisma). Resolved fresh from the
     // database on every session read, never cached in the signed JWT, so a
