@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requirePermission } from "@/lib/auth-guards";
 import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { ProfileHeader } from "@/components/app/ProfileHeader";
+import { getMemberIntakeProvenance } from "@/lib/member-intake/reporting";
 import { StatusBadge } from "@/components/app/StatusBadge";
 import { Tabs } from "@/components/app/Tabs";
 import { Timeline } from "@/components/app/Timeline";
@@ -184,6 +185,7 @@ export default async function MemberProfilePage({
     methodLabels[method.method] = method.label;
   }
   const memberName = formatPersonName(member);
+  const intakeProvenance = await getMemberIntakeProvenance(organizationId, member.id);
 
   return (
     <main className="space-y-6">
@@ -201,6 +203,16 @@ export default async function MemberProfilePage({
           { href: "/dashboard", label: "Back to Dashboard" },
         ]}
       />
+
+      {intakeProvenance ? (
+        <p className="text-sm text-slate-500">
+          {intakeProvenance.wasNewMember ? "Created" : "Last updated"} through{" "}
+          <Link href={`/labs/member-intake/submissions/${intakeProvenance.submissionId}`} className="font-medium text-emerald-700 hover:underline">
+            {intakeProvenance.formName}
+          </Link>
+          {intakeProvenance.appliedAt ? ` — ${formatDate(intakeProvenance.appliedAt)}` : ""}
+        </p>
+      ) : null}
 
       <Tabs
         tabs={[
