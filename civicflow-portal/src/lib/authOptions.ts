@@ -31,7 +31,7 @@ async function resolveSessionIdentity(userId: string) {
   // outstanding JWT becomes practically unauthenticated on the very next
   // request, the same way a permission/role revocation already does above.
   if (!user || user.deletedAt) {
-    return { active: null, organizations: [], user: null, platformAccess: { hasPlatformAccess: false, platformRoles: [] }, permissions: [], primaryVertical: null };
+    return { active: null, organizations: [], user: null, platformAccess: { hasPlatformAccess: false, platformRoles: [] }, permissions: [], primaryVertical: null, enabledLabFeatures: [] };
   }
   const permissions = active?.organizationId && active?.role ? await getEffectivePermissions(active.organizationId, active.role) : [];
   const activeOrgRecord = active?.organizationId
@@ -44,7 +44,17 @@ async function resolveSessionIdentity(userId: string) {
     active?.organizationId && activeOrgRecord
       ? await resolveEffectiveVertical(active.organizationId, activeOrgRecord.primaryVertical)
       : null;
-  return { active, organizations, user, platformAccess, permissions, primaryVertical };
+  // ENABLED Unestra Labs features for the active org -- see the
+  // enabledLabFeatures doc comment in next-auth.d.ts.
+  const enabledLabFeatures = active?.organizationId
+    ? (
+        await prisma.organizationLabFeature.findMany({
+          where: { organizationId: active.organizationId, status: "ENABLED" },
+          select: { featureKey: true },
+        })
+      ).map((f) => f.featureKey)
+    : [];
+  return { active, organizations, user, platformAccess, permissions, primaryVertical, enabledLabFeatures };
 }
 
 export const authOptions: NextAuthOptions = {
@@ -272,6 +282,7 @@ export const authOptions: NextAuthOptions = {
           session.hasPlatformAccess = false;
           session.platformRoles = [];
           session.permissions = [];
+          session.enabledLabFeatures = [];
           session.impersonation = undefined;
           session.org_id = String(token.org_id || "");
           session.api_key = String(token.api_key || "");
@@ -295,6 +306,7 @@ export const authOptions: NextAuthOptions = {
         session.hasPlatformAccess = identity.platformAccess.hasPlatformAccess;
         session.platformRoles = identity.platformAccess.platformRoles;
         session.permissions = identity.permissions;
+        session.enabledLabFeatures = identity.enabledLabFeatures;
         session.impersonation = overlay
           ? {
               active: true,
@@ -319,6 +331,7 @@ export const authOptions: NextAuthOptions = {
         session.hasPlatformAccess = false;
         session.platformRoles = [];
         session.permissions = [];
+        session.enabledLabFeatures = [];
         session.impersonation = undefined;
       }
 

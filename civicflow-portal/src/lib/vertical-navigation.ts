@@ -173,8 +173,28 @@ const NAVIGATION: Record<OrganizationVertical, NavItem[]> = {
   ],
 };
 
-export function getNavigationProfile(vertical: OrganizationVertical): NavItem[] {
-  return NAVIGATION[vertical];
+/**
+ * Member Intake & Profile Update -- lifecycle INTERNAL / internalOnly in the
+ * Labs registry (billing-exempt + explicitly enrolled orgs only), so this
+ * item is injected conditionally rather than living in the static
+ * NAVIGATION lists above. Unconditionally adding it there would show every
+ * org admin a "Forms & QR" link that dead-ends into "not available for this
+ * organization" for every org that isn't specifically enrolled -- the exact
+ * anti-pattern the HOA-Properties conditional above this function already
+ * avoids for a different feature. `permission` still applies after
+ * injection (see both call sites' post-filter), so an enrolled org's
+ * ordinary members never see it either.
+ */
+const MEMBER_INTAKE_NAV_ITEM: NavItem = { href: "/labs/member-intake/forms", label: "Forms & QR", permission: "memberIntake:view" };
+
+export function getNavigationProfile(vertical: OrganizationVertical, enabledLabFeatures: string[] = []): NavItem[] {
+  const base = NAVIGATION[vertical];
+  if (!enabledLabFeatures.includes("memberIntake")) return base;
+
+  const insertAfterHref = vertical === "PTA" ? "/labs/pta/households" : "/members";
+  const insertIndex = base.findIndex((item) => item.href === insertAfterHref);
+  if (insertIndex === -1) return [...base, MEMBER_INTAKE_NAV_ITEM];
+  return [...base.slice(0, insertIndex + 1), MEMBER_INTAKE_NAV_ITEM, ...base.slice(insertIndex + 1)];
 }
 
 /**

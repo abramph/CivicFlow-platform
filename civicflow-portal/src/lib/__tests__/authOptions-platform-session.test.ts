@@ -9,6 +9,10 @@ vi.mock("@/lib/prisma", () => ({
     // also resolves for the active org — stub a stable default so the
     // existing platform-access assertions below are unaffected.
     organization: { findUnique: vi.fn().mockResolvedValue({ primaryVertical: "COMMUNITY" }) },
+    // This file predates enabledLabFeatures, which the session callback now
+    // also resolves for the active org (sync-verification follow-up) --
+    // stub a stable empty default so the existing assertions are unaffected.
+    organizationLabFeature: { findMany: vi.fn().mockResolvedValue([]) },
   },
 }));
 
