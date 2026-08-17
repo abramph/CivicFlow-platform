@@ -44,6 +44,31 @@ export interface IntakeFormPreset {
   description: string;
   successMessage: string;
   fields: IntakeFieldPreset[];
+  /**
+   * Whether a genuine NO_MATCH submission through this preset should create
+   * a member automatically rather than wait in the review queue. Found live
+   * (2026-08-17, first real production use) that every preset previously
+   * left this unset and silently inherited createIntakeForm()'s own
+   * blanket-conservative default (false) -- correct for a hand-built form
+   * an admin configures from scratch, but wrong for a preset whose whole
+   * purpose IS "join us." Each preset below sets this explicitly, by
+   * product intent per vertical, not by omission:
+   *   - COMMUNITY/HOA: true -- an unambiguous "join our organization" /
+   *     "register as a resident" intent; a genuine no-match is exactly the
+   *     case this preset exists for.
+   *   - CHURCH: false -- this preset is a visitor CONNECTION CARD
+   *     (VISITOR_CONNECT), not a formal membership application. Becoming a
+   *     visitor must never silently become becoming a member.
+   *   - UNION: false -- this preset is a CONTACT UPDATE for people already
+   *     assumed to be members, and union membership eligibility is
+   *     controlled by roster/employment data this form never sees. A
+   *     public form must never be able to originate official membership.
+   *   - PTA: false -- this preset deliberately maps to generic OrgMember
+   *     fields only, not PtaHousehold/PtaHouseholdAdult (see this file's
+   *     top doc comment); auto-creating a bare member record here would
+   *     bypass the real household model rather than respect it.
+   */
+  autoCreateNewMember: boolean;
 }
 
 const NAME_FIELDS: IntakeFieldPreset[] = [
@@ -75,6 +100,7 @@ const PRESETS: Record<OrganizationVertical, IntakeFormPreset> = {
     title: "Join Our Organization",
     description: "Tell us a bit about yourself to join or update your membership information.",
     successMessage: "Thank you! We've received your information.",
+    autoCreateNewMember: true,
     fields: [
       ...NAME_FIELDS,
       ...EMAIL_PHONE_FIELDS,
@@ -90,6 +116,7 @@ const PRESETS: Record<OrganizationVertical, IntakeFormPreset> = {
     title: "PTA/PTO Family Information",
     description: "Share your family's information to join or update your household's PTA/PTO record.",
     successMessage: "Thank you! Your family's information has been received.",
+    autoCreateNewMember: false,
     fields: [
       ...NAME_FIELDS,
       ...EMAIL_PHONE_FIELDS,
@@ -112,6 +139,7 @@ const PRESETS: Record<OrganizationVertical, IntakeFormPreset> = {
     title: "Union Member Contact Update",
     description: "Keep your union contact and worksite information up to date.",
     successMessage: "Thank you! Your information has been received.",
+    autoCreateNewMember: false,
     fields: [
       ...NAME_FIELDS,
       { fieldKey: "email", label: "Personal email (not your work email)", fieldType: "EMAIL", targetEntity: "MEMBER", targetField: "email" },
@@ -130,6 +158,7 @@ const PRESETS: Record<OrganizationVertical, IntakeFormPreset> = {
     title: "Resident Information",
     description: "Share your contact and property information with the association.",
     successMessage: "Thank you! Your information has been received.",
+    autoCreateNewMember: true,
     fields: [
       ...NAME_FIELDS,
       ...EMAIL_PHONE_FIELDS,
@@ -148,6 +177,7 @@ const PRESETS: Record<OrganizationVertical, IntakeFormPreset> = {
     title: "Connect With Our Church",
     description: "We'd love to get to know you. Share your information so we can stay connected.",
     successMessage: "Thank you for connecting with us! We look forward to staying in touch.",
+    autoCreateNewMember: false,
     fields: [
       ...NAME_FIELDS,
       ...EMAIL_PHONE_FIELDS,
@@ -196,6 +226,7 @@ export async function createFormFromPreset(organizationId: string, actorUserId: 
     title: preset.title,
     description: preset.description,
     successMessage: preset.successMessage,
+    autoCreateNewMember: preset.autoCreateNewMember,
   });
 
   for (const [index, fieldPreset] of preset.fields.entries()) {
