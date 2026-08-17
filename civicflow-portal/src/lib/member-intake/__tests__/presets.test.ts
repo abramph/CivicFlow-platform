@@ -79,6 +79,22 @@ describe("createFormFromPreset", () => {
     const result = await createFormFromPreset("org-a", "user-1", "COMMUNITY");
     expect(result.fields).toHaveLength(1);
   });
+
+  // Found live in production (2026-08-17): every preset previously left
+  // autoCreateNewMember unset and silently inherited createIntakeForm()'s
+  // own blanket-conservative default (false) -- a genuinely new person on
+  // a "Join Our Organization" form still landed in the review queue. Each
+  // preset now sets this explicitly; this test is the regression guard so
+  // a future preset addition can't silently reintroduce the same gap.
+  it("passes each preset's own autoCreateNewMember policy through to createIntakeForm -- never silently inherits the default", async () => {
+    const { createFormFromPreset } = await import("../presets");
+    const expected: Record<string, boolean> = { COMMUNITY: true, HOA: true, PTA: false, UNION: false, CHURCH: false };
+    for (const [vertical, autoCreate] of Object.entries(expected)) {
+      createIntakeForm.mockClear();
+      await createFormFromPreset("org-a", "user-1", vertical as never);
+      expect(createIntakeForm).toHaveBeenCalledWith("org-a", "user-1", expect.objectContaining({ autoCreateNewMember: autoCreate }));
+    }
+  });
 });
 
 describe("getOrganizationVertical", () => {
