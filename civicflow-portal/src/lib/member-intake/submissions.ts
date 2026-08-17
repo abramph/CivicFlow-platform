@@ -40,8 +40,11 @@ function isBlankInput(value: unknown): boolean {
 /** Validates one submitted value against its field definition. Throws
  * MEMBER_INTAKE_VALIDATION_ERROR (never silently coerces or drops) on
  * anything that doesn't fit -- an untrusted client gets a clear 400, not a
- * best-effort guess at what it meant. */
-function validateFieldValue(field: MemberIntakeFormField, raw: unknown): ValidatedFieldValue | null {
+ * best-effort guess at what it meant. Exported for reuse by
+ * self-service.ts (MEMBER-QR-J) -- an authenticated member's own submitted
+ * values go through the exact same per-field validation as an anonymous
+ * public one, never a looser parallel check. */
+export function validateFieldValue(field: MemberIntakeFormField, raw: unknown): ValidatedFieldValue | null {
   if (isBlankInput(raw)) {
     if (field.required) {
       throw new MemberIntakeError("MEMBER_INTAKE_VALIDATION_ERROR", `"${field.label}" is required.`);

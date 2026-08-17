@@ -108,6 +108,12 @@ export default function ProfileScreen() {
         </Pressable>
       ) : null}
 
+      {hasMemberIdentity ? (
+        <Pressable style={styles.secondaryButton} onPress={() => router.push('/profile-edit' as never)} accessibilityRole="button" accessibilityLabel="Update my information">
+          <ThemedText type="link">Update My Information</ThemedText>
+        </Pressable>
+      ) : null}
+
       {hasMemberIdentity && isChurch ? (
         <>
           <ThemedText type="smallBold" style={styles.sectionLabel}>Giving</ThemedText>

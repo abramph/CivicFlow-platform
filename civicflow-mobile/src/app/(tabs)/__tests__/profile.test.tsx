@@ -69,6 +69,38 @@ describe('Profile screen — org switcher discoverability (GitHub #71)', () => {
   });
 });
 
+describe('Profile screen — Update My Information (MEMBER-QR-J)', () => {
+  beforeEach(() => {
+    mockPush.mockReset();
+    mockGetProfile.mockReset().mockResolvedValue({ commsPushEnabled: false, commsEmailEnabled: false, commsSmsEnabled: false, smsOptedOutAt: null });
+  });
+
+  it('shows the entry point for a member with a linked identity and navigates to the edit screen', async () => {
+    mockUseAuth.mockReturnValue(authWith(1));
+
+    await render(<ProfileScreen />);
+    await waitFor(() => expect(screen.getByLabelText('Update my information')).toBeTruthy());
+
+    await fireEvent.press(screen.getByLabelText('Update my information'));
+    expect(mockPush).toHaveBeenCalledWith('/profile-edit');
+  });
+
+  it('hides the entry point for a login with no linked member identity', async () => {
+    mockUseAuth.mockReturnValue({
+      user: { id: 'user-1', email: 'owner@example.com', displayName: 'Org Owner' },
+      organizations: [{ organizationId: 'org-0', organizationName: 'Sample Org' }],
+      selectedOrganization: { organizationName: 'Sample Org', memberId: null, firstName: null, lastName: null },
+      selectedOrganizationId: 'org-0',
+      logout: mockLogout,
+    });
+
+    await render(<ProfileScreen />);
+    await waitFor(() => expect(screen.getByText('Org Owner')).toBeTruthy());
+
+    expect(screen.queryByLabelText('Update my information')).toBeNull();
+  });
+});
+
 describe('Profile screen — org owner/admin without a personal member identity', () => {
   beforeEach(() => {
     mockGetProfile.mockReset();

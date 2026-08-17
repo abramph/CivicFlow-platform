@@ -248,8 +248,14 @@ export function sendConversationMessage(organizationId: string, conversationId: 
 export interface MobileProfile {
   firstName: string;
   lastName: string;
+  preferredName: string | null;
   email: string | null;
   phone: string | null;
+  addressLine1: string | null;
+  addressLine2: string | null;
+  city: string | null;
+  state: string | null;
+  zipCode: string | null;
   commsPushEnabled: boolean;
   commsEmailEnabled: boolean;
   commsSmsEnabled: boolean;
@@ -271,6 +277,37 @@ export function updateProfile(organizationId: string, input: UpdateProfileInput)
     `/api/mobile/profile`,
     { method: 'PATCH', body: JSON.stringify({ organizationId, ...input }) }
   );
+}
+
+/**
+ * MEMBER-QR-J — "Update My Information." A submission, not a direct write:
+ * the backend routes it through the same Member Intake apply engine the
+ * public QR form uses, so an identity-sensitive change (legal name, email,
+ * date of birth) may come back REVIEW_REQUIRED instead of APPLIED even
+ * though the request itself succeeded (200).
+ */
+export type ProfileUpdateFieldKey =
+  | 'firstName'
+  | 'lastName'
+  | 'preferredName'
+  | 'email'
+  | 'phone'
+  | 'addressLine1'
+  | 'addressLine2'
+  | 'city'
+  | 'state'
+  | 'zipCode';
+
+export interface ProfileUpdateResult {
+  status: 'APPLIED' | 'REVIEW_REQUIRED';
+  appliedFieldCount: number;
+}
+
+export function submitProfileUpdate(organizationId: string, fieldValues: Partial<Record<ProfileUpdateFieldKey, string>>) {
+  return apiFetch<ProfileUpdateResult>(`/api/mobile/profile`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId, fieldValues }),
+  });
 }
 
 export interface Campaign {

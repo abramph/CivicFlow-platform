@@ -16,7 +16,21 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
-import { GET, PATCH } from "@/app/api/mobile/profile/route";
+const submitMemberSelfServiceUpdate = vi.fn();
+vi.mock("@/lib/member-intake/self-service", () => ({
+  submitMemberSelfServiceUpdate: (...args: unknown[]) => submitMemberSelfServiceUpdate(...args),
+}));
+vi.mock("@/lib/rate-limit", () => ({ requireRateLimit: vi.fn().mockResolvedValue(null) }));
+
+import { GET, PATCH, POST } from "@/app/api/mobile/profile/route";
+
+function postRequest(body: unknown) {
+  return new Request("https://portal.test/api/mobile/profile", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
 
 function getRequest(organizationId: string | null) {
   const url = organizationId
@@ -126,5 +140,45 @@ describe("PATCH /api/mobile/profile", () => {
       data: { commsPushEnabled: false },
       select: expect.any(Object),
     });
+  });
+});
+
+describe("POST /api/mobile/profile", () => {
+  beforeEach(() => {
+    requireMobileMembership.mockReset();
+    submitMemberSelfServiceUpdate.mockReset();
+  });
+
+  it("resolves memberId/organizationId/actor from the verified mobile session, never the request body", async () => {
+    requireMobileMembership.mockResolvedValueOnce({
+      session: { userId: "member-user-1", email: "member@example.com" },
+      organizationId: "org-a",
+      memberId: "member-1",
+    });
+    submitMemberSelfServiceUpdate.mockResolvedValueOnce({ status: "APPLIED", appliedFieldCount: 1 });
+
+    const response = await POST(postRequest({ organizationId: "org-a", fieldValues: { phone: "+12155551111" } }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(submitMemberSelfServiceUpdate).toHaveBeenCalledWith(
+      "org-a",
+      "member-1",
+      { userId: "member-user-1", userEmail: "member@example.com" },
+      { phone: "+12155551111" }
+    );
+    expect(body.data.status).toBe("APPLIED");
+  });
+
+  it("rejects a fieldValues key that isn't an allowed self-service target field before ever calling the service", async () => {
+    requireMobileMembership.mockResolvedValueOnce({
+      session: { userId: "member-user-1", email: "member@example.com" },
+      organizationId: "org-a",
+      memberId: "member-1",
+    });
+
+    const response = await POST(postRequest({ organizationId: "org-a", fieldValues: { commsEmailEnabled: true } }));
+    expect(response.status).toBe(400);
+    expect(submitMemberSelfServiceUpdate).not.toHaveBeenCalled();
   });
 });
