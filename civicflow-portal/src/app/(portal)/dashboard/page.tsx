@@ -13,6 +13,7 @@ import { getVerticalTerminology, getQuickActions, getHelpTopics, getEmptyStateCo
 import { getFinanceDashboard } from "@/lib/giving/finance-dashboard";
 import { getLandingRoute } from "@/lib/vertical-navigation";
 import { getUnionCaseDashboardCounts } from "@/lib/union/cases";
+import { getOrganizationLabAccess } from "@/lib/labs/access";
 import type { OrganizationVertical } from "@prisma/client";
 import {
   Users, Calendar, DollarSign, TrendingDown, AlertCircle, UserCheck,
@@ -203,6 +204,7 @@ export default async function DashboardPage() {
   // receive organizational contribution totals accidentally.
   const canSeeGivingSummary = can("contributions:summary:view");
   const canSeeGroups = can("groups:view");
+  const canSeeMemberIntake = can("memberIntake:review");
   // UNION-WEB-DASH: Case Center summary and financial-administration
   // visibility are capability-gated independently of each other -- e.g. a
   // FINANCE-role viewer deliberately holds zero union:cases:* permissions
@@ -458,6 +460,13 @@ export default async function DashboardPage() {
   const activeGroupsCount = canSeeGroups
     ? await prisma.orgGroup.count({ where: { organizationId: orgId, status: "ACTIVE" } })
     : 0;
+  // MEMBER-QR-I: Labs-gated (internalOnly) on top of the permission check --
+  // mirrors requireMemberIntakeAccess's own "Labs gate controls whether the
+  // UI exists, permission is the actual authorization" split.
+  const memberIntakeAccess = canSeeMemberIntake ? await getOrganizationLabAccess(orgId, "memberIntake") : null;
+  const memberIntakeNeedsReviewCount = memberIntakeAccess?.available
+    ? await prisma.memberIntakeSubmission.count({ where: { organizationId: orgId, status: "REVIEW_REQUIRED" } })
+    : 0;
 
   const statusCounts = Object.fromEntries(
     membershipBreakdown.map((r) => [r.membershipStatus, r._count.id])
@@ -573,6 +582,9 @@ export default async function DashboardPage() {
           <StatCard label="Giving Needs Attention" value={givingDashboard.failedNeedingAttention} subtext="Failed recurring payments" icon={AlertCircle} color="amber" href="/giving/dashboard" />
         )}
         {canSeeGroups && activeGroupsCount > 0 && <StatCard label="Active Groups" value={activeGroupsCount} subtext="Ministries, committees, chapters" icon={Users} color="sky" href="/groups" />}
+        {memberIntakeNeedsReviewCount > 0 && (
+          <StatCard label="Member Intake Needs Review" value={memberIntakeNeedsReviewCount} subtext="New submissions to review" icon={AlertCircle} color="amber" href="/labs/member-intake/submissions?filter=NEEDS_REVIEW" />
+        )}
       </div>
 
       {/* UNION-WEB-DASH: Case Center summary -- Union's actual primary
