@@ -8,7 +8,13 @@ import { applySubmission } from "@/lib/member-intake/update-engine";
 
 const bodySchema = z.object({
   fieldValues: z.record(z.string(), z.unknown()),
-  sourceToken: z.string().trim().min(1).optional(),
+  // Nullable, not just optional: the public form client always sends this
+  // key (its `sourceToken` prop defaults to null for a direct/no-source
+  // link, not undefined) -- z.string().optional() alone rejects an
+  // explicit null, which made every direct-link submission (i.e. anyone
+  // who didn't arrive via a QR source) 400 in production. Found live during
+  // MEMBER-QR-L smoke testing.
+  sourceToken: z.union([z.string().trim().min(1), z.null()]).optional(),
 });
 
 export type PublicSubmitOutcome = "NEW_MEMBER_CREATED" | "UPDATE_APPLIED" | "VERIFICATION_REQUIRED" | "REVIEW_REQUIRED";

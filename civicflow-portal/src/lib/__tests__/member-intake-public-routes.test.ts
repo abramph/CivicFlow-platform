@@ -68,6 +68,18 @@ describe("POST /api/public/member-intake/[token]/submit", () => {
     expect(recordSubmission).toHaveBeenCalledWith(expect.objectContaining({ formId: "form-1" }));
   });
 
+  it("MEMBER-QR-L: accepts an explicit sourceToken: null (the real public form client's payload shape for a direct/no-source link, not omitted/undefined) instead of 400ing", async () => {
+    resolvePublicIntakeForm.mockResolvedValue({ id: "form-1", organizationId: "org-a" });
+    recordSubmission.mockResolvedValue({ submissionId: "sub-1", status: "REVIEW_REQUIRED", matchedMemberId: null });
+    const { POST } = await import("@/app/api/public/member-intake/[token]/submit/route");
+    const response = await POST(
+      jsonRequest("https://app.test/api/public/member-intake/tok/submit", { fieldValues: { firstName: "A" }, sourceToken: null }),
+      { params: Promise.resolve({ token: "tok" }) }
+    );
+    expect(response.status).toBe(200);
+    expect(recordSubmission).toHaveBeenCalledWith(expect.objectContaining({ sourceToken: null }));
+  });
+
   it("VERIFICATION_REQUIRED path sends a verification code and never applies anything yet", async () => {
     resolvePublicIntakeForm.mockResolvedValue({ id: "form-1", organizationId: "org-a" });
     recordSubmission.mockResolvedValue({ submissionId: "sub-1", status: "VERIFICATION_REQUIRED", matchedMemberId: "m-1" });
