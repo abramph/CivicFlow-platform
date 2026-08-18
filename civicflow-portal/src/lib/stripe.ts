@@ -1,5 +1,6 @@
 import Stripe from "stripe";
 import { SMS_ADDON } from "@/lib/sms-pricing";
+import { PLANS, type PlanId, type BillingInterval } from "@/lib/plans";
 
 let _stripe: Stripe | null = null;
 
@@ -18,47 +19,47 @@ export function stripeWebhookSecret(): string {
   return secret;
 }
 
-export function priceIdForPlan(planId: "essential" | "elite", interval: "month" | "year" = "month"): string {
-  const key =
-    interval === "year"
-      ? planId === "essential"
-        ? process.env.STRIPE_PRICE_ESSENTIAL_YEARLY
-        : process.env.STRIPE_PRICE_ELITE_YEARLY
-      : planId === "essential"
-        ? process.env.STRIPE_PRICE_ESSENTIAL_MONTHLY
-        : process.env.STRIPE_PRICE_ELITE_MONTHLY;
-  if (!key) throw new Error(`Stripe price not configured for plan: ${planId} (${interval})`);
+/**
+ * Resolves the Stripe Price env var for a plan+interval directly from the
+ * plan catalog (plans.ts) rather than a hardcoded per-plan branch — every
+ * Cloud plan (and the legacy essential/elite tiers) resolves through the
+ * same path. Cloud plan ids already encode their own interval (e.g.
+ * "pta_monthly"); for those, the passed `interval` is ignored in favor of
+ * the plan's own `interval` field. For legacy plans (whose id has no
+ * interval baked in), `interval` selects monthly vs. yearly.
+ */
+export function priceIdForPlan(planId: PlanId, interval: BillingInterval = "month"): string {
+  const plan = PLANS[planId];
+  const effectiveInterval = plan.interval ?? interval;
+  const envKey = effectiveInterval === "year" ? plan.yearlyPriceEnvKey : plan.monthlyPriceEnvKey;
+  const key = envKey ? process.env[envKey] : undefined;
+  if (!key) throw new Error(`Stripe price not configured for plan: ${planId} (${effectiveInterval})`);
   return key;
 }
 
-export function planFromPriceId(priceId: string): "essential" | "elite" | null {
-  const essentialIds = [process.env.STRIPE_PRICE_ESSENTIAL_MONTHLY, process.env.STRIPE_PRICE_ESSENTIAL_YEARLY];
-  const eliteIds = [process.env.STRIPE_PRICE_ELITE_MONTHLY, process.env.STRIPE_PRICE_ELITE_YEARLY];
-  if (essentialIds.includes(priceId)) return "essential";
-  if (eliteIds.includes(priceId)) return "elite";
+export function planFromPriceId(priceId: string): PlanId | null {
+  for (const plan of Object.values(PLANS)) {
+    const configuredIds = [plan.monthlyPriceEnvKey, plan.yearlyPriceEnvKey]
+      .filter((envKey): envKey is string => Boolean(envKey))
+      .map((envKey) => process.env[envKey]);
+    if (configuredIds.includes(priceId)) return plan.id;
+  }
   return null;
 }
 
-export function seatPriceIdForPlan(planId: "essential" | "elite", interval: "month" | "year" = "month"): string | null {
-  const key =
-    interval === "year"
-      ? planId === "essential"
-        ? process.env.STRIPE_PRICE_ESSENTIAL_SEAT_YEARLY
-        : process.env.STRIPE_PRICE_ELITE_SEAT_YEARLY
-      : planId === "essential"
-        ? process.env.STRIPE_PRICE_ESSENTIAL_SEAT_MONTHLY
-        : process.env.STRIPE_PRICE_ELITE_SEAT_MONTHLY;
-  return key ?? null;
+export function seatPriceIdForPlan(planId: PlanId, interval: BillingInterval = "month"): string | null {
+  const plan = PLANS[planId];
+  const envKey = interval === "year" ? plan.seatYearlyPriceEnvKey : plan.seatMonthlyPriceEnvKey;
+  return envKey ? (process.env[envKey] ?? null) : null;
 }
 
 export function isSeatPriceId(priceId: string): boolean {
-  const seatIds = [
-    process.env.STRIPE_PRICE_ESSENTIAL_SEAT_MONTHLY,
-    process.env.STRIPE_PRICE_ESSENTIAL_SEAT_YEARLY,
-    process.env.STRIPE_PRICE_ELITE_SEAT_MONTHLY,
-    process.env.STRIPE_PRICE_ELITE_SEAT_YEARLY,
-  ];
-  return seatIds.includes(priceId);
+  return Object.values(PLANS).some((plan) => {
+    const configuredIds = [plan.seatMonthlyPriceEnvKey, plan.seatYearlyPriceEnvKey]
+      .filter((envKey): envKey is string => Boolean(envKey))
+      .map((envKey) => process.env[envKey]);
+    return configuredIds.includes(priceId);
+  });
 }
 
 export function smsAddOnPriceId(): string {
