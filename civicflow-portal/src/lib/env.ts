@@ -42,6 +42,9 @@ const serverEnvSchema = z.object({
   // Optional until a live-mode connected-account endpoint exists too — see
   // the doc's CONNECT-C decisions-log entry.
   STRIPE_CONNECT_WEBHOOK_SECRET: z.string().min(1).optional(),
+  // Legacy flat plan tier — kept for read-compatibility with historical
+  // Organization.plan/Subscription.plan values only; no longer sold. See
+  // docs/unestra-cloud-pricing-architecture.md.
   STRIPE_PRICE_ESSENTIAL_MONTHLY: z.string().optional(),
   STRIPE_PRICE_ESSENTIAL_YEARLY: z.string().optional(),
   STRIPE_PRICE_ELITE_MONTHLY: z.string().optional(),
@@ -50,6 +53,22 @@ const serverEnvSchema = z.object({
   STRIPE_PRICE_ESSENTIAL_SEAT_YEARLY: z.string().optional(),
   STRIPE_PRICE_ELITE_SEAT_MONTHLY: z.string().optional(),
   STRIPE_PRICE_ELITE_SEAT_YEARLY: z.string().optional(),
+
+  // Unestra Cloud — per-vertical unlimited-member pricing (CLOUD-B). See
+  // docs/unestra-cloud-pricing-architecture.md for the pricing table and
+  // the seat/feature-bundle assumptions carried over from the legacy plan.
+  STRIPE_PRICE_PTA_MONTHLY: z.string().optional(),
+  STRIPE_PRICE_PTA_YEARLY: z.string().optional(),
+  STRIPE_PRICE_COMMUNITY_MONTHLY: z.string().optional(),
+  STRIPE_PRICE_COMMUNITY_YEARLY: z.string().optional(),
+  STRIPE_PRICE_CHURCH_MONTHLY: z.string().optional(),
+  STRIPE_PRICE_CHURCH_YEARLY: z.string().optional(),
+  STRIPE_PRICE_UNION_MONTHLY: z.string().optional(),
+  STRIPE_PRICE_UNION_YEARLY: z.string().optional(),
+  // All 8 Cloud plans share one seat price (see the seat-pricing note in
+  // docs/unestra-cloud-pricing-architecture.md) rather than 8 separate ones.
+  STRIPE_PRICE_CLOUD_SEAT_MONTHLY: z.string().optional(),
+  STRIPE_PRICE_CLOUD_SEAT_YEARLY: z.string().optional(),
 
   DO_SPACES_ENDPOINT: z.string().url(),
   DO_SPACES_REGION: z.string().min(1),

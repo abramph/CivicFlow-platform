@@ -207,7 +207,8 @@ describe("getOrganizationEntitlements — consolidated snapshot", () => {
     const entitlements = await getOrganizationEntitlements("org-1");
 
     expect(entitlements.planId).toBe("essential");
-    expect(entitlements.planName).toBe("Essential");
+    // CLOUD-B renames the legacy display name to make clear it's no longer sold.
+    expect(entitlements.planName).toBe("Essential (legacy)");
     expect(entitlements.billingExempt).toBe(false);
     expect(entitlements.trial.isInTrial).toBe(false);
     expect(entitlements.members).toEqual({ allowed: true, current: 10, limit: 500 });
