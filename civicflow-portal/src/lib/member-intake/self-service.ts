@@ -2,7 +2,7 @@ import type { MemberIntakeFieldType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { applySubmission, type ApplySubmissionResult } from "./update-engine";
 import { validateFieldValue, type ValidatedFieldValue } from "./submissions";
-import { ALLOWED_MEMBER_TARGET_FIELDS, type AllowedMemberTargetField } from "./sensitivity";
+import { ALLOWED_MEMBER_TARGET_FIELDS, effectiveFieldSensitivity, type AllowedMemberTargetField } from "./sensitivity";
 import { generateIntakeToken } from "./token";
 import { RESERVED_SELF_SERVICE_FORM_NAME } from "./forms";
 import type { MemberMutationActor } from "@/lib/member-mutations";
@@ -101,7 +101,7 @@ async function getOrCreateSelfServiceForm(organizationId: string) {
       options: [],
       targetEntity: "MEMBER" as const,
       targetField: field.targetField,
-      sensitivity: "LOW" as const, // floor enforced anyway -- see effectiveFieldSensitivity
+      sensitivity: effectiveFieldSensitivity(field.targetField, "LOW"),
       isCustomField: false,
     })),
   });
