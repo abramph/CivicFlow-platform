@@ -66,6 +66,28 @@ describe("getOrCreateSelfServiceForm (via submitMemberSelfServiceUpdate)", () =>
     expect(fieldRows.map((f) => f.targetField)).toContain("email");
     expect(fieldRows.map((f) => f.targetField)).not.toContain("commsEmailEnabled"); // comms toggles stay on the existing PATCH path
   });
+
+  it("floors each field's stored sensitivity to its authoritative minimum, never LOW across the board", async () => {
+    findFirstForm.mockResolvedValue(null);
+    createForm.mockResolvedValue({ id: "form-new" });
+    findFirstOrThrowForm.mockResolvedValue(existingForm([{ fieldKey: "phone", label: "Phone" }]));
+    const { submitMemberSelfServiceUpdate } = await import("../self-service");
+    await submitMemberSelfServiceUpdate("org-a", "m-1", ACTOR, { phone: "+12155551111" });
+
+    const fieldRows = createManyField.mock.calls[0][0].data as { targetField: string; sensitivity: string }[];
+    const byField = Object.fromEntries(fieldRows.map((f) => [f.targetField, f.sensitivity]));
+    // Regression: these were previously hardcoded to LOW, which let a
+    // mobile self-service legal-name/email/DOB change auto-apply with zero
+    // review -- effectiveFieldSensitivity's floor must actually be applied
+    // at field-creation time, not just claimed in a comment.
+    expect(byField.firstName).toBe("HIGH");
+    expect(byField.lastName).toBe("HIGH");
+    expect(byField.email).toBe("HIGH");
+    expect(byField.dateOfBirth).toBe("HIGH");
+    expect(byField.phone).toBe("MODERATE");
+    expect(byField.addressLine1).toBe("MODERATE");
+    expect(byField.preferredName).toBe("LOW");
+  });
 });
 
 describe("submitMemberSelfServiceUpdate", () => {
