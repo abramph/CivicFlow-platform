@@ -13,9 +13,17 @@
 --
 -- Mirrors the same guard discipline: targets by immutable organization id,
 -- name cross-check, idempotent re-run, audited.
+--
+-- First deploy attempt (same day) used a mis-supplied org id belonging to a
+-- different, real org ("CWA LOCAL 1040- TPH-AKFC-STU" -- an easy mix-up,
+-- its slug cwa-local-1040-tph-akfc-stu closely resembles Demo Union's own
+-- cwa-union-local-1040) -- the name cross-check below did exactly its job,
+-- raised, and rolled back cleanly with zero writes. Resolved via `prisma
+-- migrate resolve --rolled-back` against production, then this file
+-- corrected with the verified id and redeployed.
 DO $$
 DECLARE
-  target_org_id TEXT := 'cmsahovbf001tao2xskll0jt4';
+  target_org_id TEXT := 'cmsvcsi9700038m2yomrr6yso';
   expected_name TEXT := 'Unestra Demo Union';
   existing_name TEXT;
   already_exempt BOOLEAN;
