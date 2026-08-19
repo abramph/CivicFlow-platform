@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { activePlans, type PricingVertical } from "@/lib/plans";
+import { activePlans, annualSavingsCentsForVertical, type PricingVertical } from "@/lib/plans";
 
 const VERTICAL_LABELS: Record<PricingVertical, string> = {
   PTA: "PTA / PTO",
@@ -47,7 +47,7 @@ export default function PricingContent() {
               interval === "year" ? "bg-slate-950 text-white" : "bg-white text-slate-700 border border-slate-300"
             }`}
           >
-            Annual <span className="font-normal opacity-80">(2 months free)</span>
+            Annual <span className="font-normal opacity-80">(save with annual billing)</span>
           </button>
         </div>
 
@@ -74,7 +74,8 @@ export default function PricingContent() {
                   </p>
                   {interval === "year" ? (
                     <p className="mt-1 text-xs text-slate-500">
-                      ${(perMonthEquivalent / 100).toFixed(2)}/mo equivalent
+                      ${(perMonthEquivalent / 100).toFixed(2)}/mo equivalent — save $
+                      {(annualSavingsCentsForVertical(plan.vertical!) / 100).toFixed(0)}/year
                     </p>
                   ) : null}
                 </div>

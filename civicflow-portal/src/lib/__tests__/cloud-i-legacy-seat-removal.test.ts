@@ -22,6 +22,10 @@ const BANNED_PATTERNS: [string, RegExp][] = [
   ["additional seat purchase language", /additional seats?\s+(available for purchase|purchase)/i],
   ["per-member pricing language", /per[- ]member/i],
   ["obsolete SaaS branding", /Unestra SaaS/],
+  // CLOUD-J: the annual discount is now exactly one month, and the 30-day
+  // trial is a separate concept — "X months free" marketing is obsolete and
+  // conflates the two.
+  ["obsolete 'months free' annual marketing", /months? free/i],
 ];
 
 describe("CLOUD-I: customer-facing surfaces never reintroduce legacy paid-seat/pricing language", () => {
