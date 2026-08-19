@@ -41,13 +41,19 @@
  * access must not consume a seat in every org merely from platform reach"
  * true by construction, with no special-casing required here.
  */
-import type { OrganizationVertical } from "@prisma/client";
+import { Prisma, type OrganizationVertical, type PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { type Role, ROLES } from "@/lib/rbac";
-
-const ALL_ROLES = Object.keys(ROLES) as Role[];
 import { resolvePricingVertical, type PricingVertical } from "@/lib/plans";
 import { roleRequiresAdministrativeSeat } from "@/lib/admin-seat-policy";
+
+const ALL_ROLES = Object.keys(ROLES) as Role[];
+
+/** Accepts either the ordinary global client or an interactive-transaction
+ * client, so the same read logic can run either standalone (display) or
+ * inside a caller's row-locked transaction (enforcement — see
+ * lockAndAssertAdminSeatAvailable below). */
+type Db = PrismaClient | Prisma.TransactionClient;
 
 /** Approved per-vertical included administrative seats (base subscription
  * price is unaffected by this — see docs/unestra-cloud-pricing-architecture.md). */
@@ -93,10 +99,10 @@ async function seatConsumingRoles(organizationId: string): Promise<Role[]> {
  * at most one role — and therefore consume at most one seat — per org,
  * regardless of how many privileged permissions that single role carries.
  */
-export async function getUsedAdminSeats(organizationId: string): Promise<number> {
+export async function getUsedAdminSeats(organizationId: string, db: Db = prisma): Promise<number> {
   const seatRoles = await seatConsumingRoles(organizationId);
   if (seatRoles.length === 0) return 0;
-  return prisma.organizationMembership.count({
+  return db.organizationMembership.count({
     where: { organizationId, status: "active", role: { in: seatRoles } },
   });
 }
@@ -123,8 +129,8 @@ export interface AdminSeatSummary {
  * function of vertical + override + purchased seats only, never of billing
  * state, so an exempt org's seats are calculated exactly like a paying org's.
  */
-export async function getAdminSeatSummary(organizationId: string): Promise<AdminSeatSummary> {
-  const org = await prisma.organization.findUniqueOrThrow({
+export async function getAdminSeatSummary(organizationId: string, db: Db = prisma): Promise<AdminSeatSummary> {
+  const org = await db.organization.findUniqueOrThrow({
     where: { id: organizationId },
     select: {
       primaryVertical: true,
@@ -136,7 +142,7 @@ export async function getAdminSeatSummary(organizationId: string): Promise<Admin
   const vertical = resolvePricingVertical(org.primaryVertical);
   const includedAdminSeats = INCLUDED_ADMIN_SEATS[vertical];
   const effectiveAdminSeatLimit = includedAdminSeats + org.adminSeatOverride + org.purchasedAdminSeats;
-  const usedAdminSeats = await getUsedAdminSeats(organizationId);
+  const usedAdminSeats = await getUsedAdminSeats(organizationId, db);
 
   return {
     vertical,
@@ -156,4 +162,54 @@ export async function getAdminSeatSummary(organizationId: string): Promise<Admin
 export async function hasAvailableAdminSeat(organizationId: string): Promise<boolean> {
   const summary = await getAdminSeatSummary(organizationId);
   return summary.availableAdminSeats > 0;
+}
+
+/**
+ * CLOUD-SEAT-C: the stable, customer-facing denial. Deliberately says
+ * nothing about ordinary-member limits (there are none) — an org admin
+ * hitting this must never be led to believe their MEMBER capacity is
+ * affected. Message text is exact per the product brief; do not reword.
+ */
+export class AdminSeatLimitError extends Error {
+  readonly status = 403;
+  readonly code = "ADMIN_SEAT_LIMIT_REACHED";
+  constructor() {
+    super(
+      "You are using all included administrative seats for your Unestra Cloud plan. Deactivate an unused administrator or contact Unestra Support to request additional administrative access."
+    );
+    this.name = "AdminSeatLimitError";
+  }
+}
+
+/**
+ * The concurrency-safe enforcement primitive. Locks the Organization row for
+ * the remainder of the caller's transaction (same `SELECT ... FOR UPDATE`
+ * idiom as giving/refunds.ts's cumulative-total race fix), then evaluates
+ * seat availability against that locked state. Two simultaneous
+ * privilege-granting mutations against the same org serialize on this lock:
+ * the second call blocks until the first's transaction commits (or rolls
+ * back), then re-reads usedAdminSeats including whatever the first call just
+ * wrote — so they can never both observe an available seat and both proceed
+ * past the last one.
+ *
+ * The caller's own membership create/update MUST happen inside the same
+ * `tx` this was called with — calling this standalone and then writing in a
+ * separate transaction reopens the race it exists to close.
+ *
+ * Only call this when the mutation would actually newly consume a seat
+ * (e.g. creating a privileged membership, or promoting an existing member
+ * from a non-seat-consuming role into a seat-consuming one). A role change
+ * between two seat-consuming roles, or into/within non-seat-consuming roles,
+ * is seat-neutral and must not call this — see organization-memberships
+ * routes for the exact transition logic.
+ */
+export async function lockAndAssertAdminSeatAvailable(
+  tx: Prisma.TransactionClient,
+  organizationId: string
+): Promise<void> {
+  await tx.$queryRaw`SELECT id FROM "Organization" WHERE id = ${organizationId} FOR UPDATE`;
+  const summary = await getAdminSeatSummary(organizationId, tx);
+  if (summary.availableAdminSeats <= 0) {
+    throw new AdminSeatLimitError();
+  }
 }

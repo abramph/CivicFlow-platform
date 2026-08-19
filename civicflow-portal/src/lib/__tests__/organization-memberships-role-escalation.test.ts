@@ -9,25 +9,40 @@ const findUniqueUser = vi.fn();
 const createUser = vi.fn();
 const createMembership = vi.fn();
 const findFirstExistingMembership = vi.fn().mockResolvedValue(null);
+const findUniqueOrgRolePermissionSet = vi.fn().mockResolvedValue(null);
+
+function membershipDelegate() {
+  return {
+    findFirst: (...args: unknown[]) => {
+      // POST create-flow checks for an existing membership for the invited user;
+      // PATCH/DELETE flows look up the target membership by id — route by shape.
+      const where = (args[0] as { where?: Record<string, unknown> } | undefined)?.where;
+      if (where && "userId" in where) return findFirstExistingMembership(...args);
+      return findFirstMembership(...args);
+    },
+    update: (...args: unknown[]) => updateMembership(...args),
+    delete: (...args: unknown[]) => deleteMembership(...args),
+    create: (...args: unknown[]) => createMembership(...args),
+  };
+}
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    organizationMembership: {
-      findFirst: (...args: unknown[]) => {
-        // POST create-flow checks for an existing membership for the invited user;
-        // PATCH/DELETE flows look up the target membership by id — route by shape.
-        const where = (args[0] as { where?: Record<string, unknown> } | undefined)?.where;
-        if (where && "userId" in where) return findFirstExistingMembership(...args);
-        return findFirstMembership(...args);
-      },
-      update: (...args: unknown[]) => updateMembership(...args),
-      delete: (...args: unknown[]) => deleteMembership(...args),
-      create: (...args: unknown[]) => createMembership(...args),
-    },
+    organizationMembership: membershipDelegate(),
     user: {
       findUnique: (...args: unknown[]) => findUniqueUser(...args),
       create: (...args: unknown[]) => createUser(...args),
     },
+    orgRolePermissionSet: { findUnique: (...args: unknown[]) => findUniqueOrgRolePermissionSet(...args) },
+    // Only PATCH/POST use $transaction, and only when the role change/create
+    // actually crosses into seat-consuming territory does anything inside it
+    // touch $queryRaw/organization — this repo's route code always wraps the
+    // write in $transaction regardless, so every route under test needs it.
+    $transaction: async (fn: (tx: unknown) => unknown) =>
+      fn({
+        organizationMembership: membershipDelegate(),
+        $queryRaw: vi.fn(),
+      }),
   },
 }));
 
@@ -44,7 +59,6 @@ vi.mock("@/lib/auth-guards", async (importOriginal) => {
 });
 
 vi.mock("@/lib/audit", () => ({ createAuditEvent: vi.fn().mockResolvedValue(undefined) }));
-vi.mock("@/lib/plan-gate", () => ({ requireSeatSlot: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("bcryptjs", () => ({ hash: vi.fn().mockResolvedValue("hashed") }));
 
 import { PATCH, DELETE } from "@/app/api/organization-memberships/[id]/route";
@@ -75,6 +89,8 @@ describe("organization-memberships: role-escalation hardening", () => {
     findUniqueUser.mockResolvedValue(null);
     createUser.mockReset();
     createUser.mockResolvedValue({ id: "u2", email: "new@example.com", displayName: "New" });
+    findUniqueOrgRolePermissionSet.mockReset();
+    findUniqueOrgRolePermissionSet.mockResolvedValue(null);
   });
 
   it("PATCH: an ORG_ADMIN cannot promote a member to ORG_OWNER", async () => {

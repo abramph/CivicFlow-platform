@@ -132,14 +132,18 @@ export async function checkSeatLimit(
   return { allowed: current < limit, current, limit };
 }
 
-export async function requireSeatSlot(organizationId: string): Promise<void> {
-  const { allowed, current, limit } = await checkSeatLimit(organizationId);
-  if (!allowed) {
-    throw new PlanLimitError(
-      `Your plan allows up to ${limit} portal user seat${limit === 1 ? "" : "s"} (you have ${current}). Purchase additional seats in Billing to add more users.`
-    );
-  }
-}
+/**
+ * CLOUD-SEAT-C: this legacy role-name-based gate (which counted READ_ONLY as
+ * seat-consuming) no longer enforces anything — every real enforcement call
+ * site (organization-memberships POST/PATCH) now uses the capability-based
+ * `lockAndAssertAdminSeatAvailable()` in admin-seats.ts instead, which is
+ * also concurrency-safe (row-locked) where this never was. `checkSeatLimit`
+ * itself is kept only for its current display use in
+ * getOrganizationEntitlements() below — see admin-seats.ts's doc comment for
+ * why READ_ONLY must never count. CLOUD-SEAT-E will replace that display
+ * value with the new admin-seat summary; not done here to keep this PR
+ * scoped to enforcement.
+ */
 
 /**
  * The authoritative backend gate for every plan-controlled feature
