@@ -14,6 +14,10 @@ const CUSTOMER_FACING_FILES = [
   "../../components/app/BillingActions.tsx",
   "../../app/pricing/PricingContent.tsx",
   "../../app/settings/billing/page.tsx",
+  // CLOUD-K: the trial-expiration SubscriptionWall lives here — it shipped
+  // with obsolete Essential/Elite cards and a "500 member" cap for weeks
+  // because this scan didn't cover it.
+  "../../app/(portal)/layout.tsx",
 ].map((rel) => path.resolve(__dirname, rel));
 
 const BANNED_PATTERNS: [string, RegExp][] = [
@@ -26,6 +30,10 @@ const BANNED_PATTERNS: [string, RegExp][] = [
   // trial is a separate concept — "X months free" marketing is obsolete and
   // conflates the two.
   ["obsolete 'months free' annual marketing", /months? free/i],
+  // CLOUD-K: member caps don't exist on any plan — "Up to N members" is
+  // always a stale-legacy-catalog leak on a customer-facing surface.
+  ["obsolete member-cap language", /up to [\d,]+ members/i],
+  ["retired Essential/Elite tier marketing", /Subscribe to Essential|Essential or Elite/],
 ];
 
 describe("CLOUD-I: customer-facing surfaces never reintroduce legacy paid-seat/pricing language", () => {

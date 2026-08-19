@@ -30,6 +30,17 @@ async function TrialBanner({ organizationId }: { organizationId: string }) {
   );
 }
 
+/**
+ * Shown when a non-exempt organization's internal 30-day trial has ended
+ * without a subscription. CLOUD-K: rewritten off the retired Essential/Elite
+ * tier cards (which advertised obsolete prices and a "500 member" cap that
+ * no longer exists anywhere). Unestra Cloud has exactly one plan per
+ * vertical, priced per-vertical — so this wall doesn't repeat a pricing
+ * table it can't know without the org's vertical; it sends the admin to
+ * Billing, where their own vertical's real monthly/annual pricing renders
+ * from the authoritative catalog. Nothing is deleted at expiration and no
+ * card was ever collected during the trial, so no charge has occurred.
+ */
 function SubscriptionWall() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-slate-50 px-6 py-16 text-center">
@@ -39,37 +50,26 @@ function SubscriptionWall() {
         </div>
         <h1 className="text-2xl font-bold text-slate-950">Your free trial has ended</h1>
         <p className="mt-3 text-slate-600">
-          Subscribe to Essential or Elite to continue using Unestra. Your data is safe and waiting for you.
+          Subscribe to Unestra Cloud to continue. Your data is safe and waiting for you — nothing has
+          been deleted, and you haven&apos;t been charged.
         </p>
 
-        <div className="mt-8 grid gap-4 sm:grid-cols-2">
-          <div className="rounded-xl border border-slate-200 bg-white p-5 text-left">
-            <p className="font-bold text-slate-950">Essential</p>
-            <p className="mt-1 text-2xl font-bold text-slate-950">$49<span className="text-sm font-normal text-slate-500">/mo</span></p>
-            <ul className="mt-3 space-y-1.5 text-xs text-slate-600">
-              <li>✓ Up to 500 members</li>
-              <li>✓ Email campaigns</li>
-              <li>✓ PDF export</li>
-              <li>✓ Payment reconciliation</li>
-            </ul>
-          </div>
-          <div className="rounded-xl border border-emerald-400 bg-emerald-50 p-5 text-left">
-            <p className="font-bold text-slate-950">Elite</p>
-            <p className="mt-1 text-2xl font-bold text-slate-950">$99<span className="text-sm font-normal text-slate-500">/mo</span></p>
-            <ul className="mt-3 space-y-1.5 text-xs text-slate-600">
-              <li>✓ Unlimited members</li>
-              <li>✓ Advanced reports</li>
-              <li>✓ API access</li>
-              <li>✓ Priority support</li>
-            </ul>
-          </div>
+        <div className="mt-8 rounded-xl border border-emerald-300 bg-emerald-50 p-5 text-left">
+          <p className="font-bold text-slate-950">Unestra Cloud</p>
+          <p className="mt-1 text-sm text-slate-600">One plan for your organization type, monthly or annual billing.</p>
+          <ul className="mt-3 space-y-1.5 text-xs text-slate-600">
+            <li>✓ Unlimited members</li>
+            <li>✓ Administrative seats included</li>
+            <li>✓ Email campaigns &amp; PDF export</li>
+            <li>✓ Advanced reports &amp; API access</li>
+          </ul>
         </div>
 
         <Link
           href="/settings/billing"
           className="mt-6 inline-block w-full rounded-xl bg-emerald-600 px-6 py-3 text-sm font-semibold text-white hover:bg-emerald-700"
         >
-          Choose a plan
+          See your plan &amp; subscribe
         </Link>
         <p className="mt-3 text-xs text-slate-500">
           Questions? Email <a href="mailto:support@getunestra.com" className="underline">support@getunestra.com</a>
