@@ -19,6 +19,12 @@ vi.mock("@/lib/payments/stripe-connect", () => ({
   getStripeForMode: async () => ({ checkout: { sessions: { create: (...args: unknown[]) => sessionsCreate(...args) } } }),
 }));
 
+const quoteProcessingCostCoverage = vi.fn();
+vi.mock("@/lib/giving/processing-cost-coverage", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/giving/processing-cost-coverage")>();
+  return { ...actual, quoteProcessingCostCoverage: (...args: unknown[]) => quoteProcessingCostCoverage(...args) };
+});
+
 import { FinanceError } from "@/lib/finance-errors";
 import { POST } from "@/app/api/pay/[slug]/checkout/route";
 
@@ -57,6 +63,8 @@ describe("POST /api/pay/[slug]/checkout (Stripe gating)", () => {
     sessionsCreate.mockReset();
     resolveConnectedAccountForCharges.mockReset();
     resolveConnectedAccountForCharges.mockResolvedValue({ stripeConnectedAccountId: "acct_connected1", accountMode: "test" });
+    quoteProcessingCostCoverage.mockReset();
+    quoteProcessingCostCoverage.mockResolvedValue({ offered: true, coverageCents: 105, totalCents: 2605 });
   });
 
   it("rejects checkout when the link has no active STRIPE PaymentLinkMethod attached", async () => {
@@ -99,5 +107,68 @@ describe("POST /api/pay/[slug]/checkout (Stripe gating)", () => {
 
     expect(response.status).toBe(409);
     expect(sessionsCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("FEE-COVER-C: voluntary processing-cost coverage on payment links", () => {
+  beforeEach(() => {
+    findUniquePaymentLink.mockReset();
+    findFirstPaymentLinkMethod.mockReset();
+    sessionsCreate.mockReset();
+    resolveConnectedAccountForCharges.mockReset();
+    resolveConnectedAccountForCharges.mockResolvedValue({ stripeConnectedAccountId: "acct_connected1", accountMode: "test" });
+    quoteProcessingCostCoverage.mockReset();
+    quoteProcessingCostCoverage.mockResolvedValue({ offered: true, coverageCents: 105, totalCents: 2605 });
+    findUniquePaymentLink.mockResolvedValue(baseLink); // $25 fixed
+    findFirstPaymentLinkMethod.mockResolvedValue({ id: "plm-1" });
+    sessionsCreate.mockResolvedValue({ url: "https://checkout.stripe.com/session-1" });
+  });
+
+  it("OFF by default: no coverage quote, unit_amount is exactly the base, split metadata records zero coverage", async () => {
+    await POST(buildRequest({}), params());
+
+    expect(quoteProcessingCostCoverage).not.toHaveBeenCalled();
+    const args = sessionsCreate.mock.calls[0][0];
+    expect(args.line_items[0].price_data.unit_amount).toBe(2500);
+    expect(args.metadata.linkBaseAmountCents).toBe("2500");
+    expect(args.metadata.linkCoverageAmountCents).toBe("0");
+  });
+
+  it("ON: server quotes at the org's own rate, grosses the unit_amount, and snapshots the split into metadata", async () => {
+    await POST(buildRequest({ coverProcessingCosts: true }), params());
+
+    expect(quoteProcessingCostCoverage).toHaveBeenCalledWith("org-a", 2500);
+    const args = sessionsCreate.mock.calls[0][0];
+    expect(args.line_items[0].price_data.unit_amount).toBe(2605);
+    expect(args.metadata.linkBaseAmountCents).toBe("2500");
+    expect(args.metadata.linkCoverageAmountCents).toBe("105");
+  });
+
+  it("org mode OFF: the quote returns zero coverage and the charge stays exactly the base even when the client opts in", async () => {
+    quoteProcessingCostCoverage.mockResolvedValue({ offered: false, coverageCents: 0, totalCents: 2500 });
+
+    await POST(buildRequest({ coverProcessingCosts: true }), params());
+
+    const args = sessionsCreate.mock.calls[0][0];
+    expect(args.line_items[0].price_data.unit_amount).toBe(2500);
+    expect(args.metadata.linkCoverageAmountCents).toBe("0");
+  });
+
+  it("client-supplied fee amounts are structurally impossible: unknown fields are stripped and never reach Stripe", async () => {
+    await POST(
+      buildRequest({
+        coverProcessingCosts: true,
+        coverageCents: 1, // fake low fee
+        feeAmount: -500, // negative
+        totalAmount: 1, // manipulated total
+        processorRate: 0.0001,
+      } as never),
+      params()
+    );
+
+    // Server quote wins regardless of every injected field.
+    const args = sessionsCreate.mock.calls[0][0];
+    expect(args.line_items[0].price_data.unit_amount).toBe(2605);
+    expect(args.metadata.linkCoverageAmountCents).toBe("105");
   });
 });

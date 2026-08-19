@@ -4,6 +4,7 @@ import { DuesCheckoutButton } from "@/components/app/DuesCheckoutButton";
 import { filterPayableMethods, PayableMethodsList } from "@/components/app/PayableMethodsList";
 import { getMemberWebSession } from "@/lib/member-web-session";
 import { findActivePaymentLink } from "@/lib/payment-links";
+import { getProcessingCostCoverageSettings } from "@/lib/giving/processing-cost-coverage";
 import { prisma } from "@/lib/prisma";
 
 export default async function MemberPayDuesInAdvancePage({ searchParams }: { searchParams: Promise<{ org?: string }> }) {
@@ -18,13 +19,20 @@ export default async function MemberPayDuesInAdvancePage({ searchParams }: { sea
     );
   }
 
-  const [paymentLink, paymentMethods] = await Promise.all([
+  const [paymentLink, paymentMethods, coverageSettings] = await Promise.all([
     findActivePaymentLink({ organizationId: memberSession.organizationId, linkType: "DUES" }),
     prisma.paymentMethodConfig.findMany({
       where: { organizationId: memberSession.organizationId, isActive: true },
       orderBy: [{ sortOrder: "asc" }, { label: "asc" }],
     }),
+    getProcessingCostCoverageSettings(memberSession.organizationId),
   ]);
+
+  const coverage = {
+    offered: coverageSettings.mode === "OPTIONAL_CONTRIBUTOR_COVERAGE",
+    percentBps: coverageSettings.percentBps,
+    fixedCents: coverageSettings.fixedCents,
+  };
 
   const orgSuffix = org ? `?org=${encodeURIComponent(org)}` : "";
 
@@ -40,6 +48,7 @@ export default async function MemberPayDuesInAdvancePage({ searchParams }: { sea
           organizationId={memberSession.organizationId}
           fixedAmount={paymentLink.amount ? Number(paymentLink.amount) : null}
           minAmount={paymentLink.minAmount ? Number(paymentLink.minAmount) : 1}
+          coverage={coverage}
         />
       ) : null}
 

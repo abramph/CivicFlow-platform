@@ -4,11 +4,16 @@ import { findActivePaymentLink } from "@/lib/payment-links";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { parseJsonBody, ValidationError, z } from "@/lib/validation";
 import { resolveConnectedAccountForCharges, getStripeForMode } from "@/lib/payments/stripe-connect";
+import { quoteProcessingCostCoverage } from "@/lib/giving/processing-cost-coverage";
 import { getServerEnv } from "@/lib/env";
 
 const bodySchema = z.object({
   organizationId: z.string().min(1),
   amount: z.number().positive().optional(),
+  /** FEE-COVER-C: opt-in only — a boolean request, never an amount. The
+   * coverage never inflates the dues obligation itself: the webhook settles
+   * the member's DuesCharge by the BASE amount only. */
+  coverProcessingCosts: z.boolean().optional(),
 });
 
 /**
@@ -58,6 +63,12 @@ export async function POST(request: Request) {
     const baseUrl = env.NEXTAUTH_URL.replace(/\/$/, "");
     const orgSuffix = `?org=${encodeURIComponent(organizationId)}`;
 
+    // FEE-COVER-C: quoted server-side at the org's CURRENT rate and
+    // snapshotted into metadata (same discipline as giving/CONNECT-F §36).
+    const { coverageCents } = input.coverProcessingCosts
+      ? await quoteProcessingCostCoverage(organizationId, amountCents)
+      : { coverageCents: 0 };
+
     const session = await stripe.checkout.sessions.create(
       {
         mode: "payment",
@@ -66,7 +77,7 @@ export async function POST(request: Request) {
             price_data: {
               currency: "usd",
               product_data: { name: link.title, description: "Membership dues" },
-              unit_amount: amountCents,
+              unit_amount: amountCents + coverageCents,
             },
             quantity: 1,
           },
@@ -81,6 +92,8 @@ export async function POST(request: Request) {
           organizationId,
           memberId,
           stripeConnectedAccountId,
+          linkBaseAmountCents: String(amountCents),
+          linkCoverageAmountCents: String(coverageCents),
           environment: process.env.NODE_ENV ?? "development",
         },
       },

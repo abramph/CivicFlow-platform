@@ -245,7 +245,27 @@ export async function POST(request: Request) {
 
           if (paymentLinkId && session.payment_status === "paid") {
             const amountTotal = session.amount_total ?? 0;
-            const amountDollars = amountTotal / 100;
+
+            // FEE-COVER-C: validate the snapshotted base/coverage split
+            // against Stripe's own amount_total — same rigor as giving.
+            // Absent metadata (legacy sessions) = full amount is base.
+            // Present-but-inconsistent metadata = tampering/staleness:
+            // record NOTHING and log, never guess.
+            const { resolveCoverageSplit } = await import("@/lib/giving/processing-cost-coverage");
+            const split = resolveCoverageSplit(
+              amountTotal,
+              session.metadata?.linkBaseAmountCents ? Number(session.metadata.linkBaseAmountCents) : null,
+              session.metadata?.linkCoverageAmountCents ? Number(session.metadata.linkCoverageAmountCents) : null
+            );
+            if (split.baseAmountCents === null) {
+              console.error(
+                JSON.stringify({ event: "payment_link_coverage_split_rejected", sessionId: session.id, organizationId, paymentLinkId })
+              );
+              break;
+            }
+            const baseDollars = split.baseAmountCents / 100;
+            const coverageDollars = split.coverageAmountCents / 100;
+            const totalDollars = amountTotal / 100;
 
             if (linkPaymentType === "dues" && payingMemberId) {
               const charge = await prisma.duesCharge.findFirst({
@@ -254,17 +274,22 @@ export async function POST(request: Request) {
               });
 
               const { recordDuesPayment } = await import("@/lib/dues-payments");
+              // `amount` is the BASE figure — it alone settles the member's
+              // DuesCharge obligation; voluntary coverage never inflates
+              // what the member is credited as having paid toward dues.
               await recordDuesPayment({
                 organizationId,
                 memberId: payingMemberId,
                 duesChargeId: charge?.id ?? null,
-                amount: amountDollars,
+                amount: baseDollars,
                 paymentDate: new Date(),
                 method: "STRIPE",
                 reference: session.id,
                 notes: `Paid by card via payment link ${paymentLinkId}`,
                 stripeConnectedAccountId: connectedAccountId,
                 providerAccountContext: "CONNECTED_ACCOUNT_PAYMENT",
+                processingCostCoverageAmount: split.coverageAmountCents > 0 ? coverageDollars : null,
+                totalChargedAmount: totalDollars,
                 charge,
               });
             } else {
@@ -274,10 +299,12 @@ export async function POST(request: Request) {
               const contributorEmail =
                 typeof session.customer_details?.email === "string" ? session.customer_details.email : null;
 
+              // `amount` stays the BASE figure (§37: coverage is never fund/
+              // campaign principal) — campaign/event progress sums `amount`.
               await prisma.contribution.create({
                 data: {
                   organizationId,
-                  amount: amountDollars,
+                  amount: baseDollars,
                   contributionDate: new Date(),
                   paymentMethod: "STRIPE",
                   source: campaignId ? "CAMPAIGN_PAGE" : eventId ? "EVENT_PAGE" : "MANUAL",
@@ -288,6 +315,8 @@ export async function POST(request: Request) {
                   receiptRequested: Boolean(contributorEmail),
                   stripeConnectedAccountId: connectedAccountId,
                   providerAccountContext: "CONNECTED_ACCOUNT_PAYMENT",
+                  processingCostCoverageAmount: split.coverageAmountCents > 0 ? coverageDollars : null,
+                  totalChargedAmount: totalDollars,
                 },
               });
             }

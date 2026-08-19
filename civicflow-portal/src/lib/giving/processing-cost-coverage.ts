@@ -17,18 +17,14 @@ export const MAX_COVERAGE_PERCENT_BPS = 1000;
 export const MAX_COVERAGE_FIXED_CENTS = 500;
 
 /**
- * gross = ceil((net + fixed) / (1 − p)) — solves for the total charge whose
- * processor fee, once deducted, leaves exactly `netCents` for the
- * organization. Returns the COVERAGE portion only (gross − net), in integer
- * cents. Pure and side-effect free — the only place this math happens.
+ * FEE-COVER-C: the pure gross-up now lives in coverage-math.ts (client-safe,
+ * no prisma) so checkout UIs can render live estimates from the exact same
+ * function. Re-exported here so every existing server caller keeps its
+ * import path — this remains the module through which server code accesses
+ * the calculation.
  */
-export function calculateProcessingCostCoverageCents(netCents: number, percentBps: number, fixedCents: number): number {
-  if (netCents <= 0) return 0;
-  if (percentBps <= 0 && fixedCents <= 0) return 0;
-  const p = Math.min(Math.max(percentBps, 0), 9999) / 10000;
-  const gross = Math.ceil((netCents + fixedCents) / (1 - p));
-  return gross - netCents;
-}
+export { calculateProcessingCostCoverageCents } from "./coverage-math";
+import { calculateProcessingCostCoverageCents } from "./coverage-math";
 
 export interface ProcessingCostCoverageSettings {
   mode: "OFF" | "OPTIONAL_CONTRIBUTOR_COVERAGE" | "STRIPE_SURCHARGE";
