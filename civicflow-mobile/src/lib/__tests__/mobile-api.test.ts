@@ -26,6 +26,7 @@ import {
   getPtaVolunteerOpportunity,
   getPtaVolunteerRoster,
   getPtaVolunteerToday,
+  manageRecurringGiving,
   markAnnouncementRead,
   markAnnouncementReadForIdentity,
   markPtaAnnouncementRead,
@@ -36,6 +37,8 @@ import {
   setPtaEventRsvp,
   setPtaMeetingRsvp,
   setPtaVolunteerAttendance,
+  startGivingCheckout,
+  startRecurringGivingCheckout,
   submitPaymentReport,
   updateProfile,
 } from '@/lib/mobile-api';
@@ -448,6 +451,64 @@ describe('mobile-api', () => {
         method: 'POST',
         body: JSON.stringify({ organizationId: 'org-1', status: 'GOING', attendeeCount: 1 }),
       });
+    });
+  });
+});
+
+/**
+ * MOBILE-COVER §4/§12 — the request bodies are the security contract: the
+ * ONLY fee-related field the app can ever emit is the literal boolean
+ * `coverProcessingCosts: true`. No amount/rate/total/price/account field
+ * exists in any signature, and false is OMITTED so pre-coverage builds and
+ * declined offers produce byte-identical requests.
+ */
+describe('mobile-api — processing-cost coverage contract', () => {
+  beforeEach(() => {
+    mockApiFetch.mockReset();
+  });
+
+  it('startGivingCheckout with coverage ON sends only the boolean alongside the base amount', async () => {
+    mockApiFetch.mockResolvedValueOnce({ url: 'https://checkout' });
+    await startGivingCheckout('org-1', 'fund-1', 25, null, true);
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/giving/checkout', {
+      method: 'POST',
+      body: JSON.stringify({ organizationId: 'org-1', fundId: 'fund-1', amount: 25, pledgeId: null, coverProcessingCosts: true }),
+    });
+  });
+
+  it('startGivingCheckout with coverage OFF omits the field entirely', async () => {
+    mockApiFetch.mockResolvedValueOnce({ url: 'https://checkout' });
+    await startGivingCheckout('org-1', 'fund-1', 25, null, false);
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/giving/checkout', {
+      method: 'POST',
+      body: JSON.stringify({ organizationId: 'org-1', fundId: 'fund-1', amount: 25, pledgeId: null }),
+    });
+  });
+
+  it('startRecurringGivingCheckout carries the preference the same way', async () => {
+    mockApiFetch.mockResolvedValueOnce({ url: 'https://checkout' });
+    await startRecurringGivingCheckout('org-1', 'fund-1', 50, 'MONTHLY', false, true);
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/giving/recurring/checkout', {
+      method: 'POST',
+      body: JSON.stringify({ organizationId: 'org-1', fundId: 'fund-1', amount: 50, frequency: 'MONTHLY', confirmDuplicate: false, coverProcessingCosts: true }),
+    });
+  });
+
+  it("manageRecurringGiving action 'coverage' sends an explicit boolean (false included — turning OFF must always transmit)", async () => {
+    mockApiFetch.mockResolvedValueOnce({});
+    await manageRecurringGiving('org-1', 'sched-1', 'coverage', undefined, false);
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/giving/recurring/manage', {
+      method: 'POST',
+      body: JSON.stringify({ organizationId: 'org-1', scheduleId: 'sched-1', action: 'coverage', amount: null, coverProcessingCosts: false }),
+    });
+  });
+
+  it('non-coverage manage actions never gain the coverage field', async () => {
+    mockApiFetch.mockResolvedValueOnce({});
+    await manageRecurringGiving('org-1', 'sched-1', 'pause');
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/giving/recurring/manage', {
+      method: 'POST',
+      body: JSON.stringify({ organizationId: 'org-1', scheduleId: 'sched-1', action: 'pause', amount: null }),
     });
   });
 });

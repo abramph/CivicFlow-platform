@@ -1903,6 +1903,19 @@ export interface GivingSchedule {
   status: string;
   nextContributionDate: string | null;
   paymentMethodDescriptor: string | null;
+  /** MOBILE-COVER: whether this schedule currently covers processing costs.
+   * Optional so the app tolerates a portal that predates the field. */
+  coverProcessingCosts?: boolean;
+}
+
+/** MOBILE-COVER: the org's voluntary processing-cost coverage offer. The
+ * rate fields feed the DISPLAYED estimate only (via coverage-math.ts) — the
+ * server re-quotes authoritatively at checkout, so nothing the app computes
+ * is ever charged. */
+export interface GivingCoverageOffer {
+  offered: boolean;
+  percentBps: number;
+  fixedCents: number;
 }
 
 export interface GivingPledge {
@@ -1940,6 +1953,8 @@ export type GivingSummary =
       enabled: true;
       terminology: string;
       yearTotal: number;
+      /** Optional so the app tolerates a portal that predates MOBILE-COVER. */
+      coverage?: GivingCoverageOffer;
       funds: GivingFund[];
       history: GivingHistoryRow[];
       schedules: GivingSchedule[];
@@ -1951,10 +1966,25 @@ export function getGiving(organizationId: string) {
   return apiFetch<GivingSummary>(`/api/mobile/giving?organizationId=${encodeURIComponent(organizationId)}`);
 }
 
-export function startGivingCheckout(organizationId: string, fundId: string, amount: number, pledgeId?: string | null) {
+/** MOBILE-COVER §4: the ONLY fee-related thing the app may send is the
+ * boolean opt-in — never an amount, rate, or total. Omitted when false so
+ * the request is byte-identical to pre-coverage builds. */
+export function startGivingCheckout(
+  organizationId: string,
+  fundId: string,
+  amount: number,
+  pledgeId?: string | null,
+  coverProcessingCosts?: boolean
+) {
   return apiFetch<{ url: string }>(`/api/mobile/giving/checkout`, {
     method: 'POST',
-    body: JSON.stringify({ organizationId, fundId, amount, pledgeId: pledgeId ?? null }),
+    body: JSON.stringify({
+      organizationId,
+      fundId,
+      amount,
+      pledgeId: pledgeId ?? null,
+      ...(coverProcessingCosts ? { coverProcessingCosts: true } : {}),
+    }),
   });
 }
 
@@ -1963,23 +1993,38 @@ export function startRecurringGivingCheckout(
   fundId: string,
   amount: number,
   frequency: 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY' | 'QUARTERLY' | 'ANNUALLY',
-  confirmDuplicate: boolean = false
+  confirmDuplicate: boolean = false,
+  coverProcessingCosts?: boolean
 ) {
   return apiFetch<{ url: string }>(`/api/mobile/giving/recurring/checkout`, {
     method: 'POST',
-    body: JSON.stringify({ organizationId, fundId, amount, frequency, confirmDuplicate }),
+    body: JSON.stringify({
+      organizationId,
+      fundId,
+      amount,
+      frequency,
+      confirmDuplicate,
+      ...(coverProcessingCosts ? { coverProcessingCosts: true } : {}),
+    }),
   });
 }
 
 export function manageRecurringGiving(
   organizationId: string,
   scheduleId: string,
-  action: 'pause' | 'resume' | 'cancel' | 'change-amount' | 'retry',
-  amount?: number
+  action: 'pause' | 'resume' | 'cancel' | 'change-amount' | 'retry' | 'coverage',
+  amount?: number,
+  coverProcessingCosts?: boolean
 ) {
   return apiFetch<Record<string, never>>(`/api/mobile/giving/recurring/manage`, {
     method: 'POST',
-    body: JSON.stringify({ organizationId, scheduleId, action, amount: amount ?? null }),
+    body: JSON.stringify({
+      organizationId,
+      scheduleId,
+      action,
+      amount: amount ?? null,
+      ...(action === 'coverage' ? { coverProcessingCosts: coverProcessingCosts === true } : {}),
+    }),
   });
 }
 

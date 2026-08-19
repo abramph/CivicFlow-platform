@@ -84,6 +84,45 @@ describe("GET /api/mobile/giving (CORE-GIVE-L)", () => {
     const payload = await response.json();
     expect(payload.data.yearTotal).toBe(125);
   });
+
+  it("MOBILE-COVER: exposes the org's coverage offer and each schedule's coverage preference", async () => {
+    findUniqueOrgSettings
+      .mockResolvedValueOnce({ contributionsEnabled: true, contributionTerminology: "Giving" })
+      .mockResolvedValueOnce({
+        processingCostCoverageMode: "OPTIONAL_CONTRIBUTOR_COVERAGE",
+        processingCostCoveragePercentBps: 290,
+        processingCostCoverageFixedCents: 30,
+      });
+    listMySchedules.mockResolvedValueOnce([
+      {
+        id: "sched-1",
+        fund: { name: "General" },
+        amount: 50,
+        frequency: "MONTHLY",
+        status: "ACTIVE",
+        nextContributionDate: null,
+        paymentMethodDescriptor: null,
+        coverProcessingCosts: true,
+      },
+    ]);
+    const response = await getGiving(new Request("http://x/api/mobile/giving?organizationId=org-1"));
+    const payload = await response.json();
+    expect(payload.data.coverage).toEqual({ offered: true, percentBps: 290, fixedCents: 30 });
+    expect(payload.data.schedules[0].coverProcessingCosts).toBe(true);
+  });
+
+  it("MOBILE-COVER: org mode OFF (or unset) → offered:false, so the native toggle never renders", async () => {
+    findUniqueOrgSettings
+      .mockResolvedValueOnce({ contributionsEnabled: true, contributionTerminology: "Giving" })
+      .mockResolvedValueOnce({
+        processingCostCoverageMode: "OFF",
+        processingCostCoveragePercentBps: 290,
+        processingCostCoverageFixedCents: 30,
+      });
+    const response = await getGiving(new Request("http://x/api/mobile/giving?organizationId=org-1"));
+    const payload = await response.json();
+    expect(payload.data.coverage).toEqual({ offered: false, percentBps: 290, fixedCents: 30 });
+  });
 });
 
 describe("GET /api/mobile/giving/statements/[statementId] — subject only", () => {

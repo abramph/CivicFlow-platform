@@ -1,6 +1,7 @@
 import { withApiErrorHandling } from "@/lib/api-route";
 import { requireMobileMembership } from "@/lib/mobile-auth";
 import { getGivingSettings } from "@/lib/giving/module";
+import { getProcessingCostCoverageSettings } from "@/lib/giving/processing-cost-coverage";
 import { listMySchedules } from "@/lib/giving/recurring";
 import { listMyPledges } from "@/lib/giving/pledges";
 import { prisma } from "@/lib/prisma";
@@ -25,7 +26,8 @@ export async function GET(request: Request) {
     }
 
     const yearStart = new Date(Date.UTC(new Date().getUTCFullYear(), 0, 1));
-    const [funds, history, schedules, pledges, statements, yearRows] = await Promise.all([
+    const [coverageSettings, funds, history, schedules, pledges, statements, yearRows] = await Promise.all([
+      getProcessingCostCoverageSettings(verifiedOrgId),
       prisma.fund.findMany({
         where: { organizationId: verifiedOrgId, status: "ACTIVE", allowOneTime: true },
         orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
@@ -85,6 +87,14 @@ export async function GET(request: Request) {
       data: {
         enabled: true,
         terminology: settings.terminology,
+        // MOBILE-COVER: the org's voluntary coverage offer, for the native
+        // toggle + live estimate ONLY — the checkout routes re-quote
+        // authoritatively server-side (same contract as /pay/[slug]).
+        coverage: {
+          offered: coverageSettings.mode === "OPTIONAL_CONTRIBUTOR_COVERAGE",
+          percentBps: coverageSettings.percentBps,
+          fixedCents: coverageSettings.fixedCents,
+        },
         yearTotal: yearRows.reduce((sum, row) => sum + Number(row.amount) - Number(row.refundedAmount ?? 0), 0),
         funds: funds.map((fund) => ({
           id: fund.id,
@@ -112,6 +122,7 @@ export async function GET(request: Request) {
           status: schedule.status,
           nextContributionDate: schedule.nextContributionDate?.toISOString() ?? null,
           paymentMethodDescriptor: schedule.paymentMethodDescriptor,
+          coverProcessingCosts: schedule.coverProcessingCosts,
         })),
         pledges: pledges.map((pledge) => ({
           id: pledge.id,

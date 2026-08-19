@@ -7,6 +7,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/lib/auth-context';
+import { calculateProcessingCostCoverageCents } from '@/lib/coverage-math';
 import {
   createGivingPledge,
   getGiving,
@@ -76,6 +77,10 @@ export function GivingContent({
   // route hardcodes pledgeId: null), so entering pledge mode always forces
   // a one-time gift.
   const [pledgeId, setPledgeId] = useState<string | null>(null);
+  // MOBILE-COVER §2: voluntary, DEFAULT OFF. The app displays an estimate
+  // from the shared pure formula; checkout sends only the boolean — the
+  // server quote alone determines the charged amount (§4).
+  const [coverProcessingCosts, setCoverProcessingCosts] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
 
   const load = useCallback(async () => {
@@ -100,6 +105,18 @@ export function GivingContent({
   const enabled = summary?.enabled === true ? summary : null;
   const selectedFund = enabled?.funds.find((fund) => fund.id === fundId) ?? enabled?.funds[0] ?? null;
 
+  // MOBILE-COVER: the org's offer (absent/OFF → the control never renders,
+  // §5) and the client-side ESTIMATE for the entered amount. Integer cents
+  // via the exact same pure formula the server uses.
+  const coverageOffer = enabled?.coverage?.offered === true ? enabled.coverage : null;
+  const baseCents = Math.round(Number(amount) * 100);
+  const estimatedCoverageCents =
+    coverageOffer && baseCents > 0
+      ? calculateProcessingCostCoverageCents(baseCents, coverageOffer.percentBps, coverageOffer.fixedCents)
+      : 0;
+  const coverageApplies = coverageOffer !== null && baseCents > 0 && estimatedCoverageCents > 0;
+  const estimatedTotalCents = coverProcessingCosts && coverageApplies ? baseCents + estimatedCoverageCents : baseCents;
+
   async function give() {
     if (!selectedOrganizationId || !selectedFund) return;
     const value = Number(amount);
@@ -107,14 +124,18 @@ export function GivingContent({
       Alert.alert('Enter an amount', 'Choose or enter the amount you want to give.');
       return;
     }
+    // §4/§5: only the boolean ever leaves the app, and only when the org
+    // currently offers coverage.
+    const cover = coverProcessingCosts && coverageApplies;
     setBusy(true);
     try {
       const { url } = recurring
-        ? await startRecurringGivingCheckout(selectedOrganizationId, selectedFund.id, value, frequency)
-        : await startGivingCheckout(selectedOrganizationId, selectedFund.id, value, pledgeId);
+        ? await startRecurringGivingCheckout(selectedOrganizationId, selectedFund.id, value, frequency, false, cover)
+        : await startGivingCheckout(selectedOrganizationId, selectedFund.id, value, pledgeId, cover);
       await WebBrowser.openBrowserAsync(url);
       setAmount('');
       setPledgeId(null);
+      setCoverProcessingCosts(false);
       await load();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to start your gift.';
@@ -125,8 +146,9 @@ export function GivingContent({
             text: 'Add another anyway',
             onPress: async () => {
               try {
-                const { url } = await startRecurringGivingCheckout(selectedOrganizationId, selectedFund.id, value, frequency, true);
+                const { url } = await startRecurringGivingCheckout(selectedOrganizationId, selectedFund.id, value, frequency, true, cover);
                 await WebBrowser.openBrowserAsync(url);
+                setCoverProcessingCosts(false);
                 await load();
               } catch (retryError) {
                 Alert.alert('Unable to start', retryError instanceof Error ? retryError.message : 'Please try again.');
@@ -137,6 +159,23 @@ export function GivingContent({
       } else {
         Alert.alert('Unable to start', message);
       }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // MOBILE-COVER §7: toggle the live preference on an existing schedule via
+  // the same self-service contract as the web (§41 — OFF always works, ON
+  // requires the org to currently offer coverage; the server re-grosses at
+  // its CURRENT rate).
+  async function toggleScheduleCoverage(scheduleId: string, next: boolean) {
+    if (!selectedOrganizationId) return;
+    setBusy(true);
+    try {
+      await manageRecurringGiving(selectedOrganizationId, scheduleId, 'coverage', undefined, next);
+      await load();
+    } catch (error) {
+      Alert.alert('Unable to update', error instanceof Error ? error.message : 'Please try again.');
     } finally {
       setBusy(false);
     }
@@ -326,6 +365,30 @@ export function GivingContent({
                     ))}
                   </ScrollView>
                 ) : null}
+                {coverageApplies ? (
+                  <>
+                    <Pressable
+                      onPress={() => setCoverProcessingCosts(!coverProcessingCosts)}
+                      style={styles.toggleRow}
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked: coverProcessingCosts }}
+                      accessibilityLabel={`Help cover estimated processing costs, optional, adds ${formatCurrency(estimatedCoverageCents / 100)}${recurring ? ' to each contribution' : ''}`}
+                    >
+                      <ThemedText type="small">
+                        {coverProcessingCosts ? '◉' : '○'} Help cover estimated processing costs (+{formatCurrency(estimatedCoverageCents / 100)})
+                      </ThemedText>
+                    </Pressable>
+                    <ThemedText type="smallBold" accessibilityLabel={`Total ${formatCurrency(estimatedTotalCents / 100)}${recurring ? ' per contribution' : ''}`}>
+                      Total{recurring ? ' per contribution' : ''}: {formatCurrency(estimatedTotalCents / 100)}
+                    </ThemedText>
+                    {coverProcessingCosts ? (
+                      <ThemedText type="small" themeColor="textSecondary">
+                        The full {formatCurrency(baseCents / 100)} goes to the organization{recurring ? ' each time' : ''}. You&apos;ll see the
+                        final amount on the secure payment page.
+                      </ThemedText>
+                    ) : null}
+                  </>
+                ) : null}
                 <Pressable
                   style={[styles.primaryButton, busy && styles.disabled]}
                   disabled={busy}
@@ -366,6 +429,11 @@ export function GivingContent({
                             : schedule.status}
                       {schedule.paymentMethodDescriptor ? ` · ${schedule.paymentMethodDescriptor}` : ''}
                     </ThemedText>
+                    {schedule.coverProcessingCosts ? (
+                      <ThemedText type="small" themeColor="textSecondary">
+                        Covering estimated processing costs — the full {formatCurrency(schedule.amount)} goes to the organization.
+                      </ThemedText>
+                    ) : null}
                     <ThemedView style={styles.actionRow}>
                       {schedule.status === 'ACTIVE' ? (
                         <Pressable style={styles.smallButton} disabled={busy} onPress={() => manage(schedule.id, 'pause')} accessibilityRole="button">
@@ -380,6 +448,31 @@ export function GivingContent({
                       {schedule.status === 'PAYMENT_FAILED' ? (
                         <Pressable style={styles.smallButton} disabled={busy} onPress={() => manage(schedule.id, 'retry')} accessibilityRole="button">
                           <ThemedText type="small">Retry payment</ThemedText>
+                        </Pressable>
+                      ) : null}
+                      {schedule.status !== 'CANCELLED' && schedule.status !== 'COMPLETED' && schedule.coverProcessingCosts ? (
+                        <Pressable
+                          style={styles.smallButton}
+                          disabled={busy}
+                          onPress={() => toggleScheduleCoverage(schedule.id, false)}
+                          accessibilityRole="button"
+                          accessibilityLabel="Stop covering processing costs"
+                        >
+                          <ThemedText type="small">Stop covering costs</ThemedText>
+                        </Pressable>
+                      ) : null}
+                      {schedule.status !== 'CANCELLED' &&
+                      schedule.status !== 'COMPLETED' &&
+                      !schedule.coverProcessingCosts &&
+                      coverageOffer ? (
+                        <Pressable
+                          style={styles.smallButton}
+                          disabled={busy}
+                          onPress={() => toggleScheduleCoverage(schedule.id, true)}
+                          accessibilityRole="button"
+                          accessibilityLabel="Cover estimated processing costs on future contributions"
+                        >
+                          <ThemedText type="small">Cover costs</ThemedText>
                         </Pressable>
                       ) : null}
                       {schedule.status !== 'CANCELLED' && schedule.status !== 'COMPLETED' ? (
@@ -563,6 +656,7 @@ const styles = StyleSheet.create({
   },
   actionRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
     marginTop: 4,
     backgroundColor: 'transparent',
