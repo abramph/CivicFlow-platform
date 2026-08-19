@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { priceIdForPlan, planFromPriceId, seatPriceIdForPlan, isSeatPriceId } from "@/lib/stripe";
 
 const ORIGINAL_ENV = { ...process.env };
@@ -32,12 +32,18 @@ describe("priceIdForPlan / planFromPriceId (catalog-driven, not hardcoded per pl
     expect(planFromPriceId("unconfigured-price-id")).toBeNull();
   });
 
-  it("all 8 Cloud plans share one seat price pair, distinct from any plan price", () => {
+  it("CLOUD-I: no Cloud plan has a seat price — seatPriceIdForPlan always returns null for one, even if the legacy env var happens to be set", () => {
     process.env.STRIPE_PRICE_CLOUD_SEAT_MONTHLY = "seat_m";
     process.env.STRIPE_PRICE_CLOUD_SEAT_YEARLY = "seat_y";
-    expect(seatPriceIdForPlan("pta_monthly", "month")).toBe("seat_m");
-    expect(seatPriceIdForPlan("union_annual", "year")).toBe("seat_y");
-    expect(isSeatPriceId("seat_m")).toBe(true);
+    expect(seatPriceIdForPlan("pta_monthly", "month")).toBeNull();
+    expect(seatPriceIdForPlan("union_annual", "year")).toBeNull();
+    expect(isSeatPriceId("seat_m")).toBe(false);
+  });
+
+  it("seatPriceIdForPlan still resolves for a legacy plan (historical Subscription records only — no Cloud checkout path reaches this)", () => {
+    process.env.STRIPE_PRICE_ESSENTIAL_SEAT_MONTHLY = "legacy_seat_m";
+    expect(seatPriceIdForPlan("essential", "month")).toBe("legacy_seat_m");
+    expect(isSeatPriceId("legacy_seat_m")).toBe(true);
     expect(isSeatPriceId("some-other-price")).toBe(false);
   });
 });

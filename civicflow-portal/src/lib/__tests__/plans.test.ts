@@ -87,11 +87,26 @@ describe("Unestra Cloud plan catalog", () => {
     expect(getPlan("not-a-real-plan").id).toBe("community_monthly");
   });
 
-  it("shares one seat policy across all 8 Cloud plans (carried over from the legacy essential tier)", () => {
+  it("CLOUD-I: no Cloud plan ever charges for administrative seats", () => {
     for (const plan of Object.values(CLOUD_PLANS)) {
-      expect(plan.includedSeats).toBe(3);
-      expect(plan.additionalSeatCentsMonthly).toBe(800);
-      expect(plan.seatMonthlyPriceEnvKey).toBe("STRIPE_PRICE_CLOUD_SEAT_MONTHLY");
+      expect(plan.additionalSeatCentsMonthly).toBe(0);
+      expect(plan.additionalSeatCentsYearly).toBe(0);
+      expect(plan.seatMonthlyPriceEnvKey).toBeNull();
+      expect(plan.seatYearlyPriceEnvKey).toBeNull();
+    }
+  });
+
+  it("includedSeats matches the real admin-seat allowance per vertical (display-only, never billed)", () => {
+    expect(CLOUD_PLANS.pta_monthly.includedSeats).toBe(10);
+    expect(CLOUD_PLANS.community_monthly.includedSeats).toBe(10);
+    expect(CLOUD_PLANS.church_monthly.includedSeats).toBe(15);
+    expect(CLOUD_PLANS.union_monthly.includedSeats).toBe(15);
+  });
+
+  it("highlights the real administrative-seat count, never legacy paid-seat language", () => {
+    for (const plan of Object.values(CLOUD_PLANS)) {
+      expect(plan.highlights.some((h) => h.includes("administrative seats included"))).toBe(true);
+      expect(plan.highlights.some((h) => h.includes("portal user seat"))).toBe(false);
     }
   });
 

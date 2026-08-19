@@ -97,16 +97,25 @@ export interface PlanConfig {
   displayOrder: number;
 }
 
-/** Every Cloud plan shares one seat price and included-seat count (see the
- * seat-pricing note in docs/unestra-cloud-pricing-architecture.md) — carried
- * over unchanged from the legacy `essential` tier rather than invented. */
-const CLOUD_SEAT_POLICY = {
-  includedSeats: 3,
-  additionalSeatCentsMonthly: 800,
-  additionalSeatCentsYearly: 8800,
-  seatMonthlyPriceEnvKey: "STRIPE_PRICE_CLOUD_SEAT_MONTHLY",
-  seatYearlyPriceEnvKey: "STRIPE_PRICE_CLOUD_SEAT_YEARLY",
-} as const;
+/**
+ * CLOUD-I: Cloud plans never charge for administrative seats. This is
+ * display-only historical/informational data (matches the real included
+ * admin-seat allowance in src/lib/admin-seats.ts's INCLUDED_ADMIN_SEATS —
+ * duplicated here as a plain literal rather than imported, since admin-
+ * seats.ts imports resolvePricingVertical from this very file and importing
+ * back would create a cycle). No seatMonthlyPriceEnvKey/seatYearlyPriceEnvKey
+ * is ever set for a Cloud plan, so seatPriceIdForPlan() always returns null
+ * for them and no checkout can ever add a seat line item — this is enforced
+ * structurally, not just by the checkout route no longer asking for a
+ * quantity. If this number ever needs to change, update
+ * admin-seats.ts's INCLUDED_ADMIN_SEATS too — they must stay in sync.
+ */
+const CLOUD_INCLUDED_ADMIN_SEATS: Record<PricingVertical, number> = {
+  PTA: 10,
+  COMMUNITY: 10,
+  CHURCH: 15,
+  UNION: 15,
+};
 
 /** Every Cloud plan grants the same full entitlement bundle — pricing here
  * is driven by vertical, not a feature ladder (no differentiated per-
@@ -138,16 +147,19 @@ function cloudPlan(args: {
     yearlyPriceCents: isMonthly ? 0 : args.priceCents,
     monthlyPriceEnvKey: isMonthly ? args.priceEnvKey : null,
     yearlyPriceEnvKey: isMonthly ? null : args.priceEnvKey,
-    seatMonthlyPriceEnvKey: CLOUD_SEAT_POLICY.seatMonthlyPriceEnvKey,
-    seatYearlyPriceEnvKey: CLOUD_SEAT_POLICY.seatYearlyPriceEnvKey,
-    includedSeats: CLOUD_SEAT_POLICY.includedSeats,
-    additionalSeatCentsMonthly: CLOUD_SEAT_POLICY.additionalSeatCentsMonthly,
-    additionalSeatCentsYearly: CLOUD_SEAT_POLICY.additionalSeatCentsYearly,
+    // No paid seat add-on at launch (CLOUD-I) — null env keys make
+    // seatPriceIdForPlan() always return null for a Cloud plan, so no
+    // checkout can ever attach a seat line item.
+    seatMonthlyPriceEnvKey: null,
+    seatYearlyPriceEnvKey: null,
+    includedSeats: CLOUD_INCLUDED_ADMIN_SEATS[args.vertical],
+    additionalSeatCentsMonthly: 0,
+    additionalSeatCentsYearly: 0,
     priceEnvKey: args.priceEnvKey,
     limits: { members: Infinity, ...CLOUD_FEATURE_BUNDLE },
     highlights: [
       "Unlimited members",
-      `${CLOUD_SEAT_POLICY.includedSeats} portal user seats included`,
+      `${CLOUD_INCLUDED_ADMIN_SEATS[args.vertical]} administrative seats included`,
       "Email campaigns",
       "PDF export",
       "Advanced reports & analytics",
