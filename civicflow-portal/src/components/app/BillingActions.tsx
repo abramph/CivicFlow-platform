@@ -3,31 +3,36 @@
 import { useState } from "react";
 import type { BillingInterval } from "@/lib/plans";
 
-type Plan = "essential" | "elite";
-
-interface UpgradeButtonProps {
-  plan: Plan;
-  currentPlan: string;
+interface SubscribeButtonProps {
+  /** Whether the org is already subscribed at this exact interval — the
+   * only "current plan" state left, since Unestra Cloud has one plan per
+   * vertical rather than a tier to pick between (see CLOUD-D). */
+  isCurrentSelection: boolean;
   interval: BillingInterval;
   additionalSeats?: number;
   label?: string;
 }
 
-export function UpgradeButton({ plan, currentPlan, interval, additionalSeats = 0, label }: UpgradeButtonProps) {
+/**
+ * Unestra Cloud (CLOUD-D): the client sends only the billing interval —
+ * never a plan id. The server resolves which Cloud plan applies entirely
+ * from the organization's own primaryVertical (see
+ * /api/billing/checkout/route.ts) — there is no client input path that
+ * could select a different vertical's price.
+ */
+export function SubscribeButton({ isCurrentSelection, interval, additionalSeats = 0, label }: SubscribeButtonProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const isCurrentPlan = currentPlan === plan;
-
   async function handleClick() {
-    if (isCurrentPlan) return;
+    if (isCurrentSelection) return;
     setLoading(true);
     setError(null);
     try {
       const res = await fetch("/api/billing/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan, interval, additionalSeats }),
+        body: JSON.stringify({ interval, additionalSeats }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -46,18 +51,14 @@ export function UpgradeButton({ plan, currentPlan, interval, additionalSeats = 0
     <div>
       <button
         onClick={handleClick}
-        disabled={loading || isCurrentPlan}
+        disabled={loading || isCurrentSelection}
         className={`w-full rounded-lg px-4 py-2 text-sm font-semibold transition disabled:opacity-60 ${
-          isCurrentPlan
+          isCurrentSelection
             ? "cursor-default bg-slate-100 text-slate-500"
             : "bg-emerald-600 text-white hover:bg-emerald-700"
         }`}
       >
-        {isCurrentPlan
-          ? "Current plan"
-          : loading
-            ? "Redirecting…"
-            : label ?? `Upgrade to ${plan.charAt(0).toUpperCase() + plan.slice(1)}`}
+        {isCurrentSelection ? "Current plan" : loading ? "Redirecting…" : (label ?? "Subscribe")}
       </button>
       {error ? (
         <p className="mt-2 text-xs text-red-600">{error}</p>

@@ -1,11 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { PLANS, type BillingInterval } from "@/lib/plans";
-import { UpgradeButton } from "@/components/app/BillingActions";
-import { planRank } from "@/lib/plans";
+import { plansForVertical, type BillingInterval, type PricingVertical } from "@/lib/plans";
+import { SubscribeButton } from "@/components/app/BillingActions";
 
 interface BillingPlansProps {
+  vertical: PricingVertical;
   currentPlanId: string;
   isInTrial: boolean;
   hasActiveSubscription: boolean;
@@ -53,69 +53,48 @@ function SeatStepper({
   );
 }
 
-export function BillingPlans({ currentPlanId, isInTrial, hasActiveSubscription, canManageBilling }: BillingPlansProps) {
-  const [interval, setInterval] = useState<BillingInterval>("month");
-  const [additionalSeats, setAdditionalSeats] = useState<Record<string, number>>({
-    essential: 0,
-    elite: 0,
-  });
-  const plans = [PLANS.essential, PLANS.elite] as const;
+/**
+ * Unestra Cloud (CLOUD-D): an organization has exactly one plan — its own
+ * vertical's Cloud plan — with a choice of billing interval, not a tier
+ * ladder to pick between. Renders the two interval variants
+ * (plansForVertical) side by side rather than the old essential/elite
+ * comparison grid.
+ */
+export function BillingPlans({ vertical, currentPlanId, isInTrial, hasActiveSubscription, canManageBilling }: BillingPlansProps) {
+  const [additionalSeats, setAdditionalSeats] = useState(0);
+  const plans = plansForVertical(vertical);
 
   return (
     <div className="space-y-5">
-      {/* Interval toggle */}
-      <div className="flex items-center gap-3">
-        <span className={`text-sm font-medium ${interval === "month" ? "text-slate-950" : "text-slate-400"}`}>Monthly</span>
-        <button
-          type="button"
-          onClick={() => setInterval(interval === "month" ? "year" : "month")}
-          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${interval === "year" ? "bg-emerald-600" : "bg-slate-200"}`}
-        >
-          <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${interval === "year" ? "translate-x-6" : "translate-x-1"}`} />
-        </button>
-        <span className={`text-sm font-medium ${interval === "year" ? "text-slate-950" : "text-slate-400"}`}>
-          Yearly
-          <span className="ml-1.5 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">1 month free</span>
-        </span>
-      </div>
-
       <div className="grid gap-4 md:grid-cols-2">
         {plans.map((plan) => {
-          const isCurrent = !isInTrial && currentPlanId === plan.id;
-          const isTrialPlan = isInTrial && plan.id === "essential";
-          const isUpgrade = planRank(plan.id) > planRank(isInTrial ? "essential" : currentPlanId);
-          const isDowngrade = planRank(plan.id) < planRank(isInTrial ? "essential" : currentPlanId);
-
-          const basePrice = interval === "year" ? plan.yearlyPriceCents : plan.monthlyPriceCents;
+          const interval = plan.interval as BillingInterval;
+          const isCurrentSelection = !isInTrial && currentPlanId === plan.id;
           const effectiveMonthly = interval === "year" ? Math.round(plan.yearlyPriceCents / 12) : plan.monthlyPriceCents;
+          const price = interval === "year" ? plan.yearlyPriceCents : plan.monthlyPriceCents;
           const seatCents = interval === "year" ? plan.additionalSeatCentsYearly : plan.additionalSeatCentsMonthly;
-          const extraSeats = additionalSeats[plan.id] ?? 0;
-          const totalSeats = plan.includedSeats + extraSeats;
+          const totalSeats = plan.includedSeats + additionalSeats;
 
           return (
             <div
               key={plan.id}
-              className={`flex flex-col rounded-xl border p-5 ${isCurrent || isTrialPlan ? "border-emerald-400 bg-emerald-50" : "border-slate-200 bg-white"}`}
+              className={`flex flex-col rounded-xl border p-5 ${isCurrentSelection ? "border-emerald-400 bg-emerald-50" : "border-slate-200 bg-white"}`}
             >
               <div className="mb-3 flex items-start justify-between">
                 <div>
-                  <p className="text-sm font-bold text-slate-950">{plan.name}</p>
+                  <p className="text-sm font-bold text-slate-950">{interval === "month" ? "Monthly" : "Annual"}</p>
                   <p className="mt-1 text-2xl font-bold text-slate-950">
                     ${(effectiveMonthly / 100).toFixed(0)}
                     <span className="text-sm font-normal text-slate-500">/mo</span>
                   </p>
                   {interval === "year" && (
-                    <p className="text-xs text-slate-500">${(basePrice / 100).toFixed(0)} billed annually</p>
+                    <p className="text-xs text-slate-500">${(price / 100).toFixed(0)} billed annually — 2 months free</p>
                   )}
                 </div>
-                {isTrialPlan ? (
+                {isInTrial ? (
                   <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">Trial</span>
-                ) : isCurrent ? (
+                ) : isCurrentSelection ? (
                   <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">Current</span>
-                ) : isUpgrade ? (
-                  <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">Upgrade</span>
-                ) : isDowngrade ? (
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">Downgrade</span>
                 ) : null}
               </div>
 
@@ -134,20 +113,14 @@ export function BillingPlans({ currentPlanId, isInTrial, hasActiveSubscription, 
 
               {canManageBilling && !hasActiveSubscription ? (
                 <>
-                  <SeatStepper
-                    value={extraSeats}
-                    onChange={(n) => setAdditionalSeats((prev) => ({ ...prev, [plan.id]: n }))}
-                    seatCents={seatCents}
-                    interval={interval}
-                  />
-                  {extraSeats > 0 && (
+                  <SeatStepper value={additionalSeats} onChange={setAdditionalSeats} seatCents={seatCents} interval={interval} />
+                  {additionalSeats > 0 && (
                     <p className="mb-2 text-center text-xs text-slate-500">{totalSeats} total seats</p>
                   )}
-                  <UpgradeButton
-                    plan={plan.id as "essential" | "elite"}
-                    currentPlan={currentPlanId}
+                  <SubscribeButton
+                    isCurrentSelection={isCurrentSelection}
                     interval={interval}
-                    additionalSeats={extraSeats}
+                    additionalSeats={additionalSeats}
                     label={isInTrial ? `Subscribe — $${(effectiveMonthly / 100).toFixed(0)}/mo` : undefined}
                   />
                 </>
@@ -161,7 +134,7 @@ export function BillingPlans({ currentPlanId, isInTrial, hasActiveSubscription, 
 
       {hasActiveSubscription && canManageBilling && (
         <p className="text-sm text-slate-600">
-          To add seats, change billing interval, upgrade, or cancel, open the <span className="font-medium text-slate-900">billing portal</span> below.
+          To add seats, change billing interval, or cancel, open the <span className="font-medium text-slate-900">billing portal</span> below.
         </p>
       )}
     </div>

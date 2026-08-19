@@ -63,7 +63,7 @@ export function LoginForm({ verified }: { verified?: boolean } = {}) {
 
   return (
     <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-      <h1 className="text-2xl font-bold text-slate-900">Unestra SaaS Portal</h1>
+      <h1 className="text-2xl font-bold text-slate-900">Unestra Cloud</h1>
       <p className="mt-1 text-sm text-slate-600">Sign in with your email and password.</p>
 
       {verified ? (

@@ -92,10 +92,26 @@ describe("getOrgPlan — ordinary organizations (unchanged behavior)", () => {
     expect(await getOrgPlan("org-1")).toBe("essential");
   });
 
-  it("elevates a free-plan org with an active trial window to essential", async () => {
-    findUnique.mockResolvedValueOnce({ plan: "free", trialEndsAt: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000), billingExempt: false });
+  it("elevates a free-plan org with an active trial window to its OWN vertical's Cloud plan, not a hardcoded legacy tier", async () => {
+    findUnique.mockResolvedValueOnce({
+      plan: "free",
+      trialEndsAt: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000),
+      billingExempt: false,
+      primaryVertical: "UNION",
+    });
     const { getOrgPlan } = await import("../plan-gate");
-    expect(await getOrgPlan("org-1")).toBe("essential");
+    expect(await getOrgPlan("org-1")).toBe("union_monthly");
+  });
+
+  it("maps a trialing HOA org to community_monthly (HOA folds into Community pricing)", async () => {
+    findUnique.mockResolvedValueOnce({
+      plan: "free",
+      trialEndsAt: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000),
+      billingExempt: false,
+      primaryVertical: "HOA",
+    });
+    const { getOrgPlan } = await import("../plan-gate");
+    expect(await getOrgPlan("org-1")).toBe("community_monthly");
   });
 
   it("returns free for a free-plan org whose trial has expired", async () => {
@@ -308,17 +324,18 @@ describe("requirePlanFeature — the authoritative backend gate", () => {
     }
   });
 
-  it("grants Essential-tier features (emailCampaigns, pdfExport) to a free-plan org during an active trial", async () => {
+  it("grants the full Cloud feature bundle to a free-plan org during an active trial (CLOUD-D: trial resolves to the org's own vertical plan, which carries the same full bundle as every other Cloud plan)", async () => {
     findUnique.mockResolvedValue({
       plan: "free",
       trialEndsAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000),
       billingExempt: false,
+      primaryVertical: "COMMUNITY",
     });
     const { requirePlanFeature } = await import("../plan-gate");
     await expect(requirePlanFeature("org-1", "emailCampaigns")).resolves.toBeUndefined();
     await expect(requirePlanFeature("org-1", "pdfExport")).resolves.toBeUndefined();
-    // advancedReports/apiAccess are elite-only — a trial only elevates to Essential.
-    await expect(requirePlanFeature("org-1", "advancedReports")).rejects.toThrow();
+    await expect(requirePlanFeature("org-1", "advancedReports")).resolves.toBeUndefined();
+    await expect(requirePlanFeature("org-1", "apiAccess")).resolves.toBeUndefined();
   });
 
   it("is re-evaluated fresh per organizationId — one org's entitlement never leaks into another's check in the same batch of calls", async () => {
@@ -328,7 +345,7 @@ describe("requirePlanFeature — the authoritative backend gate", () => {
 
     await expect(requirePlanFeature("org-entitled", "apiAccess")).resolves.toBeUndefined();
     await expect(requirePlanFeature("org-not-entitled", "apiAccess")).rejects.toThrow();
-    expect(findUnique).toHaveBeenNthCalledWith(1, { where: { id: "org-entitled" }, select: { plan: true, trialEndsAt: true, billingExempt: true } });
-    expect(findUnique).toHaveBeenNthCalledWith(2, { where: { id: "org-not-entitled" }, select: { plan: true, trialEndsAt: true, billingExempt: true } });
+    expect(findUnique).toHaveBeenNthCalledWith(1, { where: { id: "org-entitled" }, select: { plan: true, trialEndsAt: true, billingExempt: true, primaryVertical: true } });
+    expect(findUnique).toHaveBeenNthCalledWith(2, { where: { id: "org-not-entitled" }, select: { plan: true, trialEndsAt: true, billingExempt: true, primaryVertical: true } });
   });
 });
