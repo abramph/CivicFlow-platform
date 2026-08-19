@@ -7,7 +7,9 @@ import { getPlan, resolvePricingVertical } from "@/lib/plans";
 import { ManageBillingButton } from "@/components/app/BillingActions";
 import { BillingPlans } from "@/components/app/BillingPlans";
 import { SmsAddOnCard } from "@/components/app/SmsAddOnCard";
-import { checkMemberLimit, getTrialStatus, checkSeatLimit } from "@/lib/plan-gate";
+import { checkMemberLimit, getTrialStatus } from "@/lib/plan-gate";
+import { getAdminSeatSummary } from "@/lib/admin-seats";
+import { SUPPORT_EMAIL } from "@/lib/brand";
 
 type SearchParams = Promise<{ success?: string }>;
 
@@ -19,7 +21,7 @@ export default async function BillingSettingsPage({
   const params = await searchParams;
   const { organizationId, role, can } = await requirePermission("billing:read");
 
-  const [organization, subscription, memberCheck, trial, seatCheck] = await Promise.all([
+  const [organization, subscription, memberCheck, trial, adminSeats] = await Promise.all([
     prisma.organization.findUnique({
       where: { id: organizationId },
       select: { id: true, name: true, plan: true, status: true, createdAt: true, billingExempt: true, primaryVertical: true },
@@ -30,7 +32,7 @@ export default async function BillingSettingsPage({
     }),
     checkMemberLimit(organizationId),
     getTrialStatus(organizationId),
-    checkSeatLimit(organizationId),
+    getAdminSeatSummary(organizationId),
   ]);
 
   const currentPlanId = organization?.plan ?? "free";
@@ -98,9 +100,13 @@ export default async function BillingSettingsPage({
           helper="Unlimited — every Unestra Cloud plan includes unlimited members"
         />
         <StatCard
-          label="Portal Users (Seats)"
-          value={`${seatCheck.current} / ${seatCheck.limit}`}
-          helper={seatCheck.allowed ? `${seatCheck.limit - seatCheck.current} seat${seatCheck.limit - seatCheck.current === 1 ? "" : "s"} available` : "Seat limit reached"}
+          label="Administrative Seats"
+          value={`${adminSeats.usedAdminSeats} / ${adminSeats.effectiveAdminSeatLimit}`}
+          helper={
+            adminSeats.availableAdminSeats > 0
+              ? `${adminSeats.availableAdminSeats} seat${adminSeats.availableAdminSeats === 1 ? "" : "s"} available`
+              : "No seats available — deactivate an unused administrator or contact support"
+          }
         />
         <StatCard
           label="Subscription Status"
@@ -108,6 +114,35 @@ export default async function BillingSettingsPage({
         />
         <StatCard label="Your Role" value={role} />
       </div>
+
+      {/* Administrative seats — a separate entitlement from ordinary members
+          (unlimited on every plan, see the "Members" card above). Only
+          counts users with material organization-management authority. */}
+      <SectionCard
+        title="Administrative Seats"
+        description="Included with your plan for staff and officers who manage the organization. Ordinary members, congregants, parents, and volunteers never count toward this."
+      >
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <StatCard label="Included" value={adminSeats.includedAdminSeats} />
+          <StatCard label="Additional" value={adminSeats.effectiveAdminSeatLimit - adminSeats.includedAdminSeats} />
+          <StatCard label="Effective limit" value={adminSeats.effectiveAdminSeatLimit} />
+          <StatCard label="Used" value={adminSeats.usedAdminSeats} />
+        </div>
+        {adminSeats.availableAdminSeats === 0 ? (
+          <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            You are using all included administrative seats for your Unestra Cloud plan. Deactivate an unused
+            administrator or contact Unestra Support to request additional administrative access.
+          </div>
+        ) : null}
+        <div className="mt-4 flex flex-wrap items-center gap-4 text-sm">
+          <Link href="/settings/users" className="font-semibold text-emerald-700 hover:underline">
+            Manage administrators →
+          </Link>
+          <a href={`mailto:${SUPPORT_EMAIL}`} className="text-slate-600 hover:underline">
+            Contact Unestra Support
+          </a>
+        </div>
+      </SectionCard>
 
       {/* Current plan features */}
       <SectionCard

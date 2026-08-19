@@ -99,6 +99,9 @@ describe("getAdminSeatSummary — the consolidated snapshot", () => {
       vertical: "PTA",
       includedAdminSeats: 10,
       adminSeatOverride: 2,
+      adminSeatOverrideActive: true,
+      adminSeatOverrideReason: undefined,
+      adminSeatOverrideExpiresAt: undefined,
       purchasedAdminSeats: 0,
       effectiveAdminSeatLimit: 12,
       usedAdminSeats: 9,
@@ -152,6 +155,78 @@ describe("getAdminSeatSummary — the consolidated snapshot", () => {
 
     expect(summary.effectiveAdminSeatLimit).toBe(21); // 15 + 1 + 5
     expect(summary.availableAdminSeats).toBe(11);
+  });
+});
+
+describe("getAdminSeatSummary — override expiration (CLOUD-SEAT-E)", () => {
+  it("an override past its expiresAt no longer contributes to the effective limit", async () => {
+    findUniqueOrThrowOrganization.mockResolvedValueOnce({
+      primaryVertical: "PTA",
+      adminSeatOverride: 5,
+      purchasedAdminSeats: 0,
+      adminSeatOverrideExpiresAt: new Date(Date.now() - 24 * 60 * 60 * 1000), // yesterday
+      adminSeatOverrideReason: "Temporary launch bump",
+    });
+    organizationMembershipCount.mockResolvedValueOnce(12); // was fine under the override, not under base 10
+    const { getAdminSeatSummary } = await import("../admin-seats");
+
+    const summary = await getAdminSeatSummary("org-1");
+
+    expect(summary.effectiveAdminSeatLimit).toBe(10); // 10 included + 0 (expired override ignored)
+    expect(summary.adminSeatOverrideActive).toBe(false);
+    expect(summary.adminSeatOverride).toBe(5); // raw stored value preserved for display/restoration
+    expect(summary.overLimit).toBe(true); // 12 used > 10 effective
+  });
+
+  it("an override with a future expiresAt still fully counts", async () => {
+    findUniqueOrThrowOrganization.mockResolvedValueOnce({
+      primaryVertical: "PTA",
+      adminSeatOverride: 5,
+      purchasedAdminSeats: 0,
+      adminSeatOverrideExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // tomorrow
+      adminSeatOverrideReason: "Temporary launch bump",
+    });
+    organizationMembershipCount.mockResolvedValueOnce(12);
+    const { getAdminSeatSummary } = await import("../admin-seats");
+
+    const summary = await getAdminSeatSummary("org-1");
+
+    expect(summary.effectiveAdminSeatLimit).toBe(15);
+    expect(summary.adminSeatOverrideActive).toBe(true);
+    expect(summary.overLimit).toBe(false);
+  });
+
+  it("an override with no expiresAt (permanent) always counts and is reported active", async () => {
+    findUniqueOrThrowOrganization.mockResolvedValueOnce({
+      primaryVertical: "COMMUNITY",
+      adminSeatOverride: 3,
+      purchasedAdminSeats: 0,
+      adminSeatOverrideExpiresAt: null,
+      adminSeatOverrideReason: "Manual platform-admin grant",
+    });
+    organizationMembershipCount.mockResolvedValueOnce(5);
+    const { getAdminSeatSummary } = await import("../admin-seats");
+
+    const summary = await getAdminSeatSummary("org-1");
+
+    expect(summary.effectiveAdminSeatLimit).toBe(13);
+    expect(summary.adminSeatOverrideActive).toBe(true);
+  });
+
+  it("a zero override is never reported active regardless of expiration fields", async () => {
+    findUniqueOrThrowOrganization.mockResolvedValueOnce({
+      primaryVertical: "COMMUNITY",
+      adminSeatOverride: 0,
+      purchasedAdminSeats: 0,
+      adminSeatOverrideExpiresAt: null,
+      adminSeatOverrideReason: null,
+    });
+    organizationMembershipCount.mockResolvedValueOnce(2);
+    const { getAdminSeatSummary } = await import("../admin-seats");
+
+    const summary = await getAdminSeatSummary("org-1");
+
+    expect(summary.adminSeatOverrideActive).toBe(false);
   });
 });
 

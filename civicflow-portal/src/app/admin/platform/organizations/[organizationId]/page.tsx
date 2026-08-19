@@ -10,7 +10,9 @@ import { CopyIdButton } from "@/components/admin/CopyIdButton";
 import { OpenInOrganizationPortalButton } from "@/components/admin/OpenInOrganizationPortalButton";
 import { ImpersonateUserPanel } from "@/components/admin/ImpersonateUserPanel";
 import { PrimaryVerticalManager } from "@/components/admin/PrimaryVerticalManager";
+import { AdminSeatOverrideManager } from "@/components/admin/AdminSeatOverrideManager";
 import { getVerticalTerminology } from "@/lib/vertical-terminology";
+import { getAdminSeatOverrideDetail } from "@/lib/admin-seat-override";
 
 export default async function PlatformOrganizationDetailPage({
   params,
@@ -25,6 +27,7 @@ export default async function PlatformOrganizationDetailPage({
 
   const { identity, membership, billing, communications, operationalHealth } = detail;
   const impersonationCandidates = await listOrganizationMembersForImpersonation(organizationId);
+  const adminSeats = await getAdminSeatOverrideDetail(organizationId);
   const stripeDashboardUrl = billing.stripeCustomerId
     ? `https://dashboard.stripe.com/customers/${encodeURIComponent(billing.stripeCustomerId)}`
     : null;
@@ -109,6 +112,45 @@ export default async function PlatformOrganizationDetailPage({
         description="Experience this organization exactly as one of its members would — for demos, QA, and support. Unlike “Open in organization portal” above (which only works for orgs you're a real member of), this works for any organization and any active member, and is fully audited."
       >
         <ImpersonateUserPanel organizationId={identity.id} candidates={impersonationCandidates} />
+      </SectionCard>
+
+      <SectionCard
+        title="Administrative seats"
+        description="Unestra Cloud administrative-seat entitlement — separate from ordinary member count, which is unlimited on every plan. Only counts users holding material organization-management authority (see admin-seat-policy.ts), never platform-level access."
+      >
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <StatCard label="Included (plan)" value={adminSeats.includedAdminSeats} />
+          <StatCard
+            label="Override"
+            value={adminSeats.adminSeatOverrideActive ? `+${adminSeats.adminSeatOverride}` : "None"}
+            helper={
+              adminSeats.adminSeatOverride > 0 && !adminSeats.adminSeatOverrideActive
+                ? "Stored value expired — no longer counted"
+                : adminSeats.adminSeatOverrideExpiresAt
+                  ? `Expires ${formatDate(adminSeats.adminSeatOverrideExpiresAt)}`
+                  : undefined
+            }
+          />
+          <StatCard label="Effective limit" value={adminSeats.effectiveAdminSeatLimit} />
+          <StatCard
+            label="Used / Available"
+            value={`${adminSeats.usedAdminSeats} / ${adminSeats.availableAdminSeats}`}
+            helper={adminSeats.overLimit ? "Over limit — existing admins unaffected, new privileged assignments blocked" : undefined}
+          />
+        </div>
+        {adminSeats.adminSeatOverrideReason ? (
+          <p className="mt-3 text-xs text-slate-500">
+            Current override reason: “{adminSeats.adminSeatOverrideReason}”
+            {adminSeats.adminSeatOverrideSetAt ? ` — set ${formatDateTime(adminSeats.adminSeatOverrideSetAt)}` : ""}
+          </p>
+        ) : null}
+        <div className="mt-4">
+          <AdminSeatOverrideManager
+            organizationId={identity.id}
+            currentOverride={adminSeats.adminSeatOverride}
+            overrideActive={adminSeats.adminSeatOverrideActive}
+          />
+        </div>
       </SectionCard>
 
       <SectionCard title="Membership summary">

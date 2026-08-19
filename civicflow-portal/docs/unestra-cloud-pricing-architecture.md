@@ -271,3 +271,42 @@ audit ran. In practice this caused no impact — the audit above proves no org w
 within reach of its limit while enforcement was live (6 seats of headroom at the
 closest org) — but the ordering itself did not match the brief, and is recorded here
 rather than silently glossed over.
+
+### CLOUD-SEAT-E — seat UI + platform overrides
+
+**Org-facing display** (`/settings/billing`, gated by the existing `billing:read`
+permission — unreachable by ordinary members): a new "Administrative Seats" section
+showing included / additional / effective limit / used, sourced from
+`getAdminSeatSummary()` (replacing the old `checkSeatLimit`-backed "Portal Users
+(Seats)" card, which incorrectly counted `READ_ONLY` — this is the display fix
+promised in CLOUD-SEAT-C's PR description). At zero available seats, shows the exact
+required customer-facing message. `purchasedAdminSeats` is never shown. "Pending
+privileged invitations" is omitted from this display — per CLOUD-SEAT-B's finding,
+no such state exists in this codebase for staff/admin roles. Includes a "Manage
+administrators" link to `/settings/users` and a "Contact Unestra Support" link
+(`SUPPORT_EMAIL` from `lib/brand.ts`) as the two required actions.
+
+**Platform-admin override management** (`/admin/platform/organizations/[id]`, gated
+by the existing `requireSuperAdmin`): a new "Administrative seats" section showing
+the full picture (included/override/effective limit/used-available) plus current
+override reason and set-at timestamp, and an `AdminSeatOverrideManager` panel to
+grant, change, or remove the override — reason required, optional expiration date,
+negative values rejected. New API route
+`/api/admin/organizations/[organizationId]/admin-seats` (GET detail, PUT grant/change,
+DELETE remove), all guarded by `requireSuperAdmin` — there is no org-scoped route
+capable of writing this field, so an org's own admins structurally cannot edit their
+own override. Every write is audited (`ADMIN_SEAT_OVERRIDE_GRANTED` /
+`_CHANGED` / `_REMOVED`) via the existing `createAuditEvent`, with before/after
+values, actor, reason, and timestamp.
+
+**Override expiration** (closes a real gap): `getAdminSeatSummary()` now checks
+`adminSeatOverrideExpiresAt` and stops counting an expired override toward
+`effectiveAdminSeatLimit` — previously (CLOUD-SEAT-B/C/D) nothing ever read this
+field, so an expired override would have silently kept granting extra seats forever.
+Expiration never touches any `OrganizationMembership` row — it can only make
+`overLimit` true, which blocks new privileged assignments (CLOUD-SEAT-C), never
+removes existing access. A separate `ADMIN_SEAT_OVERRIDE_EXPIRED` audit event (fired
+by a background sweep, e.g. a daily cron) was in the original brief's event list but
+is not implemented here — nothing currently observes expiration transitions to emit
+it; the *effect* of expiration is fully correct and tested, only that one audit event
+is deferred. Flagged here rather than silently claimed complete.
