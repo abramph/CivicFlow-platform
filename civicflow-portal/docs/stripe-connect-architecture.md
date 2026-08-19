@@ -410,7 +410,8 @@ Each PR merges + deploys + production-verifies before the next.
   public `/give/[slug]`) and recurring (member web/mobile setup, plus
   self-service amount/frequency changes and a new coverage toggle). NOT
   dues, NOT payment links — those stay untouched, exactly as E's decisions
-  log flagged as deferred.
+  log flagged as deferred. **(Superseded 2026-08-19 by FEE-COVER-C below:
+  payment links and dues now offer coverage too, via the same service.)**
 - **Config (additive):** `OrgSettings` gained `processingCostCoverageMode`
   (`OFF | OPTIONAL_CONTRIBUTOR_COVERAGE | STRIPE_SURCHARGE`, default OFF),
   `processingCostCoveragePercentBps`, `processingCostCoverageFixedCents`
@@ -484,6 +485,52 @@ Each PR merges + deploys + production-verifies before the next.
   backward-compat, identical charge behavior to before this PR for that
   binary. No native UI was built (out of scope; a future mobile release
   can adopt the same already-wired backend).
+
+### 14a. FEE-COVER-C addendum (2026-08-19, PR #179) — payment links & dues
+
+The Member Processing-Fee Cover Program closed CONNECT-F's two deferred
+gaps. Nothing about CONNECT-F's math, config, or webhook validation
+changed — the same `quoteProcessingCostCoverage` / `resolveCoverageSplit`
+service now also backs:
+
+- **Payment links (`/api/pay/[slug]/checkout`):** request schema gained an
+  optional `coverProcessingCosts: boolean` (the ONLY fee-related field a
+  client may send — amounts/rates are structurally impossible, unknown
+  fields are stripped by zod). The route quotes server-side at the org's
+  current rate, grosses `unit_amount`, and snapshots the split into
+  session metadata (`linkBaseAmountCents` / `linkCoverageAmountCents`).
+- **Member dues checkout (`/api/member-portal/dues/checkout`):** identical
+  pattern. `DuesPayment` gained the same two nullable columns as
+  Contribution (`processingCostCoverageAmount`, `totalChargedAmount`;
+  migration `20260819123634_fee_cover_c_dues_payment_split`).
+  `DuesPayment.amount` stays the BASE dues figure ALWAYS — it alone
+  settles the `DuesCharge` obligation ($50 owed stays $50 owed; coverage
+  never inflates `amountPaid` or flips PARTIAL→PAID early).
+- **Connect webhook (`paymentLinkId` branch):** now runs
+  `resolveCoverageSplit` against the link metadata; a null base (tampered
+  or inconsistent split) logs `payment_link_coverage_split_rejected` and
+  records NOTHING. Campaign/event Contributions and dues rows both store
+  base as `amount` plus the split fields.
+- **Math extraction:** the pure gross-up moved to
+  `src/lib/giving/coverage-math.ts` (client-safe, no prisma) so checkout
+  UIs render live estimates with the exact same function;
+  `processing-cost-coverage.ts` re-exports it so every server import path
+  is unchanged.
+- **UI:** `/pay/[slug]` (PublicPaymentForm) and the member dues page both
+  show a default-OFF checkbox — "Help cover estimated processing costs
+  (+$X)" — voluntary wording only, never "fee"/"surcharge".
+- **Live verification (2026-08-19, Demo Church test-mode connected
+  account, link `connect-e-test-link-e0o1aq`, rate 290bps+30¢):**
+  Test A (decline): $5 link paid WITHOUT coverage → Stripe charged $5.00,
+  Contribution `cmt0hp6lt0008902ynk11dt8r` = amount 5 / coverage null /
+  total 5. Test B (accept): same link WITH coverage → Stripe Checkout
+  showed and charged $5.46, Contribution `cmt0hzota000d902y4tjhex8d` =
+  amount 5 / coverage 0.46 / total 5.46, both on
+  `acct_1U4g70JVyzvU3Flk` (`CONNECTED_ACCOUNT_PAYMENT`).
+- **Still out of scope:** native mobile toggle (server route already
+  accepts the flag; the binary never sends it — deliberate, keeps iOS
+  build 24 / Android vc13 current), coverage on the `DuesPayment` refund
+  path (no DuesPayment refund mechanism exists at all, per §13).
 
 ## 15. CONNECT-G — webhook recovery & the deferred secret fix (implemented)
 
