@@ -1,11 +1,16 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { calculateProcessingCostCoverageCents } from "@/lib/giving/coverage-math";
+
+/** FEE-COVER-C: display-only — the server re-quotes at checkout. */
+type CoverageOffer = { offered: boolean; percentBps: number; fixedCents: number };
 
 type Props = {
   organizationId: string;
   fixedAmount: number | null;
   minAmount: number;
+  coverage?: CoverageOffer;
 };
 
 /**
@@ -16,10 +21,25 @@ type Props = {
  * to the authenticated /api/member-portal/dues/checkout route instead, which
  * stamps the caller's real memberId into the Stripe session server-side.
  */
-export function DuesCheckoutButton({ organizationId, fixedAmount, minAmount }: Props) {
+export function DuesCheckoutButton({
+  organizationId,
+  fixedAmount,
+  minAmount,
+  coverage = { offered: false, percentBps: 0, fixedCents: 0 },
+}: Props) {
   const [amount, setAmount] = useState(fixedAmount ? fixedAmount.toFixed(2) : "");
+  // FEE-COVER-C: voluntary and defaults OFF — never silently pre-added. The
+  // dues obligation itself is always settled by the BASE amount only.
+  const [coverProcessingCosts, setCoverProcessingCosts] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const effectiveAmount = fixedAmount ?? Number(amount);
+  const baseCents = Number.isNaN(effectiveAmount) ? 0 : Math.round(effectiveAmount * 100);
+  const estimateCents =
+    coverage.offered && baseCents > 0
+      ? calculateProcessingCostCoverageCents(baseCents, coverage.percentBps, coverage.fixedCents)
+      : 0;
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -36,7 +56,11 @@ export function DuesCheckoutButton({ organizationId, fixedAmount, minAmount }: P
       const response = await fetch("/api/member-portal/dues/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ organizationId, amount: parsedAmount }),
+        body: JSON.stringify({
+          organizationId,
+          amount: parsedAmount,
+          coverProcessingCosts: coverage.offered && coverProcessingCosts ? true : undefined,
+        }),
       });
 
       const payload = (await response.json().catch(() => null)) as
@@ -75,6 +99,28 @@ export function DuesCheckoutButton({ organizationId, fixedAmount, minAmount }: P
             />
           </div>
         </label>
+      ) : null}
+
+      {coverage.offered && baseCents > 0 ? (
+        <label className="flex items-start gap-2 rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            checked={coverProcessingCosts}
+            onChange={(e) => setCoverProcessingCosts(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span>
+            Help cover estimated processing costs{" "}
+            <span className="font-semibold">(+${(estimateCents / 100).toFixed(2)})</span>. Your dues payment stays $
+            {(baseCents / 100).toFixed(2)}.
+          </span>
+        </label>
+      ) : null}
+
+      {coverage.offered && coverProcessingCosts && baseCents > 0 ? (
+        <div className="rounded-lg bg-emerald-50 px-4 py-2 text-center text-sm text-emerald-800">
+          Total: <span className="font-semibold">${((baseCents + estimateCents) / 100).toFixed(2)}</span>
+        </div>
       ) : null}
 
       {error ? <p className="text-sm text-red-700">{error}</p> : null}

@@ -3,12 +3,17 @@ import { prisma } from "@/lib/prisma";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { parseJsonBody, ValidationError, z } from "@/lib/validation";
 import { resolveConnectedAccountForCharges, getStripeForMode } from "@/lib/payments/stripe-connect";
+import { quoteProcessingCostCoverage } from "@/lib/giving/processing-cost-coverage";
 import { getServerEnv } from "@/lib/env";
 
 const checkoutSchema = z.object({
   amount: z.number().positive().optional(),
   contributorName: z.string().trim().max(160).optional(),
   contributorEmail: z.string().email().optional(),
+  /** FEE-COVER-C: opt-in only — a boolean request, never an amount. The
+   * server quotes the actual coverage from the org's own configured rate
+   * and ignores this entirely unless the org's mode offers coverage. */
+  coverProcessingCosts: z.boolean().optional(),
 });
 
 export async function POST(request: Request, { params }: { params: Promise<{ slug: string }> }) {
@@ -77,6 +82,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
     const destination =
       link.campaign?.name ?? link.event?.title ?? link.organization.name;
 
+    // FEE-COVER-C: quoted server-side at the org's CURRENT rate and
+    // snapshotted into metadata — the webhook records exactly this split,
+    // never a recomputation (same discipline as giving/CONNECT-F §36).
+    const { coverageCents } = input.coverProcessingCosts
+      ? await quoteProcessingCostCoverage(link.organizationId, amountCents)
+      : { coverageCents: 0 };
+
     const session = await stripe.checkout.sessions.create(
       {
         mode: "payment",
@@ -88,7 +100,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
                 name: link.title,
                 description: destination,
               },
-              unit_amount: amountCents,
+              unit_amount: amountCents + coverageCents,
             },
             quantity: 1,
           },
@@ -106,6 +118,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
           eventId: link.eventId ?? "",
           contributorName: input.contributorName ?? "",
           stripeConnectedAccountId,
+          // FEE-COVER-C: base/coverage split snapshotted at checkout time,
+          // validated by resolveCoverageSplit in the connect webhook.
+          linkBaseAmountCents: String(amountCents),
+          linkCoverageAmountCents: String(coverageCents),
           environment: process.env.NODE_ENV ?? "development",
         },
       },

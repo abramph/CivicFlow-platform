@@ -3,6 +3,7 @@
 import { useMemo, useState, type FormEvent } from "react";
 import type { DuesPaymentMethod } from "@prisma/client";
 import { buildPayLink, getPayLinkHostname, getPaymentMethodCategory } from "@/lib/payment-method-links";
+import { calculateProcessingCostCoverageCents } from "@/lib/giving/coverage-math";
 
 type PayMethod = {
   id: string;
@@ -12,17 +13,21 @@ type PayMethod = {
   accountIdentifier: string | null;
 };
 
+/** FEE-COVER-C: display-only — the server re-quotes at checkout. */
+type CoverageOffer = { offered: boolean; percentBps: number; fixedCents: number };
+
 type Props = {
   slug: string;
   fixedAmount: number | null;
   minAmount: number;
   methods: PayMethod[];
+  coverage?: CoverageOffer;
 };
 
 const fieldClassName =
   "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 shadow-sm outline-none transition focus:border-emerald-600 focus:ring-2 focus:ring-emerald-200";
 
-export function PublicPaymentForm({ slug, fixedAmount, minAmount, methods }: Props) {
+export function PublicPaymentForm({ slug, fixedAmount, minAmount, methods, coverage }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(methods[0]?.id ?? null);
   const selected = methods.find((m) => m.id === selectedId) ?? null;
   const category = selected ? getPaymentMethodCategory(selected.method) : null;
@@ -59,7 +64,7 @@ export function PublicPaymentForm({ slug, fixedAmount, minAmount, methods }: Pro
       )}
 
       {selected && category === "native" && (
-        <StripeCheckoutSection slug={slug} fixedAmount={fixedAmount} minAmount={minAmount} />
+        <StripeCheckoutSection slug={slug} fixedAmount={fixedAmount} minAmount={minAmount} coverage={coverage} />
       )}
 
       {selected && category === "external" && <ExternalRedirectSection method={selected} />}
@@ -75,16 +80,27 @@ function StripeCheckoutSection({
   slug,
   fixedAmount,
   minAmount,
+  coverage = { offered: false, percentBps: 0, fixedCents: 0 },
 }: {
   slug: string;
   fixedAmount: number | null;
   minAmount: number;
+  coverage?: CoverageOffer;
 }) {
   const [amount, setAmount] = useState(fixedAmount ? fixedAmount.toFixed(2) : "");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  // FEE-COVER-C: voluntary and defaults OFF — never silently pre-added.
+  const [coverProcessingCosts, setCoverProcessingCosts] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const effectiveAmount = fixedAmount ?? Number(amount);
+  const baseCents = Number.isNaN(effectiveAmount) ? 0 : Math.round(effectiveAmount * 100);
+  const estimateCents =
+    coverage.offered && baseCents > 0
+      ? calculateProcessingCostCoverageCents(baseCents, coverage.percentBps, coverage.fixedCents)
+      : 0;
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -105,6 +121,7 @@ function StripeCheckoutSection({
           amount: parsedAmount,
           contributorName: name.trim() || undefined,
           contributorEmail: email.trim() || undefined,
+          coverProcessingCosts: coverage.offered && coverProcessingCosts ? true : undefined,
         }),
       });
 
@@ -172,6 +189,28 @@ function StripeCheckoutSection({
           placeholder="jane@example.com"
         />
       </label>
+
+      {coverage.offered && baseCents > 0 ? (
+        <label className="flex items-start gap-2 rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            checked={coverProcessingCosts}
+            onChange={(e) => setCoverProcessingCosts(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span>
+            Help cover estimated processing costs{" "}
+            <span className="font-semibold">(+${(estimateCents / 100).toFixed(2)})</span>, so the full $
+            {(baseCents / 100).toFixed(2)} goes to the organization.
+          </span>
+        </label>
+      ) : null}
+
+      {coverage.offered && coverProcessingCosts && baseCents > 0 ? (
+        <div className="rounded-lg bg-emerald-50 px-4 py-2 text-center text-sm text-emerald-800">
+          Total: <span className="font-semibold">${((baseCents + estimateCents) / 100).toFixed(2)}</span>
+        </div>
+      ) : null}
 
       {error && (
         <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>

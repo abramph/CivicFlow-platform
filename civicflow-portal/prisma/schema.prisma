@@ -2301,6 +2301,13 @@ model DuesPayment {
   /// Null for offline/manual payments — only Stripe-sourced rows are stamped.
   stripeConnectedAccountId String?
   providerAccountContext   ProviderAccountContext?
+  /// FEE-COVER-C: voluntary processing-cost coverage, mirroring
+  /// Contribution's CONNECT-F fields exactly. `amount` above stays the BASE
+  /// dues figure ALWAYS — it is what settles the member's DuesCharge
+  /// obligation, which must never be inflated by coverage. Null on every
+  /// offline/manual/legacy row.
+  processingCostCoverageAmount Decimal? @db.Decimal(12, 2)
+  totalChargedAmount           Decimal? @db.Decimal(12, 2)
   createdAt                DateTime                @default(now())
   updatedAt                DateTime                @updatedAt
 

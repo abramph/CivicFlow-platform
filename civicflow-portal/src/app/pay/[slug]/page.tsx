@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { PublicPaymentForm } from "@/components/public/PublicPaymentForm";
+import { getProcessingCostCoverageSettings } from "@/lib/giving/processing-cost-coverage";
 
 export default async function PublicPayPage({
   params,
@@ -24,6 +25,16 @@ export default async function PublicPayPage({
   });
 
   if (!link || link.status === "archived") notFound();
+
+  // FEE-COVER-C: whether this org offers voluntary processing-cost coverage
+  // and at what configured rate — the client uses these only for the live
+  // estimate; the checkout route re-quotes authoritatively server-side.
+  const coverageSettings = await getProcessingCostCoverageSettings(link.organizationId);
+  const coverage = {
+    offered: coverageSettings.mode === "OPTIONAL_CONTRIBUTOR_COVERAGE",
+    percentBps: coverageSettings.percentBps,
+    fixedCents: coverageSettings.fixedCents,
+  };
 
   const methods = link.methods.map((m) => ({
     id: m.paymentMethodConfig.id,
@@ -61,6 +72,7 @@ export default async function PublicPayPage({
             fixedAmount={link.amount ? Number(link.amount) : null}
             minAmount={link.minAmount ? Number(link.minAmount) : 1}
             methods={methods}
+            coverage={coverage}
           />
         )}
 

@@ -17,6 +17,13 @@ interface RecordDuesPaymentParams {
    * webhook path passes these; offline/manual entries leave them null. */
   stripeConnectedAccountId?: string | null;
   providerAccountContext?: ProviderAccountContext | null;
+  /** FEE-COVER-C: voluntary processing-cost coverage split, dollars.
+   * `amount` above must ALWAYS be the base dues figure — it alone settles
+   * the DuesCharge obligation below; coverage never inflates it. Only the
+   * Stripe webhook path passes these; offline/manual entries leave them
+   * null. */
+  processingCostCoverageAmount?: number | null;
+  totalChargedAmount?: number | null;
   /** Pass the already-validated charge to have its balance updated. */
   charge?: { id: string; amountPaid: unknown; amountDue: unknown } | null;
 }
@@ -35,6 +42,8 @@ async function recordDuesPaymentWithClient(tx: TxClient, params: RecordDuesPayme
       notes: params.notes ?? null,
       stripeConnectedAccountId: params.stripeConnectedAccountId ?? null,
       providerAccountContext: params.providerAccountContext ?? null,
+      processingCostCoverageAmount: params.processingCostCoverageAmount ?? null,
+      totalChargedAmount: params.totalChargedAmount ?? null,
     },
   });
 
