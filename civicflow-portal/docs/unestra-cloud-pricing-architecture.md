@@ -119,3 +119,52 @@ LLC`) are explicitly out of scope and untouched.
 
 Each PR is implemented, tested, typechecked, linted, built, committed, opened, merged, and
 deployed before the next begins — no stacked unverified billing changes.
+
+## CLOUD-E — Stripe test-mode objects (2026-08-19)
+
+Account confirmed via the Stripe dashboard (logged-in browser session) before creating
+anything, not assumed — the CLI's cached login initially pointed at a different, unrelated
+account ("ThrivePath MHS") that had to be re-authenticated against the correct one first.
+
+**Product**: `prod_V6ACsByLUhI4QI` ("Unestra Cloud"), test mode, account
+`acct_1TrSGDJe9g4GsjEn` (APH Technologies, LLC).
+
+**Prices** (lookup key → Price ID):
+
+| Lookup key | Price ID | Amount |
+| --- | --- | --- |
+| `unestra_cloud_pta_monthly` | `price_1U5xsEJe9g4GsjEnqtKzp6Yw` | $49.00/mo |
+| `unestra_cloud_pta_annual` | `price_1U5xsFJe9g4GsjEnuMowWeaP` | $490.00/yr |
+| `unestra_cloud_community_monthly` | `price_1U5xsFJe9g4GsjEnGuhv4oF0` | $59.00/mo |
+| `unestra_cloud_community_annual` | `price_1U5xsFJe9g4GsjEnCObIKhaU` | $590.00/yr |
+| `unestra_cloud_church_monthly` | `price_1U5xsGJe9g4GsjEnsFdSBSTo` | $79.00/mo |
+| `unestra_cloud_church_annual` | `price_1U5xsGJe9g4GsjEntrLjhvKU` | $790.00/yr |
+| `unestra_cloud_union_monthly` | `price_1U5xsHJe9g4GsjEnWoWW4g4L` | $129.00/mo |
+| `unestra_cloud_union_annual` | `price_1U5xsHJe9g4GsjEnXpdfczkP` | $1,290.00/yr |
+| `unestra_cloud_seat_monthly` | `price_1U5xsSJe9g4GsjEntF4kgOPU` | $8.00/mo |
+| `unestra_cloud_seat_annual` | `price_1U5xsSJe9g4GsjEnxJKs4ZXu` | $88.00/yr |
+
+Test-mode secret key + all 10 Price env vars written to
+`civicflow-portal/.env.development.local` (gitignored, confirmed via `git check-ignore`
+before writing — never committed, never wired into production, which uses the live key).
+
+**Verification performed** (all real, not mocked):
+1. Direct Stripe API: created a single-line-item test Checkout Session against
+   `pta_monthly` — succeeded.
+2. Direct Stripe API: created a multi-line-item session (`union_annual` + 2× seat) —
+   proves the seat-addon line-item path the app's `createCheckoutSession()` builds is
+   valid.
+3. **Full real-app path**: local dev server (`civicflow_dev`, an isolated local
+   Postgres, never production) → logged in as a real demo org's owner (Pine Grove
+   School PTA, a fictional local-only seed org) → clicked Subscribe on the actual
+   `/settings/billing` page → real Stripe Checkout page rendered with the correct
+   product name, description, and $49.00/month price → completed with Stripe's
+   standard test card (4242...) → **real, active Stripe subscription
+   `sub_1U5y2HJe9g4GsjEnD89unedJ` created against `unestra_cloud_pta_monthly` at
+   exactly $49.00**, confirmed via a direct read of the Stripe API afterward.
+
+Webhook sync to the local dev database was not exercised (would require `stripe listen
+--forward-to` or a public tunnel to reach localhost) — the webhook handler itself already
+has full existing test coverage (`stripe-webhook-route.test.ts`) and CLOUD-B's
+catalog-driven `planFromPriceId()` rewrite is separately unit-tested; the gap here is
+narrowly "did we watch the local DB row update," not "does the sync logic work."
