@@ -516,3 +516,39 @@ real subscriptions, no event carrying a retired Price can legitimately arrive.
 **Live mode**: still zero live-mode Unestra Cloud Prices — see the proposed live catalog
 in the CLOUD-J completion report. NOT created; live billing activation remains a
 separately-authorized step.
+
+## LIVE BILLING ACTIVATION (2026-08-19, owner-authorized)
+
+Live Product **`prod_V6KfzMhPmoRRhY`** ("Unestra Cloud") on `acct_1TrSGDJe9g4GsjEn`
+(APH Technologies, LLC), with 8 live Prices — every one field-verified (amount,
+interval, USD, livemode, active, product, per-unit, no trial settings) before any
+production configuration referenced it:
+
+| Lookup key | Live Price ID | Amount |
+| --- | --- | ---: |
+| `unestra_cloud_pta_monthly` | `price_1U6846Je9g4GsjEnR9zWXP3G` | $49/mo |
+| `unestra_cloud_pta_annual` | `price_1U684KJe9g4GsjEnBbpMpevF` | $539/yr |
+| `unestra_cloud_community_monthly` | `price_1U684LJe9g4GsjEnROEHPU7u` | $59/mo |
+| `unestra_cloud_community_annual` | `price_1U684LJe9g4GsjEnRxPftR9B` | $649/yr |
+| `unestra_cloud_church_monthly` | `price_1U684MJe9g4GsjEnHHOk2Ra0` | $79/mo |
+| `unestra_cloud_church_annual` | `price_1U684MJe9g4GsjEnVks9NLvx` | $869/yr |
+| `unestra_cloud_union_monthly` | `price_1U684MJe9g4GsjEnXblwajbq` | $129/mo |
+| `unestra_cloud_union_annual` | `price_1U684NJe9g4GsjEn8j2s1IXc` | $1,419/yr |
+
+Production `STRIPE_PRICE_*` env mappings flipped from the test-mode IDs to these live
+IDs (same variable names; the test-mode catalog remains intact in Stripe test mode and
+in `.env.development.local` for local verification). Deployed; clean boot; live webhook
+endpoints pre-existing and verified (`.../api/webhooks/stripe`, 6 events, separate
+Connect endpoint; no legacy civicflowapp.com endpoint).
+
+**Honestly scoped**: the live catalog is active and correctly mapped, but the first
+REAL payment lifecycle (live checkout completed with a real card → live webhook →
+Subscription row) has deliberately NOT been exercised — no real charge has ever been
+made. Status: **LIVE CATALOG ACTIVE — FIRST REAL PAYMENT LIFECYCLE NOT YET EXERCISED.**
+
+Key-permission note: the CLI's live restricted key is group-granular only; Core and
+Billing were temporarily set to Write via the dashboard (owner 2FA), the objects
+created, and BOTH groups reverted to Read immediately after — revert verified by a
+denied live-write probe. CLI live checkout-session creation was skipped (would have
+needed a third scope widen); Phase-7-style session verification therefore rests on the
+field-verified Prices + the byte-identical, test-mode-proven app code path.
