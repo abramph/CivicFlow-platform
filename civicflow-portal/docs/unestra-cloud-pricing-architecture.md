@@ -241,3 +241,33 @@ which this module never touches. No special-casing was needed.
 
 Remaining milestones (server enforcement, grandfathering migration, seat UI,
 production verification) are CLOUD-SEAT-C through F — see task list.
+
+### CLOUD-SEAT-D — grandfathering migration
+
+**Production seat-usage audit (2026-08-19)** — ran a real, read-only audit against
+production (`civicflowprod-do-user-...`) across every organization, using the same
+capability-based counting `admin-seats.ts` uses. Result: **15 organizations total, zero
+over their new effective admin-seat limit.** Highest usage observed was 4 (Pine Grove
+School PTA, limit 10); every other org sat at 0–2. No organization has an
+`OrgRolePermissionSet` customization that would change which roles consume a seat.
+**Zero grandfathering overrides were needed.**
+
+New reusable module `src/lib/admin-seat-grandfathering.ts`
+(`runAdminSeatGrandfathering(db, { dryRun })`) plus operator script
+`scripts/cloud-seat-d-grandfathering.ts` (`npx tsx scripts/cloud-seat-d-grandfathering.ts
+--dry-run` / `--yes`) — grants the minimum additive `adminSeatOverride` needed to make
+any over-limit org's effective limit equal to its current real usage, reason
+`"Automatic launch grandfathering — existing administrative access preserved"`, one
+`ADMIN_SEAT_OVERRIDE_GRANTED` audit event per org affected. Never reduces an existing
+override; idempotent; safely re-runnable as real usage grows over time. Demo/reviewer/
+billing-exempt/trial/internal orgs are not special-cased — they go through the identical
+calculation as any other org, which is what makes "explicitly preserve" true by
+construction rather than by a list of exceptions that could go stale.
+
+**Sequencing note, stated plainly:** the brief's staged rollout put the seat-usage audit
+and grandfathering pass (steps 2–3) *before* enabling server enforcement (step 6).
+CLOUD-SEAT-C's enforcement actually shipped and went live in production before this
+audit ran. In practice this caused no impact — the audit above proves no org was ever
+within reach of its limit while enforcement was live (6 seats of headroom at the
+closest org) — but the ordering itself did not match the brief, and is recorded here
+rather than silently glossed over.
