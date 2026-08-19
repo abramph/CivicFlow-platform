@@ -67,29 +67,35 @@ export async function getTrialStatus(organizationId: string): Promise<TrialStatu
   return { isInTrial, trialEndsAt, daysRemaining };
 }
 
+/**
+ * Unestra Cloud (CLOUD-C): ordinary-member count is no longer a pricing
+ * input for ANY organization, on ANY plan (Cloud or legacy) — every
+ * standard subscription includes unlimited ordinary members, full stop.
+ * This is why the gate itself always reports `allowed: true, limit:
+ * Infinity` rather than deferring to a per-plan `limits.members` value the
+ * way it used to (see plans.ts's PlanConfig.limits.members doc comment —
+ * legacy plans still carry historical numbers there for record-keeping,
+ * but nothing reads them for enforcement anymore). `current` is still
+ * computed and returned — member count remains real operational/reporting
+ * data (dashboards, Operations Center, vertical reporting), it has just
+ * stopped being a gate. The `plan` parameter and PlanId import are kept so
+ * every existing call site (createMember, mobile admin create, QR intake,
+ * import engines) continues to compile unchanged.
+ */
 export async function checkMemberLimit(
   organizationId: string,
-  plan?: PlanId
+  _plan?: PlanId
 ): Promise<{ allowed: boolean; current: number; limit: number }> {
-  const resolvedPlan = plan ?? (await getOrgPlan(organizationId));
-  const { limits } = getPlan(resolvedPlan);
-
-  if (limits.members === Infinity) {
-    const current = await prisma.orgMember.count({ where: { organizationId } });
-    return { allowed: true, current, limit: Infinity };
-  }
-
   const current = await prisma.orgMember.count({ where: { organizationId } });
-  return { allowed: current < limits.members, current, limit: limits.members };
+  return { allowed: true, current, limit: Infinity };
 }
 
-export async function requireMemberSlot(organizationId: string): Promise<void> {
-  const { allowed, current, limit } = await checkMemberLimit(organizationId);
-  if (!allowed) {
-    throw new PlanLimitError(
-      `Your plan allows up to ${limit} members (you have ${current}). Upgrade to add more.`
-    );
-  }
+/** Permanent no-op — kept as a named call site (rather than deleted and
+ * removed from every caller) so a future, deliberate reintroduction of
+ * member-based limits has one place to change, and so this file's own
+ * history documents that the removal was intentional, not an oversight. */
+export async function requireMemberSlot(_organizationId: string): Promise<void> {
+  return;
 }
 
 /**
