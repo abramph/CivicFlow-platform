@@ -9,7 +9,6 @@ interface SubscribeButtonProps {
    * vertical rather than a tier to pick between (see CLOUD-D). */
   isCurrentSelection: boolean;
   interval: BillingInterval;
-  additionalSeats?: number;
   label?: string;
 }
 
@@ -19,8 +18,11 @@ interface SubscribeButtonProps {
  * from the organization's own primaryVertical (see
  * /api/billing/checkout/route.ts) — there is no client input path that
  * could select a different vertical's price.
+ *
+ * CLOUD-I: no seat quantity is ever sent — administrative seats are never
+ * a paid add-on.
  */
-export function SubscribeButton({ isCurrentSelection, interval, additionalSeats = 0, label }: SubscribeButtonProps) {
+export function SubscribeButton({ isCurrentSelection, interval, label }: SubscribeButtonProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,7 +34,7 @@ export function SubscribeButton({ isCurrentSelection, interval, additionalSeats 
       const res = await fetch("/api/billing/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ interval, additionalSeats }),
+        body: JSON.stringify({ interval }),
       });
       const data = await res.json();
       if (!res.ok) {

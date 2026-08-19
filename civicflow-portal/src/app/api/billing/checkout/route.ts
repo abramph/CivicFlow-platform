@@ -2,12 +2,7 @@ import { requirePermission } from "@/lib/auth-guards";
 import { withApiErrorHandling } from "@/lib/api-route";
 import { parseJsonBody, ValidationError, z } from "@/lib/validation";
 import { prisma } from "@/lib/prisma";
-import {
-  getOrCreateStripeCustomer,
-  createCheckoutSession,
-  priceIdForPlan,
-  seatPriceIdForPlan,
-} from "@/lib/stripe";
+import { getOrCreateStripeCustomer, createCheckoutSession, priceIdForPlan } from "@/lib/stripe";
 import { resolvePricingVertical, type CloudPlanId } from "@/lib/plans";
 import { getServerEnv } from "@/lib/env";
 
@@ -19,10 +14,14 @@ import { getServerEnv } from "@/lib/env";
  * makes "an org checks out on a different vertical's price" structurally
  * impossible rather than merely validated — there is no client input path
  * that could select a different plan.
+ *
+ * CLOUD-I: `additionalSeats` has been removed entirely. Administrative
+ * seats are never a paid add-on — the checkout contract has no field a
+ * client could use to influence Stripe quantity/amount for seats, and
+ * createCheckoutSession() is called below with no seat price at all.
  */
 const checkoutSchema = z.object({
   interval: z.enum(["month", "year"]).default("month"),
-  additionalSeats: z.number().int().min(0).max(50).default(0),
 });
 
 function cloudPlanIdFor(vertical: "PTA" | "COMMUNITY" | "CHURCH" | "UNION", interval: "month" | "year"): CloudPlanId {
@@ -71,8 +70,6 @@ export async function POST(req: Request) {
     }
 
     const priceId = priceIdForPlan(plan);
-    const extraSeats = body.additionalSeats ?? 0;
-    const seatPriceId = extraSeats > 0 ? seatPriceIdForPlan(plan) : null;
 
     const stripeCustomerId = await getOrCreateStripeCustomer(
       organizationId,
@@ -85,8 +82,6 @@ export async function POST(req: Request) {
       organizationId,
       stripeCustomerId,
       priceId,
-      seatPriceId,
-      additionalSeats: extraSeats,
       successUrl: `${baseUrl}/settings/billing?success=1`,
       cancelUrl: `${baseUrl}/settings/billing`,
     });

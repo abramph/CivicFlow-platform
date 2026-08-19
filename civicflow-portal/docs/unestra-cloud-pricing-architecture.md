@@ -395,3 +395,60 @@ graph, not assumption (CLOUD-SEAT-F). Base Cloud pricing and Stripe are fully
 unaffected. The three gaps above are real but non-blocking: none of them can cause an
 existing administrator to lose access, an ordinary member action to fail, or a
 production incident — they are follow-up polish, not launch blockers.
+
+## CLOUD-I — remove legacy paid seat add-on
+
+The production readiness audit (2026-08-19) found a live contradiction: `CLOUD_SEAT_POLICY`
+in `plans.ts` — a carryover from the legacy `essential` tier, self-flagged as an assumption
+back in CLOUD-B — was still giving every Cloud plan a working "3 portal user seats
+included, +$8/mo per additional seat" purchase flow, complete with a real Stripe line item
+(`unestra_cloud_seat_monthly`/`_annual`) that would have charged a customer. This directly
+contradicted the admin-seat program's explicit "no paid seat add-ons at launch" requirement.
+Product decision: remove it completely, not reinterpret it as the admin-seat system.
+
+**Removed:**
+- `additionalSeats` from the checkout contract (`checkoutSchema` in `/api/billing/checkout`)
+  entirely — the client can no longer submit a seat quantity in any form.
+- The `SeatStepper` quantity control and "+$X/mo per additional seat" copy from
+  `BillingPlans.tsx`.
+- `seatPriceId`/`additionalSeats` from the checkout route's call into
+  `createCheckoutSession()` — no Cloud checkout can ever attach a seat line item again.
+- Every Cloud plan's `seatMonthlyPriceEnvKey`/`seatYearlyPriceEnvKey` are now `null` and
+  `additionalSeatCentsMonthly`/`Yearly` are `0` — structural, not just UI-level: even a
+  direct API call can't resolve a seat price for a Cloud plan (`seatPriceIdForPlan()`
+  returns `null`). Legacy `essential`/`elite` plans keep their real values unchanged
+  (historical Subscription-record resolution only — no checkout path reaches them).
+- The pricing-page/billing-page highlight line now reads
+  `"{N} administrative seats included"` (10 for PTA/Community, 15 for Church/Union — the
+  real admin-seat allowance) instead of the fake universal "3 portal user seats included."
+- Archived (deactivated, test-mode) the two obsolete Stripe Prices
+  (`unestra_cloud_seat_monthly`/`_annual`) — confirmed zero real Subscription depends on
+  them first. Confirmed the Stripe account has **no Billing Portal configuration at all**,
+  so there was never a portal-side backdoor to add seat quantity either.
+
+**Verified — all 8 checkout combinations, real Stripe test-mode Checkout Sessions, real
+app code path** (not mocked, not Stripe-API-only — actual HTTP requests to the running
+app, real org DB rows, real session auth):
+
+| Plan | Amount | Line items | Price/lookup key |
+|---|---:|---:|---|
+| PTA monthly | $49.00 | 1 | `unestra_cloud_pta_monthly` |
+| PTA annual | $490.00 | 1 | `unestra_cloud_pta_annual` |
+| Community monthly | $59.00 | 1 | `unestra_cloud_community_monthly` |
+| Community annual | $590.00 | 1 | `unestra_cloud_community_annual` |
+| Church monthly | $79.00 | 1 | `unestra_cloud_church_monthly` |
+| Church annual | $790.00 | 1 | `unestra_cloud_church_annual` |
+| Union monthly | $129.00 | 1 | `unestra_cloud_union_monthly` |
+| Union annual | $1,290.00 | 1 | `unestra_cloud_union_annual` |
+
+Every session: exactly 1 line item (no seat add-on), correct `organizationId` metadata,
+correct amount. Synthetic Church test org created for this pass, cleaned up afterward.
+
+**Live-mode audit**: `stripe prices list --live` shows only the old legacy
+essential/elite/perpetual Prices — **zero live-mode Unestra Cloud Prices exist**.
+**LIVE BILLING ACTIVATION STILL REQUIRED** before any real organization could be charged
+in live mode; not done here, not authorized this pass.
+
+**Fee-cover**: re-confirmed not implemented anywhere in the codebase (searched every
+plausible name across `src/lib/giving`, `src/app/api/giving`, broader `src`) —
+**NOT IMPLEMENTED / NOT FOUND**, not a false PASS.

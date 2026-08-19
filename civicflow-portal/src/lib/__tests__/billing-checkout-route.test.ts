@@ -28,12 +28,10 @@ vi.mock("@/lib/prisma", () => ({
 const getOrCreateStripeCustomer = vi.fn();
 const createCheckoutSession = vi.fn();
 const priceIdForPlan = vi.fn();
-const seatPriceIdForPlan = vi.fn();
 vi.mock("@/lib/stripe", () => ({
   getOrCreateStripeCustomer: (...args: unknown[]) => getOrCreateStripeCustomer(...args),
   createCheckoutSession: (...args: unknown[]) => createCheckoutSession(...args),
   priceIdForPlan: (...args: unknown[]) => priceIdForPlan(...args),
-  seatPriceIdForPlan: (...args: unknown[]) => seatPriceIdForPlan(...args),
 }));
 
 import { POST } from "@/app/api/billing/checkout/route";
@@ -54,7 +52,6 @@ describe("POST /api/billing/checkout — server-authoritative plan resolution", 
     getOrCreateStripeCustomer.mockResolvedValue("cus_123");
     createCheckoutSession.mockResolvedValue("https://checkout.stripe.com/session_abc");
     priceIdForPlan.mockReturnValue("price_resolved");
-    seatPriceIdForPlan.mockReturnValue("price_seat_resolved");
   });
 
   it("resolves the plan from the organization's own primaryVertical — the client never sends a plan id at all", async () => {
@@ -123,5 +120,35 @@ describe("POST /api/billing/checkout — server-authoritative plan resolution", 
     findUniqueOrganization.mockResolvedValue(null);
     const res = await POST(buildRequest({ interval: "month" }));
     expect(res.status).toBe(404);
+  });
+});
+
+describe("CLOUD-I: administrative seats are never a paid checkout add-on", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    requirePermission.mockResolvedValue({ organizationId: "org-1" });
+    findFirstSubscription.mockResolvedValue(null);
+    getOrCreateStripeCustomer.mockResolvedValue("cus_123");
+    createCheckoutSession.mockResolvedValue("https://checkout.stripe.com/session_abc");
+    priceIdForPlan.mockReturnValue("price_resolved");
+    findUniqueOrganization.mockResolvedValue({ name: "PTA Org", email: "a@b.com", plan: "free", primaryVertical: "PTA" });
+  });
+
+  it("a client-supplied additionalSeats field is silently stripped — the schema has no such field at all", async () => {
+    const res = await POST(buildRequest({ interval: "month", additionalSeats: 25 } as never));
+    expect(res.status).toBe(200);
+    // createCheckoutSession is called with exactly the base-plan args — no
+    // seatPriceId, no additionalSeats — regardless of what the client sent.
+    expect(createCheckoutSession).toHaveBeenCalledWith(
+      expect.not.objectContaining({ seatPriceId: expect.anything(), additionalSeats: expect.anything() })
+    );
+  });
+
+  it("creates a checkout session with only organizationId/stripeCustomerId/priceId/successUrl/cancelUrl", async () => {
+    await POST(buildRequest({ interval: "year" }));
+    const callArgs = createCheckoutSession.mock.calls[0][0];
+    expect(Object.keys(callArgs).sort()).toEqual(
+      ["organizationId", "stripeCustomerId", "priceId", "successUrl", "cancelUrl"].sort()
+    );
   });
 });

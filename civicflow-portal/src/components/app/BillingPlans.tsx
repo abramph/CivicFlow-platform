@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { plansForVertical, type BillingInterval, type PricingVertical } from "@/lib/plans";
+import type { BillingInterval, PricingVertical } from "@/lib/plans";
+import { plansForVertical } from "@/lib/plans";
 import { SubscribeButton } from "@/components/app/BillingActions";
 
 interface BillingPlansProps {
@@ -12,56 +12,21 @@ interface BillingPlansProps {
   canManageBilling: boolean;
 }
 
-function SeatStepper({
-  value,
-  onChange,
-  seatCents,
-  interval,
-}: {
-  value: number;
-  onChange: (n: number) => void;
-  seatCents: number;
-  interval: BillingInterval;
-}) {
-  return (
-    <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
-      <p className="mb-1.5 text-xs font-medium text-slate-600">Additional seats</p>
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          onClick={() => onChange(Math.max(0, value - 1))}
-          className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-40"
-          disabled={value === 0}
-        >
-          −
-        </button>
-        <span className="min-w-[1.5rem] text-center text-sm font-semibold text-slate-900">{value}</span>
-        <button
-          type="button"
-          onClick={() => onChange(Math.min(50, value + 1))}
-          className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-100"
-        >
-          +
-        </button>
-        {value > 0 && (
-          <span className="text-xs text-slate-500">
-            +${((seatCents * value) / 100).toFixed(0)}/{interval === "year" ? "yr" : "mo"}
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
-
 /**
  * Unestra Cloud (CLOUD-D): an organization has exactly one plan — its own
  * vertical's Cloud plan — with a choice of billing interval, not a tier
  * ladder to pick between. Renders the two interval variants
  * (plansForVertical) side by side rather than the old essential/elite
  * comparison grid.
+ *
+ * CLOUD-I: administrative seats are never a paid add-on. There is no seat
+ * quantity selector here — customers see only their included administrative-
+ * seat allowance as a plan highlight (see plans.ts); additional capacity is
+ * granted only via a platform-admin complimentary override
+ * (/settings/billing shows the org's current usage/limit, never a purchase
+ * control).
  */
 export function BillingPlans({ vertical, currentPlanId, isInTrial, hasActiveSubscription, canManageBilling }: BillingPlansProps) {
-  const [additionalSeats, setAdditionalSeats] = useState(0);
   const plans = plansForVertical(vertical);
 
   return (
@@ -72,8 +37,6 @@ export function BillingPlans({ vertical, currentPlanId, isInTrial, hasActiveSubs
           const isCurrentSelection = !isInTrial && currentPlanId === plan.id;
           const effectiveMonthly = interval === "year" ? Math.round(plan.yearlyPriceCents / 12) : plan.monthlyPriceCents;
           const price = interval === "year" ? plan.yearlyPriceCents : plan.monthlyPriceCents;
-          const seatCents = interval === "year" ? plan.additionalSeatCentsYearly : plan.additionalSeatCentsMonthly;
-          const totalSeats = plan.includedSeats + additionalSeats;
 
           return (
             <div
@@ -105,25 +68,14 @@ export function BillingPlans({ vertical, currentPlanId, isInTrial, hasActiveSubs
                     {item}
                   </li>
                 ))}
-                <li className="flex items-start gap-2 text-xs text-slate-500">
-                  <span className="mt-0.5">+</span>
-                  ${(seatCents / 100).toFixed(0)}/{interval === "year" ? "yr" : "mo"} per additional seat
-                </li>
               </ul>
 
               {canManageBilling && !hasActiveSubscription ? (
-                <>
-                  <SeatStepper value={additionalSeats} onChange={setAdditionalSeats} seatCents={seatCents} interval={interval} />
-                  {additionalSeats > 0 && (
-                    <p className="mb-2 text-center text-xs text-slate-500">{totalSeats} total seats</p>
-                  )}
-                  <SubscribeButton
-                    isCurrentSelection={isCurrentSelection}
-                    interval={interval}
-                    additionalSeats={additionalSeats}
-                    label={isInTrial ? `Subscribe — $${(effectiveMonthly / 100).toFixed(0)}/mo` : undefined}
-                  />
-                </>
+                <SubscribeButton
+                  isCurrentSelection={isCurrentSelection}
+                  interval={interval}
+                  label={isInTrial ? `Subscribe — $${(effectiveMonthly / 100).toFixed(0)}/mo` : undefined}
+                />
               ) : !canManageBilling ? (
                 <p className="text-center text-xs text-slate-500">Contact your org owner to change plans</p>
               ) : null}
@@ -134,7 +86,7 @@ export function BillingPlans({ vertical, currentPlanId, isInTrial, hasActiveSubs
 
       {hasActiveSubscription && canManageBilling && (
         <p className="text-sm text-slate-600">
-          To add seats, change billing interval, or cancel, open the <span className="font-medium text-slate-900">billing portal</span> below.
+          To change billing interval or cancel, open the <span className="font-medium text-slate-900">billing portal</span> below.
         </p>
       )}
     </div>
