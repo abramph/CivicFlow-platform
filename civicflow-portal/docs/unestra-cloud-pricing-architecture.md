@@ -168,3 +168,76 @@ Webhook sync to the local dev database was not exercised (would require `stripe 
 has full existing test coverage (`stripe-webhook-route.test.ts`) and CLOUD-B's
 catalog-driven `planFromPriceId()` rewrite is separately unit-tested; the gap here is
 narrowly "did we watch the local DB row update," not "does the sync logic work."
+
+## Administrative Seats (CLOUD-SEAT program)
+
+A second, explicitly separate entitlement dimension layered on top of the pricing
+above — see `docs/admin-seat-capability-audit.md` for the CLOUD-SEAT-A capability
+classification and `src/lib/admin-seat-policy.ts` for the resulting
+`requiresAdministrativeSeat()` policy. **Ordinary members remain unlimited and never
+affect price; admin seats never affect the Stripe subscription amount.** The two
+concepts are deliberately never conflated in the same code path.
+
+### CLOUD-SEAT-B — seat calculation & entitlements (this milestone)
+
+Schema (migration `20260819012807_cloud_seat_b_admin_seat_override`, additive only):
+`Organization` gains `adminSeatOverride Int @default(0)`, `purchasedAdminSeats Int
+@default(0)` (always 0, never sold/shown at launch), and override metadata
+(`adminSeatOverrideReason/ExpiresAt/SetByUserId/SetAt`) for CLOUD-SEAT-E's
+platform-admin grant UI. `includedAdminSeats` is deliberately **not stored** — it's
+derived per-request from the org's pricing vertical:
+
+| Vertical | Included admin seats |
+| --- | --- |
+| PTA | 10 |
+| Community (incl. HOA) | 10 |
+| Church | 15 |
+| Union | 15 |
+
+`effectiveAdminSeatLimit = includedAdminSeats + adminSeatOverride + purchasedAdminSeats`.
+`usedAdminSeats` counts unique users per org currently holding a role that resolves
+(via the org's own effective, possibly-customized permissions) to
+`requiresAdministrativeSeat() === true`, restricted to `status: "active"`
+memberships. New module: `src/lib/admin-seats.ts`
+(`includedAdminSeatsFor`, `getUsedAdminSeats`, `getAdminSeatSummary`,
+`hasAvailableAdminSeat`).
+
+**Finding: no pending-invitation state exists for staff/admin roles.** The brief's
+seat-reservation requirement assumes a pending-invite lifecycle (reserve on send,
+release on cancel/expire/reject, convert on accept). This codebase doesn't have one
+for privileged roles: `MemberInvite` is a constituent (`OrgMember`) self-service
+portal-access invite that always lands on `MEMBER` (never seat-consuming — see
+`accept-invite.ts`). The actual staff/admin invite flow
+(`POST /api/organization-memberships`) creates the `User` and the privileged
+`OrganizationMembership` **synchronously** — no intermediate pending row, no token,
+no accept step. There is therefore no reservation window to model. `usedAdminSeats`
+already reflects reality the instant a privileged membership exists, and
+CLOUD-SEAT-C's enforcement is a pre-check immediately before that synchronous
+create/update, not a separate reserve/release lifecycle. This is a scope reduction
+grounded in the actual schema, not an oversight.
+
+**Reconciling with the legacy seat system.** `Organization.seatLimit` /
+`checkSeatLimit()` / `requireSeatSlot()` / `STAFF_SEAT_ROLES` (`src/lib/plan-gate.ts`)
+predate the capability-based policy and count `READ_ONLY` as seat-consuming — directly
+contradicting CLOUD-SEAT-A's classification (`READ_ONLY`'s own bundle is the seat-exempt
+baseline). CLOUD-SEAT-C will retire that role-name-based system's enforcement role and
+switch its call sites (`organization-memberships` POST/PATCH, plus any other
+`requireSeatSlot()` callers) to the new capability-based `admin-seats.ts`. The
+`seatLimit` column itself is left in place (unused, not dropped) rather than migrated
+destructively — per the schema's own stated policy on `OrgRole` cleanup, that kind of
+removal is deferred to a dedicated low-traffic schema-cleanup release, not bundled with
+feature work.
+
+**Unique-user counting falls out of the schema for free.**
+`OrganizationMembership` has a hard `@@unique([organizationId, userId])` constraint, so
+a user can hold at most one role — and consume at most one seat — per org, regardless
+of how many privileged permissions that role carries. Counting per-org therefore also
+gives "same user privileged in two different orgs = 1 seat in each" automatically.
+
+**Platform-level access never consumes an org seat by construction.** Seat counting
+only ever queries `OrganizationMembership`; platform-level `SUPER_ADMIN`/support reach
+is tracked entirely separately via `PlatformAccess` (`src/lib/platform-access.ts`),
+which this module never touches. No special-casing was needed.
+
+Remaining milestones (server enforcement, grandfathering migration, seat UI,
+production verification) are CLOUD-SEAT-C through F — see task list.

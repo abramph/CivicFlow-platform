@@ -649,6 +649,24 @@ model Organization {
   plan             String                @default("free") // "free" | "essential" | "elite"
   trialEndsAt      DateTime? // set at org creation; nil once subscribed or expired
   seatLimit        Int? // null = use plan default; set explicitly when seats are purchased
+  /// CLOUD-SEAT-B: Unestra Cloud administrative-seat program. Distinct from
+  /// the legacy `seatLimit` above (which counts ALL portal roles including
+  /// READ_ONLY, and predates the capability-based admin-seat policy in
+  /// src/lib/admin-seat-policy.ts). `includedAdminSeats` is NOT stored here —
+  /// it's derived per-request from the org's pricing vertical (see
+  /// src/lib/admin-seats.ts). `adminSeatOverride` is a platform-admin-granted
+  /// additive adjustment (never negative, never self-editable by the org),
+  /// with full before/after/actor/reason audit trail via AuditEvent
+  /// (ADMIN_SEAT_OVERRIDE_GRANTED/CHANGED/REMOVED/EXPIRED) rather than a
+  /// separate history table. `purchasedAdminSeats` exists so a future paid
+  /// seat pack can populate it without a schema redesign — deliberately
+  /// unsold and unexposed in any UI at launch (always 0).
+  adminSeatOverride           Int       @default(0)
+  purchasedAdminSeats         Int       @default(0)
+  adminSeatOverrideReason     String?
+  adminSeatOverrideExpiresAt  DateTime?
+  adminSeatOverrideSetByUserId String?
+  adminSeatOverrideSetAt      DateTime?
   /// Marks an organization as internal/platform-owned — exempt from trial
   /// expiration and subscription-required gating (see src/lib/plan-gate.ts).
   /// Deliberately NOT part of updateOrganizationSchema in
