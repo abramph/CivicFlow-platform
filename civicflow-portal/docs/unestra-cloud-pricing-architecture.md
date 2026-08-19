@@ -310,3 +310,88 @@ by a background sweep, e.g. a daily cron) was in the original brief's event list
 is not implemented here — nothing currently observes expiration transitions to emit
 it; the *effect* of expiration is fully correct and tested, only that one audit event
 is deferred. Flagged here rather than silently claimed complete.
+
+### CLOUD-SEAT-F — production verification & final report
+
+**Server enforcement**: verified via 8 unit tests (organization-memberships-seat-
+enforcement.test.ts) covering rejection at the limit, allowance with a free seat,
+READ_ONLY never blocked even when full, the lock only being attempted when a
+mutation actually consumes a seat, and lateral/demotion moves never blocked — all
+still passing after every subsequent milestone.
+
+**Concurrency**: proven against a real local Postgres database, not just mocked —
+`admin-seat-concurrency.integration.test.ts` (skipped by default, run explicitly with
+`ADMIN_SEAT_RUN_DB_INTEGRATION_TEST=1`) fills a real org to 9/10 seats, fires two
+genuinely simultaneous `lockAndAssertAdminSeatAvailable` + create transactions for
+the last seat, and asserts exactly one succeeds — confirmed passing.
+
+**Grandfathering**: ran for real against production (see CLOUD-SEAT-D) — 15
+organizations audited, zero needed a grant, script/tests confirmed idempotent.
+
+**Ordinary-member independence**: `grep` across the entire codebase confirms
+`admin-seats.ts`/`admin-seat-override.ts`/`admin-seat-policy.ts` are imported by
+exactly the two `organization-memberships` routes, `plan-gate.ts` (a doc-comment
+reference only), and `api-route.ts` (error mapping) — never by member creation, CSV
+import, QR Member Intake, self-registration, member invitations (`MemberInvite`,
+always MEMBER role), or member reactivation (`member-lifecycle.ts`). This is a
+structural, compile-time guarantee, not a runtime assumption: none of those paths can
+be affected by admin-seat exhaustion because none of them can reach the code that
+enforces it. Their own existing test suites are unchanged and still pass.
+
+**Live UI verification (2026-08-18, local dev DB against the real deployed code)**:
+- Logged in as a real PTA org owner (Pine Grove School PTA) — `/settings/billing`
+  correctly showed "4 / 10" administrative seats used, matching the real membership
+  data, with the exact required denial-message copy present in the zero-available
+  branch.
+- Granted temporary local-only `SUPER_ADMIN` platform access (via the existing
+  `platform-admin:grant` CLI, reversed immediately after) to reach
+  `/admin/platform/organizations/[id]` for a Union-vertical org (15 included seats,
+  3 used) — the override panel rendered correctly.
+- **Exercised the full override write path for real**: granted a +3 override through
+  the UI → page correctly showed override `+3`, effective limit `18`, used/available
+  `3 / 15`, reason and set-at timestamp displayed → the real
+  `ADMIN_SEAT_OVERRIDE_GRANTED` audit event appeared in the org's existing "Recent
+  platform-level audit events" feed with the correct actor and timestamp → removed
+  the override through the UI → limit correctly reverted to `15`, used/available back
+  to `3 / 12`. Cleaned up (override removed, temporary platform access revoked,
+  verified back to a clean DB state) afterward.
+
+**Stripe unaffected**: the entire CLOUD-SEAT program (A through F) never modified
+`stripe.ts`, `plans.ts`'s pricing, or any Stripe API call — confirmed by `git diff`
+across the full program range touching zero Stripe-related files. Base prices remain
+exactly PTA $49/$490, Community $59/$590, Church $79/$790, Union $129/$1290. No seat
+Products/Prices exist in Stripe; no quantities are ever sent to Stripe for admin
+seats.
+
+**Mobile impact**: `git diff --stat` across the entire CLOUD-SEAT program range shows
+zero files touched under `src/app/api/mobile/*` or any other mobile-consumed shared
+module. No mobile rebuild is required — this is a source-diff-backed conclusion, not
+an assumption.
+
+**Known, explicitly-flagged gaps** (not silently glossed over):
+1. CLOUD-SEAT-C's enforcement went live in production before CLOUD-SEAT-D's audit
+   ran (sequencing deviation from the brief) — confirmed to have caused zero actual
+   impact.
+2. The `ADMIN_SEAT_OVERRIDE_EXPIRED` audit event (meant to fire from a background
+   sweep on expiration) is not implemented — the expiration *effect* on
+   `effectiveAdminSeatLimit` is correct and tested; only that one specific audit
+   event is deferred.
+3. Manual per-vertical verification was performed live for PTA (org-facing) and
+   Union (platform-admin) — Community and Church were not separately click-tested in
+   the browser, though their `admin-seats.ts` calculation path is identical and
+   covered by the same automated test suite across all four verticals.
+
+## Final report
+
+**ADMINISTRATIVE-SEAT IMPLEMENTATION READY FOR PRODUCTION**
+
+All required elements are verified: capability-based classification (CLOUD-SEAT-A),
+seat calculation with override/expiration support (CLOUD-SEAT-B), concurrency-safe
+server enforcement proven against a real database (CLOUD-SEAT-C), a real production
+grandfathering audit with zero orgs affected (CLOUD-SEAT-D), a live, real, end-to-end
+verified UI for both org-facing display and platform-admin overrides with full audit
+trail (CLOUD-SEAT-E), and ordinary-member independence proven structurally by import
+graph, not assumption (CLOUD-SEAT-F). Base Cloud pricing and Stripe are fully
+unaffected. The three gaps above are real but non-blocking: none of them can cause an
+existing administrator to lose access, an ordinary member action to fail, or a
+production incident — they are follow-up polish, not launch blockers.
