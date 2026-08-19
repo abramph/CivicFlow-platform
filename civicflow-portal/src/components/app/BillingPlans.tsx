@@ -1,7 +1,7 @@
 "use client";
 
 import type { BillingInterval, PricingVertical } from "@/lib/plans";
-import { plansForVertical } from "@/lib/plans";
+import { annualSavingsCentsForVertical, plansForVertical } from "@/lib/plans";
 import { SubscribeButton } from "@/components/app/BillingActions";
 
 interface BillingPlansProps {
@@ -51,7 +51,10 @@ export function BillingPlans({ vertical, currentPlanId, isInTrial, hasActiveSubs
                     <span className="text-sm font-normal text-slate-500">/mo</span>
                   </p>
                   {interval === "year" && (
-                    <p className="text-xs text-slate-500">${(price / 100).toFixed(0)} billed annually — 2 months free</p>
+                    <p className="text-xs text-slate-500">
+                      ${(price / 100).toFixed(0)} billed annually — save $
+                      {(annualSavingsCentsForVertical(vertical) / 100).toFixed(0)}/year
+                    </p>
                   )}
                 </div>
                 {isInTrial ? (

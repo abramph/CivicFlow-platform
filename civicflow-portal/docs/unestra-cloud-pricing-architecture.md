@@ -452,3 +452,67 @@ in live mode; not done here, not authorized this pass.
 **Fee-cover**: re-confirmed not implemented anywhere in the codebase (searched every
 plausible name across `src/lib/giving`, `src/app/api/giving`, broader `src`) —
 **NOT IMPLEMENTED / NOT FOUND**, not a false PASS.
+
+## CLOUD-J — annual pricing revision (final launch pricing)
+
+**Product decision (2026-08-19), supersedes the annual prices above**: annual = exactly
+**11 months of monthly service** (one month of savings), because the separate 30-day free
+trial already covers introductory economics — the old ~2-months-free annual discount was
+unnecessarily aggressive on top of it. Monthly prices, the trial, unlimited members,
+included admin seats, and complimentary-only overrides are all unchanged.
+
+| Vertical | Monthly | Annual | Annual savings |
+| --- | ---: | ---: | ---: |
+| PTA/PTO | $49 | **$539** | $49 |
+| Community/Nonprofit (incl. HOA) | $59 | **$649** | $59 |
+| Church | $79 | **$869** | $79 |
+| Union | $129 | **$1,419** | $129 |
+
+**Trial audit (required before this change)** — the 30-day trial is entirely internal:
+`Organization.trialEndsAt` is written in exactly one place (org creation,
+`/api/onboarding/organization`), and `getOrgPlan()` grants the org's own vertical Cloud
+plan while `plan === "free" && trialEndsAt > now`. Zero occurrences of
+`trial_period_days`/`trial_end` anywhere — Stripe never sees a trial, so paid billing
+begins at checkout completion for both intervals. **Trial-stacking ("30-day trial + free
+month(s) + 11-month price") is structurally impossible.** Repeat-trial protection already
+exists without a new subsystem: nothing ever resets `trialEndsAt` (webhook cancellation
+reverts `plan` to free but leaves the original, by-then-expired trial date), the checkout
+contract accepts only `interval`, vertical corrections never touch billing, and onboarding
+blocks a user already in an active org from creating another. One trial per organization.
+Accepted limitation (reported, not "fixed"): a genuinely new user identity creating a
+genuinely new organization gets a fresh trial — that's the new-customer boundary every
+SaaS has, not an in-app bypass.
+
+**Stripe test mode**: recurring Price amounts are immutable, so 4 replacement annual
+Prices were created on the same Product (`prod_V6ACsByLUhI4QI`) with lookup keys migrated
+via `transfer_lookup_key` (no ambiguous duplicate mappings — the old Prices' lookup keys
+are now null):
+
+| Lookup key | New Price ID | Amount | Replaces (archived) |
+| --- | --- | ---: | --- |
+| `unestra_cloud_pta_annual` | `price_1U67DzJe9g4GsjEneEJIjUvN` | $539/yr | `price_1U5xsFJe9g4GsjEnuMowWeaP` ($490) |
+| `unestra_cloud_community_annual` | `price_1U67DzJe9g4GsjEnbHBnoUYW` | $649/yr | `price_1U5xsFJe9g4GsjEnCObIKhaU` ($590) |
+| `unestra_cloud_church_annual` | `price_1U67DzJe9g4GsjEnEkMxpbv2` | $869/yr | `price_1U5xsGJe9g4GsjEntrLjhvKU` ($790) |
+| `unestra_cloud_union_annual` | `price_1U67E0Je9g4GsjEn8j1NprPJ` | $1,419/yr | `price_1U5xsHJe9g4GsjEnXpdfczkP` ($1,290) |
+
+Old annual Prices archived (deactivated, not deleted) after confirming **zero
+subscriptions** referenced any of them. Monthly Prices untouched. The leftover CLOUD-E
+synthetic test subscription (`sub_1U5y2HJe9g4GsjEnD89unedJ`, PTA monthly) was also
+cancelled as cleanup. Env mappings (`STRIPE_PRICE_*_YEARLY`) updated in both
+`.env.development.local` and the production app spec — same variable names, new values.
+
+**Copy changes**: "2 months free" is retired everywhere; annual savings are now computed
+from the authoritative catalog via `annualSavingsCentsForVertical()` (12×monthly − annual)
+and displayed as "save $N/year". The customer-facing string regression scan now also bans
+`months free` so the obsolete framing can't silently return. Trial language ("30-day free
+trial") remains deliberately separate from annual-savings language.
+
+**Webhook note (pre-existing, documented not changed)**: `upsertSubscriptionFromStripe`
+falls back to `"essential"` (an inactive legacy plan, not a sellable Cloud plan) when a
+price id is unrecognized. The archived annual Prices resolve to nothing (their env
+mappings are gone), which is correct — no retired Price maps to a current plan. With zero
+real subscriptions, no event carrying a retired Price can legitimately arrive.
+
+**Live mode**: still zero live-mode Unestra Cloud Prices — see the proposed live catalog
+in the CLOUD-J completion report. NOT created; live billing activation remains a
+separately-authorized step.

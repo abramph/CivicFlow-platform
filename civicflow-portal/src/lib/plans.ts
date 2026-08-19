@@ -173,13 +173,13 @@ function cloudPlan(args: {
 
 export const CLOUD_PLANS: Record<CloudPlanId, PlanConfig> = {
   pta_monthly: cloudPlan({ id: "pta_monthly", name: "Unestra Cloud — PTA/PTO", vertical: "PTA", interval: "month", priceCents: 4900, priceEnvKey: "STRIPE_PRICE_PTA_MONTHLY", displayOrder: 0 }),
-  pta_annual: cloudPlan({ id: "pta_annual", name: "Unestra Cloud — PTA/PTO", vertical: "PTA", interval: "year", priceCents: 49000, priceEnvKey: "STRIPE_PRICE_PTA_YEARLY", displayOrder: 1 }),
+  pta_annual: cloudPlan({ id: "pta_annual", name: "Unestra Cloud — PTA/PTO", vertical: "PTA", interval: "year", priceCents: 53900, priceEnvKey: "STRIPE_PRICE_PTA_YEARLY", displayOrder: 1 }),
   community_monthly: cloudPlan({ id: "community_monthly", name: "Unestra Cloud — Community", vertical: "COMMUNITY", interval: "month", priceCents: 5900, priceEnvKey: "STRIPE_PRICE_COMMUNITY_MONTHLY", displayOrder: 2 }),
-  community_annual: cloudPlan({ id: "community_annual", name: "Unestra Cloud — Community", vertical: "COMMUNITY", interval: "year", priceCents: 59000, priceEnvKey: "STRIPE_PRICE_COMMUNITY_YEARLY", displayOrder: 3 }),
+  community_annual: cloudPlan({ id: "community_annual", name: "Unestra Cloud — Community", vertical: "COMMUNITY", interval: "year", priceCents: 64900, priceEnvKey: "STRIPE_PRICE_COMMUNITY_YEARLY", displayOrder: 3 }),
   church_monthly: cloudPlan({ id: "church_monthly", name: "Unestra Cloud — Church", vertical: "CHURCH", interval: "month", priceCents: 7900, priceEnvKey: "STRIPE_PRICE_CHURCH_MONTHLY", displayOrder: 4 }),
-  church_annual: cloudPlan({ id: "church_annual", name: "Unestra Cloud — Church", vertical: "CHURCH", interval: "year", priceCents: 79000, priceEnvKey: "STRIPE_PRICE_CHURCH_YEARLY", displayOrder: 5 }),
+  church_annual: cloudPlan({ id: "church_annual", name: "Unestra Cloud — Church", vertical: "CHURCH", interval: "year", priceCents: 86900, priceEnvKey: "STRIPE_PRICE_CHURCH_YEARLY", displayOrder: 5 }),
   union_monthly: cloudPlan({ id: "union_monthly", name: "Unestra Cloud — Union", vertical: "UNION", interval: "month", priceCents: 12900, priceEnvKey: "STRIPE_PRICE_UNION_MONTHLY", displayOrder: 6 }),
-  union_annual: cloudPlan({ id: "union_annual", name: "Unestra Cloud — Union", vertical: "UNION", interval: "year", priceCents: 129000, priceEnvKey: "STRIPE_PRICE_UNION_YEARLY", displayOrder: 7 }),
+  union_annual: cloudPlan({ id: "union_annual", name: "Unestra Cloud — Union", vertical: "UNION", interval: "year", priceCents: 141900, priceEnvKey: "STRIPE_PRICE_UNION_YEARLY", displayOrder: 7 }),
 };
 
 const LEGACY_PLANS: Record<LegacyPlanId, PlanConfig> = {
@@ -268,6 +268,22 @@ export function plansForVertical(vertical: PricingVertical): PlanConfig[] {
 /** Every active (sold) Cloud plan, in display order — for /pricing. */
 export function activePlans(): PlanConfig[] {
   return Object.values(CLOUD_PLANS).sort((a, b) => a.displayOrder - b.displayOrder);
+}
+
+/**
+ * CLOUD-J: what a vertical actually saves per year by choosing annual
+ * billing — computed from the authoritative catalog (12 × monthly − annual),
+ * never hardcoded in display copy. At launch pricing this is exactly one
+ * month of service per vertical ($49/$59/$79/$129). The old "2 months free"
+ * marketing line is obsolete and must not be reintroduced — the 30-day free
+ * trial is a separate introductory concept, not part of the annual discount.
+ */
+export function annualSavingsCentsForVertical(vertical: PricingVertical): number {
+  const pair = plansForVertical(vertical);
+  const monthly = pair.find((p) => p.interval === "month");
+  const annual = pair.find((p) => p.interval === "year");
+  if (!monthly || !annual) return 0;
+  return monthly.monthlyPriceCents * 12 - annual.yearlyPriceCents;
 }
 
 export function planRank(planId: string): number {

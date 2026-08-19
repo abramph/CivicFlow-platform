@@ -1,15 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { CLOUD_PLANS, PLANS, activePlans, getPlan, isPaidPlan, planRank, plansForVertical, resolvePricingVertical, type CloudPlanId } from "@/lib/plans";
+import { CLOUD_PLANS, PLANS, activePlans, annualSavingsCentsForVertical, getPlan, isPaidPlan, planRank, plansForVertical, resolvePricingVertical, type CloudPlanId } from "@/lib/plans";
 
+// CLOUD-J launch pricing: annual = exactly 11 months of monthly service
+// (the ~2-months-free annual discount was deliberately tightened because the
+// separate 30-day free trial already covers introductory economics).
 const EXPECTED: Record<CloudPlanId, { vertical: string; interval: string; cents: number }> = {
   pta_monthly: { vertical: "PTA", interval: "month", cents: 4900 },
-  pta_annual: { vertical: "PTA", interval: "year", cents: 49000 },
+  pta_annual: { vertical: "PTA", interval: "year", cents: 53900 },
   community_monthly: { vertical: "COMMUNITY", interval: "month", cents: 5900 },
-  community_annual: { vertical: "COMMUNITY", interval: "year", cents: 59000 },
+  community_annual: { vertical: "COMMUNITY", interval: "year", cents: 64900 },
   church_monthly: { vertical: "CHURCH", interval: "month", cents: 7900 },
-  church_annual: { vertical: "CHURCH", interval: "year", cents: 79000 },
+  church_annual: { vertical: "CHURCH", interval: "year", cents: 86900 },
   union_monthly: { vertical: "UNION", interval: "month", cents: 12900 },
-  union_annual: { vertical: "UNION", interval: "year", cents: 129000 },
+  union_annual: { vertical: "UNION", interval: "year", cents: 141900 },
 };
 
 describe("Unestra Cloud plan catalog", () => {
@@ -24,11 +27,18 @@ describe("Unestra Cloud plan catalog", () => {
     }
   });
 
-  it("annual pricing is exactly 10x monthly (two months free) for every vertical", () => {
+  it("CLOUD-J: annual pricing is exactly 11x monthly (one month of savings) for every vertical", () => {
     for (const vertical of ["PTA", "COMMUNITY", "CHURCH", "UNION"] as const) {
       const [monthly, annual] = plansForVertical(vertical);
-      expect(annual.yearlyPriceCents).toBe(monthly.monthlyPriceCents * 10);
+      expect(annual.yearlyPriceCents).toBe(monthly.monthlyPriceCents * 11);
     }
+  });
+
+  it("annualSavingsCentsForVertical reports exactly one month of monthly service per vertical", () => {
+    expect(annualSavingsCentsForVertical("PTA")).toBe(4900);
+    expect(annualSavingsCentsForVertical("COMMUNITY")).toBe(5900);
+    expect(annualSavingsCentsForVertical("CHURCH")).toBe(7900);
+    expect(annualSavingsCentsForVertical("UNION")).toBe(12900);
   });
 
   it("grants unlimited members on every Cloud plan", () => {
