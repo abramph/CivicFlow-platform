@@ -4,6 +4,7 @@ import { MobileAuthError, MobileForbiddenError } from "@/lib/mobile-auth";
 import { ValidationError, jsonError } from "@/lib/validation";
 import { PlanFeatureError, PlanLimitError } from "@/lib/plan-gate";
 import { AdminSeatLimitError } from "@/lib/admin-seats";
+import { AdminSeatOverrideError } from "@/lib/admin-seat-override";
 import { LabFeatureError } from "@/lib/labs/access";
 import { MeetingIntelligenceError } from "@/lib/labs/meeting-intelligence/errors";
 import { PtaError } from "@/lib/labs/pta/errors";
@@ -47,6 +48,9 @@ export async function withApiErrorHandling(
         return Response.json({ ok: false, error: error.message, code: error.code }, { status: error.status });
       }
       if (error instanceof AdminSeatLimitError) {
+        return Response.json({ ok: false, error: error.message, code: error.code }, { status: error.status });
+      }
+      if (error instanceof AdminSeatOverrideError) {
         return Response.json({ ok: false, error: error.message, code: error.code }, { status: error.status });
       }
       if (error instanceof LabFeatureError) {

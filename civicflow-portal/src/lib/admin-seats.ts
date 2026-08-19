@@ -110,7 +110,16 @@ export async function getUsedAdminSeats(organizationId: string, db: Db = prisma)
 export interface AdminSeatSummary {
   vertical: PricingVertical;
   includedAdminSeats: number;
+  /** Raw stored value, for display/audit — NOT necessarily what's currently
+   * contributing to effectiveAdminSeatLimit; see adminSeatOverrideActive. */
   adminSeatOverride: number;
+  /** False once adminSeatOverrideExpiresAt has passed — an expired override
+   * stops contributing to effectiveAdminSeatLimit (see CLOUD-SEAT-E) but the
+   * stored value itself is left untouched, so restoring it (or granting a
+   * fresh one) needs no re-entry of the original amount. */
+  adminSeatOverrideActive: boolean;
+  adminSeatOverrideReason: string | null;
+  adminSeatOverrideExpiresAt: Date | null;
   purchasedAdminSeats: number;
   effectiveAdminSeatLimit: number;
   usedAdminSeats: number;
@@ -128,6 +137,13 @@ export interface AdminSeatSummary {
  * demo/trial status intentionally has no bearing here: seat allowance is a
  * function of vertical + override + purchased seats only, never of billing
  * state, so an exempt org's seats are calculated exactly like a paying org's.
+ *
+ * An override past its adminSeatOverrideExpiresAt stops counting toward
+ * effectiveAdminSeatLimit here — this is the enforcement half of "expiration
+ * must never remove existing admins": nothing here touches any
+ * OrganizationMembership row, it only makes overLimit potentially true,
+ * which CLOUD-SEAT-C's enforcement reads to block only NEW privileged
+ * assignments going forward.
  */
 export async function getAdminSeatSummary(organizationId: string, db: Db = prisma): Promise<AdminSeatSummary> {
   const org = await db.organization.findUniqueOrThrow({
@@ -136,18 +152,27 @@ export async function getAdminSeatSummary(organizationId: string, db: Db = prism
       primaryVertical: true,
       adminSeatOverride: true,
       purchasedAdminSeats: true,
+      adminSeatOverrideExpiresAt: true,
+      adminSeatOverrideReason: true,
     },
   });
 
+  const overrideExpired = org.adminSeatOverrideExpiresAt !== null && org.adminSeatOverrideExpiresAt < new Date();
+  const adminSeatOverrideActive = org.adminSeatOverride > 0 && !overrideExpired;
+  const effectiveOverride = overrideExpired ? 0 : org.adminSeatOverride;
+
   const vertical = resolvePricingVertical(org.primaryVertical);
   const includedAdminSeats = INCLUDED_ADMIN_SEATS[vertical];
-  const effectiveAdminSeatLimit = includedAdminSeats + org.adminSeatOverride + org.purchasedAdminSeats;
+  const effectiveAdminSeatLimit = includedAdminSeats + effectiveOverride + org.purchasedAdminSeats;
   const usedAdminSeats = await getUsedAdminSeats(organizationId, db);
 
   return {
     vertical,
     includedAdminSeats,
     adminSeatOverride: org.adminSeatOverride,
+    adminSeatOverrideActive,
+    adminSeatOverrideReason: org.adminSeatOverrideReason,
+    adminSeatOverrideExpiresAt: org.adminSeatOverrideExpiresAt,
     purchasedAdminSeats: org.purchasedAdminSeats,
     effectiveAdminSeatLimit,
     usedAdminSeats,
