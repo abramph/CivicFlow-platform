@@ -3,6 +3,7 @@ import { ForbiddenError, UnauthenticatedError, OrganizationRequiredError, withFo
 import { MobileAuthError, MobileForbiddenError } from "@/lib/mobile-auth";
 import { ValidationError, jsonError } from "@/lib/validation";
 import { PlanFeatureError, PlanLimitError } from "@/lib/plan-gate";
+import { AdminSeatLimitError } from "@/lib/admin-seats";
 import { LabFeatureError } from "@/lib/labs/access";
 import { MeetingIntelligenceError } from "@/lib/labs/meeting-intelligence/errors";
 import { PtaError } from "@/lib/labs/pta/errors";
@@ -43,6 +44,9 @@ export async function withApiErrorHandling(
         );
       }
       if (error instanceof PlanLimitError) {
+        return Response.json({ ok: false, error: error.message, code: error.code }, { status: error.status });
+      }
+      if (error instanceof AdminSeatLimitError) {
         return Response.json({ ok: false, error: error.message, code: error.code }, { status: error.status });
       }
       if (error instanceof LabFeatureError) {

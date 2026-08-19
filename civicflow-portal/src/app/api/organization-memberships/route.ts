@@ -5,7 +5,8 @@ import { withApiErrorHandling } from "@/lib/api-route";
 import { createAuditEvent } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 import { parseJsonBody, ValidationError, z } from "@/lib/validation";
-import { requireSeatSlot } from "@/lib/plan-gate";
+import { lockAndAssertAdminSeatAvailable } from "@/lib/admin-seats";
+import { roleRequiresAdministrativeSeat } from "@/lib/admin-seat-policy";
 
 const createMembershipSchema = z.object({
   email: z.string().trim().email(),
@@ -76,35 +77,47 @@ export async function POST(request: Request) {
       });
     }
 
-    await requireSeatSlot(organizationId);
+    // Only a role that actually consumes an administrative seat needs the
+    // locked availability check below — creating a READ_ONLY (or an org's
+    // custom-trimmed) membership never touches the seat pool.
+    const willConsumeSeat = await roleRequiresAdministrativeSeat(organizationId, input.role as Role);
 
-    const existingMembership = await prisma.organizationMembership.findFirst({
-      where: {
-        organizationId,
-        userId: user.id,
-      },
-    });
+    const membership = await prisma.$transaction(async (tx) => {
+      // Locking the org row (when a seat would be consumed) also serializes
+      // this whole check-then-write against the duplicate-membership check
+      // just below, for free.
+      if (willConsumeSeat) {
+        await lockAndAssertAdminSeatAvailable(tx, organizationId);
+      }
 
-    if (existingMembership) {
-      throw new ValidationError("That user already has access to this organization.");
-    }
+      const existingMembership = await tx.organizationMembership.findFirst({
+        where: {
+          organizationId,
+          userId: user.id,
+        },
+      });
 
-    const membership = await prisma.organizationMembership.create({
-      data: {
-        organizationId,
-        userId: user.id,
-        role: input.role,
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            email: true,
-            displayName: true,
-            createdAt: true,
+      if (existingMembership) {
+        throw new ValidationError("That user already has access to this organization.");
+      }
+
+      return tx.organizationMembership.create({
+        data: {
+          organizationId,
+          userId: user.id,
+          role: input.role,
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              displayName: true,
+              createdAt: true,
+            },
           },
         },
-      },
+      });
     });
 
     await createAuditEvent({

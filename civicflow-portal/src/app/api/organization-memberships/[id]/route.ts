@@ -4,6 +4,8 @@ import { withApiErrorHandling } from "@/lib/api-route";
 import { createAuditEvent } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 import { parseJsonBody, ValidationError, z } from "@/lib/validation";
+import { lockAndAssertAdminSeatAvailable } from "@/lib/admin-seats";
+import { roleRequiresAdministrativeSeat } from "@/lib/admin-seat-policy";
 
 const updateMembershipSchema = z.object({
   role: z.enum(["ORG_OWNER", "ORG_ADMIN", "FINANCE", "STAFF", "READ_ONLY"]).optional(),
@@ -40,19 +42,34 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       throw new ValidationError("You cannot modify a member whose role is higher than your own.");
     }
 
-    const updated = await prisma.organizationMembership.update({
-      where: { id },
-      data: { role: input.role },
-      include: {
-        user: {
-          select: {
-            id: true,
-            email: true,
-            displayName: true,
-            createdAt: true,
+    // Seat-neutral in every case except an actual promotion out of a
+    // non-seat-consuming role into a seat-consuming one — a lateral move
+    // between two seat-consuming roles, or a demotion, never touches the
+    // seat pool and must not be blocked by it.
+    const [existingRequiresSeat, nextRequiresSeat] = await Promise.all([
+      roleRequiresAdministrativeSeat(organizationId, existing.role as Role),
+      roleRequiresAdministrativeSeat(organizationId, input.role as Role),
+    ]);
+    const isNewSeatConsumption = !existingRequiresSeat && nextRequiresSeat;
+
+    const updated = await prisma.$transaction(async (tx) => {
+      if (isNewSeatConsumption) {
+        await lockAndAssertAdminSeatAvailable(tx, organizationId);
+      }
+      return tx.organizationMembership.update({
+        where: { id },
+        data: { role: input.role },
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              displayName: true,
+              createdAt: true,
+            },
           },
         },
-      },
+      });
     });
 
     await createAuditEvent({
