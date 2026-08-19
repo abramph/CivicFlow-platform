@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { getPlan, type FeatureKey, type PlanId } from "@/lib/plans";
+import { getPlan, resolvePricingVertical, type FeatureKey, type PlanId, type CloudPlanId } from "@/lib/plans";
 
 export interface TrialStatus {
   isInTrial: boolean;
@@ -27,7 +27,7 @@ export async function isBillingExempt(organizationId: string): Promise<boolean> 
 export async function getOrgPlan(organizationId: string): Promise<PlanId> {
   const org = await prisma.organization.findUnique({
     where: { id: organizationId },
-    select: { plan: true, trialEndsAt: true, billingExempt: true },
+    select: { plan: true, trialEndsAt: true, billingExempt: true, primaryVertical: true },
   });
   // Internal/platform-owned organizations (see Organization.billingExempt)
   // get full-featured access with no plan limits or trial framing — they
@@ -36,9 +36,12 @@ export async function getOrgPlan(organizationId: string): Promise<PlanId> {
   // inferred from the caller's identity, role, or PlatformAccess grant.
   if (org?.billingExempt) return "elite";
   const plan = (org?.plan ?? "free") as PlanId;
-  // During active trial, org gets Essential-tier access at no charge.
+  // During active trial, the org gets full access to its OWN vertical's
+  // Cloud plan at no charge (not a hardcoded legacy tier) — a trialing PTA
+  // org should see PTA branding/features during the trial, not "Essential".
   if (plan === "free" && org?.trialEndsAt && org.trialEndsAt > new Date()) {
-    return "essential";
+    const vertical = resolvePricingVertical(org.primaryVertical ?? "COMMUNITY");
+    return `${vertical.toLowerCase()}_monthly` as CloudPlanId;
   }
   return plan;
 }

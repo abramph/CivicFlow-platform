@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
-import { getOrgPlan, isBillingExempt } from "@/lib/plan-gate";
+import { getOrgPlan, getTrialStatus, isBillingExempt } from "@/lib/plan-gate";
+import { isPaidPlan } from "@/lib/plans";
 import { findLabFeature, listLabFeatures, type LabFeatureKey, type LabLifecycle } from "./registry";
 
 export const LAB_DENIAL_CODES = [
@@ -50,16 +51,27 @@ function denied(
 /**
  * Whether an organization satisfies the conservative default entitlement
  * bar for a Labs feature that requires one: billing-exempt (internal), or
- * resolved onto the elite plan (includes an active trial only insofar as
- * getOrgPlan() itself elevates trialing free-plan orgs to essential, never
- * elite — so a trial alone is never sufficient here). This is a policy
+ * an actual paid subscription — never a trial alone.
+ *
+ * Unestra Cloud (CLOUD-D): with per-vertical pricing there is no longer a
+ * single "elite" tier to check against — getOrgPlan() now resolves a real
+ * PTA subscriber to "pta_monthly", a real Union subscriber to
+ * "union_monthly", etc., and (since CLOUD-D) a TRIALING org resolves to
+ * that same vertical-keyed plan id too, so the plan id string alone can no
+ * longer distinguish "actually paying" from "still trialing." This checks
+ * isPaidPlan() (true for every Cloud plan and the legacy essential/elite
+ * tiers) AND explicitly excludes active trials via getTrialStatus(), which
+ * preserves the original policy exactly: billing-exempt, or a real paid
+ * subscription — a trial alone is never sufficient. This is a policy
  * default for experimental/premium capabilities, not a claim made on any
  * pricing page — no Labs feature is customer-visible today. Revisit per
  * feature at real launch time (see docs/unestra-labs.md).
  */
 async function requiresElitePlanOrBillingExempt(organizationId: string): Promise<boolean> {
   if (await isBillingExempt(organizationId)) return true;
-  return (await getOrgPlan(organizationId)) === "elite";
+  const [plan, trial] = await Promise.all([getOrgPlan(organizationId), getTrialStatus(organizationId)]);
+  if (trial.isInTrial) return false;
+  return isPaidPlan(plan);
 }
 
 /**

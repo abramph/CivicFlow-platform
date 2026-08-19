@@ -3,7 +3,7 @@ import { requirePermission } from "@/lib/auth-guards";
 import { prisma } from "@/lib/prisma";
 import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { formatDate } from "@/lib/formatting";
-import { PLANS, getPlan } from "@/lib/plans";
+import { getPlan, resolvePricingVertical } from "@/lib/plans";
 import { ManageBillingButton } from "@/components/app/BillingActions";
 import { BillingPlans } from "@/components/app/BillingPlans";
 import { SmsAddOnCard } from "@/components/app/SmsAddOnCard";
@@ -22,7 +22,7 @@ export default async function BillingSettingsPage({
   const [organization, subscription, memberCheck, trial, seatCheck] = await Promise.all([
     prisma.organization.findUnique({
       where: { id: organizationId },
-      select: { id: true, name: true, plan: true, status: true, createdAt: true, billingExempt: true },
+      select: { id: true, name: true, plan: true, status: true, createdAt: true, billingExempt: true, primaryVertical: true },
     }),
     prisma.subscription.findFirst({
       where: { organizationId },
@@ -37,6 +37,8 @@ export default async function BillingSettingsPage({
   const currentPlan = getPlan(currentPlanId);
   const canManageBilling = can("billing:manage");
   const isBillingExemptOrg = organization?.billingExempt ?? false;
+  const pricingVertical = resolvePricingVertical(organization?.primaryVertical ?? "COMMUNITY");
+  const trialPlan = getPlan(`${pricingVertical.toLowerCase()}_monthly`);
 
   // Org has an active Stripe subscription — plan changes must go through the
   // billing portal, not a new checkout session.
@@ -77,7 +79,7 @@ export default async function BillingSettingsPage({
             Free trial — {trial.daysRemaining} day{trial.daysRemaining === 1 ? "" : "s"} remaining
           </p>
           <p className="mt-1 text-sm text-blue-700">
-            You have full Essential access until{" "}
+            You have full {trialPlan.name} access until{" "}
             <span className="font-medium">{formatDate(trial.trialEndsAt)}</span>.
             Subscribe before then to keep your access uninterrupted.
           </p>
@@ -87,13 +89,13 @@ export default async function BillingSettingsPage({
       <div className="grid gap-4 md:grid-cols-4">
         <StatCard
           label="Current Plan"
-          value={isBillingExemptOrg ? "Internal (exempt)" : trial.isInTrial ? "Essential (trial)" : currentPlan.name}
+          value={isBillingExemptOrg ? "Internal (exempt)" : trial.isInTrial ? `${trialPlan.name} (trial)` : currentPlan.name}
           helper={isBillingExemptOrg ? "Not a paying customer" : trial.isInTrial ? `Trial ends ${formatDate(trial.trialEndsAt)}` : currentPlan.description}
         />
         <StatCard
           label="Members"
-          value={`${memberCheck.current}${memberCheck.limit === Infinity ? "" : ` / ${memberCheck.limit}`}`}
-          helper={memberCheck.limit === Infinity ? "Unlimited" : `${memberCheck.limit - memberCheck.current} slots remaining`}
+          value={`${memberCheck.current}`}
+          helper="Unlimited — every Unestra Cloud plan includes unlimited members"
         />
         <StatCard
           label="Portal Users (Seats)"
@@ -109,34 +111,30 @@ export default async function BillingSettingsPage({
 
       {/* Current plan features */}
       <SectionCard
-        title={`${trial.isInTrial ? "Essential (trial)" : currentPlan.name} — What's included`}
-        description={trial.isInTrial ? PLANS.essential.description : currentPlan.description}
+        title={`${trial.isInTrial ? `${trialPlan.name} (trial)` : currentPlan.name} — What's included`}
+        description={trial.isInTrial ? trialPlan.description : currentPlan.description}
       >
         <ul className="mt-2 space-y-2">
-          {(trial.isInTrial ? PLANS.essential : currentPlan).highlights.map((item) => (
+          {(trial.isInTrial ? trialPlan : currentPlan).highlights.map((item) => (
             <li key={item} className="flex items-center gap-2 text-sm text-slate-700">
               <span className="text-emerald-600">✓</span> {item}
             </li>
           ))}
         </ul>
-        {currentPlan.limits.members !== Infinity && !memberCheck.allowed ? (
-          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            You have reached your member limit ({memberCheck.current}/{memberCheck.limit}). Upgrade to add more members.
-          </div>
-        ) : null}
       </SectionCard>
 
       {/* Plan comparison & actions — omitted entirely for a billing-exempt organization; there is nothing to buy or upgrade. */}
       {!isBillingExemptOrg ? (
         <SectionCard
-          title="Plans"
+          title="Plan"
           description={
             hasActiveSubscription
-              ? "Use the billing portal below to change or cancel your plan."
-              : "Choose a plan and billing cycle. Changes take effect immediately after payment."
+              ? "Use the billing portal below to change your billing interval or cancel."
+              : "Choose your billing interval. Changes take effect immediately after payment."
           }
         >
           <BillingPlans
+            vertical={pricingVertical}
             currentPlanId={currentPlanId}
             isInTrial={trial.isInTrial}
             hasActiveSubscription={hasActiveSubscription}
