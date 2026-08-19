@@ -163,6 +163,28 @@ describe("checkMemberLimit / checkSeatLimit — billing-exempt organizations get
   });
 });
 
+describe("checkMemberLimit / requireMemberSlot — CLOUD-C: unlimited members is universal", () => {
+  it("checkMemberLimit is unlimited even for an ordinary, non-exempt org on the free plan", async () => {
+    orgMemberCount.mockResolvedValueOnce(50_000);
+    const { checkMemberLimit } = await import("../plan-gate");
+    const result = await checkMemberLimit("ordinary-org");
+    expect(result).toEqual({ allowed: true, current: 50_000, limit: Infinity });
+  });
+
+  it("checkMemberLimit is unlimited even for an ordinary org on a legacy paid plan", async () => {
+    orgMemberCount.mockResolvedValueOnce(50_000);
+    const { checkMemberLimit } = await import("../plan-gate");
+    const result = await checkMemberLimit("ordinary-org", "essential");
+    expect(result).toEqual({ allowed: true, current: 50_000, limit: Infinity });
+  });
+
+  it("requireMemberSlot never throws, regardless of member count — it no longer queries the DB at all", async () => {
+    const { requireMemberSlot } = await import("../plan-gate");
+    await expect(requireMemberSlot("any-org")).resolves.toBeUndefined();
+    expect(orgMemberCount).not.toHaveBeenCalled();
+  });
+});
+
 describe("checkSeatLimit — only counts staff-role seats, never constituent MEMBER-role rows", () => {
   it("queries organizationMembership.count with a role filter that excludes MEMBER", async () => {
     findUnique.mockResolvedValueOnce({ plan: "essential", trialEndsAt: null, billingExempt: false, seatLimit: null });
@@ -211,7 +233,8 @@ describe("getOrganizationEntitlements — consolidated snapshot", () => {
     expect(entitlements.planName).toBe("Essential (legacy)");
     expect(entitlements.billingExempt).toBe(false);
     expect(entitlements.trial.isInTrial).toBe(false);
-    expect(entitlements.members).toEqual({ allowed: true, current: 10, limit: 500 });
+    // CLOUD-C: unlimited ordinary members is universal, not a plan feature.
+    expect(entitlements.members).toEqual({ allowed: true, current: 10, limit: Infinity });
     expect(entitlements.seats).toEqual({ allowed: true, current: 2, limit: 3 });
     expect(entitlements.features).toEqual({
       emailCampaigns: true,
