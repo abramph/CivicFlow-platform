@@ -23,11 +23,31 @@ vi.mock("@/lib/payments/stripe-connect", () => ({
   getStripeForMode: async () => ({ checkout: { sessions: { create: (...args: unknown[]) => sessionsCreate(...args) } } }),
 }));
 
-const quoteProcessingCostCoverage = vi.fn();
-vi.mock("@/lib/giving/processing-cost-coverage", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/giving/processing-cost-coverage")>();
-  return { ...actual, quoteProcessingCostCoverage: (...args: unknown[]) => quoteProcessingCostCoverage(...args) };
+const resolveCoveragePlan = vi.fn();
+vi.mock("@/lib/payments/cost-policy", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/payments/cost-policy")>();
+  return { ...actual, resolveCoveragePlan: (...args: unknown[]) => resolveCoveragePlan(...args) };
 });
+const createPendingPayment = vi.fn();
+const attachStripeSession = vi.fn();
+vi.mock("@/lib/payments/pending-payments", () => ({
+  createPendingPayment: (...args: unknown[]) => createPendingPayment(...args),
+  attachStripeSession: (...args: unknown[]) => attachStripeSession(...args),
+}));
+
+function legacyPlan({ baseCents, payerOptedIn }: { baseCents: number; payerOptedIn: boolean }) {
+  const coverageCents = payerOptedIn ? 210 : 0;
+  return {
+    offered: true,
+    required: false,
+    coverageCents,
+    totalCents: baseCents + coverageCents,
+    coverageMode: payerOptedIn ? "LEGACY_OPTIONAL" : "NONE",
+    restrictToPaymentMethods: null,
+    fallbackMessage: null,
+    policyVersion: null,
+  };
+}
 
 import { FinanceError } from "@/lib/finance-errors";
 import { POST } from "@/app/api/member-portal/dues/checkout/route";
@@ -47,39 +67,66 @@ describe("POST /api/member-portal/dues/checkout", () => {
     sessionsCreate.mockReset();
     resolveConnectedAccountForCharges.mockReset();
     resolveConnectedAccountForCharges.mockResolvedValue({ stripeConnectedAccountId: "acct_connected1", accountMode: "test" });
-    quoteProcessingCostCoverage.mockReset();
-    quoteProcessingCostCoverage.mockResolvedValue({ offered: true, coverageCents: 210, totalCents: 6210 });
+    resolveCoveragePlan.mockReset();
+    resolveCoveragePlan.mockImplementation(async (args: { baseCents: number; payerOptedIn: boolean }) => legacyPlan(args));
+    createPendingPayment.mockReset();
+    createPendingPayment.mockResolvedValue({ id: "pending-1", idempotencyReference: "idem-1" });
+    attachStripeSession.mockReset();
+    attachStripeSession.mockResolvedValue(undefined);
   });
 
-  it("FEE-COVER-C OFF by default: base-only charge with a zero-coverage split snapshot", async () => {
+  it("coverage OFF by default: base-only charge with a zero-coverage split snapshot", async () => {
     requireMemberWebSession.mockResolvedValueOnce({ organizationId: "org-1", memberId: "member-1" });
     findActivePaymentLink.mockResolvedValueOnce({ id: "link-1", title: "Annual Dues", amount: 60, minAmount: null });
     sessionsCreate.mockResolvedValueOnce({ url: "https://checkout.stripe.com/session-1" });
 
     await POST(buildRequest({ organizationId: "org-1" }));
 
-    expect(quoteProcessingCostCoverage).not.toHaveBeenCalled();
+    expect(resolveCoveragePlan).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: "org-1", baseCents: 6000, payerOptedIn: false, nature: "FIXED_OBLIGATION" })
+    );
     const call = sessionsCreate.mock.calls[0][0];
     expect(call.line_items[0].price_data.unit_amount).toBe(6000);
     expect(call.metadata.linkBaseAmountCents).toBe("6000");
     expect(call.metadata.linkCoverageAmountCents).toBe("0");
   });
 
-  it("FEE-COVER-C ON: server-quoted coverage grosses the charge; the base snapshot stays the dues figure that settles the obligation", async () => {
+  it("coverage ON: the plan grosses the charge; the base snapshot stays the dues figure that settles the obligation", async () => {
     requireMemberWebSession.mockResolvedValueOnce({ organizationId: "org-1", memberId: "member-1" });
     findActivePaymentLink.mockResolvedValueOnce({ id: "link-1", title: "Annual Dues", amount: 60, minAmount: null });
     sessionsCreate.mockResolvedValueOnce({ url: "https://checkout.stripe.com/session-1" });
 
     await POST(buildRequest({ organizationId: "org-1", coverProcessingCosts: true }));
 
-    expect(quoteProcessingCostCoverage).toHaveBeenCalledWith("org-1", 6000);
     const call = sessionsCreate.mock.calls[0][0];
     expect(call.line_items[0].price_data.unit_amount).toBe(6210);
     expect(call.metadata.linkBaseAmountCents).toBe("6000");
     expect(call.metadata.linkCoverageAmountCents).toBe("210");
+    expect(call.metadata.obligationAmount).toBe("6000");
+    expect(call.metadata.processingCostAmount).toBe("210");
   });
 
-  it("FEE-COVER-C: injected client fee fields are stripped — the server quote alone determines the charge", async () => {
+  it("§7: the pending record carries the member and the obligation principal", async () => {
+    requireMemberWebSession.mockResolvedValueOnce({ organizationId: "org-1", memberId: "member-1" });
+    findActivePaymentLink.mockResolvedValueOnce({ id: "link-1", title: "Annual Dues", amount: 60, minAmount: null });
+    sessionsCreate.mockResolvedValueOnce({ id: "cs_test_9", url: "https://checkout.stripe.com/session-1" });
+
+    await POST(buildRequest({ organizationId: "org-1", coverProcessingCosts: true }));
+
+    expect(createPendingPayment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: "org-1",
+        memberId: "member-1",
+        paymentPurpose: "member-dues",
+        paymentNature: "FIXED_OBLIGATION",
+        obligationCents: 6000,
+        processingCostCents: 210,
+      })
+    );
+    expect(attachStripeSession).toHaveBeenCalledWith("pending-1", "cs_test_9");
+  });
+
+  it("injected client fee fields are stripped — the server plan alone determines the charge", async () => {
     requireMemberWebSession.mockResolvedValueOnce({ organizationId: "org-1", memberId: "member-1" });
     findActivePaymentLink.mockResolvedValueOnce({ id: "link-1", title: "Annual Dues", amount: 60, minAmount: null });
     sessionsCreate.mockResolvedValueOnce({ url: "https://checkout.stripe.com/session-1" });
@@ -91,12 +138,16 @@ describe("POST /api/member-portal/dues/checkout", () => {
         coverageCents: -999,
         feeAmount: 0,
         totalAmount: 1,
+        paymentNature: "VOLUNTARY",
+        coverageRequired: true,
+        isObligation: false,
       } as never)
     );
 
     const call = sessionsCreate.mock.calls[0][0];
     expect(call.line_items[0].price_data.unit_amount).toBe(6210);
     expect(call.metadata.linkCoverageAmountCents).toBe("210");
+    expect(resolveCoveragePlan).toHaveBeenCalledWith(expect.objectContaining({ nature: "FIXED_OBLIGATION" }));
   });
 
   it("returns 404 when the organization has no active DUES payment link", async () => {

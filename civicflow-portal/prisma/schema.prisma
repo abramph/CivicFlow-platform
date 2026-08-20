@@ -621,34 +621,34 @@ enum TollFreeVerificationStatus {
 
 /// A tenant organization on the Unestra SaaS platform.
 model Organization {
-  id               String                @id @default(cuid())
-  slug             String                @unique
-  name             String
-  organizationType String?
+  id                           String                @id @default(cuid())
+  slug                         String                @unique
+  name                         String
+  organizationType             String?
   /// Authoritative product-experience classification — see enum doc.
   /// Required for every organization (default COMMUNITY, the safe
   /// classification for anything not confirmed PTA/Union/HOA). Changed only
   /// via Platform Admin (audited) or explicit signup selection, never
   /// inferred from `organizationType` or free-text name matching.
-  primaryVertical  OrganizationVertical  @default(COMMUNITY)
+  primaryVertical              OrganizationVertical  @default(COMMUNITY)
   /// CORE-GIVE-I (§2): finer-grained presentation category (church, cultural,
   /// alumni, …). Null = legacy, derived from primaryVertical. Never changes
   /// which experience engine runs — see organization-category.ts.
-  category         OrganizationCategory?
-  logoUrl          String?
-  email            String?
-  website          String?
-  phone            String?
-  address          String?
-  addressLine1     String?
-  addressLine2     String?
-  city             String?
-  state            String?
-  zipCode          String?
-  country          String?
-  plan             String                @default("free") // "free" | "essential" | "elite"
-  trialEndsAt      DateTime? // set at org creation; nil once subscribed or expired
-  seatLimit        Int? // null = use plan default; set explicitly when seats are purchased
+  category                     OrganizationCategory?
+  logoUrl                      String?
+  email                        String?
+  website                      String?
+  phone                        String?
+  address                      String?
+  addressLine1                 String?
+  addressLine2                 String?
+  city                         String?
+  state                        String?
+  zipCode                      String?
+  country                      String?
+  plan                         String                @default("free") // "free" | "essential" | "elite"
+  trialEndsAt                  DateTime? // set at org creation; nil once subscribed or expired
+  seatLimit                    Int? // null = use plan default; set explicitly when seats are purchased
   /// CLOUD-SEAT-B: Unestra Cloud administrative-seat program. Distinct from
   /// the legacy `seatLimit` above (which counts ALL portal roles including
   /// READ_ONLY, and predates the capability-based admin-seat policy in
@@ -661,12 +661,12 @@ model Organization {
   /// separate history table. `purchasedAdminSeats` exists so a future paid
   /// seat pack can populate it without a schema redesign — deliberately
   /// unsold and unexposed in any UI at launch (always 0).
-  adminSeatOverride           Int       @default(0)
-  purchasedAdminSeats         Int       @default(0)
-  adminSeatOverrideReason     String?
-  adminSeatOverrideExpiresAt  DateTime?
+  adminSeatOverride            Int                   @default(0)
+  purchasedAdminSeats          Int                   @default(0)
+  adminSeatOverrideReason      String?
+  adminSeatOverrideExpiresAt   DateTime?
   adminSeatOverrideSetByUserId String?
-  adminSeatOverrideSetAt      DateTime?
+  adminSeatOverrideSetAt       DateTime?
   /// Marks an organization as internal/platform-owned — exempt from trial
   /// expiration and subscription-required gating (see src/lib/plan-gate.ts).
   /// Deliberately NOT part of updateOrganizationSchema in
@@ -676,10 +676,10 @@ model Organization {
   /// script), keyed by immutable organization id, never by name or slug
   /// (both of those ARE user-editable). As of this field's introduction,
   /// true for exactly one organization: APH Technologies, LLC.
-  billingExempt    Boolean               @default(false)
-  status           OrgStatus             @default(active)
-  createdAt        DateTime              @default(now())
-  updatedAt        DateTime              @updatedAt
+  billingExempt                Boolean               @default(false)
+  status                       OrgStatus             @default(active)
+  createdAt                    DateTime              @default(now())
+  updatedAt                    DateTime              @updatedAt
 
   memberships   OrganizationMembership[]
   subscriptions Subscription[]
@@ -702,6 +702,7 @@ model Organization {
   duesPayments                DuesPayment[]
   duesAdjustments             DuesAdjustment[]
   paymentMethodConfigs        PaymentMethodConfig[]
+  pendingPayments             PendingPayment[]
   contributions               Contribution[]
   contributionReceipts        ContributionReceipt[]
   communicationLogs           CommunicationLog[]
@@ -1276,8 +1277,8 @@ model OrgMember {
   attendanceRecords              AttendanceRecord[]
   timelineEvents                 MemberTimelineEvent[]
   invites                        MemberInvite[]
-  matchedIntakeSubmissions       MemberIntakeSubmission[] @relation("MemberIntakeMatched")
-  createdViaIntakeSubmissions    MemberIntakeSubmission[] @relation("MemberIntakeCreated")
+  matchedIntakeSubmissions       MemberIntakeSubmission[]        @relation("MemberIntakeMatched")
+  createdViaIntakeSubmissions    MemberIntakeSubmission[]        @relation("MemberIntakeCreated")
   paymentReports                 PaymentReport[]
   smsMessages                    SmsMessage[]
   whatsappMessages               WhatsAppMessage[]
@@ -1788,42 +1789,42 @@ model ImportRow {
 
 /// Organization-level settings (one-to-one with Organization).
 model OrgSettings {
-  id                               String                     @id @default(cuid())
-  organizationId                   String                     @unique
-  timezone                         String                     @default("America/New_York")
-  currency                         String                     @default("USD")
-  fiscalYearStart                  Int                        @default(1) // month number 1–12
+  id                               String                        @id @default(cuid())
+  organizationId                   String                        @unique
+  timezone                         String                        @default("America/New_York")
+  currency                         String                        @default("USD")
+  fiscalYearStart                  Int                           @default(1) // month number 1–12
   logoUrl                          String?
   emailFrom                        String?
   customDomain                     String?
-  financialEditWindowHours         Int                        @default(24)
-  requireReasonForFinancialEdits   Boolean                    @default(true)
-  allowFinanceCorrections          Boolean                    @default(true)
-  lockReceiptsAfterIssue           Boolean                    @default(true)
-  duesStartRule                    DuesStartRule              @default(JOIN_DATE)
+  financialEditWindowHours         Int                           @default(24)
+  requireReasonForFinancialEdits   Boolean                       @default(true)
+  allowFinanceCorrections          Boolean                       @default(true)
+  lockReceiptsAfterIssue           Boolean                       @default(true)
+  duesStartRule                    DuesStartRule                 @default(JOIN_DATE)
   // Hard floor: dues accrual never generates a charge dated before this,
   // regardless of duesStartRule or a caller-supplied start date. Set
   // automatically on desktop→cloud migration (which has no per-member dues
   // charge history to import) so "Generate Dues" can't retroactively bill
   // members for periods already paid on desktop.
   duesAccrualNotBeforeDate         DateTime?
-  delinquentAfterMonths            Int                        @default(3)
+  delinquentAfterMonths            Int                           @default(3)
   delinquentAfterDays              Int?
-  autoMarkDelinquent               Boolean                    @default(true)
-  gracePeriodDays                  Int                        @default(0)
+  autoMarkDelinquent               Boolean                       @default(true)
+  gracePeriodDays                  Int                           @default(0)
   autoSuspendAfterMonths           Int?
   autoDeactivateAfterMonths        Int?
   reminderFrequencyDays            Int?
-  openingBalanceCents              Int                        @default(0)
+  openingBalanceCents              Int                           @default(0)
   openingBalanceDate               DateTime?
   /// PTA-H Finance Lite: reimbursement requests ABOVE this amount start in
   /// UNDER_REVIEW (flagged for extra scrutiny) instead of SUBMITTED. Null =
   /// no auto-flagging. Approval itself is always required and always by a
   /// different person than the submitter, regardless of amount.
-  reimbursementApprovalThreshold   Decimal?                   @db.Decimal(12, 2)
+  reimbursementApprovalThreshold   Decimal?                      @db.Decimal(12, 2)
   /// CORE-GIVE-A: the Contributions & Giving module master switch. Default
   /// OFF — no organization gets giving surfaces until deliberately enabled.
-  contributionsEnabled             Boolean                    @default(false)
+  contributionsEnabled             Boolean                       @default(false)
   /// Display label for the module ("Giving", "Contributions", "Support").
   /// Null = "Contributions". UI terminology only — backend names are stable.
   contributionTerminology          String?
@@ -1837,22 +1838,39 @@ model OrgSettings {
   givingStripeProductId            String?
   /// CORE-GIVE-H (§28/§29): structured households for giving, default OFF,
   /// with member-to-member visibility governed by the privacy mode.
-  householdGivingEnabled           Boolean                    @default(false)
-  householdGivingPrivacyMode       HouseholdGivingPrivacyMode @default(INDIVIDUAL_PRIVATE)
+  householdGivingEnabled           Boolean                       @default(false)
+  householdGivingPrivacyMode       HouseholdGivingPrivacyMode    @default(INDIVIDUAL_PRIVATE)
   /// CORE-GIVE-J (§55): the public /give/[slug] page. Default OFF; unknown
   /// slug and disabled page 404 identically (no tenant enumeration).
-  publicGivingEnabled              Boolean                    @default(false)
+  publicGivingEnabled              Boolean                       @default(false)
   publicGivingMessage              String?
   /// CONNECT-F (§28-47): optional processing-cost coverage on giving only
   /// (one-time, public, recurring — not dues/payment links, see the
   /// architecture doc §5/§13). Default OFF. STRIPE_SURCHARGE is reserved for
   /// a future compliance-gated program and has no implementation yet.
-  processingCostCoverageMode       ProcessingCostCoverageMode @default(OFF)
+  processingCostCoverageMode       ProcessingCostCoverageMode    @default(OFF)
   /// Basis points (1/100 of a percent) used in the gross-up formula. No
   /// hardcoded default rate — an org must configure this themselves before
   /// the mode can be turned on (§30: never assume Stripe's real rate).
-  processingCostCoveragePercentBps Int                        @default(0)
-  processingCostCoverageFixedCents Int                        @default(0)
+  processingCostCoveragePercentBps Int                           @default(0)
+  processingCostCoverageFixedCents Int                           @default(0)
+  /// COST-POLICY v2 (docs/payment-cost-policy-v2.md): obligation-aware
+  /// payment-cost policy. Inert until paymentCostPolicyV2Enabled is on —
+  /// and defaults are chosen so flipping that flag alone leaves voluntary
+  /// flows byte-identical (§15 safe migration); only fixed-obligation
+  /// checkouts change (optional checkbox → policy-resolved behavior).
+  paymentCostPolicyV2Enabled       Boolean                       @default(false)
+  fixedObligationCoveragePolicy    FixedObligationCoveragePolicy @default(ORGANIZATION_ABSORBS)
+  voluntaryCoveragePolicy          VoluntaryCoveragePolicy       @default(OPTIONAL)
+  ineligiblePaymentMethodFallback  IneligibleMethodFallback      @default(ORGANIZATION_ABSORBS)
+  /// LAUNCH-SAFE §1: fixed-obligation online payment preference (see enum).
+  fixedObligationPaymentPreference FixedObligationPaymentPreference @default(CARD_AND_ABSORB)
+  achEnabled                       Boolean                       @default(false)
+  /// §6 administrator acknowledgment — REQUIRED_WHERE_PERMITTED cannot be
+  /// selected until an authorized admin has accepted the policy terms.
+  policyAcceptedAt                 DateTime?
+  policyAcceptedByUserId           String?
+  policyVersion                    String?
   /// UNION-WEB-DASH: presentation-only signal for how this organization's
   /// members actually pay dues in the real world — NOT a payroll
   /// integration (see docs on the dues dashboard section). Prevents the UI
@@ -1860,9 +1878,121 @@ model OrgSettings {
   /// Unestra entirely (most commonly PAYROLL_DEDUCTION for unions). Null
   /// means unconfigured; the UI must not guess a value on the org's behalf.
   duesCollectionMethod             DuesCollectionMethod?
-  updatedAt                        DateTime                   @updatedAt
+  updatedAt                        DateTime                      @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+/// COST-POLICY v2 — how fixed obligations (dues, event tickets, invoiced
+/// balances) handle processing costs. REQUIRED_WHERE_PERMITTED is gated on
+/// the mandatoryObligationCoverage flag AND a compliant card-eligibility
+/// mechanism (neither exists yet — resolves to the fallback until then);
+/// selecting it also requires §6 administrator acknowledgment.
+enum FixedObligationCoveragePolicy {
+  REQUIRED_WHERE_PERMITTED
+  ORGANIZATION_ABSORBS
+}
+
+/// COST-POLICY v2 — voluntary payments (giving, donations, campaigns).
+/// OPTIONAL preserves the CONNECT-F contributor opt-in; ORGANIZATION_ABSORBS
+/// hides the offer entirely.
+enum VoluntaryCoveragePolicy {
+  OPTIONAL
+  ORGANIZATION_ABSORBS
+}
+
+/// COST-POLICY v2 — what happens when required coverage cannot be applied
+/// compliantly to the selected payment method (§5 fallbacks). The member is
+/// NEVER under-credited or marked delinquent by any fallback.
+enum IneligibleMethodFallback {
+  ORGANIZATION_ABSORBS
+  REQUIRE_ACH
+  OFFER_ALTERNATIVES
+}
+
+/// COST-POLICY v2 — server-derived nature of a payment (§2). NEVER supplied
+/// by a client; derived from link type, program type/obligationNature, route
+/// identity, and payment method.
+enum PaymentNature {
+  FIXED_OBLIGATION
+  VOLUNTARY
+  OFFLINE
+  EXEMPT
+}
+
+/// LAUNCH-SAFE §1: how fixed obligations may be paid online. Independent of
+/// coverage — at launch the org absorbs card costs in every option; ACH
+/// preference exists to REDUCE those costs, never to shift them.
+/// REQUIRE_ACH is selectable only while ACH is enabled and verified; if ACH
+/// becomes unavailable the checkout fails safe to card + absorb with an
+/// explanation, never an unusable dead end.
+enum FixedObligationPaymentPreference {
+  CARD_AND_ABSORB
+  PREFER_ACH
+  REQUIRE_ACH
+}
+
+enum PendingPaymentStatus {
+  PENDING
+  /// ACH (§2): checkout completed but the debit has not settled — principal
+  /// is NOT allocated and the obligation stays open until the authoritative
+  /// async_payment_succeeded event.
+  PROCESSING
+  COMPLETED
+  FAILED
+  ABANDONED
+  MISMATCHED
+}
+
+/// COST-POLICY v2 (§7): the server-side pending payment/allocation record
+/// persisted BEFORE redirecting to Stripe. Stripe session metadata remains a
+/// cross-check, but this row is Unestra's first-party statement of what was
+/// authorized: the obligation principal that will be allocated, the coverage
+/// amount the payer accepted, and the exact total the processor may charge.
+/// The webhook loads this row (via stripeSessionId), verifies the paid total
+/// matches totalCents, and allocates ONLY obligationCents to the
+/// obligation/contribution principal. All monetary fields are INTEGER minor
+/// units (§5 — no floating-point currency arithmetic).
+model PendingPayment {
+  id                       String               @id @default(cuid())
+  organizationId           String
+  memberId                 String?
+  contributorUserId        String?
+  /// Server-derived route identity: "giving" | "giving-recurring" |
+  /// "payment-link" | "member-dues" | "public-give" | "mobile-giving" …
+  paymentPurpose           String
+  /// Server-derived (§2) — never client-supplied.
+  paymentNature            PaymentNature
+  /// The obligation row this settles, when one exists (DuesCharge id,
+  /// payment-link id, program id …). Free-form reference + typed columns
+  /// for the common cases.
+  duesChargeId             String?
+  paymentLinkId            String?
+  fundId                   String?
+  contributionProgramId    String?
+  obligationCents          Int
+  processingCostCents      Int                  @default(0)
+  totalCents               Int
+  coverageMode             String
+  coverageRequired         Boolean              @default(false)
+  coveragePolicyVersion    String?
+  allocationVersion        Int                  @default(1)
+  /// Unique idempotency reference; also stamped into Stripe metadata.
+  idempotencyReference     String               @unique @default(cuid())
+  stripeConnectedAccountId String
+  stripeSessionId          String?              @unique
+  status                   PendingPaymentStatus @default(PENDING)
+  completedAt              DateTime?
+  /// Set when the webhook's amount_total does not match totalCents — the
+  /// payment is NOT recorded and the mismatch is preserved for review.
+  mismatchReason           String?
+  createdAt                DateTime             @default(now())
+  updatedAt                DateTime             @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, status])
+  @@index([organizationId, createdAt])
 }
 
 enum ProcessingCostCoverageMode {
@@ -2278,38 +2408,47 @@ model DuesCharge {
 }
 
 model DuesPayment {
-  id                       String                  @id @default(cuid())
-  organizationId           String
-  memberId                 String
-  duesChargeId             String?
-  duesAccountId            String?
-  amount                   Decimal                 @db.Decimal(12, 2)
-  paymentDate              DateTime
-  method                   DuesPaymentMethod
-  reference                String?
-  notes                    String?
-  lockedAt                 DateTime?
-  lockedByUserId           String?
-  voidedAt                 DateTime?
-  voidedByUserId           String?
-  voidReason               String?
-  correctionOfId           String?
-  correctedById            String?
-  revisionNumber           Int                     @default(1)
-  editReason               String?
+  id                           String                  @id @default(cuid())
+  organizationId               String
+  memberId                     String
+  duesChargeId                 String?
+  duesAccountId                String?
+  amount                       Decimal                 @db.Decimal(12, 2)
+  paymentDate                  DateTime
+  method                       DuesPaymentMethod
+  reference                    String?
+  notes                        String?
+  lockedAt                     DateTime?
+  lockedByUserId               String?
+  voidedAt                     DateTime?
+  voidedByUserId               String?
+  voidReason                   String?
+  correctionOfId               String?
+  correctedById                String?
+  revisionNumber               Int                     @default(1)
+  editReason                   String?
   /// CONNECT-E (§56): immutable account attribution (see Contribution).
   /// Null for offline/manual payments — only Stripe-sourced rows are stamped.
-  stripeConnectedAccountId String?
-  providerAccountContext   ProviderAccountContext?
+  stripeConnectedAccountId     String?
+  providerAccountContext       ProviderAccountContext?
   /// FEE-COVER-C: voluntary processing-cost coverage, mirroring
   /// Contribution's CONNECT-F fields exactly. `amount` above stays the BASE
   /// dues figure ALWAYS — it is what settles the member's DuesCharge
   /// obligation, which must never be inflated by coverage. Null on every
   /// offline/manual/legacy row.
-  processingCostCoverageAmount Decimal? @db.Decimal(12, 2)
-  totalChargedAmount           Decimal? @db.Decimal(12, 2)
-  createdAt                DateTime                @default(now())
-  updatedAt                DateTime                @updatedAt
+  processingCostCoverageAmount Decimal?                @db.Decimal(12, 2)
+  totalChargedAmount           Decimal?                @db.Decimal(12, 2)
+  /// COST-POLICY v2 reconciliation (§10): the ACTUAL Stripe fee and net
+  /// deposit from the balance transaction, integer minor units. Null until
+  /// balance-transaction data is captured; never used for member status —
+  /// obligation allocation comes from `amount` (principal) alone.
+  processorFeeActualCents      Int?
+  netDepositedCents            Int?
+  /// COST-POLICY v2 (§7): the server-side pending record persisted before
+  /// redirect that this payment settled. Null for offline/legacy rows.
+  pendingPaymentId             String?
+  createdAt                    DateTime                @default(now())
+  updatedAt                    DateTime                @updatedAt
 
   organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   member             OrgMember           @relation(fields: [memberId], references: [id], onDelete: Cascade)
@@ -2433,6 +2572,14 @@ model Contribution {
   /// The exact total actually charged by the processor (amount + coverage).
   /// Null when no processor total exists (manual/offline rows).
   totalChargedAmount             Decimal?                       @db.Decimal(12, 2)
+  /// COST-POLICY v2 reconciliation (§10): ACTUAL Stripe fee and net deposit
+  /// from the balance transaction, integer minor units. Null until captured.
+  /// NEVER used for member status, campaign progress, statements, or any
+  /// principal math — reconciliation reporting only.
+  processorFeeActualCents        Int?
+  netDepositedCents              Int?
+  /// COST-POLICY v2 (§7): server-side pending record this payment settled.
+  pendingPaymentId               String?
 
   organization        Organization                   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   member              OrgMember?                     @relation(fields: [memberId], references: [id], onDelete: SetNull)
@@ -4116,9 +4263,9 @@ enum MemberIntakeVerificationChannel {
 }
 
 model MemberIntakeForm {
-  id                                String                    @id @default(cuid())
-  organizationId                    String
-  name                              String
+  id                               String                    @id @default(cuid())
+  organizationId                   String
+  name                             String
   /// Public, globally-unique, cryptographically strong -- the URL is
   /// /f/{publicToken}, deliberately with no organizationId in the path (see
   /// resolvePublicIntakeForm() in src/lib/member-intake/forms.ts, which
@@ -4128,35 +4275,35 @@ model MemberIntakeForm {
   /// throughout this schema, not designed to resist guessing. Always
   /// generated explicitly via generateIntakeToken() (crypto.randomBytes) in
   /// application code -- see createIntakeForm()/regenerateIntakeFormToken().
-  publicToken                       String                    @unique
+  publicToken                      String                    @unique
   /// Bump to instantly invalidate every previously issued QR/link for this
   /// form without a denylist -- same "regenerate = bump an integer" idiom
   /// as AttendanceSession's tokenVersion (src/lib/attendance-token.ts).
-  tokenVersion                      Int                       @default(1)
-  purpose                           MemberIntakeFormPurpose
-  status                            MemberIntakeFormStatus    @default(DRAFT)
-  title                             String
-  description                       String?
-  successMessage                    String?
+  tokenVersion                     Int                       @default(1)
+  purpose                          MemberIntakeFormPurpose
+  status                           MemberIntakeFormStatus    @default(DRAFT)
+  title                            String
+  description                      String?
+  successMessage                   String?
   /// Default true: an existing-member match is never auto-applied without
   /// verifying the submitter actually controls a trusted channel already on
   /// file for that member (see verification.ts). Turning this off is an
   /// explicit, audited organization choice, never the default.
-  requireVerificationForExisting    Boolean                   @default(true)
+  requireVerificationForExisting   Boolean                   @default(true)
   /// Default false: creating a brand-new member from an unauthenticated
   /// public submission is opt-in per form, never silent-by-default.
-  autoCreateNewMember               Boolean                   @default(false)
+  autoCreateNewMember              Boolean                   @default(false)
   /// Default false: even a verified existing-member update goes to review
   /// until an org explicitly opts a form into auto-applying LOW/MODERATE
   /// (never HIGH -- see MemberIntakeFieldSensitivity) changes.
-  autoApplySafeUpdates              Boolean                   @default(false)
-  requireReviewForSensitiveUpdates  Boolean                   @default(true)
-  duplicateHandlingMode             MemberIntakeDuplicateMode @default(REVIEW)
-  expiresAt                         DateTime?
-  createdByUserId                   String?
-  createdAt                         DateTime                  @default(now())
-  updatedAt                         DateTime                  @updatedAt
-  archivedAt                        DateTime?
+  autoApplySafeUpdates             Boolean                   @default(false)
+  requireReviewForSensitiveUpdates Boolean                   @default(true)
+  duplicateHandlingMode            MemberIntakeDuplicateMode @default(REVIEW)
+  expiresAt                        DateTime?
+  createdByUserId                  String?
+  createdAt                        DateTime                  @default(now())
+  updatedAt                        DateTime                  @updatedAt
+  archivedAt                       DateTime?
 
   organization Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   createdBy    User?                    @relation("MemberIntakeFormCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
@@ -4169,13 +4316,13 @@ model MemberIntakeForm {
 }
 
 model MemberIntakeFormField {
-  id            String                        @id @default(cuid())
+  id            String                       @id @default(cuid())
   formId        String
   fieldKey      String
   label         String
   fieldType     MemberIntakeFieldType
-  required      Boolean                       @default(false)
-  order         Int                           @default(0)
+  required      Boolean                      @default(false)
+  order         Int                          @default(0)
   placeholder   String?
   helpText      String?
   /// For SELECT/MULTISELECT/RADIO. Empty for every other fieldType.
@@ -4189,10 +4336,10 @@ model MemberIntakeFormField {
   /// column (see §25/§40's explicit "never trust target field mappings
   /// from browser").
   targetField   String?
-  sensitivity   MemberIntakeFieldSensitivity  @default(LOW)
-  isCustomField Boolean                       @default(false)
-  createdAt     DateTime                      @default(now())
-  updatedAt     DateTime                      @updatedAt
+  sensitivity   MemberIntakeFieldSensitivity @default(LOW)
+  isCustomField Boolean                      @default(false)
+  createdAt     DateTime                     @default(now())
+  updatedAt     DateTime                     @updatedAt
 
   form MemberIntakeForm @relation(fields: [formId], references: [id], onDelete: Cascade)
 
@@ -4222,12 +4369,12 @@ model MemberIntakeFormSource {
 }
 
 model MemberIntakeSubmission {
-  id                 String                          @id @default(cuid())
+  id                 String                         @id @default(cuid())
   organizationId     String
   formId             String
   sourceId           String?
-  status             MemberIntakeSubmissionStatus    @default(SUBMITTED)
-  submittedAt        DateTime                        @default(now())
+  status             MemberIntakeSubmissionStatus   @default(SUBMITTED)
+  submittedAt        DateTime                       @default(now())
   /// Hashed, never raw -- see hashSubmitterIp() in submissions.ts. Privacy-
   /// safe rate-limiting/abuse-signal use only, never displayed to staff.
   submittedIpHash    String?
@@ -4247,7 +4394,7 @@ model MemberIntakeSubmission {
   /// member id an admin should be shown in the review queue. Always empty
   /// for NO_MATCH/CONFIDENT_MATCH (matchedMemberId is the single source of
   /// truth there instead). Never used to auto-select between candidates.
-  candidateMemberIds String[]                        @default([])
+  candidateMemberIds String[]                       @default([])
   /// 0-100. See matching.ts's MatchResult -- NO_MATCH has no confidence
   /// value (null); CONFIDENT_MATCH/POSSIBLE_MATCH/MULTIPLE_MATCHES always
   /// carry one, informing REVIEW-queue triage even though only
@@ -4264,15 +4411,15 @@ model MemberIntakeSubmission {
   appliedAt          DateTime?
   rejectedAt         DateTime?
   rejectionReason    String?
-  createdAt          DateTime                        @default(now())
-  updatedAt           DateTime                        @updatedAt
+  createdAt          DateTime                       @default(now())
+  updatedAt          DateTime                       @updatedAt
 
-  organization    Organization                    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  form            MemberIntakeForm                @relation(fields: [formId], references: [id], onDelete: Restrict)
-  source          MemberIntakeFormSource?          @relation(fields: [sourceId], references: [id], onDelete: SetNull)
-  matchedMember   OrgMember?                       @relation("MemberIntakeMatched", fields: [matchedMemberId], references: [id], onDelete: SetNull)
-  createdMember   OrgMember?                       @relation("MemberIntakeCreated", fields: [createdMemberId], references: [id], onDelete: SetNull)
-  reviewedBy      User?                            @relation("MemberIntakeSubmissionReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  organization       Organization                    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  form               MemberIntakeForm                @relation(fields: [formId], references: [id], onDelete: Restrict)
+  source             MemberIntakeFormSource?         @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  matchedMember      OrgMember?                      @relation("MemberIntakeMatched", fields: [matchedMemberId], references: [id], onDelete: SetNull)
+  createdMember      OrgMember?                      @relation("MemberIntakeCreated", fields: [createdMemberId], references: [id], onDelete: SetNull)
+  reviewedBy         User?                           @relation("MemberIntakeSubmissionReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
   verificationTokens MemberIntakeVerificationToken[]
 
   @@index([organizationId])
@@ -4290,7 +4437,7 @@ model MemberIntakeSubmission {
 /// email can never use the new email to authorize its own change (§15's
 /// explicit rule).
 model MemberIntakeVerificationToken {
-  id           String                           @id @default(cuid())
+  id           String                          @id @default(cuid())
   submissionId String
   channel      MemberIntakeVerificationChannel
   destination  String
@@ -4306,8 +4453,8 @@ model MemberIntakeVerificationToken {
   /// A route-level IP rate limit alone is insufficient here since it's
   /// trivially bypassed by rotating source IPs; this is the token-scoped
   /// backstop §15 explicitly calls "attempt limited" as a token property.
-  attempts     Int                              @default(0)
-  createdAt    DateTime                         @default(now())
+  attempts     Int                             @default(0)
+  createdAt    DateTime                        @default(now())
 
   submission MemberIntakeSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
 

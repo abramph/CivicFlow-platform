@@ -24,6 +24,22 @@ export const dynamic = "force-dynamic";
  *    webhook — Stripe event ids are globally unique regardless of which
  *    account produced them.
  */
+/**
+ * Stripe API 2025-03+ ("basil"/"dahlia") removed the top-level
+ * `invoice.subscription` string — the link now lives at
+ * `invoice.parent.subscription_details.subscription`. Events arrive in
+ * whatever API version the delivering endpoint (or the CLI) pins, so read
+ * both shapes; returning null on a subscription-billed invoice would
+ * silently skip recurring-gift recording.
+ */
+function invoiceSubscriptionId(invoice: Stripe.Invoice): string | null {
+  const legacy = (invoice as { subscription?: unknown }).subscription;
+  if (typeof legacy === "string") return legacy;
+  const parent = (invoice as { parent?: { subscription_details?: { subscription?: unknown } | null } | null }).parent;
+  const nested = parent?.subscription_details?.subscription;
+  return typeof nested === "string" ? nested : null;
+}
+
 export async function POST(request: Request) {
   const rateLimited = await requireRateLimit({
     scope: "api:webhooks:stripe-connect",
@@ -89,8 +105,24 @@ export async function POST(request: Request) {
 
   try {
     switch (event.type) {
+      // ACH (§2): us_bank_account debits settle asynchronously — Stripe
+      // fires checkout.session.completed with payment_status "unpaid",
+      // then async_payment_succeeded (or _failed) days later. The recording
+      // logic below keys on payment_status === "paid", so an ACH session
+      // records NOTHING at completion and everything at settlement — the
+      // member's obligation is allocated only by the authoritative
+      // successful-payment event.
+      case "checkout.session.async_payment_succeeded":
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
+
+        // ACH in flight: explicit Processing state on our first-party
+        // record; no allocation.
+        if (session.mode === "payment" && session.payment_status === "unpaid") {
+          const { markPendingProcessing } = await import("@/lib/payments/pending-payments");
+          await markPendingProcessing(session.id);
+          break;
+        }
 
         // §20: metadata must AGREE with the account-resolved tenant. A
         // mismatch is rejected and logged; nothing is recorded from either
@@ -106,6 +138,48 @@ export async function POST(request: Request) {
             })
           );
           break;
+        }
+
+        // COST-POLICY v2 (§10): settle Unestra's first-party pending record
+        // before ANY recording. NOT_FOUND = legacy session (metadata
+        // cross-checks below still apply, unchanged). MISMATCH = the paid
+        // total or account differs from what was authorized — record
+        // NOTHING; the reason is preserved on the PendingPayment row.
+        let settledPendingPaymentId: string | null = null;
+        if (session.mode === "payment" && session.payment_status === "paid") {
+          const { settlePendingPaymentBySession } = await import("@/lib/payments/pending-payments");
+          const settlement = await settlePendingPaymentBySession({
+            stripeSessionId: session.id,
+            paidTotalCents: session.amount_total ?? 0,
+            stripeConnectedAccountId: connectedAccountId,
+          });
+          if (settlement.outcome === "MISMATCH") {
+            console.error(
+              JSON.stringify({
+                event: "cost_policy_pending_mismatch",
+                sessionId: session.id,
+                organizationId,
+                reason: settlement.reason,
+              })
+            );
+            await createAuditEvent({
+              organizationId,
+              action: "update",
+              entityType: "stripe_webhook",
+              entityId: session.id,
+              metadata: { eventType: event.type, connected: true, outcome: "PENDING_MISMATCH", reason: settlement.reason },
+            });
+            break;
+          }
+          if (settlement.outcome !== "NOT_FOUND" && (session.currency ?? "usd") !== "usd") {
+            console.error(
+              JSON.stringify({ event: "cost_policy_currency_rejected", sessionId: session.id, organizationId, currency: session.currency })
+            );
+            break;
+          }
+          if (settlement.outcome === "SETTLED" || settlement.outcome === "ALREADY_COMPLETED") {
+            settledPendingPaymentId = settlement.record.id;
+          }
         }
 
         // CONNECT-D: setup-mode session completing a recurring payment-method
@@ -192,6 +266,17 @@ export async function POST(request: Request) {
             entityId: session.id,
             metadata: { eventType: event.type, giving: true, connected: true, outcome: result.outcome },
           });
+          if (result.outcome !== "REJECTED") {
+            const { captureActualProcessorFee } = await import("@/lib/payments/reconciliation");
+            await captureActualProcessorFee({
+              accountMode: accountRow.accountMode as "test" | "live",
+              stripeConnectedAccountId: connectedAccountId,
+              providerPaymentIntentId:
+                typeof session.payment_intent === "string" ? session.payment_intent : (session.payment_intent?.id ?? null),
+              providerSessionId: session.id,
+              pendingPaymentId: settledPendingPaymentId,
+            });
+          }
           break;
         }
 
@@ -229,6 +314,17 @@ export async function POST(request: Request) {
             entityId: session.id,
             metadata: { eventType: event.type, publicGiving: true, connected: true, outcome: result.outcome },
           });
+          if (result.outcome !== "REJECTED") {
+            const { captureActualProcessorFee } = await import("@/lib/payments/reconciliation");
+            await captureActualProcessorFee({
+              accountMode: accountRow.accountMode as "test" | "live",
+              stripeConnectedAccountId: connectedAccountId,
+              providerPaymentIntentId:
+                typeof session.payment_intent === "string" ? session.payment_intent : (session.payment_intent?.id ?? null),
+              providerSessionId: session.id,
+              pendingPaymentId: settledPendingPaymentId,
+            });
+          }
           break;
         }
 
@@ -315,8 +411,11 @@ export async function POST(request: Request) {
                   receiptRequested: Boolean(contributorEmail),
                   stripeConnectedAccountId: connectedAccountId,
                   providerAccountContext: "CONNECTED_ACCOUNT_PAYMENT",
+                  providerPaymentIntentId:
+                    typeof session.payment_intent === "string" ? session.payment_intent : (session.payment_intent?.id ?? null),
                   processingCostCoverageAmount: split.coverageAmountCents > 0 ? coverageDollars : null,
                   totalChargedAmount: totalDollars,
+                  pendingPaymentId: settledPendingPaymentId,
                 },
               });
             }
@@ -332,9 +431,37 @@ export async function POST(request: Request) {
               entityId: session.id,
               metadata: { eventType: event.type, paymentLinkId, connected: true },
             });
+            const { captureActualProcessorFee } = await import("@/lib/payments/reconciliation");
+            await captureActualProcessorFee({
+              accountMode: accountRow.accountMode as "test" | "live",
+              stripeConnectedAccountId: connectedAccountId,
+              providerPaymentIntentId:
+                typeof session.payment_intent === "string" ? session.payment_intent : (session.payment_intent?.id ?? null),
+              providerSessionId: session.id,
+              pendingPaymentId: settledPendingPaymentId,
+            });
           }
         }
 
+        break;
+      }
+
+      // ACH (§2): the debit failed or was returned before settlement.
+      // Nothing was allocated at completion, so nothing is reversed — the
+      // obligation stays open and the failure is explicit on our record.
+      // (Returns AFTER settlement arrive as refund events and reverse
+      // through the existing auditable refund path below.)
+      case "checkout.session.async_payment_failed": {
+        const session = event.data.object as Stripe.Checkout.Session;
+        const { markPendingFailed } = await import("@/lib/payments/pending-payments");
+        await markPendingFailed(session.id, "async payment failed or returned before settlement");
+        await createAuditEvent({
+          organizationId,
+          action: "update",
+          entityType: "stripe_webhook",
+          entityId: session.id,
+          metadata: { eventType: event.type, connected: true, outcome: "ASYNC_PAYMENT_FAILED" },
+        });
         break;
       }
 
@@ -439,7 +566,7 @@ export async function POST(request: Request) {
 
       case "invoice.payment_failed": {
         const invoice = event.data.object as Stripe.Invoice;
-        const subId = typeof invoice.subscription === "string" ? invoice.subscription : null;
+        const subId = invoiceSubscriptionId(invoice);
         if (subId) {
           // CONNECT-D (§16): failed voluntary giving is a schedule status,
           // NEVER a debt.
@@ -454,7 +581,12 @@ export async function POST(request: Request) {
 
       case "invoice.paid": {
         const invoice = event.data.object as Stripe.Invoice;
-        const subId = typeof invoice.subscription === "string" ? invoice.subscription : null;
+        const subId = invoiceSubscriptionId(invoice);
+        if (!subId && invoice.billing_reason?.startsWith("subscription")) {
+          console.error(
+            JSON.stringify({ event: "giving_recurring_invoice_missing_subscription_id", stripeInvoiceId: invoice.id })
+          );
+        }
         if (subId) {
           const { recordRecurringInvoicePaid } = await import("@/lib/giving/recurring");
           const result = await recordRecurringInvoicePaid({

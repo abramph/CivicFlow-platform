@@ -14,7 +14,20 @@ type PayMethod = {
 };
 
 /** FEE-COVER-C: display-only — the server re-quotes at checkout. */
-type CoverageOffer = { offered: boolean; percentBps: number; fixedCents: number };
+type CoverageOffer = {
+  offered: boolean;
+  /** COST-POLICY v2 §8: non-removable coverage on a fixed obligation —
+   * rendered as a summary, never a checkbox. Unreachable until the
+   * platform's eligibility mechanism ships. */
+  required?: boolean;
+  percentBps: number;
+  fixedCents: number;
+  /** §8 fallback disclosure ("processing costs cannot be added…"). */
+  fallbackMessage?: string | null;
+  /** LAUNCH-SAFE §4: "Amount credited toward …" line when the organization
+   * absorbs the card cost on a fixed obligation. */
+  creditedNoticeLabel?: string | null;
+};
 
 type Props = {
   slug: string;
@@ -98,7 +111,7 @@ function StripeCheckoutSection({
   const effectiveAmount = fixedAmount ?? Number(amount);
   const baseCents = Number.isNaN(effectiveAmount) ? 0 : Math.round(effectiveAmount * 100);
   const estimateCents =
-    coverage.offered && baseCents > 0
+    (coverage.offered || coverage.required) && baseCents > 0
       ? calculateProcessingCostCoverageCents(baseCents, coverage.percentBps, coverage.fixedCents)
       : 0;
 
@@ -121,7 +134,7 @@ function StripeCheckoutSection({
           amount: parsedAmount,
           contributorName: name.trim() || undefined,
           contributorEmail: email.trim() || undefined,
-          coverProcessingCosts: coverage.offered && coverProcessingCosts ? true : undefined,
+          coverProcessingCosts: coverage.required ? true : coverage.offered && coverProcessingCosts ? true : undefined,
         }),
       });
 
@@ -190,6 +203,22 @@ function StripeCheckoutSection({
         />
       </label>
 
+      {coverage.required && baseCents > 0 ? (
+        // §8 fixed obligation: a non-editable summary — no removable
+        // checkbox when coverage is required and permitted. The account is
+        // credited the full base amount.
+        <div className="space-y-1 rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
+          <div className="flex justify-between"><span>Payment</span><span>${(baseCents / 100).toFixed(2)}</span></div>
+          <div className="flex justify-between"><span>Card processing cost</span><span>${(estimateCents / 100).toFixed(2)}</span></div>
+          <div className="flex justify-between font-semibold text-slate-900">
+            <span>Total</span><span>${((baseCents + estimateCents) / 100).toFixed(2)}</span>
+          </div>
+          <p className="pt-1 text-xs text-slate-500">
+            Your account will be credited ${(baseCents / 100).toFixed(2)}.
+          </p>
+        </div>
+      ) : null}
+
       {coverage.offered && baseCents > 0 ? (
         <label className="flex items-start gap-2 rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
           <input
@@ -209,6 +238,19 @@ function StripeCheckoutSection({
       {coverage.offered && coverProcessingCosts && baseCents > 0 ? (
         <div className="rounded-lg bg-emerald-50 px-4 py-2 text-center text-sm text-emerald-800">
           Total: <span className="font-semibold">${((baseCents + estimateCents) / 100).toFixed(2)}</span>
+        </div>
+      ) : null}
+
+      {coverage.creditedNoticeLabel && baseCents > 0 ? (
+        <div className="flex justify-between rounded-lg bg-slate-50 px-4 py-2 text-sm text-slate-700">
+          <span>{coverage.creditedNoticeLabel}</span>
+          <span className="font-semibold">${(baseCents / 100).toFixed(2)}</span>
+        </div>
+      ) : null}
+
+      {coverage.fallbackMessage ? (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          {coverage.fallbackMessage}
         </div>
       ) : null}
 

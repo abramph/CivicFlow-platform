@@ -17,6 +17,21 @@ function getStripeClient() {
   return new Stripe(env.STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" });
 }
 
+/**
+ * Stripe API 2025-03+ removed the top-level `invoice.subscription` string —
+ * the link now lives at `invoice.parent.subscription_details.subscription`.
+ * Events arrive in whatever API version the endpoint pins, so read both
+ * shapes; a null here on a subscription invoice silently skips giving
+ * recording AND SaaS past_due handling.
+ */
+function invoiceSubscriptionId(invoice: Stripe.Invoice): string | null {
+  const legacy = (invoice as { subscription?: unknown }).subscription;
+  if (typeof legacy === "string") return legacy;
+  const parent = (invoice as { parent?: { subscription_details?: { subscription?: unknown } | null } | null }).parent;
+  const nested = parent?.subscription_details?.subscription;
+  return typeof nested === "string" ? nested : null;
+}
+
 function mapSubscriptionStatus(status: Stripe.Subscription.Status): SubscriptionStatus {
   if (status === "active")   return "active";
   if (status === "trialing") return "trialing";
@@ -417,10 +432,7 @@ export async function POST(request: Request) {
 
       case "invoice.payment_failed": {
         const invoice = event.data.object as Stripe.Invoice;
-        const subId =
-          typeof invoice.subscription === "string"
-            ? invoice.subscription
-            : null;
+        const subId = invoiceSubscriptionId(invoice);
         if (subId) {
           // CORE-GIVE-C: failed voluntary giving is a schedule status, NEVER
           // a debt (§16) — and never a SaaS past_due.
@@ -451,10 +463,7 @@ export async function POST(request: Request) {
 
       case "invoice.paid": {
         const invoice = event.data.object as Stripe.Invoice;
-        const subId =
-          typeof invoice.subscription === "string"
-            ? invoice.subscription
-            : null;
+        const subId = invoiceSubscriptionId(invoice);
         if (subId) {
           // CORE-GIVE-C: recurring giving invoice → durable Contribution,
           // idempotent on the invoice id; the schedule is resolved by OUR
