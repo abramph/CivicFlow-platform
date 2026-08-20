@@ -26,15 +26,21 @@ export async function captureActualProcessorFee(input: {
 
   try {
     const stripe = await getStripeForMode(input.accountMode);
-    const intent = await stripe.paymentIntents.retrieve(
-      input.providerPaymentIntentId,
-      { expand: ["latest_charge.balance_transaction"] },
-      { stripeAccount: input.stripeConnectedAccountId }
-    );
-    const charge = typeof intent.latest_charge === "string" ? null : intent.latest_charge;
-    const balanceTx =
-      charge && typeof charge.balance_transaction !== "string" ? (charge.balance_transaction ?? null) : null;
-    if (!balanceTx) return; // Not yet available — a later reconciliation pass can fill it.
+    // The balance transaction can lag the webhook by moments; retry briefly
+    // before giving up. A missing capture is still only a reconciliation
+    // gap (fillable by a later sweep), never an accounting problem.
+    let balanceTx: { fee: number; net: number } | null = null;
+    for (let attempt = 0; attempt < 3 && !balanceTx; attempt++) {
+      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 2000));
+      const intent = await stripe.paymentIntents.retrieve(
+        input.providerPaymentIntentId,
+        { expand: ["latest_charge.balance_transaction"] },
+        { stripeAccount: input.stripeConnectedAccountId }
+      );
+      const charge = typeof intent.latest_charge === "string" ? null : intent.latest_charge;
+      balanceTx = charge && typeof charge.balance_transaction !== "string" ? (charge.balance_transaction ?? null) : null;
+    }
+    if (!balanceTx) return; // Still not available — a later reconciliation sweep can fill it.
 
     const feeCents = balanceTx.fee;
     const netCents = balanceTx.net;

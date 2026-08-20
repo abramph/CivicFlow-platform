@@ -239,3 +239,65 @@ the shipped model (voluntary opt-in + org-absorb fallback, ACH restrict
 option). Affected: every connected account. Safest launch fallback
 (implemented as default): ORGANIZATION_ABSORBS with full principal
 crediting.
+
+## 12. Launch model (LAUNCH-SAFE, owner-decided 2026-08-20)
+
+The owner chose the launch-safe configuration; the settings surface and
+API enforce it:
+
+- No Stripe surcharge program / third-party surcharge integration
+  pre-launch. `MANDATORY_OBLIGATION_COVERAGE` and
+  `PAYMENT_METHOD_ELIGIBILITY_CHECK` stay OFF; the cost-policy API answers
+  409 to `REQUIRED_WHERE_PERMITTED` even from an authenticated owner who
+  accepts the policy, and the settings page presents required coverage as
+  a described-but-unavailable capability, never a choosable option.
+- Fixed obligations launch as ORGANIZATION_ABSORBS: members are credited
+  the full amount they pay toward the obligation, always.
+- Voluntary giving keeps the optional, unchecked coverage checkbox.
+- ACH is the sanctioned cost-reduction path
+  (`fixedObligationPaymentPreference`): CARD_AND_ABSORB (default),
+  PREFER_ACH (restricts to ["us_bank_account","card"], bank listed
+  first), REQUIRE_ACH (["us_bank_account"] only) — selectable only when
+  `achEnabled` is true, otherwise 409 + locked in the UI. REQUIRE_ACH
+  fail-safes to card+absorb with an offline-alternatives message rather
+  than ever blocking a member.
+- Offline payments (cash, check, payroll checkoff) are completely
+  fee-free: no PendingPayment, no coverage, no fee fields.
+- Mobile builds: iOS build 25 / Android vc14 remain the release
+  candidates — no client contract changed (boolean-only coverage opt-in,
+  server-priced totals), zero mobile source touched.
+
+### §5 verification matrix
+
+The full 24-case local matrix (real Stripe test-mode checkouts on a test
+connected account, stripe-CLI-forwarded webhooks, dev DB) is recorded in
+the LAUNCH-SAFE handoff report. Highlights: absorb-mode fixed obligations
+credit the exact principal; gross-up nets the org exactly the principal
+on covered gifts; ACH success settles only on
+`checkout.session.async_payment_succeeded` (actual ACH fee on $10 was
+8¢ vs 59¢ card); ACH failure records nothing and leaves the charge
+PENDING; tampered pending records are MISMATCHED and never settle;
+hostile client fields never affect server-derived nature or totals;
+webhook replays are deduplicated.
+
+### Stripe API-version hazard found by the matrix (fixed)
+
+At Stripe API 2025-03+ ("basil"/"dahlia") the invoice payload no longer
+carries top-level `invoice.subscription` (moved to
+`invoice.parent.subscription_details.subscription`) or
+`invoice.payment_intent`. Both webhooks previously read the legacy field
+and silently skipped recurring-gift recording (and SaaS past_due
+handling) when it was absent — production only worked because its
+endpoint pins an older API version. Fixed via `invoiceSubscriptionId()`
+reading both shapes, plus an error log when a subscription-billed
+invoice yields no id. Known degradation under new API versions:
+`payment_intent` is absent from the invoice payload, so recurring-gift
+actual-fee capture is skipped (reconciliation-only data; fillable by a
+later sweep).
+
+### Micro-deposit note (ACH §2)
+
+Manually entered bank accounts require micro-deposit verification before
+the debit runs (`payment_intent.requires_action`); Financial-Connections
+instant verification does not. Support runbooks should expect
+Processing → (verify) → Paid/Failed for manual-entry members.

@@ -24,6 +24,22 @@ export const dynamic = "force-dynamic";
  *    webhook — Stripe event ids are globally unique regardless of which
  *    account produced them.
  */
+/**
+ * Stripe API 2025-03+ ("basil"/"dahlia") removed the top-level
+ * `invoice.subscription` string — the link now lives at
+ * `invoice.parent.subscription_details.subscription`. Events arrive in
+ * whatever API version the delivering endpoint (or the CLI) pins, so read
+ * both shapes; returning null on a subscription-billed invoice would
+ * silently skip recurring-gift recording.
+ */
+function invoiceSubscriptionId(invoice: Stripe.Invoice): string | null {
+  const legacy = (invoice as { subscription?: unknown }).subscription;
+  if (typeof legacy === "string") return legacy;
+  const parent = (invoice as { parent?: { subscription_details?: { subscription?: unknown } | null } | null }).parent;
+  const nested = parent?.subscription_details?.subscription;
+  return typeof nested === "string" ? nested : null;
+}
+
 export async function POST(request: Request) {
   const rateLimited = await requireRateLimit({
     scope: "api:webhooks:stripe-connect",
@@ -550,7 +566,7 @@ export async function POST(request: Request) {
 
       case "invoice.payment_failed": {
         const invoice = event.data.object as Stripe.Invoice;
-        const subId = typeof invoice.subscription === "string" ? invoice.subscription : null;
+        const subId = invoiceSubscriptionId(invoice);
         if (subId) {
           // CONNECT-D (§16): failed voluntary giving is a schedule status,
           // NEVER a debt.
@@ -565,7 +581,12 @@ export async function POST(request: Request) {
 
       case "invoice.paid": {
         const invoice = event.data.object as Stripe.Invoice;
-        const subId = typeof invoice.subscription === "string" ? invoice.subscription : null;
+        const subId = invoiceSubscriptionId(invoice);
+        if (!subId && invoice.billing_reason?.startsWith("subscription")) {
+          console.error(
+            JSON.stringify({ event: "giving_recurring_invoice_missing_subscription_id", stripeInvoiceId: invoice.id })
+          );
+        }
         if (subId) {
           const { recordRecurringInvoicePaid } = await import("@/lib/giving/recurring");
           const result = await recordRecurringInvoicePaid({
