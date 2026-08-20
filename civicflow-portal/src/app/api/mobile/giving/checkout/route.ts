@@ -4,7 +4,8 @@ import { validateGivingRequest } from "@/lib/giving/checkout";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { parseJsonBody, z } from "@/lib/validation";
 import { resolveConnectedAccountForCharges, getStripeForMode } from "@/lib/payments/stripe-connect";
-import { quoteProcessingCostCoverage } from "@/lib/giving/processing-cost-coverage";
+import { derivePaymentNature, resolveCoveragePlan } from "@/lib/payments/cost-policy";
+import { attachStripeSession, createPendingPayment } from "@/lib/payments/pending-payments";
 import { getServerEnv } from "@/lib/env";
 import { logGivingEvent } from "@/lib/giving/telemetry";
 
@@ -49,9 +50,37 @@ export async function POST(request: Request) {
     const baseUrl = env.NEXTAUTH_URL.replace(/\/$/, "");
 
     const baseAmountCents = Math.round(amount * 100);
-    const { coverageCents } = input.coverProcessingCosts
-      ? await quoteProcessingCostCoverage(organizationId, baseAmountCents)
-      : { coverageCents: 0 };
+    // COST-POLICY v2 (§2): same server-side derivation as the web route —
+    // the mobile client still sends only the boolean opt-in.
+    const nature = derivePaymentNature({
+      purpose: "giving",
+      programType: program?.type ?? null,
+      programObligationNature: program?.obligationNature ?? null,
+    });
+    const plan = await resolveCoveragePlan({
+      organizationId,
+      nature,
+      baseCents: baseAmountCents,
+      payerOptedIn: input.coverProcessingCosts === true,
+    });
+    const coverageCents = plan.coverageCents;
+
+    // §7: first-party pending record persisted BEFORE redirect.
+    const pending = await createPendingPayment({
+      organizationId,
+      memberId,
+      contributorUserId: mobileSession.userId,
+      paymentPurpose: "mobile-giving",
+      paymentNature: nature,
+      fundId: fund.id,
+      contributionProgramId: program?.id ?? null,
+      obligationCents: baseAmountCents,
+      processingCostCents: coverageCents,
+      coverageMode: plan.coverageMode,
+      coverageRequired: plan.required,
+      coveragePolicyVersion: plan.policyVersion,
+      stripeConnectedAccountId,
+    });
 
     logGivingEvent("GIVING_CHECKOUT_STARTED", { organizationId, fundId: fund.id, amountCents: baseAmountCents });
     const session = await stripe.checkout.sessions.create(
@@ -68,7 +97,7 @@ export async function POST(request: Request) {
                 name: program ? `${program.name} — ${fund.name}` : fund.name,
                 description: "Contribution",
               },
-              unit_amount: baseAmountCents + coverageCents,
+              unit_amount: plan.totalCents,
             },
             quantity: 1,
           },
@@ -90,12 +119,24 @@ export async function POST(request: Request) {
           givingPledgeId: pledge?.id ?? "",
           anonymityMode: input.anonymityMode ?? "NONE",
           givingMemo: "",
+          // COST-POLICY v2 (§7) — cross-check only; the PendingPayment row
+          // is the accounting record.
+          paymentNature: nature,
+          obligationAmount: String(baseAmountCents),
+          processingCostAmount: String(coverageCents),
+          coverageMode: plan.coverageMode,
+          coverageRequired: plan.required ? "true" : "false",
+          coveragePolicyVersion: plan.policyVersion ?? "",
+          allocationVersion: "1",
+          idempotencyReference: pending.idempotencyReference,
+          pendingPaymentId: pending.id,
           environment: process.env.NODE_ENV ?? "development",
         },
       },
       { stripeAccount: stripeConnectedAccountId }
     );
     if (!session.url) throw new Error("Stripe did not return a checkout URL");
+    await attachStripeSession(pending.id, session.id);
     return Response.json({ ok: true, data: { url: session.url } });
   });
 }

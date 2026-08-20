@@ -3,7 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { parseJsonBody, ValidationError, z } from "@/lib/validation";
 import { resolveConnectedAccountForCharges, getStripeForMode } from "@/lib/payments/stripe-connect";
-import { quoteProcessingCostCoverage } from "@/lib/giving/processing-cost-coverage";
+import { derivePaymentNature, resolveCoveragePlan } from "@/lib/payments/cost-policy";
+import { attachStripeSession, createPendingPayment } from "@/lib/payments/pending-payments";
 import { getServerEnv } from "@/lib/env";
 
 const checkoutSchema = z.object({
@@ -82,16 +83,44 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
     const destination =
       link.campaign?.name ?? link.event?.title ?? link.organization.name;
 
-    // FEE-COVER-C: quoted server-side at the org's CURRENT rate and
-    // snapshotted into metadata — the webhook records exactly this split,
-    // never a recomputation (same discipline as giving/CONNECT-F §36).
-    const { coverageCents } = input.coverProcessingCosts
-      ? await quoteProcessingCostCoverage(link.organizationId, amountCents)
-      : { coverageCents: 0 };
+    // COST-POLICY v2 (§2): the link's own configuration determines nature —
+    // campaign links are voluntary; event-registration links are fixed
+    // purchases; dues-in-advance links are fixed obligations. With v2
+    // disabled for the org, resolveCoveragePlan reproduces FEE-COVER-C's
+    // optional opt-in exactly (quoted server-side at the org's CURRENT
+    // rate, snapshotted below — the webhook records exactly this split).
+    const purpose = link.campaign?.name
+      ? ("payment-link-campaign" as const)
+      : link.event?.title
+        ? ("payment-link-event" as const)
+        : ("payment-link-dues" as const);
+    const nature = derivePaymentNature({ purpose });
+    const plan = await resolveCoveragePlan({
+      organizationId: link.organizationId,
+      nature,
+      baseCents: amountCents,
+      payerOptedIn: input.coverProcessingCosts === true,
+    });
+    const coverageCents = plan.coverageCents;
+
+    // §7: Unestra's first-party pending record, persisted BEFORE redirect.
+    const pending = await createPendingPayment({
+      organizationId: link.organizationId,
+      paymentPurpose: purpose,
+      paymentNature: nature,
+      paymentLinkId: link.id,
+      obligationCents: amountCents,
+      processingCostCents: coverageCents,
+      coverageMode: plan.coverageMode,
+      coverageRequired: plan.required,
+      coveragePolicyVersion: plan.policyVersion,
+      stripeConnectedAccountId,
+    });
 
     const session = await stripe.checkout.sessions.create(
       {
         mode: "payment",
+        ...(plan.restrictToPaymentMethods ? { payment_method_types: plan.restrictToPaymentMethods as never } : {}),
         line_items: [
           {
             price_data: {
@@ -100,7 +129,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
                 name: link.title,
                 description: destination,
               },
-              unit_amount: amountCents + coverageCents,
+              unit_amount: plan.totalCents,
             },
             quantity: 1,
           },
@@ -122,6 +151,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
           // validated by resolveCoverageSplit in the connect webhook.
           linkBaseAmountCents: String(amountCents),
           linkCoverageAmountCents: String(coverageCents),
+          // COST-POLICY v2 (§7) — cross-check only; the PendingPayment row
+          // is the accounting record.
+          paymentNature: nature,
+          obligationAmount: String(amountCents),
+          processingCostAmount: String(coverageCents),
+          coverageMode: plan.coverageMode,
+          coverageRequired: plan.required ? "true" : "false",
+          coveragePolicyVersion: plan.policyVersion ?? "",
+          allocationVersion: "1",
+          idempotencyReference: pending.idempotencyReference,
+          pendingPaymentId: pending.id,
           environment: process.env.NODE_ENV ?? "development",
         },
       },
@@ -129,6 +169,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
     );
 
     if (!session.url) throw new Error("Stripe did not return a checkout URL");
+    await attachStripeSession(pending.id, session.id);
 
     return Response.json({ ok: true, url: session.url });
   });

@@ -108,6 +108,48 @@ export async function POST(request: Request) {
           break;
         }
 
+        // COST-POLICY v2 (§10): settle Unestra's first-party pending record
+        // before ANY recording. NOT_FOUND = legacy session (metadata
+        // cross-checks below still apply, unchanged). MISMATCH = the paid
+        // total or account differs from what was authorized — record
+        // NOTHING; the reason is preserved on the PendingPayment row.
+        let settledPendingPaymentId: string | null = null;
+        if (session.mode === "payment" && session.payment_status === "paid") {
+          const { settlePendingPaymentBySession } = await import("@/lib/payments/pending-payments");
+          const settlement = await settlePendingPaymentBySession({
+            stripeSessionId: session.id,
+            paidTotalCents: session.amount_total ?? 0,
+            stripeConnectedAccountId: connectedAccountId,
+          });
+          if (settlement.outcome === "MISMATCH") {
+            console.error(
+              JSON.stringify({
+                event: "cost_policy_pending_mismatch",
+                sessionId: session.id,
+                organizationId,
+                reason: settlement.reason,
+              })
+            );
+            await createAuditEvent({
+              organizationId,
+              action: "update",
+              entityType: "stripe_webhook",
+              entityId: session.id,
+              metadata: { eventType: event.type, connected: true, outcome: "PENDING_MISMATCH", reason: settlement.reason },
+            });
+            break;
+          }
+          if (settlement.outcome !== "NOT_FOUND" && (session.currency ?? "usd") !== "usd") {
+            console.error(
+              JSON.stringify({ event: "cost_policy_currency_rejected", sessionId: session.id, organizationId, currency: session.currency })
+            );
+            break;
+          }
+          if (settlement.outcome === "SETTLED" || settlement.outcome === "ALREADY_COMPLETED") {
+            settledPendingPaymentId = settlement.record.id;
+          }
+        }
+
         // CONNECT-D: setup-mode session completing a recurring payment-method
         // update (mirrors the platform webhook's giving-method-update branch).
         if (session.mode === "setup" && session.metadata?.paymentType === "giving-method-update") {
@@ -192,6 +234,17 @@ export async function POST(request: Request) {
             entityId: session.id,
             metadata: { eventType: event.type, giving: true, connected: true, outcome: result.outcome },
           });
+          if (result.outcome !== "REJECTED") {
+            const { captureActualProcessorFee } = await import("@/lib/payments/reconciliation");
+            await captureActualProcessorFee({
+              accountMode: accountRow.accountMode as "test" | "live",
+              stripeConnectedAccountId: connectedAccountId,
+              providerPaymentIntentId:
+                typeof session.payment_intent === "string" ? session.payment_intent : (session.payment_intent?.id ?? null),
+              providerSessionId: session.id,
+              pendingPaymentId: settledPendingPaymentId,
+            });
+          }
           break;
         }
 
@@ -229,6 +282,17 @@ export async function POST(request: Request) {
             entityId: session.id,
             metadata: { eventType: event.type, publicGiving: true, connected: true, outcome: result.outcome },
           });
+          if (result.outcome !== "REJECTED") {
+            const { captureActualProcessorFee } = await import("@/lib/payments/reconciliation");
+            await captureActualProcessorFee({
+              accountMode: accountRow.accountMode as "test" | "live",
+              stripeConnectedAccountId: connectedAccountId,
+              providerPaymentIntentId:
+                typeof session.payment_intent === "string" ? session.payment_intent : (session.payment_intent?.id ?? null),
+              providerSessionId: session.id,
+              pendingPaymentId: settledPendingPaymentId,
+            });
+          }
           break;
         }
 
@@ -315,8 +379,11 @@ export async function POST(request: Request) {
                   receiptRequested: Boolean(contributorEmail),
                   stripeConnectedAccountId: connectedAccountId,
                   providerAccountContext: "CONNECTED_ACCOUNT_PAYMENT",
+                  providerPaymentIntentId:
+                    typeof session.payment_intent === "string" ? session.payment_intent : (session.payment_intent?.id ?? null),
                   processingCostCoverageAmount: split.coverageAmountCents > 0 ? coverageDollars : null,
                   totalChargedAmount: totalDollars,
+                  pendingPaymentId: settledPendingPaymentId,
                 },
               });
             }
@@ -331,6 +398,15 @@ export async function POST(request: Request) {
               entityType: "stripe_webhook",
               entityId: session.id,
               metadata: { eventType: event.type, paymentLinkId, connected: true },
+            });
+            const { captureActualProcessorFee } = await import("@/lib/payments/reconciliation");
+            await captureActualProcessorFee({
+              accountMode: accountRow.accountMode as "test" | "live",
+              stripeConnectedAccountId: connectedAccountId,
+              providerPaymentIntentId:
+                typeof session.payment_intent === "string" ? session.payment_intent : (session.payment_intent?.id ?? null),
+              providerSessionId: session.id,
+              pendingPaymentId: settledPendingPaymentId,
             });
           }
         }

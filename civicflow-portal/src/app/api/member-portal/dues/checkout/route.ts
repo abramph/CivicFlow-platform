@@ -4,7 +4,8 @@ import { findActivePaymentLink } from "@/lib/payment-links";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { parseJsonBody, ValidationError, z } from "@/lib/validation";
 import { resolveConnectedAccountForCharges, getStripeForMode } from "@/lib/payments/stripe-connect";
-import { quoteProcessingCostCoverage } from "@/lib/giving/processing-cost-coverage";
+import { derivePaymentNature, resolveCoveragePlan } from "@/lib/payments/cost-policy";
+import { attachStripeSession, createPendingPayment } from "@/lib/payments/pending-payments";
 import { getServerEnv } from "@/lib/env";
 
 const bodySchema = z.object({
@@ -63,21 +64,45 @@ export async function POST(request: Request) {
     const baseUrl = env.NEXTAUTH_URL.replace(/\/$/, "");
     const orgSuffix = `?org=${encodeURIComponent(organizationId)}`;
 
-    // FEE-COVER-C: quoted server-side at the org's CURRENT rate and
-    // snapshotted into metadata (same discipline as giving/CONNECT-F §36).
-    const { coverageCents } = input.coverProcessingCosts
-      ? await quoteProcessingCostCoverage(organizationId, amountCents)
-      : { coverageCents: 0 };
+    // COST-POLICY v2: dues are a FIXED OBLIGATION (§2) — the amount the
+    // member pays here settles their DuesCharge by BASE PRINCIPAL, so
+    // whatever the coverage plan resolves to, a $10 payment credits $10.
+    // With v2 disabled for the org, this reproduces FEE-COVER-C's optional
+    // opt-in exactly (quoted server-side, snapshotted into metadata).
+    const nature = derivePaymentNature({ purpose: "member-dues" });
+    const plan = await resolveCoveragePlan({
+      organizationId,
+      nature,
+      baseCents: amountCents,
+      payerOptedIn: input.coverProcessingCosts === true,
+    });
+    const coverageCents = plan.coverageCents;
+
+    // §7: first-party pending record persisted BEFORE redirect.
+    const pending = await createPendingPayment({
+      organizationId,
+      memberId,
+      paymentPurpose: "member-dues",
+      paymentNature: nature,
+      paymentLinkId: link.id,
+      obligationCents: amountCents,
+      processingCostCents: coverageCents,
+      coverageMode: plan.coverageMode,
+      coverageRequired: plan.required,
+      coveragePolicyVersion: plan.policyVersion,
+      stripeConnectedAccountId,
+    });
 
     const session = await stripe.checkout.sessions.create(
       {
         mode: "payment",
+        ...(plan.restrictToPaymentMethods ? { payment_method_types: plan.restrictToPaymentMethods as never } : {}),
         line_items: [
           {
             price_data: {
               currency: "usd",
               product_data: { name: link.title, description: "Membership dues" },
-              unit_amount: amountCents + coverageCents,
+              unit_amount: plan.totalCents,
             },
             quantity: 1,
           },
@@ -94,6 +119,17 @@ export async function POST(request: Request) {
           stripeConnectedAccountId,
           linkBaseAmountCents: String(amountCents),
           linkCoverageAmountCents: String(coverageCents),
+          // COST-POLICY v2 (§7) — cross-check only; the PendingPayment row
+          // is the accounting record.
+          paymentNature: nature,
+          obligationAmount: String(amountCents),
+          processingCostAmount: String(coverageCents),
+          coverageMode: plan.coverageMode,
+          coverageRequired: plan.required ? "true" : "false",
+          coveragePolicyVersion: plan.policyVersion ?? "",
+          allocationVersion: "1",
+          idempotencyReference: pending.idempotencyReference,
+          pendingPaymentId: pending.id,
           environment: process.env.NODE_ENV ?? "development",
         },
       },
@@ -101,6 +137,7 @@ export async function POST(request: Request) {
     );
 
     if (!session.url) throw new Error("Stripe did not return a checkout URL");
+    await attachStripeSession(pending.id, session.id);
 
     return Response.json({ ok: true, url: session.url });
   });
