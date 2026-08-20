@@ -104,6 +104,32 @@ export function getGlobalCostPolicyFlags() {
 }
 
 /**
+ * §8 — what a checkout SURFACE should render for a given nature, before an
+ * amount exists: no control (NONE), the voluntary unchecked checkbox
+ * (OPTIONAL), or the non-editable required summary (REQUIRED — unreachable
+ * until a compliant eligibility mechanism ships). Rates feed the client's
+ * live ESTIMATE only; the checkout route re-resolves authoritatively.
+ */
+export async function resolveCoverageDisplayPolicy(input: {
+  organizationId: string;
+  nature: PaymentNatureValue;
+}): Promise<{ display: "NONE" | "OPTIONAL" | "REQUIRED"; percentBps: number; fixedCents: number; fallbackMessage: string | null }> {
+  const [plan, settings] = await Promise.all([
+    resolveCoveragePlan({ organizationId: input.organizationId, nature: input.nature, baseCents: 100, payerOptedIn: true }),
+    prisma.orgSettings.findUnique({
+      where: { organizationId: input.organizationId },
+      select: { processingCostCoveragePercentBps: true, processingCostCoverageFixedCents: true },
+    }),
+  ]);
+  return {
+    display: plan.required ? "REQUIRED" : plan.offered ? "OPTIONAL" : "NONE",
+    percentBps: settings?.processingCostCoveragePercentBps ?? 0,
+    fixedCents: settings?.processingCostCoverageFixedCents ?? 0,
+    fallbackMessage: plan.fallbackMessage,
+  };
+}
+
+/**
  * §3 — resolve the coverage plan for one checkout. Reads the org's policy
  * + legacy CONNECT-F settings; the ONLY client input is `payerOptedIn`
  * (meaningful solely for OPTIONAL plans).

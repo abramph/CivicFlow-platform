@@ -4,7 +4,7 @@ import { DuesCheckoutButton } from "@/components/app/DuesCheckoutButton";
 import { filterPayableMethods, PayableMethodsList } from "@/components/app/PayableMethodsList";
 import { getMemberWebSession } from "@/lib/member-web-session";
 import { findActivePaymentLink } from "@/lib/payment-links";
-import { getProcessingCostCoverageSettings } from "@/lib/giving/processing-cost-coverage";
+import { derivePaymentNature, resolveCoverageDisplayPolicy } from "@/lib/payments/cost-policy";
 import { prisma } from "@/lib/prisma";
 
 export default async function MemberPayDuesInAdvancePage({ searchParams }: { searchParams: Promise<{ org?: string }> }) {
@@ -19,19 +19,27 @@ export default async function MemberPayDuesInAdvancePage({ searchParams }: { sea
     );
   }
 
-  const [paymentLink, paymentMethods, coverageSettings] = await Promise.all([
+  // COST-POLICY v2 (§8): dues are a FIXED OBLIGATION — the surface follows
+  // the org's policy through the same resolver as the checkout route. With
+  // v2 disabled this is FEE-COVER-C's optional offer, unchanged.
+  const [paymentLink, paymentMethods, displayPolicy] = await Promise.all([
     findActivePaymentLink({ organizationId: memberSession.organizationId, linkType: "DUES" }),
     prisma.paymentMethodConfig.findMany({
       where: { organizationId: memberSession.organizationId, isActive: true },
       orderBy: [{ sortOrder: "asc" }, { label: "asc" }],
     }),
-    getProcessingCostCoverageSettings(memberSession.organizationId),
+    resolveCoverageDisplayPolicy({
+      organizationId: memberSession.organizationId,
+      nature: derivePaymentNature({ purpose: "member-dues" }),
+    }),
   ]);
 
   const coverage = {
-    offered: coverageSettings.mode === "OPTIONAL_CONTRIBUTOR_COVERAGE",
-    percentBps: coverageSettings.percentBps,
-    fixedCents: coverageSettings.fixedCents,
+    offered: displayPolicy.display === "OPTIONAL",
+    required: displayPolicy.display === "REQUIRED",
+    percentBps: displayPolicy.percentBps,
+    fixedCents: displayPolicy.fixedCents,
+    fallbackMessage: displayPolicy.fallbackMessage,
   };
 
   const orgSuffix = org ? `?org=${encodeURIComponent(org)}` : "";

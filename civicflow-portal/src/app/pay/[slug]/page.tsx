@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { PublicPaymentForm } from "@/components/public/PublicPaymentForm";
-import { getProcessingCostCoverageSettings } from "@/lib/giving/processing-cost-coverage";
+import { derivePaymentNature, resolveCoverageDisplayPolicy } from "@/lib/payments/cost-policy";
 
 export default async function PublicPayPage({
   params,
@@ -26,14 +26,21 @@ export default async function PublicPayPage({
 
   if (!link || link.status === "archived") notFound();
 
-  // FEE-COVER-C: whether this org offers voluntary processing-cost coverage
-  // and at what configured rate — the client uses these only for the live
-  // estimate; the checkout route re-quotes authoritatively server-side.
-  const coverageSettings = await getProcessingCostCoverageSettings(link.organizationId);
+  // COST-POLICY v2 (§8): what this checkout surface renders follows the
+  // link's NATURE (campaign = voluntary, event = fixed purchase, dues =
+  // fixed obligation) through the org's policy. With v2 disabled this is
+  // FEE-COVER-C's optional offer, unchanged. Rates feed the live estimate
+  // only; the checkout route re-resolves authoritatively server-side.
+  const nature = derivePaymentNature({
+    purpose: link.campaign ? "payment-link-campaign" : link.event ? "payment-link-event" : "payment-link-dues",
+  });
+  const displayPolicy = await resolveCoverageDisplayPolicy({ organizationId: link.organizationId, nature });
   const coverage = {
-    offered: coverageSettings.mode === "OPTIONAL_CONTRIBUTOR_COVERAGE",
-    percentBps: coverageSettings.percentBps,
-    fixedCents: coverageSettings.fixedCents,
+    offered: displayPolicy.display === "OPTIONAL",
+    required: displayPolicy.display === "REQUIRED",
+    percentBps: displayPolicy.percentBps,
+    fixedCents: displayPolicy.fixedCents,
+    fallbackMessage: displayPolicy.fallbackMessage,
   };
 
   const methods = link.methods.map((m) => ({

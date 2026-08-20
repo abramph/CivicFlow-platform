@@ -4,7 +4,15 @@ import { useState, type FormEvent } from "react";
 import { calculateProcessingCostCoverageCents } from "@/lib/giving/coverage-math";
 
 /** FEE-COVER-C: display-only — the server re-quotes at checkout. */
-type CoverageOffer = { offered: boolean; percentBps: number; fixedCents: number };
+type CoverageOffer = {
+  offered: boolean;
+  /** COST-POLICY v2 §8: non-removable required coverage (fixed obligation).
+   * Unreachable until the platform eligibility mechanism ships. */
+  required?: boolean;
+  percentBps: number;
+  fixedCents: number;
+  fallbackMessage?: string | null;
+};
 
 type Props = {
   organizationId: string;
@@ -59,7 +67,7 @@ export function DuesCheckoutButton({
         body: JSON.stringify({
           organizationId,
           amount: parsedAmount,
-          coverProcessingCosts: coverage.offered && coverProcessingCosts ? true : undefined,
+          coverProcessingCosts: coverage.required ? true : coverage.offered && coverProcessingCosts ? true : undefined,
         }),
       });
 
@@ -101,6 +109,21 @@ export function DuesCheckoutButton({
         </label>
       ) : null}
 
+      {coverage.required && baseCents > 0 ? (
+        // §8 fixed obligation: non-editable summary; the dues account is
+        // credited the full base amount.
+        <div className="space-y-1 rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
+          <div className="flex justify-between"><span>Dues</span><span>${(baseCents / 100).toFixed(2)}</span></div>
+          <div className="flex justify-between"><span>Card processing cost</span><span>${(estimateCents / 100).toFixed(2)}</span></div>
+          <div className="flex justify-between font-semibold text-slate-900">
+            <span>Total</span><span>${((baseCents + estimateCents) / 100).toFixed(2)}</span>
+          </div>
+          <p className="pt-1 text-xs text-slate-500">
+            Your dues account will be credited ${(baseCents / 100).toFixed(2)}.
+          </p>
+        </div>
+      ) : null}
+
       {coverage.offered && baseCents > 0 ? (
         <label className="flex items-start gap-2 rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
           <input
@@ -115,6 +138,12 @@ export function DuesCheckoutButton({
             {(baseCents / 100).toFixed(2)}.
           </span>
         </label>
+      ) : null}
+
+      {coverage.fallbackMessage ? (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          {coverage.fallbackMessage}
+        </div>
       ) : null}
 
       {coverage.offered && coverProcessingCosts && baseCents > 0 ? (
