@@ -12,6 +12,9 @@ type CoverageOffer = {
   percentBps: number;
   fixedCents: number;
   fallbackMessage?: string | null;
+  /** LAUNCH-SAFE §4: "Amount credited toward dues $X" — shown when the
+   * organization absorbs the card cost; the total stays the principal. */
+  creditedNoticeLabel?: string | null;
 };
 
 type Props = {
@@ -138,6 +141,13 @@ export function DuesCheckoutButton({
             {(baseCents / 100).toFixed(2)}.
           </span>
         </label>
+      ) : null}
+
+      {coverage.creditedNoticeLabel && baseCents > 0 ? (
+        <div className="flex justify-between rounded-lg bg-slate-50 px-4 py-2 text-sm text-slate-700">
+          <span>{coverage.creditedNoticeLabel}</span>
+          <span className="font-semibold">${(baseCents / 100).toFixed(2)}</span>
+        </div>
       ) : null}
 
       {coverage.fallbackMessage ? (

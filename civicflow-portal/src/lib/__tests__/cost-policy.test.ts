@@ -48,6 +48,7 @@ const LEGACY_SETTINGS = {
   fixedObligationCoveragePolicy: "ORGANIZATION_ABSORBS",
   voluntaryCoveragePolicy: "OPTIONAL",
   ineligiblePaymentMethodFallback: "ORGANIZATION_ABSORBS",
+  fixedObligationPaymentPreference: "CARD_AND_ABSORB",
   achEnabled: false,
   policyAcceptedAt: null,
   policyVersion: null,
@@ -175,6 +176,55 @@ describe("resolveCoveragePlan (COST-POLICY §3)", () => {
     findUniqueOrgSettings.mockResolvedValue({ ...requiredSettings, policyAcceptedAt: null });
     plan = await resolveCoveragePlan({ organizationId: "org-1", nature: "FIXED_OBLIGATION", baseCents: 1000, payerOptedIn: false });
     expect(plan.required).toBe(false);
+  });
+
+  it("LAUNCH-SAFE: PREFER_ACH lists bank transfer first while keeping card; member total stays the principal", async () => {
+    findUniqueOrgSettings.mockResolvedValue({
+      ...LEGACY_SETTINGS,
+      paymentCostPolicyV2Enabled: true,
+      fixedObligationPaymentPreference: "PREFER_ACH",
+      achEnabled: true,
+    });
+    const plan = await resolveCoveragePlan({ organizationId: "org-1", nature: "FIXED_OBLIGATION", baseCents: 1000, payerOptedIn: false });
+    expect(plan.restrictToPaymentMethods).toEqual(["us_bank_account", "card"]);
+    expect(plan.totalCents).toBe(1000);
+    expect(plan.fallbackMessage).toMatch(/reduce processing costs/i);
+  });
+
+  it("LAUNCH-SAFE: REQUIRE_ACH restricts to bank transfer when enabled, and fails SAFE to card+absorb when ACH is unavailable", async () => {
+    findUniqueOrgSettings.mockResolvedValue({
+      ...LEGACY_SETTINGS,
+      paymentCostPolicyV2Enabled: true,
+      fixedObligationPaymentPreference: "REQUIRE_ACH",
+      achEnabled: true,
+    });
+    const restricted = await resolveCoveragePlan({ organizationId: "org-1", nature: "FIXED_OBLIGATION", baseCents: 1000, payerOptedIn: false });
+    expect(restricted.restrictToPaymentMethods).toEqual(["us_bank_account"]);
+    expect(restricted.totalCents).toBe(1000);
+
+    findUniqueOrgSettings.mockResolvedValue({
+      ...LEGACY_SETTINGS,
+      paymentCostPolicyV2Enabled: true,
+      fixedObligationPaymentPreference: "REQUIRE_ACH",
+      achEnabled: false,
+    });
+    const failSafe = await resolveCoveragePlan({ organizationId: "org-1", nature: "FIXED_OBLIGATION", baseCents: 1000, payerOptedIn: false });
+    // Never an unusable checkout, never delinquency: card opens, org absorbs.
+    expect(failSafe.restrictToPaymentMethods).toBeNull();
+    expect(failSafe.totalCents).toBe(1000);
+    expect(failSafe.fallbackMessage).toMatch(/credited in full/i);
+    expect(failSafe.fallbackMessage).toMatch(/cash, check/i);
+  });
+
+  it("LAUNCH-SAFE: payment preference never touches voluntary flows", async () => {
+    findUniqueOrgSettings.mockResolvedValue({
+      ...LEGACY_SETTINGS,
+      paymentCostPolicyV2Enabled: true,
+      fixedObligationPaymentPreference: "REQUIRE_ACH",
+      achEnabled: true,
+    });
+    const plan = await resolveCoveragePlan({ organizationId: "org-1", nature: "VOLUNTARY", baseCents: 2500, payerOptedIn: false });
+    expect(plan.restrictToPaymentMethods).toBeNull();
   });
 
   it("rounding is deterministic integer minor units — never floating-point currency", async () => {

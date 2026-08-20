@@ -3,7 +3,7 @@ import { requirePermission } from "@/lib/auth-guards";
 import { createAuditEvent } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 import { parseJsonBody, ValidationError, z } from "@/lib/validation";
-import { COST_POLICY_VERSION } from "@/lib/payments/cost-policy";
+import { COST_POLICY_VERSION, getGlobalCostPolicyFlags } from "@/lib/payments/cost-policy";
 
 /**
  * COST-POLICY v2 (§6) — organization payment-cost policy. Held to the same
@@ -22,6 +22,7 @@ const POLICY_SELECT = {
   fixedObligationCoveragePolicy: true,
   voluntaryCoveragePolicy: true,
   ineligiblePaymentMethodFallback: true,
+  fixedObligationPaymentPreference: true,
   achEnabled: true,
   policyAcceptedAt: true,
   policyAcceptedByUserId: true,
@@ -41,6 +42,7 @@ const putSchema = z.object({
   fixedObligationCoveragePolicy: z.enum(["REQUIRED_WHERE_PERMITTED", "ORGANIZATION_ABSORBS"]).optional(),
   voluntaryCoveragePolicy: z.enum(["OPTIONAL", "ORGANIZATION_ABSORBS"]).optional(),
   ineligiblePaymentMethodFallback: z.enum(["ORGANIZATION_ABSORBS", "REQUIRE_ACH", "OFFER_ALTERNATIVES"]).optional(),
+  fixedObligationPaymentPreference: z.enum(["CARD_AND_ABSORB", "PREFER_ACH", "REQUIRE_ACH"]).optional(),
   achEnabled: z.boolean().optional(),
   /** §6 acknowledgment: the caller affirms the merchant-of-record,
    * surcharge-variability, debit/prepaid, lawful-policy, and
@@ -56,15 +58,48 @@ export async function PUT(request: Request) {
     const existing = await prisma.orgSettings.findUnique({ where: { organizationId }, select: POLICY_SELECT });
     if (!existing) throw new ValidationError("Organization settings not found.");
 
+    // LAUNCH-SAFE §3: mandatory card coverage is DORMANT. Selecting
+    // REQUIRED_WHERE_PERMITTED is refused outright — including via direct
+    // API requests — until the platform's eligibility-aware capability
+    // exists (both global flags). No org can reach it by accident, and no
+    // admin toggle overrides this.
+    const capabilityFlags = getGlobalCostPolicyFlags();
+    const mandatoryCapabilityAvailable =
+      capabilityFlags.mandatoryObligationCoverage && capabilityFlags.paymentMethodEligibilityCheck;
+    if (input.fixedObligationCoveragePolicy === "REQUIRED_WHERE_PERMITTED" && !mandatoryCapabilityAvailable) {
+      return Response.json(
+        {
+          ok: false,
+          error:
+            "Required card cost coverage is not currently available: it needs an eligibility-aware surcharge capability that is not yet enabled on this platform. The organization absorbs card processing costs; members are always credited in full.",
+        },
+        { status: 409 }
+      );
+    }
+
     const wantsRequired =
       (input.fixedObligationCoveragePolicy ?? existing.fixedObligationCoveragePolicy) === "REQUIRED_WHERE_PERMITTED";
     const willHaveAcceptance = Boolean(existing.policyAcceptedAt) || input.acceptPolicy === true;
-    if (wantsRequired && !willHaveAcceptance) {
+    if (wantsRequired && mandatoryCapabilityAvailable && !willHaveAcceptance) {
       return Response.json(
         {
           ok: false,
           error:
             "Selecting required cost coverage needs the administrator acknowledgment first (acceptPolicy: true).",
+        },
+        { status: 409 }
+      );
+    }
+
+    // LAUNCH-SAFE §1: "Require ACH" is selectable only while ACH is
+    // actually enabled — a policy that would create an unusable checkout
+    // is refused at write time.
+    const nextAchEnabled = input.achEnabled ?? existing.achEnabled;
+    if (input.fixedObligationPaymentPreference === "REQUIRE_ACH" && !nextAchEnabled) {
+      return Response.json(
+        {
+          ok: false,
+          error: "Requiring ACH needs bank-transfer payments enabled and verified for this organization first.",
         },
         { status: 409 }
       );
@@ -76,6 +111,7 @@ export async function PUT(request: Request) {
       "fixedObligationCoveragePolicy",
       "voluntaryCoveragePolicy",
       "ineligiblePaymentMethodFallback",
+      "fixedObligationPaymentPreference",
       "achEnabled",
     ] as const) {
       if (input[key] !== undefined) data[key] = input[key];

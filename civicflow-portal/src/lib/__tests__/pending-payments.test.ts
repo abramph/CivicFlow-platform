@@ -15,7 +15,12 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
-import { createPendingPayment, settlePendingPaymentBySession } from "@/lib/payments/pending-payments";
+import {
+  createPendingPayment,
+  markPendingFailed,
+  markPendingProcessing,
+  settlePendingPaymentBySession,
+} from "@/lib/payments/pending-payments";
 
 const BASE_INPUT = {
   organizationId: "org-1",
@@ -84,7 +89,7 @@ describe("settlePendingPaymentBySession (COST-POLICY §10)", () => {
     });
     expect(result.outcome).toBe("SETTLED");
     expect(updateMany).toHaveBeenCalledWith({
-      where: { id: "pp-1", status: "PENDING" },
+      where: { id: "pp-1", status: { in: ["PENDING", "PROCESSING"] } },
       data: expect.objectContaining({ status: "COMPLETED" }),
     });
   });
@@ -125,6 +130,36 @@ describe("settlePendingPaymentBySession (COST-POLICY §10)", () => {
     });
     expect(result.outcome).toBe("ALREADY_COMPLETED");
     expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it("ACH lifecycle (§2): Processing on unpaid completion, settled only by the async success, Failed on async failure", async () => {
+    // Processing: only PENDING rows transition.
+    updateMany.mockResolvedValueOnce({ count: 1 });
+    await markPendingProcessing("cs_ach");
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { stripeSessionId: "cs_ach", status: "PENDING" },
+      data: { status: "PROCESSING" },
+    });
+
+    // Settlement: a PROCESSING record settles.
+    findUnique
+      .mockResolvedValueOnce({ ...RECORD, status: "PROCESSING" })
+      .mockResolvedValueOnce({ ...RECORD, status: "COMPLETED" });
+    updateMany.mockResolvedValueOnce({ count: 1 });
+    const settled = await settlePendingPaymentBySession({
+      stripeSessionId: "cs_ach",
+      paidTotalCents: 1061,
+      stripeConnectedAccountId: "acct_1",
+    });
+    expect(settled.outcome).toBe("SETTLED");
+
+    // Failure: PENDING or PROCESSING → FAILED with the reason preserved.
+    updateMany.mockResolvedValueOnce({ count: 1 });
+    await markPendingFailed("cs_ach", "async payment failed");
+    expect(updateMany).toHaveBeenLastCalledWith({
+      where: { stripeSessionId: "cs_ach", status: { in: ["PENDING", "PROCESSING"] } },
+      data: { status: "FAILED", mismatchReason: "async payment failed" },
+    });
   });
 
   it("losing the settle race resolves as the replay it is", async () => {

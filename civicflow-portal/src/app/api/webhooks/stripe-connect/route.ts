@@ -89,8 +89,24 @@ export async function POST(request: Request) {
 
   try {
     switch (event.type) {
+      // ACH (§2): us_bank_account debits settle asynchronously — Stripe
+      // fires checkout.session.completed with payment_status "unpaid",
+      // then async_payment_succeeded (or _failed) days later. The recording
+      // logic below keys on payment_status === "paid", so an ACH session
+      // records NOTHING at completion and everything at settlement — the
+      // member's obligation is allocated only by the authoritative
+      // successful-payment event.
+      case "checkout.session.async_payment_succeeded":
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
+
+        // ACH in flight: explicit Processing state on our first-party
+        // record; no allocation.
+        if (session.mode === "payment" && session.payment_status === "unpaid") {
+          const { markPendingProcessing } = await import("@/lib/payments/pending-payments");
+          await markPendingProcessing(session.id);
+          break;
+        }
 
         // §20: metadata must AGREE with the account-resolved tenant. A
         // mismatch is rejected and logged; nothing is recorded from either
@@ -411,6 +427,25 @@ export async function POST(request: Request) {
           }
         }
 
+        break;
+      }
+
+      // ACH (§2): the debit failed or was returned before settlement.
+      // Nothing was allocated at completion, so nothing is reversed — the
+      // obligation stays open and the failure is explicit on our record.
+      // (Returns AFTER settlement arrive as refund events and reverse
+      // through the existing auditable refund path below.)
+      case "checkout.session.async_payment_failed": {
+        const session = event.data.object as Stripe.Checkout.Session;
+        const { markPendingFailed } = await import("@/lib/payments/pending-payments");
+        await markPendingFailed(session.id, "async payment failed or returned before settlement");
+        await createAuditEvent({
+          organizationId,
+          action: "update",
+          entityType: "stripe_webhook",
+          entityId: session.id,
+          metadata: { eventType: event.type, connected: true, outcome: "ASYNC_PAYMENT_FAILED" },
+        });
         break;
       }
 

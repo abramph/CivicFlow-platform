@@ -113,12 +113,25 @@ export function getGlobalCostPolicyFlags() {
 export async function resolveCoverageDisplayPolicy(input: {
   organizationId: string;
   nature: PaymentNatureValue;
-}): Promise<{ display: "NONE" | "OPTIONAL" | "REQUIRED"; percentBps: number; fixedCents: number; fallbackMessage: string | null }> {
+}): Promise<{
+  display: "NONE" | "OPTIONAL" | "REQUIRED";
+  percentBps: number;
+  fixedCents: number;
+  fallbackMessage: string | null;
+  /** LAUNCH-SAFE §4: show "Amount credited toward dues $X" — v2 fixed
+   * obligations where the org absorbs the cost. The member-facing total
+   * stays the principal. */
+  showCreditedNotice: boolean;
+}> {
   const [plan, settings] = await Promise.all([
     resolveCoveragePlan({ organizationId: input.organizationId, nature: input.nature, baseCents: 100, payerOptedIn: true }),
     prisma.orgSettings.findUnique({
       where: { organizationId: input.organizationId },
-      select: { processingCostCoveragePercentBps: true, processingCostCoverageFixedCents: true },
+      select: {
+        processingCostCoveragePercentBps: true,
+        processingCostCoverageFixedCents: true,
+        paymentCostPolicyV2Enabled: true,
+      },
     }),
   ]);
   return {
@@ -126,6 +139,8 @@ export async function resolveCoverageDisplayPolicy(input: {
     percentBps: settings?.processingCostCoveragePercentBps ?? 0,
     fixedCents: settings?.processingCostCoverageFixedCents ?? 0,
     fallbackMessage: plan.fallbackMessage,
+    showCreditedNotice:
+      Boolean(settings?.paymentCostPolicyV2Enabled) && input.nature === "FIXED_OBLIGATION" && !plan.offered && !plan.required,
   };
 }
 
@@ -151,6 +166,7 @@ export async function resolveCoveragePlan(input: {
       fixedObligationCoveragePolicy: true,
       voluntaryCoveragePolicy: true,
       ineligiblePaymentMethodFallback: true,
+      fixedObligationPaymentPreference: true,
       achEnabled: true,
       policyAcceptedAt: true,
       policyVersion: true,
@@ -206,6 +222,48 @@ export async function resolveCoveragePlan(input: {
   // ── v2 path ──
   const policyVersion = settings.policyVersion ?? COST_POLICY_VERSION;
 
+  // LAUNCH-SAFE §1: fixed-obligation payment preference, applied to
+  // whatever coverage outcome resolves below. ACH exists to REDUCE the
+  // org's processing costs — it never changes what the member is credited.
+  const applyPaymentPreference = (plan: CoveragePlan): CoveragePlan => {
+    if (input.nature !== "FIXED_OBLIGATION") return plan;
+    switch (settings.fixedObligationPaymentPreference) {
+      case "REQUIRE_ACH":
+        if (settings.achEnabled) {
+          return {
+            ...plan,
+            restrictToPaymentMethods: ["us_bank_account"],
+            fallbackMessage:
+              plan.fallbackMessage ??
+              "This organization uses bank transfer (ACH) for online dues and required payments to reduce processing costs.",
+          };
+        }
+        // §2 fail-safe: ACH unavailable never creates an unusable checkout.
+        return {
+          ...plan,
+          restrictToPaymentMethods: null,
+          fallbackMessage:
+            "Bank transfer is temporarily unavailable, so card payment is open for this obligation — the organization absorbs the card-processing cost and you are credited in full. You can also pay by cash, check, or any offline method your organization accepts.",
+        };
+      case "PREFER_ACH":
+        if (settings.achEnabled) {
+          return {
+            ...plan,
+            // Order matters: Stripe Checkout lists methods in the order
+            // given, so ACH renders first.
+            restrictToPaymentMethods: ["us_bank_account", "card"],
+            fallbackMessage:
+              plan.fallbackMessage ??
+              "Paying by bank transfer (ACH) helps the organization reduce processing costs. Card is also accepted.",
+          };
+        }
+        return plan;
+      case "CARD_AND_ABSORB":
+      default:
+        return plan;
+    }
+  };
+
   if (input.nature === "VOLUNTARY") {
     if (settings.voluntaryCoveragePolicy === "ORGANIZATION_ABSORBS") {
       return none("V2_ORGANIZATION_ABSORBED");
@@ -226,7 +284,7 @@ export async function resolveCoveragePlan(input: {
 
   // FIXED_OBLIGATION (and EXEMPT resolves to org-absorbs by definition)
   if (input.nature === "EXEMPT" || settings.fixedObligationCoveragePolicy === "ORGANIZATION_ABSORBS") {
-    return none("V2_ORGANIZATION_ABSORBED");
+    return applyPaymentPreference(none("V2_ORGANIZATION_ABSORBED"));
   }
 
   // REQUIRED_WHERE_PERMITTED. Also requires the §6 acknowledgment on file.
@@ -242,7 +300,7 @@ export async function resolveCoveragePlan(input: {
       settings.processingCostCoveragePercentBps,
       settings.processingCostCoverageFixedCents
     );
-    return {
+    return applyPaymentPreference({
       offered: true,
       required: true,
       coverageCents,
@@ -251,7 +309,7 @@ export async function resolveCoveragePlan(input: {
       restrictToPaymentMethods: null,
       fallbackMessage: null,
       policyVersion,
-    };
+    });
   }
 
   // Coverage cannot be applied compliantly → configured fallback (§5).
@@ -259,7 +317,7 @@ export async function resolveCoveragePlan(input: {
   switch (settings.ineligiblePaymentMethodFallback) {
     case "REQUIRE_ACH":
       if (settings.achEnabled) {
-        return {
+        return applyPaymentPreference({
           offered: false,
           required: false,
           coverageCents: 0,
@@ -269,28 +327,28 @@ export async function resolveCoveragePlan(input: {
           fallbackMessage:
             "Processing costs cannot be added to card payments right now. This payment uses bank transfer (ACH) instead.",
           policyVersion,
-        };
+        });
       }
       // ACH not enabled → safe degradation to absorb, never a dead end.
-      return {
+      return applyPaymentPreference({
         ...none("V2_FALLBACK_ORGANIZATION_ABSORBED"),
         fallbackMessage:
           "Processing costs cannot be added to this payment method. The organization will absorb the processing cost — your payment is credited in full.",
         policyVersion,
-      };
+      });
     case "OFFER_ALTERNATIVES":
-      return {
+      return applyPaymentPreference({
         ...none("V2_FALLBACK_OFFER_ALTERNATIVES"),
         fallbackMessage:
           "Processing costs cannot be added to this payment method. You can pay by another supported method, or continue — the organization will absorb the processing cost and your payment is credited in full.",
         policyVersion,
-      };
+      });
     case "ORGANIZATION_ABSORBS":
     default:
-      return {
+      return applyPaymentPreference({
         ...none("V2_FALLBACK_ORGANIZATION_ABSORBED"),
         fallbackMessage: null,
         policyVersion,
-      };
+      });
   }
 }

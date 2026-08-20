@@ -69,6 +69,26 @@ export async function attachStripeSession(pendingPaymentId: string, stripeSessio
   });
 }
 
+/** ACH (§2): checkout completed but the payment has not settled. Principal
+ * is NOT allocated; the obligation stays open. Explicit member-facing
+ * state: Processing. */
+export async function markPendingProcessing(stripeSessionId: string): Promise<void> {
+  await prisma.pendingPayment.updateMany({
+    where: { stripeSessionId, status: "PENDING" },
+    data: { status: "PROCESSING" },
+  });
+}
+
+/** ACH (§2): the debit failed or was returned before settlement. Nothing
+ * was ever allocated, so nothing is reversed — the obligation simply
+ * remains open, and the reason is preserved. */
+export async function markPendingFailed(stripeSessionId: string, reason: string): Promise<void> {
+  await prisma.pendingPayment.updateMany({
+    where: { stripeSessionId, status: { in: ["PENDING", "PROCESSING"] } },
+    data: { status: "FAILED", mismatchReason: reason },
+  });
+}
+
 export type PendingSettlement =
   | { outcome: "NOT_FOUND" }
   | { outcome: "ALREADY_COMPLETED"; record: PendingPayment }
@@ -111,7 +131,9 @@ export async function settlePendingPaymentBySession(input: {
   }
 
   const settled = await db.pendingPayment.updateMany({
-    where: { id: record.id, status: "PENDING" },
+    // PROCESSING is the ACH path (§2): checkout completed, debit not yet
+    // settled — the authoritative async_payment_succeeded event settles it.
+    where: { id: record.id, status: { in: ["PENDING", "PROCESSING"] } },
     data: { status: "COMPLETED", completedAt: new Date() },
   });
   if (settled.count === 0) {

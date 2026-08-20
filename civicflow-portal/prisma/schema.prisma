@@ -1863,6 +1863,8 @@ model OrgSettings {
   fixedObligationCoveragePolicy    FixedObligationCoveragePolicy @default(ORGANIZATION_ABSORBS)
   voluntaryCoveragePolicy          VoluntaryCoveragePolicy       @default(OPTIONAL)
   ineligiblePaymentMethodFallback  IneligibleMethodFallback      @default(ORGANIZATION_ABSORBS)
+  /// LAUNCH-SAFE §1: fixed-obligation online payment preference (see enum).
+  fixedObligationPaymentPreference FixedObligationPaymentPreference @default(CARD_AND_ABSORB)
   achEnabled                       Boolean                       @default(false)
   /// §6 administrator acknowledgment — REQUIRED_WHERE_PERMITTED cannot be
   /// selected until an authorized admin has accepted the policy terms.
@@ -1918,9 +1920,26 @@ enum PaymentNature {
   EXEMPT
 }
 
+/// LAUNCH-SAFE §1: how fixed obligations may be paid online. Independent of
+/// coverage — at launch the org absorbs card costs in every option; ACH
+/// preference exists to REDUCE those costs, never to shift them.
+/// REQUIRE_ACH is selectable only while ACH is enabled and verified; if ACH
+/// becomes unavailable the checkout fails safe to card + absorb with an
+/// explanation, never an unusable dead end.
+enum FixedObligationPaymentPreference {
+  CARD_AND_ABSORB
+  PREFER_ACH
+  REQUIRE_ACH
+}
+
 enum PendingPaymentStatus {
   PENDING
+  /// ACH (§2): checkout completed but the debit has not settled — principal
+  /// is NOT allocated and the obligation stays open until the authoritative
+  /// async_payment_succeeded event.
+  PROCESSING
   COMPLETED
+  FAILED
   ABANDONED
   MISMATCHED
 }

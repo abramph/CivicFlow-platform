@@ -24,6 +24,9 @@ type CoverageOffer = {
   fixedCents: number;
   /** §8 fallback disclosure ("processing costs cannot be added…"). */
   fallbackMessage?: string | null;
+  /** LAUNCH-SAFE §4: "Amount credited toward …" line when the organization
+   * absorbs the card cost on a fixed obligation. */
+  creditedNoticeLabel?: string | null;
 };
 
 type Props = {
@@ -235,6 +238,13 @@ function StripeCheckoutSection({
       {coverage.offered && coverProcessingCosts && baseCents > 0 ? (
         <div className="rounded-lg bg-emerald-50 px-4 py-2 text-center text-sm text-emerald-800">
           Total: <span className="font-semibold">${((baseCents + estimateCents) / 100).toFixed(2)}</span>
+        </div>
+      ) : null}
+
+      {coverage.creditedNoticeLabel && baseCents > 0 ? (
+        <div className="flex justify-between rounded-lg bg-slate-50 px-4 py-2 text-sm text-slate-700">
+          <span>{coverage.creditedNoticeLabel}</span>
+          <span className="font-semibold">${(baseCents / 100).toFixed(2)}</span>
         </div>
       ) : null}
 

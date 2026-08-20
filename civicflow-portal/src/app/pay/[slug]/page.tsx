@@ -41,6 +41,11 @@ export default async function PublicPayPage({
     percentBps: displayPolicy.percentBps,
     fixedCents: displayPolicy.fixedCents,
     fallbackMessage: displayPolicy.fallbackMessage,
+    creditedNoticeLabel: displayPolicy.showCreditedNotice
+      ? link.event
+        ? "Amount credited toward your registration"
+        : "Amount credited toward dues"
+      : null,
   };
 
   const methods = link.methods.map((m) => ({

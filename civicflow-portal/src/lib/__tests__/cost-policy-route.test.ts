@@ -35,13 +35,14 @@ const EXISTING = {
   fixedObligationCoveragePolicy: "ORGANIZATION_ABSORBS",
   voluntaryCoveragePolicy: "OPTIONAL",
   ineligiblePaymentMethodFallback: "ORGANIZATION_ABSORBS",
+  fixedObligationPaymentPreference: "CARD_AND_ABSORB",
   achEnabled: false,
   policyAcceptedAt: null,
   policyAcceptedByUserId: null,
   policyVersion: null,
 };
 
-describe("PUT /api/payments/cost-policy (COST-POLICY §6/§13)", () => {
+describe("PUT /api/payments/cost-policy (COST-POLICY §6/§13, LAUNCH-SAFE gating)", () => {
   beforeEach(() => {
     requirePermission.mockReset();
     requirePermission.mockResolvedValue({
@@ -53,24 +54,45 @@ describe("PUT /api/payments/cost-policy (COST-POLICY §6/§13)", () => {
     update.mockReset();
     update.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ ...EXISTING, ...data }));
     createAuditEvent.mockClear();
+    delete process.env.MANDATORY_OBLIGATION_COVERAGE;
+    delete process.env.PAYMENT_METHOD_ELIGIBILITY_CHECK;
   });
 
-  it("selecting REQUIRED_WHERE_PERMITTED without the acknowledgment is a 409 and changes nothing", async () => {
-    const response = await PUT(buildRequest({ fixedObligationCoveragePolicy: "REQUIRED_WHERE_PERMITTED" }));
+  it("LAUNCH-SAFE §3: REQUIRED_WHERE_PERMITTED is refused while the capability is unavailable — even with acceptPolicy", async () => {
+    const response = await PUT(
+      buildRequest({ fixedObligationCoveragePolicy: "REQUIRED_WHERE_PERMITTED", acceptPolicy: true })
+    );
     expect(response.status).toBe(409);
+    const payload = (await response.json()) as { error: string };
+    expect(payload.error).toMatch(/not currently available/i);
     expect(update).not.toHaveBeenCalled();
     expect(createAuditEvent).not.toHaveBeenCalled();
   });
 
+  it("with the capability flags on, REQUIRED still needs the acknowledgment first", async () => {
+    process.env.MANDATORY_OBLIGATION_COVERAGE = "true";
+    process.env.PAYMENT_METHOD_ELIGIBILITY_CHECK = "true";
+    const response = await PUT(buildRequest({ fixedObligationCoveragePolicy: "REQUIRED_WHERE_PERMITTED" }));
+    expect(response.status).toBe(409);
+    expect(update).not.toHaveBeenCalled();
+  });
+
   it("acceptPolicy records who acknowledged, when, and which policy version", async () => {
-    const response = await PUT(
-      buildRequest({ fixedObligationCoveragePolicy: "REQUIRED_WHERE_PERMITTED", acceptPolicy: true })
-    );
+    const response = await PUT(buildRequest({ acceptPolicy: true }));
     expect(response.status).toBe(200);
     const data = update.mock.calls[0][0].data;
     expect(data.policyAcceptedByUserId).toBe("admin-1");
     expect(data.policyAcceptedAt).toBeInstanceOf(Date);
     expect(data.policyVersion).toBe("v2.0");
+  });
+
+  it("LAUNCH-SAFE §1: REQUIRE_ACH is refused while ACH is not enabled", async () => {
+    const response = await PUT(buildRequest({ fixedObligationPaymentPreference: "REQUIRE_ACH" }));
+    expect(response.status).toBe(409);
+    expect(update).not.toHaveBeenCalled();
+
+    const ok = await PUT(buildRequest({ fixedObligationPaymentPreference: "REQUIRE_ACH", achEnabled: true }));
+    expect(ok.status).toBe(200);
   });
 
   it("§13: every change is audited with previous and next values", async () => {

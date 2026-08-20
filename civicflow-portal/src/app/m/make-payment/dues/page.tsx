@@ -40,6 +40,7 @@ export default async function MemberPayDuesInAdvancePage({ searchParams }: { sea
     percentBps: displayPolicy.percentBps,
     fixedCents: displayPolicy.fixedCents,
     fallbackMessage: displayPolicy.fallbackMessage,
+    creditedNoticeLabel: displayPolicy.showCreditedNotice ? "Amount credited toward dues" : null,
   };
 
   const orgSuffix = org ? `?org=${encodeURIComponent(org)}` : "";
