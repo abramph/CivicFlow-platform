@@ -150,7 +150,92 @@ implemented deliberately:
 
 ## 5. Feature flags (§15)
 
-`paymentCostPolicyV2` (org-level master), `mandatoryObligationCoverage`
-(global, OFF — blocked on eligibility), `paymentMethodEligibilityCheck`
-(OFF — no compliant source), `paymentCostReconciliation` (fee capture +
-reports). Flags OFF ⇒ byte-identical behavior to today.
+- `OrgSettings.paymentCostPolicyV2Enabled` — per-org master switch
+  (default false ⇒ byte-identical legacy behavior for every flow).
+- `MANDATORY_OBLIGATION_COVERAGE` (env, default off) — global gate on
+  required coverage; MUST stay off until a compliant card-eligibility
+  mechanism exists.
+- `PAYMENT_METHOD_ELIGIBILITY_CHECK` (env, default off) — asserts such a
+  mechanism exists. Both env flags AND the org's §6 acknowledgment are
+  required before any checkout renders required coverage.
+- `PAYMENT_COST_RECONCILIATION` (env, default on) — actual-fee capture.
+
+Rollback = flip the org flag off (legacy behavior returns instantly); the
+schema is additive, so application-level rollback needs no migration.
+
+## 6. Why Stripe net payout never determines member status
+
+`DuesCharge` settles exclusively from `DuesPayment.amount` — the BASE
+principal. Coverage, the actual Stripe fee, and the net deposit live in
+separate columns (`processingCostCoverageAmount`, `totalChargedAmount`,
+`processorFeeActualCents`, `netDepositedCents`) that no status, campaign,
+statement, or balance computation reads. A member who owes $10 and pays
+$10 is credited $10 whether the org absorbed the fee, the payer covered
+it, or the actual fee differed from the estimate.
+
+## 7. Refund allocation order (§11)
+
+- Full refund: reverses the obligation/contribution allocation under the
+  existing (CONNECT-F/K) refund mechanics; the refund ceiling is
+  `totalChargedAmount ?? amount`, so payer-covered coverage is refunded
+  with it. What happened to the coverage component is visible as
+  (refund total − principal).
+- Partial refund: allocation order is PRINCIPAL FIRST — a partial refund
+  reduces the obligation/contribution principal up to `amount`, and only
+  the excess beyond principal is a coverage reversal. A processing-
+  cost-only adjustment therefore never silently reopens an obligation.
+- Failed payments record nothing (webhook-only recording).
+- Dues refunds: no DuesPayment refund mechanism exists (pre-existing,
+  documented since CONNECT-E) — unchanged by this program.
+- Stripe not returning its own fee on refund is an ORGANIZATION expense,
+  visible in reconciliation (fee captured, refund recorded) — never a
+  member balance.
+
+## 8. Recurring payments (§9)
+
+- Recurring voluntary giving keeps the CONNECT-F model: the election is a
+  live boolean on the schedule, re-grossed at the org's CURRENT rate on
+  every self-service change; donors can change it any time; statements
+  exclude coverage. The schedule row itself is the §7 first-party record
+  for subscription checkouts (created PENDING_SETUP before redirect).
+- Recurring fixed obligations: no recurring-dues product exists today
+  (dues are charged per-period and paid per-charge). If one ships, each
+  installment resolves the fixed-obligation policy at billing time and
+  totals may not change without the recurring-authorization disclosures.
+
+## 9. Reconciliation fields (§10)
+
+Per successful online payment: principal (`amount`), payer-covered
+estimate (`processingCostCoverageAmount`), exact charge
+(`totalChargedAmount`), actual Stripe fee (`processorFeeActualCents`),
+net deposit (`netDepositedCents`), organization-absorbed amount
+(= actual fee − payer-covered, floored at 0), pending-record linkage
+(`pendingPaymentId`), and the authorized-vs-paid verdict on the
+`PendingPayment` row (COMPLETED / MISMATCHED + reason). The payer-covered
+estimate and the actual fee are NOT assumed equal.
+
+## 10. Administrator-facing explanation (plain language)
+
+> When someone pays online, the card processor keeps a small fee. Unestra
+> always credits the payer the full amount they intended to pay — the fee
+> is your organization's expense unless the payer chooses (or, where
+> lawful and technically supported in the future, is asked) to add it on
+> top. You choose the policy for donations and for dues/tickets
+> separately. Debit and prepaid cards cannot legally carry a surcharge in
+> most places, so "required" coverage only activates where the platform
+> can tell card types apart — until then Unestra protects you by falling
+> back to the option you configure. No member is ever marked behind on
+> dues because of a card fee.
+
+## 11. §7 STOP report — missing Stripe capability
+
+Mandatory, eligibility-aware card surcharging needs a capability Stripe
+does not offer generally today for standard US Connect platforms
+(funding-type detection + network-cap enforcement before confirmation).
+Options if the owner wants required coverage on cards: Stripe's invite-
+only/regional surcharging programs (account approval + contracts), a
+third-party surcharge provider (new contract + integration), or keeping
+the shipped model (voluntary opt-in + org-absorb fallback, ACH restrict
+option). Affected: every connected account. Safest launch fallback
+(implemented as default): ORGANIZATION_ABSORBS with full principal
+crediting.
