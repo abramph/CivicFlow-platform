@@ -10,8 +10,27 @@ const BATCH_SIZE = 50;
  * manual admin Retry action (api/admin/sms/messages/[id]/retry) and the
  * automated queue processor below, so there's exactly one implementation of
  * "what does a retry attempt actually do."
+ *
+ * LAUNCH-BLOCKER subscription gate: re-checked fresh on every call, in this
+ * one shared place, so both the manual Retry button and the automated sweep
+ * respect it identically — without this, a super-admin's manual Retry click
+ * would bypass the gate entirely (it doesn't go through the automated
+ * sweep's loop). Marked FAILED (not left RETRYING) so the sweep never
+ * retries it forever and so it's visible in the admin SMS message list;
+ * resuming it is then an explicit manual Retry click after the organization
+ * resubscribes, never an automatic backlog blast.
  */
-export async function attemptSmsMessageResend(message: Pick<SmsMessage, "id" | "phone" | "body">): Promise<SmsMessage> {
+export async function attemptSmsMessageResend(
+  message: Pick<SmsMessage, "id" | "phone" | "body" | "organizationId">
+): Promise<SmsMessage> {
+  const access = await resolveOrganizationAccess(message.organizationId);
+  if (!access.allowed) {
+    return prisma.smsMessage.update({
+      where: { id: message.id },
+      data: { status: "FAILED", errorMessage: "Organization subscription is not active." },
+    });
+  }
+
   const result = await sendSms({ to: message.phone, body: message.body });
   return prisma.smsMessage.update({
     where: { id: message.id },
@@ -28,25 +47,15 @@ export async function attemptSmsMessageResend(message: Pick<SmsMessage, "id" | "
  * manual Retry action itself resolves synchronously. Self-healing net, run
  * on a cron alongside the other worker/cron pairs in this codebase.
  */
-export async function processRetryableSmsMessages(): Promise<{ processed: number; skippedBilling: number }> {
+export async function processRetryableSmsMessages(): Promise<{ processed: number }> {
   const due = await prisma.smsMessage.findMany({
     where: { status: "RETRYING", nextRetryAt: { lte: new Date() } },
     take: BATCH_SIZE,
   });
 
-  let skippedBilling = 0;
   for (const message of due) {
-    // LAUNCH-BLOCKER subscription gate: leave a billing-inactive
-    // organization's retrying message exactly as-is (still RETRYING, not
-    // deleted or marked FAILED) — it becomes eligible again next run once
-    // access is restored.
-    const access = await resolveOrganizationAccess(message.organizationId);
-    if (!access.allowed) {
-      skippedBilling += 1;
-      continue;
-    }
     await attemptSmsMessageResend(message);
   }
 
-  return { processed: due.length, skippedBilling };
+  return { processed: due.length };
 }

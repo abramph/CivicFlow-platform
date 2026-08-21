@@ -25,12 +25,28 @@ export async function processPendingReminderLogs(limit = 50) {
 
   for (const log of pending) {
     try {
-      // LAUNCH-BLOCKER subscription gate: a billing-inactive organization's
-      // queued reminder is left untouched (still QUEUED, not deleted or
-      // marked SKIPPED) so it becomes eligible again once access is
-      // restored — the next cron run picks it up normally.
+      // LAUNCH-BLOCKER subscription gate: re-checked fresh on every call.
+      // Marked FAILED immediately (not left QUEUED, not deleted) so this
+      // job never retries it forever and so it's visible to staff via
+      // GET /api/reminders — resending is then an explicit staff action
+      // (re-creating the reminder via POST /api/reminders), never an
+      // automatic backlog blast once the organization resubscribes.
       const access = await resolveOrganizationAccess(log.organizationId);
-      if (!access.allowed) continue;
+      if (!access.allowed) {
+        await prisma.emailReminderLog.update({
+          where: { id: log.id },
+          data: { status: "FAILED", errorMessage: "Organization subscription is not active." },
+        });
+        await createAuditEvent({
+          organizationId: log.organizationId,
+          actorUserId: log.createdByUserId,
+          action: "update",
+          entityType: "reminder_log",
+          entityId: log.id,
+          metadata: { status: "FAILED", reason: "organization_subscription_required" },
+        });
+        continue;
+      }
 
       const recipient = log.recipientEmail || log.member?.email;
       if (!recipient) {

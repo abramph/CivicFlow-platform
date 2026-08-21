@@ -23,6 +23,18 @@ vi.mock("@/lib/prisma", () => ({
 const sendSms = vi.fn();
 vi.mock("@/lib/sms", () => ({ sendSms: (...args: unknown[]) => sendSms(...args) }));
 
+// This suite tests the retry/cancel routes, not the subscription gate —
+// assume every organization is allowed.
+vi.mock("@/lib/subscription-gate", () => ({
+  resolveOrganizationAccess: vi.fn().mockResolvedValue({
+    allowed: true,
+    reason: null,
+    trialEndsAt: null,
+    subscriptionStatus: null,
+    billingExempt: false,
+  }),
+}));
+
 import { POST as retry } from "@/app/api/admin/sms/messages/[id]/retry/route";
 import { POST as cancel } from "@/app/api/admin/sms/messages/[id]/cancel/route";
 
