@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  */
 
 vi.mock("@/lib/env", () => ({ getServerEnv: () => ({ NEXTAUTH_URL: "https://app.getunestra.com" }) }));
+vi.mock("@sentry/nextjs", () => ({ captureException: vi.fn() }));
 
 const requirePermission = vi.fn();
 vi.mock("@/lib/auth-guards", async (importOriginal) => {
@@ -120,6 +121,34 @@ describe("POST /api/billing/checkout — server-authoritative plan resolution", 
     findUniqueOrganization.mockResolvedValue(null);
     const res = await POST(buildRequest({ interval: "month" }));
     expect(res.status).toBe(404);
+  });
+
+  it("when Stripe throws (e.g. a price/mode mismatch), returns a safe message + reference id and never leaks the raw price id", async () => {
+    const originalEnv = process.env.NODE_ENV;
+    // @ts-expect-error -- NODE_ENV is readonly in the type; standard pattern
+    // here for exercising the prod-only sanitized-message branch under test.
+    process.env.NODE_ENV = "production";
+    try {
+      findUniqueOrganization.mockResolvedValue({ name: "Union Local 400", email: "a@b.com", plan: "free", primaryVertical: "UNION" });
+      priceIdForPlan.mockReturnValue("price_1LiveSecretLookingId");
+      createCheckoutSession.mockRejectedValueOnce(
+        new Error(
+          "No such price: 'price_1LiveSecretLookingId'; a similar object exists in live mode, but a test mode key was used to make this request."
+        )
+      );
+
+      const res = await POST(buildRequest({ interval: "month" }));
+      const body = await res.json();
+
+      expect(res.status).toBe(500);
+      expect(typeof body.referenceId).toBe("string");
+      expect(body.referenceId).toHaveLength(8);
+      expect(JSON.stringify(body)).not.toContain("price_1LiveSecretLookingId");
+      expect(JSON.stringify(body)).not.toContain("test mode key");
+    } finally {
+      // @ts-expect-error -- restoring the same readonly-typed property
+      process.env.NODE_ENV = originalEnv;
+    }
   });
 });
 

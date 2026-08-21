@@ -113,15 +113,16 @@ export async function withApiErrorHandling(
       if (error instanceof MobileAuthError || error instanceof MobileForbiddenError) {
         return jsonError(error.message, error.status);
       }
-      Sentry.captureException(error);
-      console.error("[api-route] Unhandled error:", error);
+      const referenceId = crypto.randomUUID().slice(0, 8);
+      Sentry.captureException(error, { tags: { referenceId } });
+      console.error(`[api-route] Unhandled error (ref: ${referenceId}):`, error);
       const isProd = process.env.NODE_ENV === "production";
       const message = isProd
-        ? "Internal server error"
+        ? `Something went wrong on our end. Please try again, and include this reference if you contact support: ${referenceId}`
         : error instanceof Error
           ? error.message
           : "Internal server error";
-      return jsonError(message, 500);
+      return jsonError(message, 500, undefined, referenceId);
     }
   });
 }

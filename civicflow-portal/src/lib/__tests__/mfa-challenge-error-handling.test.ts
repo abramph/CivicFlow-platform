@@ -72,7 +72,9 @@ describe("POST /api/auth/mfa/challenge — unexpected errors are now handled, no
       const body = await response.json();
 
       expect(response.status).toBe(500);
-      expect(body.error).toBe("Internal server error");
+      expect(body.error).toMatch(/^Something went wrong on our end\. .+: [0-9a-f]{8}$/);
+      expect(typeof body.referenceId).toBe("string");
+      expect(body.referenceId).toHaveLength(8);
       expect(JSON.stringify(body)).not.toContain("hunter2");
       expect(JSON.stringify(body)).not.toContain("ECONNREFUSED");
     } finally {

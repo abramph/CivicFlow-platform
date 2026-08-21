@@ -27,12 +27,13 @@ export async function parseJsonBody<T>(
   return result.data;
 }
 
-export function jsonError(message: string, status = 400, details?: unknown): Response {
+export function jsonError(message: string, status = 400, details?: unknown, referenceId?: string): Response {
   return Response.json(
     {
       ok: false,
       error: message,
       ...(details ? { details } : {}),
+      ...(referenceId ? { referenceId } : {}),
     },
     { status }
   );
