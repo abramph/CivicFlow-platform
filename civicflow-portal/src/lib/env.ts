@@ -172,12 +172,14 @@ export function getServerEnv(): ServerEnv {
     // Platform billing must use a live-mode key in production — a test-mode
     // key here can't create sessions against the live Cloud subscription
     // Prices (Stripe rejects the mismatch), which took Cloud checkout down
-    // in production once already. STRIPE_TEST_SECRET_KEY is a separate,
-    // intentionally test-mode key for connected-account onboarding and is
-    // untouched by this check.
-    if (!parsed.data.STRIPE_SECRET_KEY.startsWith("sk_live_")) {
+    // in production once already. Both full-access (sk_live_) and
+    // restricted (rk_live_) live keys are valid here — a scoped restricted
+    // key is the more secure choice and works identically with the Stripe
+    // SDK. STRIPE_TEST_SECRET_KEY is a separate, intentionally test-mode
+    // key for connected-account onboarding and is untouched by this check.
+    if (!/^(sk|rk)_live_/.test(parsed.data.STRIPE_SECRET_KEY)) {
       throw new Error(
-        "Invalid server environment: STRIPE_SECRET_KEY must be a live-mode secret key (sk_live_...) in production."
+        "Invalid server environment: STRIPE_SECRET_KEY must be a live-mode secret key (sk_live_... or rk_live_...) in production."
       );
     }
     cached = parsed.data;

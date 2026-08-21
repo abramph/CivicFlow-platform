@@ -52,7 +52,7 @@ describe("getServerEnv — production requires a live-mode Stripe secret key", (
     expect(() => getServerEnv()).toThrow(/live-mode secret key/i);
   });
 
-  it("succeeds when STRIPE_SECRET_KEY is a live-mode key in production", async () => {
+  it("succeeds when STRIPE_SECRET_KEY is a full-access live-mode key (sk_live_...)", async () => {
     process.env = {
       ...OLD,
       ...REQUIRED_PROD_ENV,
@@ -61,6 +61,28 @@ describe("getServerEnv — production requires a live-mode Stripe secret key", (
 
     const { getServerEnv } = await load();
     expect(() => getServerEnv()).not.toThrow();
+  });
+
+  it("succeeds when STRIPE_SECRET_KEY is a restricted live-mode key (rk_live_...) — the recommended, more secure option", async () => {
+    process.env = {
+      ...OLD,
+      ...REQUIRED_PROD_ENV,
+      STRIPE_SECRET_KEY: "rk_live_abc123",
+    } as NodeJS.ProcessEnv;
+
+    const { getServerEnv } = await load();
+    expect(() => getServerEnv()).not.toThrow();
+  });
+
+  it("throws when STRIPE_SECRET_KEY is a restricted test-mode key (rk_test_...) in production", async () => {
+    process.env = {
+      ...OLD,
+      ...REQUIRED_PROD_ENV,
+      STRIPE_SECRET_KEY: "rk_test_abc123",
+    } as NodeJS.ProcessEnv;
+
+    const { getServerEnv } = await load();
+    expect(() => getServerEnv()).toThrow(/live-mode secret key/i);
   });
 
   it("does not require STRIPE_TEST_SECRET_KEY to be live-mode — that key stays test-mode by design", async () => {
