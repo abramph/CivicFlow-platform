@@ -1,6 +1,6 @@
 import { withApiErrorHandling } from "@/lib/api-route";
 import { requireMobileAuth, MobileForbiddenError } from "@/lib/mobile-auth";
-import { resolveMobileAdminCapabilities, type AdminCapabilityFlag } from "@/lib/mobile-admin";
+import { requireMobileAdminAccess, type AdminCapabilityFlag } from "@/lib/mobile-admin";
 import { listPendingPtaVolunteerHourEntries } from "@/lib/labs/pta/volunteers";
 import { getMemberPaymentsFinancialSummary } from "@/lib/financial-summary";
 import { prisma } from "@/lib/prisma";
@@ -46,7 +46,7 @@ export async function GET(request: Request) {
     if (!organizationId) throw new ValidationError("organizationId is required");
 
     const { userId } = await requireMobileAuth(request);
-    const admin = await resolveMobileAdminCapabilities(organizationId, userId);
+    const admin = await requireMobileAdminAccess(organizationId, userId);
     if (!admin.available) throw new MobileForbiddenError("No mobile admin access for this organization");
 
     const has = (flag: AdminCapabilityFlag) => admin.adminCapabilities.includes(flag);

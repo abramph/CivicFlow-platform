@@ -1,6 +1,6 @@
 import { withApiErrorHandling } from "@/lib/api-route";
 import { requireMobileAuth, MobileForbiddenError } from "@/lib/mobile-auth";
-import { resolveMobileAdminCapabilities } from "@/lib/mobile-admin";
+import { requireMobileAdminAccess } from "@/lib/mobile-admin";
 import { prisma } from "@/lib/prisma";
 import { ValidationError } from "@/lib/validation";
 
@@ -14,7 +14,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ camp
     if (!organizationId) throw new ValidationError("organizationId is required");
 
     const { userId } = await requireMobileAuth(request);
-    const admin = await resolveMobileAdminCapabilities(organizationId, userId);
+    const admin = await requireMobileAdminAccess(organizationId, userId);
     if (!admin.available || !admin.adminCapabilities.includes("manageCommunications")) {
       throw new MobileForbiddenError("No mobile communications administration access for this organization");
     }

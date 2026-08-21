@@ -1,6 +1,6 @@
 import { withApiErrorHandling } from "@/lib/api-route";
 import { requireMobileAuth, MobileForbiddenError } from "@/lib/mobile-auth";
-import { resolveMobileAdminCapabilities } from "@/lib/mobile-admin";
+import { requireMobileAdminAccess } from "@/lib/mobile-admin";
 import { prisma } from "@/lib/prisma";
 import { ValidationError, parseJsonBody, z } from "@/lib/validation";
 import { requireRateLimit } from "@/lib/rate-limit";
@@ -10,7 +10,7 @@ const createMobileCampaignSchema = createCampaignSchema.extend({ organizationId:
 
 async function requireManageCommunications(request: Request, organizationId: string) {
   const { userId, email } = await requireMobileAuth(request);
-  const admin = await resolveMobileAdminCapabilities(organizationId, userId);
+  const admin = await requireMobileAdminAccess(organizationId, userId);
   if (!admin.available || !admin.adminCapabilities.includes("manageCommunications")) {
     throw new MobileForbiddenError("No mobile communications administration access for this organization");
   }
