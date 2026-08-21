@@ -167,6 +167,41 @@ describe("Stripe platform webhook", () => {
     expect(upsertSubscription).toHaveBeenCalledTimes(1);
   });
 
+  it("LAUNCH-BLOCKER E2E-2 (incomplete subscription state): maps Stripe's 'incomplete' status to our 'cancelled' status, deactivates the org, and does not treat it as active — the subscription-gate's SUBSCRIPTION_CANCELED denial reason for an org in this DB state is therefore correct end-to-end, not just an assumption at the gate layer", async () => {
+    upsertSubscription.mockResolvedValueOnce({ id: "sub-record-1", status: "cancelled" });
+    const request = buildSignedRequest({
+      id: "evt_incomplete",
+      type: "customer.subscription.updated",
+      data: {
+        object: {
+          id: "sub_1",
+          status: "incomplete",
+          customer: "cus_1",
+          current_period_start: 1700000000,
+          current_period_end: 1702592000,
+          cancel_at_period_end: false,
+          items: { data: [] },
+          metadata: { organizationId: "org_1" },
+        },
+      },
+    });
+
+    const response = await POST(request);
+    expect(response.status).toBe(200);
+
+    const upsertArgs = upsertSubscription.mock.calls[0][0];
+    expect(upsertArgs.create.status).toBe("cancelled");
+    expect(upsertArgs.update.status).toBe("cancelled");
+
+    // isActive is false for "incomplete", so the org's plan reverts to
+    // "free" and its seatLimit clears — the same downgrade path a real
+    // cancellation takes, confirming "incomplete" is never treated as a
+    // grant of access anywhere in the webhook handler either.
+    expect(updateOrganization).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ plan: "free", seatLimit: null }) })
+    );
+  });
+
   it("skips reprocessing a duplicate event id without erroring", async () => {
     createStripeWebhookEvent.mockRejectedValueOnce(new Error("Unique constraint failed on the fields: (`stripeEventId`)"));
 

@@ -15,19 +15,30 @@ vi.mock("@/lib/role-permissions", () => ({
 
 vi.mock("@/lib/authOptions", () => ({ authOptions: {} }));
 
-// This suite tests platform-access/tenant-isolation logic, not the
-// subscription gate — assume every organization is allowed.
+// This suite tests platform-access/tenant-isolation logic. assertOrganizationAccess
+// is a plain vi.fn() (not a fixed mockResolvedValue) so the E2E-2 "platform
+// support context" tests below can assert it was never called at all — the
+// platform-administration path must be architecturally independent of the
+// per-organization billing gate, not merely permitted through it.
+const assertOrganizationAccess = vi.fn().mockResolvedValue({
+  allowed: true,
+  reason: null,
+  trialEndsAt: null,
+  subscriptionStatus: null,
+  billingExempt: false,
+});
 vi.mock("@/lib/subscription-gate", () => ({
-  assertOrganizationAccess: vi.fn().mockResolvedValue({
-    allowed: true,
-    reason: null,
-    trialEndsAt: null,
-    subscriptionStatus: null,
-    billingExempt: false,
-  }),
+  assertOrganizationAccess: (...args: unknown[]) => assertOrganizationAccess(...args),
 }));
 
-import { requireOrganization, requireRole, requirePermission, ForbiddenError } from "@/lib/auth-guards";
+const getPlatformAccessForUser = vi.fn();
+const hasPlatformRole = vi.fn();
+vi.mock("@/lib/platform-access", () => ({
+  getPlatformAccessForUser: (...args: unknown[]) => getPlatformAccessForUser(...args),
+  hasPlatformRole: (...args: unknown[]) => hasPlatformRole(...args),
+}));
+
+import { requireOrganization, requireRole, requirePermission, requirePlatformRole, requireSuperAdmin, ForbiddenError } from "@/lib/auth-guards";
 
 describe("Tenant isolation — PlatformAccess must never substitute for organization membership", () => {
   beforeEach(() => {
@@ -35,6 +46,9 @@ describe("Tenant isolation — PlatformAccess must never substitute for organiza
     redirect.mockClear();
     getEffectivePermissions.mockReset();
     getEffectivePermissions.mockResolvedValue([]);
+    assertOrganizationAccess.mockClear();
+    getPlatformAccessForUser.mockReset();
+    hasPlatformRole.mockReset();
   });
 
   it("a global platform administrator with no membership in Organization B cannot pass requireOrganization() for B", async () => {
@@ -128,5 +142,44 @@ describe("Tenant isolation — PlatformAccess must never substitute for organiza
     const result = await requireOrganization();
     expect(result.organizationId).toBe("org-thrivepathmhs");
     expect(result.role).toBe("ORG_OWNER");
+  });
+});
+
+describe("E2E-2 (platform support context): the platform-administration path bypasses the subscription gate through its own independent guard, never through the org gate", () => {
+  beforeEach(() => {
+    getServerSession.mockReset();
+    redirect.mockClear();
+    assertOrganizationAccess.mockClear();
+    getPlatformAccessForUser.mockReset();
+    hasPlatformRole.mockReset();
+  });
+
+  it("requirePlatformRole succeeds for a real SUPER_ADMIN grant without ever calling assertOrganizationAccess — no active organization is even read", async () => {
+    getServerSession.mockResolvedValueOnce({ userId: "platform-admin-1", userEmail: "admin@example.com" });
+    getPlatformAccessForUser.mockResolvedValueOnce({ hasPlatformAccess: true, platformRoles: ["SUPER_ADMIN"] });
+    hasPlatformRole.mockReturnValueOnce(true);
+
+    const result = await requirePlatformRole("SUPER_ADMIN", "throw");
+
+    expect(result.session.userId).toBe("platform-admin-1");
+    expect(assertOrganizationAccess).not.toHaveBeenCalled();
+  });
+
+  it("requireSuperAdmin succeeds without ever calling assertOrganizationAccess, for an org that would otherwise be billing-denied", async () => {
+    getServerSession.mockResolvedValueOnce({ userId: "platform-admin-1", userEmail: "admin@example.com" });
+    getPlatformAccessForUser.mockResolvedValueOnce({ hasPlatformAccess: true, platformRoles: ["SUPER_ADMIN"] });
+    hasPlatformRole.mockReturnValueOnce(true);
+    assertOrganizationAccess.mockRejectedValue(new Error("would have denied — must never be reached"));
+
+    await expect(requireSuperAdmin("throw")).resolves.toMatchObject({ session: { userId: "platform-admin-1" } });
+    expect(assertOrganizationAccess).not.toHaveBeenCalled();
+  });
+
+  it("requirePlatformRole still denies a user with no platform grant — independence from the org gate is not a blanket bypass of authorization itself", async () => {
+    getServerSession.mockResolvedValueOnce({ userId: "user-1", userEmail: "user@example.com" });
+    getPlatformAccessForUser.mockResolvedValueOnce({ hasPlatformAccess: false, platformRoles: [] });
+    hasPlatformRole.mockReturnValueOnce(false);
+
+    await expect(requirePlatformRole("SUPER_ADMIN", "throw")).rejects.toThrow(ForbiddenError);
   });
 });

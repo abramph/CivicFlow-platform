@@ -68,6 +68,25 @@ describe("resolveOrganizationAccess — the canonical access decision", () => {
     expect(result.allowed).toBe(false);
   });
 
+  it("E2E-2 boundary: still grants access one second before trialEndsAt", async () => {
+    findUniqueOrganization.mockResolvedValue({ billingExempt: false, trialEndsAt: new Date(NOW.getTime() + 1000) });
+    findManySubscription.mockResolvedValue([]);
+
+    const result = await resolveOrganizationAccess("org-1", NOW);
+
+    expect(result.allowed).toBe(true);
+  });
+
+  it("E2E-2 boundary: denies access one second after trialEndsAt", async () => {
+    findUniqueOrganization.mockResolvedValue({ billingExempt: false, trialEndsAt: new Date(NOW.getTime() - 1000) });
+    findManySubscription.mockResolvedValue([]);
+
+    const result = await resolveOrganizationAccess("org-1", NOW);
+
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toBe("TRIAL_EXPIRED");
+  });
+
   it("grants access when an ACTIVE subscription row exists, even after the trial has expired", async () => {
     findUniqueOrganization.mockResolvedValue({ billingExempt: false, trialEndsAt: new Date("2026-08-12T00:00:00.000Z") });
     findManySubscription.mockResolvedValue([{ status: "active" }]);

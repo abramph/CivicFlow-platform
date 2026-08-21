@@ -14,17 +14,16 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
-// This suite tests org-tie/tenant-isolation resolution, not the
-// subscription gate — assume every organization is allowed.
+// This suite tests org-tie/tenant-isolation resolution. assertOrganizationAccess
+// is a named, resettable mock (not a fixed factory value) so the E2E-3
+// bypass-ordering tests below can assert it was never reached when tenant
+// isolation already rejected the request — the billing check must never be
+// the FIRST gate a client-claimed organizationId passes through.
+const assertOrganizationAccess = vi.fn();
 vi.mock("@/lib/subscription-gate", () => ({
-  assertOrganizationAccess: vi.fn().mockResolvedValue({
-    allowed: true,
-    reason: null,
-    trialEndsAt: null,
-    subscriptionStatus: null,
-    billingExempt: false,
-  }),
+  assertOrganizationAccess: (...args: unknown[]) => assertOrganizationAccess(...args),
 }));
+const ALLOWED_ACCESS = { allowed: true, reason: null, trialEndsAt: null, subscriptionStatus: null, billingExempt: false } as const;
 
 /**
  * `hasActiveOrgTie()` fans out to three queries in parallel — a MEMBER-role
@@ -87,6 +86,7 @@ describe("mobile-auth: cross-organization tenant isolation", () => {
     findFirstOrgMember.mockReset();
     findFirstHouseholdAdult.mockReset();
     findUniqueUser.mockReset();
+    assertOrganizationAccess.mockReset().mockResolvedValue(ALLOWED_ACCESS);
   });
 
   it("grants access when the caller has a MEMBER membership in the requested org", async () => {
@@ -99,6 +99,10 @@ describe("mobile-auth: cross-organization tenant isolation", () => {
 
     expect(result.organizationId).toBe("org-a");
     expect(result.memberId).toBe("member-1");
+    // E2E-3: once tenant isolation confirms the caller's real tie to org-a,
+    // the billing gate runs against that same verified org-a — never a
+    // different, client-supplied value.
+    expect(assertOrganizationAccess).toHaveBeenCalledWith("org-a");
   });
 
   it("denies access to an organization the caller does not belong to — even though they're authenticated", async () => {
@@ -111,6 +115,11 @@ describe("mobile-auth: cross-organization tenant isolation", () => {
       /No active membership for this organization/
     );
     expect(findFirstOrgMember).not.toHaveBeenCalled();
+    // E2E-3: a client claiming an organizationId it has no real tie to is
+    // rejected by tenant isolation BEFORE the billing gate ever runs — the
+    // billing check can never be reached for a forged/arbitrary org claim,
+    // only for an org the caller is genuinely a member of.
+    expect(assertOrganizationAccess).not.toHaveBeenCalled();
   });
 
   it("denies access when a membership exists but has no linked OrgMember record", async () => {
@@ -138,6 +147,7 @@ describe("mobile-auth: dual identity (staff/owner who is also a member)", () => 
     findFirstOrgMember.mockReset();
     findFirstHouseholdAdult.mockReset();
     findUniqueUser.mockReset();
+    assertOrganizationAccess.mockReset().mockResolvedValue(ALLOWED_ACCESS);
   });
 
   it("grants member-only access to an ORG_OWNER who has a linked OrgMember", async () => {

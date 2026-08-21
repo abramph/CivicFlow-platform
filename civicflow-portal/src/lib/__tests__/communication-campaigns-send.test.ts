@@ -151,6 +151,9 @@ describe("sendCommunicationCampaign", () => {
     );
 
     expect(updateCampaign).toHaveBeenCalledWith({ where: { id: "campaign-1" }, data: { status: "FAILED" } });
+    // Exactly one audit event for the failure — no duplicate, no
+    // additional "attempted" or "succeeded" event alongside it.
+    expect(createAuditEvent).toHaveBeenCalledTimes(1);
     expect(createAuditEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "communication_campaign.blocked",
@@ -160,6 +163,16 @@ describe("sendCommunicationCampaign", () => {
     );
     expect(findManyRecipient).not.toHaveBeenCalled();
     expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("E2E-6: does not retry a FAILED campaign indefinitely — a second call short-circuits before ever re-checking billing", async () => {
+    findFirstCampaign.mockResolvedValueOnce(makeCampaign({ status: "FAILED" }));
+
+    const result = await sendCommunicationCampaign({ organizationId: "org-a", campaignId: "campaign-1" });
+
+    expect(result).toEqual({ sent: 0, skipped: 0, failed: 0, remainingPending: 0, complete: true });
+    expect(resolveOrganizationAccess).not.toHaveBeenCalled();
+    expect(updateCampaign).not.toHaveBeenCalled();
   });
 
   it("does not re-check organization access for a campaign that already short-circuits as SENT — the gate only matters for campaigns that would actually attempt to send", async () => {
