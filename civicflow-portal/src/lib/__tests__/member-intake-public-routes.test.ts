@@ -29,6 +29,18 @@ vi.mock("@/lib/member-intake/verification", () => ({
 vi.mock("@/lib/member-intake/update-engine", () => ({ applySubmission: (...a: unknown[]) => applySubmission(...a) }));
 vi.mock("@/lib/rate-limit", () => ({ requireRateLimit: vi.fn().mockResolvedValue(null), getClientIp: () => "203.0.113.5" }));
 
+// This suite tests submission orchestration, not the subscription gate —
+// assume every organization is allowed.
+vi.mock("@/lib/subscription-gate", () => ({
+  resolveOrganizationAccess: vi.fn().mockResolvedValue({
+    allowed: true,
+    reason: null,
+    trialEndsAt: null,
+    subscriptionStatus: null,
+    billingExempt: false,
+  }),
+}));
+
 beforeEach(() => {
   vi.clearAllMocks();
 });

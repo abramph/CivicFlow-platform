@@ -6,6 +6,7 @@ import { resolveConnectedAccountForCharges, getStripeForMode } from "@/lib/payme
 import { derivePaymentNature, resolveCoveragePlan } from "@/lib/payments/cost-policy";
 import { attachStripeSession, createPendingPayment } from "@/lib/payments/pending-payments";
 import { getServerEnv } from "@/lib/env";
+import { resolveOrganizationAccess, PUBLIC_UNAVAILABLE_MESSAGE } from "@/lib/subscription-gate";
 
 const checkoutSchema = z.object({
   amount: z.number().positive().optional(),
@@ -45,6 +46,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
 
     if (link.expiresAt && link.expiresAt < new Date()) {
       return Response.json({ ok: false, error: "This payment link has expired" }, { status: 410 });
+    }
+
+    // LAUNCH-BLOCKER subscription gate: a billing-inactive organization
+    // must not keep accepting money through the platform, even though this
+    // money is collected via the org's OWN connected Stripe account (never
+    // Unestra Cloud SaaS billing). Deliberately a neutral message — an
+    // anonymous payer must never learn the organization's own billing state.
+    const access = await resolveOrganizationAccess(link.organization.id);
+    if (!access.allowed) {
+      return Response.json({ ok: false, error: PUBLIC_UNAVAILABLE_MESSAGE }, { status: 503 });
     }
 
     const stripeMethod = await prisma.paymentLinkMethod.findFirst({

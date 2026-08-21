@@ -5,6 +5,7 @@ import { resolvePublicSubmissionOrgId } from "@/lib/member-intake/submissions";
 import { verifySubmissionCode } from "@/lib/member-intake/verification";
 import { applySubmission } from "@/lib/member-intake/update-engine";
 import { MemberIntakeError } from "@/lib/member-intake/errors";
+import { resolveOrganizationAccess } from "@/lib/subscription-gate";
 import type { PublicSubmitOutcome } from "../../submit/route";
 
 const bodySchema = z.object({ submissionId: z.string().trim().min(1), code: z.string().trim().min(1).max(20) });
@@ -19,6 +20,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
 
     const organizationId = await resolvePublicSubmissionOrgId(token, submissionId);
     if (!organizationId) throw new MemberIntakeError("MEMBER_INTAKE_SUBMISSION_NOT_FOUND", "Submission not found.");
+
+    // LAUNCH-BLOCKER subscription gate: this is the step that actually
+    // applies the submission (create/update a member record) for the
+    // verification-required path — must not complete for a billing-inactive
+    // organization, even if the submission itself started before it went
+    // inactive.
+    const access = await resolveOrganizationAccess(organizationId);
+    if (!access.allowed) {
+      throw new MemberIntakeError("MEMBER_INTAKE_SUBMISSION_NOT_FOUND", "Submission not found.");
+    }
 
     const result = await verifySubmissionCode(organizationId, submissionId, code);
     if (!result.ok) {

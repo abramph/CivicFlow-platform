@@ -4,6 +4,7 @@ import { requireRateLimit } from "@/lib/rate-limit";
 import { parseJsonBody, ValidationError, z } from "@/lib/validation";
 import { createPaymentLinkOfflineReportAndNotify } from "@/lib/payment-link-offline-reports";
 import { getPaymentMethodCategory } from "@/lib/payment-method-links";
+import { resolveOrganizationAccess, PUBLIC_UNAVAILABLE_MESSAGE } from "@/lib/subscription-gate";
 
 const offlineReportSchema = z.object({
   paymentMethodConfigId: z.string().min(1),
@@ -39,6 +40,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
     }
     if (link.expiresAt && link.expiresAt < new Date()) {
       return Response.json({ ok: false, error: "This payment link has expired" }, { status: 410 });
+    }
+
+    // LAUNCH-BLOCKER subscription gate — see checkout/route.ts's identical check.
+    const access = await resolveOrganizationAccess(link.organizationId);
+    if (!access.allowed) {
+      return Response.json({ ok: false, error: PUBLIC_UNAVAILABLE_MESSAGE }, { status: 503 });
     }
 
     const minCents = link.minAmount
