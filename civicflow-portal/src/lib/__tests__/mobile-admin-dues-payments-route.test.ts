@@ -21,6 +21,18 @@ vi.mock("@/lib/role-permissions", () => ({
   getEffectivePermissions: (...args: unknown[]) => getEffectivePermissions(...args),
 }));
 
+// This suite tests mobile-admin capability/permission gating, not the
+// subscription gate — assume every organization is allowed.
+vi.mock("@/lib/subscription-gate", () => ({
+  assertOrganizationAccess: vi.fn().mockResolvedValue({
+    allowed: true,
+    reason: null,
+    trialEndsAt: null,
+    subscriptionStatus: null,
+    billingExempt: false,
+  }),
+}));
+
 const findFirstDuesCharge = vi.fn();
 const findFirstDuesAccount = vi.fn();
 const findFirstOrgMember = vi.fn();
