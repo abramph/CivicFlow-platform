@@ -29,6 +29,18 @@ vi.mock("@/lib/audit", () => ({
   createAuditEvent: (...args: unknown[]) => createAuditEvent(...args),
 }));
 
+// This suite tests RSVP resolution, not the subscription gate — assume
+// every organization is allowed.
+vi.mock("@/lib/subscription-gate", () => ({
+  assertOrganizationAccess: vi.fn().mockResolvedValue({
+    allowed: true,
+    reason: null,
+    trialEndsAt: null,
+    subscriptionStatus: null,
+    billingExempt: false,
+  }),
+}));
+
 import { GET as getEvents } from "@/app/api/mobile/events/route";
 import { POST as postRsvp } from "@/app/api/mobile/events/[eventId]/rsvp/route";
 import { signAccessToken } from "@/lib/mobile-auth";

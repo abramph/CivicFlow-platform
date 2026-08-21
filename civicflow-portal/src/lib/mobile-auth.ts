@@ -20,6 +20,7 @@ import { getServerEnv } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
 import { getEffectivePermissions } from "@/lib/role-permissions";
 import type { Permission, Role } from "@/lib/rbac";
+import { assertOrganizationAccess } from "@/lib/subscription-gate";
 
 /**
  * PTA/PTO is a first-class vertical (PR #40) — mobile access, like web, is
@@ -272,6 +273,8 @@ export async function requireMobileMembership(
     throw new MobileForbiddenError("No active membership for this organization");
   }
 
+  await assertOrganizationAccess(organizationId);
+
   const member = await prisma.orgMember.findFirst({
     where: { userId: session.userId, organizationId },
     select: { id: true },
@@ -320,6 +323,8 @@ export async function requireMobilePtaHouseholdAccess(
   if (!adult) throw new MobileForbiddenError("Your account is not linked to a PTA household in this organization");
   if (adult.household.status !== "ACTIVE") throw new MobileForbiddenError("Your household's PTA membership is not currently active");
 
+  await assertOrganizationAccess(organizationId);
+
   return { session, organizationId, adult: { id: adult.id, householdId: adult.household.id, billingMemberId: adult.household.orgMemberId } };
 }
 
@@ -349,6 +354,8 @@ export async function requireMobileOrgAccess(request: Request, organizationId: s
   if (!(await hasActiveOrgTie(session.userId, organizationId))) {
     throw new MobileForbiddenError("No active access to this organization");
   }
+
+  await assertOrganizationAccess(organizationId);
 
   // Resolved role-agnostically: previously this only looked for an OrgMember
   // when a MEMBER-role membership existed, so a staff/owner who genuinely had
@@ -397,6 +404,8 @@ export async function requireMobileStaffPermission(
     where: { userId: session.userId, organizationId, status: "active", organization: { status: "active" }, role: { not: "MEMBER" } },
   });
   if (!membership) throw new MobileForbiddenError("No active staff membership for this organization");
+
+  await assertOrganizationAccess(organizationId);
 
   const effective = await getEffectivePermissions(organizationId, membership.role as Role);
   if (!effective.includes(permission)) {

@@ -14,6 +14,18 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
+// This suite tests org-tie/tenant-isolation resolution, not the
+// subscription gate — assume every organization is allowed.
+vi.mock("@/lib/subscription-gate", () => ({
+  assertOrganizationAccess: vi.fn().mockResolvedValue({
+    allowed: true,
+    reason: null,
+    trialEndsAt: null,
+    subscriptionStatus: null,
+    billingExempt: false,
+  }),
+}));
+
 /**
  * `hasActiveOrgTie()` fans out to three queries in parallel — a MEMBER-role
  * membership, a PTA household link, and a staff-role membership — so a test

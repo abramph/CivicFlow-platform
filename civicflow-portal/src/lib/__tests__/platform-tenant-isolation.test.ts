@@ -15,6 +15,18 @@ vi.mock("@/lib/role-permissions", () => ({
 
 vi.mock("@/lib/authOptions", () => ({ authOptions: {} }));
 
+// This suite tests platform-access/tenant-isolation logic, not the
+// subscription gate — assume every organization is allowed.
+vi.mock("@/lib/subscription-gate", () => ({
+  assertOrganizationAccess: vi.fn().mockResolvedValue({
+    allowed: true,
+    reason: null,
+    trialEndsAt: null,
+    subscriptionStatus: null,
+    billingExempt: false,
+  }),
+}));
+
 import { requireOrganization, requireRole, requirePermission, ForbiddenError } from "@/lib/auth-guards";
 
 describe("Tenant isolation — PlatformAccess must never substitute for organization membership", () => {

@@ -21,6 +21,7 @@ import { GovernanceDocumentError } from "@/lib/governance-documents";
 import { FinanceError } from "@/lib/finance-errors";
 import { AccountDeletionError } from "@/lib/account-deletion";
 import { MemberIntakeError } from "@/lib/member-intake/errors";
+import { SubscriptionRequiredError } from "@/lib/subscription-gate";
 
 export async function withApiErrorHandling(
   fn: () => Promise<Response>
@@ -112,6 +113,15 @@ export async function withApiErrorHandling(
       }
       if (error instanceof MobileAuthError || error instanceof MobileForbiddenError) {
         return jsonError(error.message, error.status);
+      }
+      if (error instanceof SubscriptionRequiredError) {
+        // Never include Stripe identifiers or other internal billing detail
+        // here — error.message is already the safe, pre-approved copy from
+        // subscription-gate.ts's accessDenialMessage().
+        return Response.json(
+          { code: error.code, reason: error.reason, message: error.message },
+          { status: error.status }
+        );
       }
       const referenceId = crypto.randomUUID().slice(0, 8);
       Sentry.captureException(error, { tags: { referenceId } });

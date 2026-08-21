@@ -38,6 +38,18 @@ vi.mock("@/lib/audit", () => ({ createAuditEvent: (...args: unknown[]) => create
 vi.mock("@/lib/mail", () => ({ sendEmail: vi.fn() }));
 vi.mock("@/lib/push", () => ({ sendPushToTokens: vi.fn() }));
 
+// This suite tests union-case org-tie resolution, not the subscription gate
+// — assume every organization is allowed.
+vi.mock("@/lib/subscription-gate", () => ({
+  assertOrganizationAccess: vi.fn().mockResolvedValue({
+    allowed: true,
+    reason: null,
+    trialEndsAt: null,
+    subscriptionStatus: null,
+    billingExempt: false,
+  }),
+}));
+
 import { GET as getCases, POST as postCase } from "@/app/api/mobile/union/cases/route";
 import { GET as getCase } from "@/app/api/mobile/union/cases/[caseId]/route";
 import { signAccessToken } from "@/lib/mobile-auth";
