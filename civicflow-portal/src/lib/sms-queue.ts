@@ -1,6 +1,7 @@
 import type { SmsMessage } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { sendSms } from "@/lib/sms";
+import { resolveOrganizationAccess } from "@/lib/subscription-gate";
 
 const BATCH_SIZE = 50;
 
@@ -27,15 +28,25 @@ export async function attemptSmsMessageResend(message: Pick<SmsMessage, "id" | "
  * manual Retry action itself resolves synchronously. Self-healing net, run
  * on a cron alongside the other worker/cron pairs in this codebase.
  */
-export async function processRetryableSmsMessages(): Promise<{ processed: number }> {
+export async function processRetryableSmsMessages(): Promise<{ processed: number; skippedBilling: number }> {
   const due = await prisma.smsMessage.findMany({
     where: { status: "RETRYING", nextRetryAt: { lte: new Date() } },
     take: BATCH_SIZE,
   });
 
+  let skippedBilling = 0;
   for (const message of due) {
+    // LAUNCH-BLOCKER subscription gate: leave a billing-inactive
+    // organization's retrying message exactly as-is (still RETRYING, not
+    // deleted or marked FAILED) — it becomes eligible again next run once
+    // access is restored.
+    const access = await resolveOrganizationAccess(message.organizationId);
+    if (!access.allowed) {
+      skippedBilling += 1;
+      continue;
+    }
     await attemptSmsMessageResend(message);
   }
 
-  return { processed: due.length };
+  return { processed: due.length, skippedBilling };
 }

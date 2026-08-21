@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { sendReminderEmail, sendReceiptEmail } from "@/lib/mail";
 import { createAuditEvent } from "@/lib/audit";
 import { getSignedObjectUrl } from "@/lib/storage";
+import { resolveOrganizationAccess } from "@/lib/subscription-gate";
 
 function buildReminderBody(log: {
   reminderType: string;
@@ -24,6 +25,13 @@ export async function processPendingReminderLogs(limit = 50) {
 
   for (const log of pending) {
     try {
+      // LAUNCH-BLOCKER subscription gate: a billing-inactive organization's
+      // queued reminder is left untouched (still QUEUED, not deleted or
+      // marked SKIPPED) so it becomes eligible again once access is
+      // restored — the next cron run picks it up normally.
+      const access = await resolveOrganizationAccess(log.organizationId);
+      if (!access.allowed) continue;
+
       const recipient = log.recipientEmail || log.member?.email;
       if (!recipient) {
         await prisma.emailReminderLog.update({

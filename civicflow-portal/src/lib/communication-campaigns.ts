@@ -5,6 +5,7 @@ import { createMemberTimelineEvent } from "@/lib/member-timeline";
 import { sendEmail } from "@/lib/mail";
 import { PlanFeatureError, requirePlanFeature } from "@/lib/plan-gate";
 import { prisma } from "@/lib/prisma";
+import { resolveOrganizationAccess } from "@/lib/subscription-gate";
 import { sendPushToTokens } from "@/lib/push";
 import { applySmsTemplateTokens, sendMemberSms } from "@/lib/sms-service";
 import { getSignedObjectUrl } from "@/lib/storage";
@@ -627,8 +628,20 @@ export async function processScheduledCampaigns(limit = 50) {
 
   let sent = 0;
   let failed = 0;
+  let skippedBilling = 0;
   for (const campaign of due) {
     try {
+      // LAUNCH-BLOCKER subscription gate: a billing-inactive organization's
+      // scheduled campaign is left exactly as-is (status/recipients
+      // untouched, nothing deleted) rather than sent — it becomes eligible
+      // again the next time this job runs after access is restored. This
+      // deliberately does NOT implement a "don't blast a backlog" cutoff
+      // policy; that's a separate product decision still to be made.
+      const access = await resolveOrganizationAccess(campaign.organizationId);
+      if (!access.allowed) {
+        skippedBilling += 1;
+        continue;
+      }
       const result = await sendCommunicationCampaign({ organizationId: campaign.organizationId, campaignId: campaign.id });
       if (result.complete) sent += 1;
     } catch (error) {
@@ -645,7 +658,7 @@ export async function processScheduledCampaigns(limit = 50) {
     }
   }
 
-  console.log(JSON.stringify({ event: "communication_campaigns_cron_completed", processed: due.length, sent, failed }));
+  console.log(JSON.stringify({ event: "communication_campaigns_cron_completed", processed: due.length, sent, failed, skippedBilling }));
 
-  return { processed: due.length, sent, failed };
+  return { processed: due.length, sent, failed, skippedBilling };
 }

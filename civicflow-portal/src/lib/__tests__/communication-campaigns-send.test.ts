@@ -49,6 +49,18 @@ vi.mock("@/lib/prisma", () => ({
 const createAuditEvent = vi.fn().mockResolvedValue(undefined);
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...args: unknown[]) => createAuditEvent(...args) }));
 
+// This suite tests campaign send/scheduling logic, not the subscription
+// gate — assume every organization is allowed.
+vi.mock("@/lib/subscription-gate", () => ({
+  resolveOrganizationAccess: vi.fn().mockResolvedValue({
+    allowed: true,
+    reason: null,
+    trialEndsAt: null,
+    subscriptionStatus: null,
+    billingExempt: false,
+  }),
+}));
+
 vi.mock("@/lib/member-timeline", () => ({ createMemberTimelineEvent: vi.fn().mockResolvedValue(undefined) }));
 
 const sendEmail = vi.fn().mockResolvedValue({ sent: true, skipped: false });
@@ -398,7 +410,7 @@ describe("processScheduledCampaigns", () => {
 
     const result = await processScheduledCampaigns(50);
 
-    expect(result).toEqual({ processed: 1, sent: 0, failed: 1 });
+    expect(result).toEqual({ processed: 1, sent: 0, failed: 1, skippedBilling: 0 });
 
     const failureLog = errorSpy.mock.calls.map((c) => JSON.parse(c[0] as string)).find((l) => l.event === "communication_campaign_scheduled_send_failed");
     expect(failureLog).toMatchObject({
@@ -408,6 +420,6 @@ describe("processScheduledCampaigns", () => {
     });
 
     const summaryLog = logSpy.mock.calls.map((c) => JSON.parse(c[0] as string)).find((l) => l.event === "communication_campaigns_cron_completed");
-    expect(summaryLog).toEqual({ event: "communication_campaigns_cron_completed", processed: 1, sent: 0, failed: 1 });
+    expect(summaryLog).toEqual({ event: "communication_campaigns_cron_completed", processed: 1, sent: 0, failed: 1, skippedBilling: 0 });
   });
 });

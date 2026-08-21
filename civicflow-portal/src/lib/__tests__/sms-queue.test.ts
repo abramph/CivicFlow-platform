@@ -14,6 +14,18 @@ vi.mock("@/lib/prisma", () => ({
 const sendSms = vi.fn();
 vi.mock("@/lib/sms", () => ({ sendSms: (...args: unknown[]) => sendSms(...args) }));
 
+// This suite tests the retry-sweep mechanics, not the subscription gate —
+// assume every organization is allowed.
+vi.mock("@/lib/subscription-gate", () => ({
+  resolveOrganizationAccess: vi.fn().mockResolvedValue({
+    allowed: true,
+    reason: null,
+    trialEndsAt: null,
+    subscriptionStatus: null,
+    billingExempt: false,
+  }),
+}));
+
 import { attemptSmsMessageResend, processRetryableSmsMessages } from "@/lib/sms-queue";
 
 describe("attemptSmsMessageResend", () => {
