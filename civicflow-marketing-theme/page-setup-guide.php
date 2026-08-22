@@ -231,8 +231,8 @@ get_header();
 						<div class="sg-step-num" aria-hidden="true">1</div>
 						<div class="sg-step-body">
 							<h3>Download the installer</h3>
-							<p>Download the Windows installer (.exe). The file is approximately 143 MB.</p>
-							<a href="https://github.com/abramph/CivicFlow-platform/releases/latest/download/Unestra-Setup-1.0.9.exe" class="sg-btn sg-btn-primary">
+							<p>Download the Windows installer (.exe). The file is approximately 130 MB.</p>
+							<a href="<?php echo esc_url( home_url( '/download/windows' ) ); ?>" class="sg-btn sg-btn-primary">
 								<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
 								Download for Windows
 							</a>
@@ -243,7 +243,7 @@ get_header();
 						<div class="sg-step-num" aria-hidden="true">2</div>
 						<div class="sg-step-body">
 							<h3>Run the installer</h3>
-							<p>Double-click <code>Unestra-Setup-1.0.9.exe</code> to launch the installer. If Windows SmartScreen shows a warning, click <strong>More info</strong> then <strong>Run anyway</strong>.</p>
+							<p>Double-click the downloaded .exe file to launch the installer. If Windows SmartScreen shows a warning, click <strong>More info</strong> then <strong>Run anyway</strong>.</p>
 							<p>Follow the installation wizard — choose your install directory, then click <strong>Install</strong>. A desktop shortcut is created automatically.</p>
 						</div>
 					</li>
@@ -318,8 +318,8 @@ get_header();
 						<div class="sg-step-num" aria-hidden="true">1</div>
 						<div class="sg-step-body">
 							<h3>Download the installer</h3>
-							<p>Download the macOS disk image (.dmg). The file is approximately 171 MB. This build is optimized for Apple Silicon (M1, M2, M3).</p>
-							<a href="https://github.com/abramph/CivicFlow-platform/releases/latest/download/Unestra-1.0.9-mac-arm64.dmg" class="sg-btn sg-btn-primary">
+							<p>Download the macOS disk image (.dmg). The file is approximately 161 MB. This build is optimized for Apple Silicon (M1, M2, M3).</p>
+							<a href="<?php echo esc_url( home_url( '/download/macos' ) ); ?>" class="sg-btn sg-btn-primary">
 								<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
 								Download for macOS (Apple Silicon)
 							</a>
@@ -330,7 +330,7 @@ get_header();
 						<div class="sg-step-num" aria-hidden="true">2</div>
 						<div class="sg-step-body">
 							<h3>Open the DMG</h3>
-							<p>Double-click the downloaded <code>Unestra-1.0.9-mac-arm64.dmg</code> file to mount it. A Finder window will open showing the Unestra app icon.</p>
+							<p>Double-click the downloaded .dmg file to mount it. A Finder window will open showing the Unestra app icon.</p>
 							<p>Drag the <strong>Unestra</strong> icon into the <strong>Applications</strong> folder shortcut shown in the same window.</p>
 						</div>
 					</li>
@@ -338,36 +338,8 @@ get_header();
 					<li class="sg-step">
 						<div class="sg-step-num" aria-hidden="true">3</div>
 						<div class="sg-step-body">
-							<h3>First launch — macOS security notice</h3>
-							<p>The first time you open Unestra from your Applications folder, macOS may show a security warning because the app is not yet notarized through the Apple Developer Program. This is expected.</p>
-
-							<div class="sg-callout sg-callout-warn">
-								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-								<span>If macOS says <em>"Unestra can't be opened because Apple cannot check it for malicious software"</em> — follow the steps below to allow it.</span>
-							</div>
-
-							<p class="sg-sub-heading">Option A — Right-click to open (easiest)</p>
-							<ol class="sg-list sg-list-alpha">
-								<li>In your <strong>Applications</strong> folder, <strong>right-click</strong> (or Ctrl-click) the Unestra icon</li>
-								<li>Select <strong>Open</strong> from the context menu</li>
-								<li>A dialog appears — click <strong>Open</strong> again to confirm</li>
-								<li>Unestra will launch. You only need to do this once.</li>
-							</ol>
-
-							<p class="sg-sub-heading">Option B — Allow via System Settings</p>
-							<ol class="sg-list sg-list-alpha">
-								<li>Try to open Unestra normally (double-click). It will be blocked.</li>
-								<li>Open <strong>System Settings</strong> (Apple menu → System Settings)</li>
-								<li>Go to <strong>Privacy &amp; Security</strong></li>
-								<li>Scroll down to the Security section — you'll see a message: <em>"Unestra was blocked from use because it is not from an identified developer."</em></li>
-								<li>Click <strong>Open Anyway</strong></li>
-								<li>Confirm by clicking <strong>Open</strong> in the prompt that appears</li>
-							</ol>
-
-							<div class="sg-callout sg-callout-info">
-								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-								<span>After the first approved launch, macOS remembers your choice. Future launches open normally without any prompts.</span>
-							</div>
+							<h3>First launch</h3>
+							<p>Open Unestra from your Applications folder or Launchpad. Unestra for Mac is signed and notarized by APH Technologies, so it launches normally — no Gatekeeper warnings, no extra steps.</p>
 						</div>
 					</li>
 

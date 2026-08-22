@@ -20,9 +20,21 @@ get_header();
 
 			<article class="rn-entry">
 				<div class="rn-entry-head">
+					<h2>Version 1.0.10</h2>
+					<span class="rn-date">July 30, 2026</span>
+					<span class="rn-badge rn-badge-current"><?php esc_html_e( 'Current', 'civicflow' ); ?></span>
+				</div>
+				<p class="rn-summary"><?php esc_html_e( 'The macOS build is now signed and notarized by APH Technologies — Unestra for Mac launches directly from Applications with no Gatekeeper warnings and no manual steps required.', 'civicflow' ); ?></p>
+				<ul class="rn-changes">
+					<li><?php esc_html_e( 'macOS desktop app signed with a Developer ID Application certificate and notarized by Apple', 'civicflow' ); ?></li>
+					<li><?php esc_html_e( 'Added a .zip build alongside the .dmg to support automatic updates on macOS', 'civicflow' ); ?></li>
+				</ul>
+			</article>
+
+			<article class="rn-entry">
+				<div class="rn-entry-head">
 					<h2>Version 1.0.9</h2>
 					<span class="rn-date">July 10, 2026</span>
-					<span class="rn-badge rn-badge-current"><?php esc_html_e( 'Current', 'civicflow' ); ?></span>
 				</div>
 				<p class="rn-summary"><?php esc_html_e( 'The first Unestra-branded desktop release — CivicFlow is now Unestra across the application, with the app icon, display name, and all customer-facing text updated. Also includes unified multi-organization membership support and several fixes to the multi-organization switcher.', 'civicflow' ); ?></p>
 				<ul class="rn-changes">

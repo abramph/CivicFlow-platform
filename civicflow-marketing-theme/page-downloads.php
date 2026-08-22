@@ -7,14 +7,14 @@
 
 get_header();
 
-$version       = '1.0.9';
-$release_date  = 'July 10, 2026';
-$win_file      = 'Unestra-Setup-1.0.9.exe';
+$version       = '1.0.10';
+$release_date  = 'July 30, 2026';
+$win_file      = 'Unestra-Setup-1.0.10.exe';
 $win_size      = '130.2 MB';
-$win_sha256    = '86129c8ec301bb537091b4f1fc076b7fe40718d2c4e9b623eeb960893cfed84d';
-$mac_file      = 'Unestra-1.0.9-mac-arm64.dmg';
-$mac_size      = '158.1 MB';
-$mac_sha256    = 'b89f34f8158c92ac86d0d198087b6069492dcaac8a50d69f2c81d60c29b62ed7';
+$win_sha256    = '1c7774d9f212b77e7881360b0eed24d2018fd017aa5119816664898292fec008';
+$mac_file      = 'Unestra-1.0.10-mac-arm64.dmg';
+$mac_size      = '161.4 MB';
+$mac_sha256    = '81fdb3ad6c627492a83e11fdadbb05071e61cab1199413fa65ebd52ecedd5a95';
 ?>
 
 <div class="dl-page">
@@ -59,7 +59,7 @@ $mac_sha256    = 'b89f34f8158c92ac86d0d198087b6069492dcaac8a50d69f2c81d60c29b62e
 				<a class="btn btn-primary dl-button" href="<?php echo esc_url( home_url( '/download/macos' ) ); ?>">
 					<?php esc_html_e( 'Download for macOS', 'civicflow' ); ?>
 				</a>
-				<p class="dl-unsigned"><span class="dl-warn" aria-hidden="true">&#9888;</span> <?php esc_html_e( 'Not yet notarized by Apple — see instructions below', 'civicflow' ); ?></p>
+				<p class="dl-signed"><span class="dl-check" aria-hidden="true">&#10003;</span> <?php esc_html_e( 'Signed and notarized by APH Technologies', 'civicflow' ); ?></p>
 				<ul class="dl-meta">
 					<li><?php esc_html_e( 'Apple Silicon (M-series) only — Intel build not yet available', 'civicflow' ); ?></li>
 					<li><?php esc_html_e( 'File type: .dmg', 'civicflow' ); ?></li>
@@ -73,18 +73,6 @@ $mac_sha256    = 'b89f34f8158c92ac86d0d198087b6069492dcaac8a50d69f2c81d60c29b62e
 
 		</div>
 
-		<!-- macOS notarization notice -->
-		<div class="dl-notice">
-			<h3><?php esc_html_e( 'About the macOS download', 'civicflow' ); ?></h3>
-			<p><?php esc_html_e( 'The macOS build is fully functional but is not yet notarized by Apple. macOS Gatekeeper will show a warning when you first open it. To run it:', 'civicflow' ); ?></p>
-			<ol>
-				<li><?php esc_html_e( 'Open the downloaded .dmg and drag Unestra to Applications.', 'civicflow' ); ?></li>
-				<li><?php esc_html_e( 'Right-click (or Control-click) Unestra in Applications and choose "Open".', 'civicflow' ); ?></li>
-				<li><?php esc_html_e( 'Click "Open" again in the confirmation dialog.', 'civicflow' ); ?></li>
-			</ol>
-			<p><?php esc_html_e( 'Apple notarization for macOS releases is in progress. Windows users do not need this step — the Windows installer is digitally signed.', 'civicflow' ); ?></p>
-		</div>
-
 		<!-- Install / requirements -->
 		<div class="dl-info-grid">
 			<div>
@@ -93,7 +81,7 @@ $mac_sha256    = 'b89f34f8158c92ac86d0d198087b6069492dcaac8a50d69f2c81d60c29b62e
 			</div>
 			<div>
 				<h3><?php esc_html_e( 'Installing on macOS', 'civicflow' ); ?></h3>
-				<p><?php esc_html_e( 'Open the .dmg, drag Unestra into Applications, then follow the Gatekeeper steps above for this pre-notarization release.', 'civicflow' ); ?></p>
+				<p><?php esc_html_e( 'Open the .dmg, drag Unestra into Applications, then launch it from Applications or Launchpad — no extra steps needed.', 'civicflow' ); ?></p>
 			</div>
 			<div>
 				<h3><?php esc_html_e( 'Automatic updates', 'civicflow' ); ?></h3>
