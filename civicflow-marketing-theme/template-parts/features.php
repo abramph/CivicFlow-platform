@@ -13,7 +13,7 @@ $features = [
 	],
 	[
 		'title' => __( 'Dues & contributions', 'civicflow' ),
-		'desc'  => __( 'Automate dues collection, track contributions, reconcile electronic payments, and generate financial summaries with ease.', 'civicflow' ),
+		'desc'  => __( 'Offer integrated Stripe checkout while continuing to document approved payments made through Zelle, Cash App, cash, checks, payroll deductions, and other external methods.', 'civicflow' ),
 		'icon'  => '<rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/>',
 	],
 	[

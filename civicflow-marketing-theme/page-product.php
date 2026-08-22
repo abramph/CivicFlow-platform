@@ -12,7 +12,7 @@ $modules = [
 	[ 'title' => 'Multi-organization membership', 'desc' => 'Members and staff can belong to more than one organization and switch between them.' ],
 	[ 'title' => 'Role-based access control', 'desc' => 'Define roles and permissions across your organization, enforced at every level.' ],
 	[ 'title' => 'Member portal & mobile app', 'desc' => 'A dedicated member-facing web portal and mobile app for dues, payments, and announcements.' ],
-	[ 'title' => 'Payments & dues', 'desc' => 'Collect dues and contributions, reconcile payments, and track balances — powered by Stripe.' ],
+	[ 'title' => 'Payments & dues', 'desc' => 'Collect dues and contributions, reconcile payments, and track balances. Use integrated Stripe checkout, or continue accepting external methods like Zelle, Cash App, cash, and check with organization review.' ],
 	[ 'title' => 'Announcements', 'desc' => 'Send organization-wide announcements to members by email, SMS, or push notification.' ],
 	[ 'title' => 'Events & meetings', 'desc' => 'Plan events and meetings, send invites, and track RSVPs and attendance.' ],
 	[ 'title' => 'QR meeting attendance', 'desc' => 'Members check in to meetings by scanning a QR code — attendance is recorded automatically.' ],

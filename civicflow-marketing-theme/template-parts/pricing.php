@@ -178,10 +178,59 @@ $cloud_plans = [
 			<a href="#contact"><?php esc_html_e( 'Contact us to discuss your needs.', 'civicflow' ); ?></a>
 		</p>
 
-		<!-- Stripe / payment explanation -->
-		<p class="pricing-seats-explainer">
-			<?php esc_html_e( 'Payments are completed through Stripe-hosted checkout. Each organization connects its own Stripe account so eligible collections — dues, donations, event payments — are routed directly to the organization. Unestra does not collect or store complete card numbers in the app.', 'civicflow' ); ?>
-		</p>
+		<!-- Payment methods explanation -->
+		<div class="payment-methods-block">
+			<div class="section-header" style="margin-bottom:1.5rem;">
+				<h3 class="section-title" style="font-size:1.4rem;"><?php esc_html_e( 'Accept payments your way', 'civicflow' ); ?></h3>
+			</div>
+			<p class="pricing-seats-explainer">
+				<?php esc_html_e( 'Use Stripe-hosted checkout for integrated online payments, or continue accepting the payment methods your organization already uses. Unestra can help organizations document and review eligible payments made through methods such as Zelle, Cash App, cash, checks, payroll deductions, and other approved options.', 'civicflow' ); ?>
+			</p>
+			<p class="pricing-seats-explainer">
+				<?php esc_html_e( 'External payments are completed outside Unestra and may require a member report, receipt, staff entry, or administrative verification. Availability depends on the organization\'s configuration.', 'civicflow' ); ?>
+			</p>
+
+			<div class="payment-methods-table-wrap">
+				<table class="payment-methods-table">
+					<thead>
+						<tr>
+							<th><?php esc_html_e( 'Payment method', 'civicflow' ); ?></th>
+							<th><?php esc_html_e( 'How it works with Unestra', 'civicflow' ); ?></th>
+						</tr>
+					</thead>
+					<tbody>
+						<tr>
+							<td><?php esc_html_e( 'Stripe (card, and bank transfer where enabled)', 'civicflow' ); ?></td>
+							<td><?php esc_html_e( 'Integrated, Stripe-hosted checkout through the organization\'s connected Stripe account. Processed and confirmed automatically.', 'civicflow' ); ?></td>
+						</tr>
+						<tr>
+							<td><?php esc_html_e( 'Zelle', 'civicflow' ); ?></td>
+							<td><?php esc_html_e( 'Payment happens outside Unestra. The payer can report the payment, with a receipt if needed, for the organization to review.', 'civicflow' ); ?></td>
+						</tr>
+						<tr>
+							<td><?php esc_html_e( 'Cash App, Venmo & PayPal', 'civicflow' ); ?></td>
+							<td><?php esc_html_e( 'Unestra can link directly to the organization\'s Cash App, Venmo, or PayPal handle. Payment happens outside Unestra; the payer can then report it, with a receipt if needed, for the organization to review.', 'civicflow' ); ?></td>
+						</tr>
+						<tr>
+							<td><?php esc_html_e( 'Cash & check', 'civicflow' ); ?></td>
+							<td><?php esc_html_e( 'Staff can record these payments directly, or the payer can report one for staff to review.', 'civicflow' ); ?></td>
+						</tr>
+						<tr>
+							<td><?php esc_html_e( 'Payroll deduction (union dues)', 'civicflow' ); ?></td>
+							<td><?php esc_html_e( 'Brought into Unestra through an organization\'s payroll-checkoff file, not entered payment-by-payment.', 'civicflow' ); ?></td>
+						</tr>
+						<tr>
+							<td><?php esc_html_e( 'Other organization-approved methods', 'civicflow' ); ?></td>
+							<td><?php esc_html_e( 'Recorded or reviewed according to the organization\'s configured process.', 'civicflow' ); ?></td>
+						</tr>
+					</tbody>
+				</table>
+			</div>
+
+			<p class="pricing-fine" style="margin-top:1.25rem;">
+				<?php esc_html_e( 'Third-party payment services are governed by their own terms, fees, availability, and account requirements. Unestra is not affiliated with or endorsed by these providers unless expressly stated.', 'civicflow' ); ?>
+			</p>
+		</div>
 
 		<!-- Desktop license — separate, one-time product -->
 		<div class="section-header" style="margin-top:3.5rem;">

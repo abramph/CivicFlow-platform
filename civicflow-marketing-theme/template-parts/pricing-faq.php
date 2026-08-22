@@ -23,6 +23,22 @@ $pricing_faqs = [
 		'a' => __( 'Each organization connects its own Stripe account. Eligible collections are processed through Stripe and routed to the connected organization.', 'civicflow' ),
 	],
 	[
+		'q' => __( 'Is Stripe the only payment method organizations can use?', 'civicflow' ),
+		'a' => __( 'No. Stripe provides Unestra\'s integrated online checkout, but organizations can continue accepting approved external methods such as Zelle, Cash App, cash, checks, payroll deductions, or other configured options. External payments occur outside Unestra and may need to be reported, entered, or verified by authorized organization staff.', 'civicflow' ),
+	],
+	[
+		'q' => __( 'Does Unestra connect directly to Zelle or Cash App?', 'civicflow' ),
+		'a' => __( 'Not currently. Zelle and Cash App payments are completed outside Unestra. Where enabled, members or staff can document the payment in Unestra so authorized staff can review it and update the appropriate record.', 'civicflow' ),
+	],
+	[
+		'q' => __( 'Are externally reported payments automatically approved?', 'civicflow' ),
+		'a' => __( 'No. A reported external payment is not automatically treated as confirmed. The organization\'s authorized staff may need to review the payment details or receipt before updating dues, contribution, or payment records.', 'civicflow' ),
+	],
+	[
+		'q' => __( 'Can organizations decide which payment methods to accept?', 'civicflow' ),
+		'a' => __( 'Yes. Each organization determines which external payment methods it accepts and communicates its payment instructions to members. Available Unestra reporting and recording options depend on the organization\'s configuration.', 'civicflow' ),
+	],
+	[
 		'q' => __( 'Does Unestra store card numbers?', 'civicflow' ),
 		'a' => __( 'No. Checkout is hosted by Stripe, and Unestra does not collect or store complete card numbers in the application.', 'civicflow' ),
 	],

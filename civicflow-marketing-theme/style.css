@@ -1406,3 +1406,53 @@ input, select, textarea { font-family: var(--cf-font); }
 	color: var(--cf-green-dark);
 	font-weight: 600;
 }
+
+/* =============================================
+   PAYMENT METHODS TABLE
+   ============================================= */
+.payment-methods-block {
+	max-width: 780px;
+	margin: 3rem auto 0;
+}
+
+.payment-methods-table-wrap {
+	overflow-x: auto;
+	margin-top: 1.25rem;
+	border: 1px solid var(--cf-border);
+	border-radius: var(--cf-radius-md);
+}
+
+.payment-methods-table {
+	width: 100%;
+	min-width: 480px;
+	border-collapse: collapse;
+	font-size: 13.5px;
+}
+
+.payment-methods-table th,
+.payment-methods-table td {
+	text-align: left;
+	padding: 10px 14px;
+	border-bottom: 1px solid var(--cf-border);
+	vertical-align: top;
+}
+
+.payment-methods-table thead th {
+	background: var(--cf-bg-alt);
+	font-weight: 600;
+	color: var(--cf-text);
+}
+
+.payment-methods-table tbody tr:last-child td {
+	border-bottom: none;
+}
+
+.payment-methods-table td:first-child {
+	font-weight: 600;
+	white-space: nowrap;
+	color: var(--cf-text);
+}
+
+.payment-methods-table td:last-child {
+	color: var(--cf-text-muted);
+}

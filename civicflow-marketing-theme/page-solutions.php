@@ -27,6 +27,7 @@ $solutions = [
 			__( 'Role-based officer access', 'civicflow' ),
 			__( 'Reports and exports', 'civicflow' ),
 		],
+		'payments' => __( 'Whether dues arrive through Stripe checkout, cash, check, Zelle, Cash App, or another approved method, Unestra helps your PTA/PTO keep a clear record — external payments can be reported for staff to confirm.', 'civicflow' ),
 	],
 	'church' => [
 		'title' => __( 'Church', 'civicflow' ),
@@ -44,6 +45,7 @@ $solutions = [
 			__( 'Forms and QR information updates', 'civicflow' ),
 			__( 'Role-based ministry and administrative access', 'civicflow' ),
 		],
+		'payments' => __( 'Accept one-time and recurring giving through Stripe-hosted checkout, plus cash, check, and gifts made externally through organization-approved services. External gifts are documented, not automatically synced — your team confirms them before they\'re recorded.', 'civicflow' ),
 	],
 	'union' => [
 		'title' => __( 'Union', 'civicflow' ),
@@ -62,6 +64,7 @@ $solutions = [
 			__( 'Forms and QR member-information updates', 'civicflow' ),
 			__( 'Reports and exports', 'civicflow' ),
 		],
+		'payments' => __( 'Whether dues arrive through payroll deduction, Stripe checkout, check, cash, Zelle, Cash App, or another approved method, Unestra helps authorized union staff maintain a clear dues record. Payroll-checkoff dues come in through your existing payroll file, not entered one payment at a time.', 'civicflow' ),
 	],
 	'community' => [
 		'title' => __( 'Community Organizations', 'civicflow' ),
@@ -79,6 +82,7 @@ $solutions = [
 			__( 'Reports and exports', 'civicflow' ),
 			__( 'Role-based administration', 'civicflow' ),
 		],
+		'payments' => __( 'Use integrated Stripe checkout for online dues and payments, and document the external methods — cash, check, Zelle, Cash App, or others — your organization already accepts.', 'civicflow' ),
 	],
 ];
 ?>
@@ -104,6 +108,9 @@ $solutions = [
 							<li><?php echo esc_html( $cap ); ?></li>
 						<?php endforeach; ?>
 					</ul>
+					<?php if ( ! empty( $s['payments'] ) ) : ?>
+						<p class="sol-payments"><?php echo esc_html( $s['payments'] ); ?></p>
+					<?php endif; ?>
 					<a class="sol-card-link" href="<?php echo esc_url( home_url( '/pricing/' ) ); ?>"><?php esc_html_e( 'See pricing →', 'civicflow' ); ?></a>
 				</div>
 			<?php endforeach; ?>
@@ -127,6 +134,7 @@ $solutions = [
 .sol-caps { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1.25rem; flex: 1; }
 .sol-caps li { font-size: 0.85rem; color: var(--cf-text-muted); padding-left: 1.1rem; position: relative; line-height: 1.5; }
 .sol-caps li::before { content: ""; position: absolute; left: 0; top: 0.5em; width: 5px; height: 5px; border-radius: 50%; background: var(--cf-green); }
+.sol-payments { font-size: 0.82rem; color: var(--cf-text-muted); line-height: 1.55; padding-top: 0.9rem; margin-bottom: 1rem; border-top: 1px solid var(--cf-border); }
 .sol-card-link { font-size: 0.88rem; font-weight: 600; color: var(--cf-green-dark); text-decoration: none; }
 .sol-card-link:hover { text-decoration: underline; }
 .sol-cta { text-align: center; background: var(--cf-bg-alt); border-radius: var(--cf-radius-lg); padding: 3rem 2rem; }
