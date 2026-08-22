@@ -30,7 +30,7 @@ $check = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="cu
 						__( 'Automatic updates & backups', 'civicflow' ),
 						__( 'Multi-user, real-time access', 'civicflow' ),
 						__( 'Secure, encrypted infrastructure', 'civicflow' ),
-						__( 'Mobile-friendly interface', 'civicflow' ),
+						__( 'Native iOS & Android apps, plus web', 'civicflow' ),
 					];
 					foreach ( $cloud_features as $feat ) :
 					?>

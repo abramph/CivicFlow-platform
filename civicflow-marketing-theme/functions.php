@@ -227,7 +227,6 @@ function civicflow_customize_register( $wp_customize ) {
 
 	$contact_fields = [
 		'contact_email'   => [ 'label' => 'Contact email',   'default' => 'support@getunestra.com' ],
-		'contact_phone'   => [ 'label' => 'Contact phone',   'default' => '1-800-UNESTRA' ],
 		'contact_hours'   => [ 'label' => 'Support hours',   'default' => 'Mon–Fri, 9am–6pm ET' ],
 	];
 
@@ -283,7 +282,7 @@ remove_action( 'wp_head', 'wp_generator' );
    ============================================= */
 function unestra_seo_meta_description() {
 	if ( is_front_page() ) {
-		$desc = __( 'Unestra is a membership and organizational management platform for nonprofits, associations, unions, churches, and community organizations — members, payments, events, and communications in one place.', 'civicflow' );
+		$desc = __( 'Manage members, communications, events, forms, payments and organization activity with specialized Unestra experiences for PTAs, churches, unions and community groups.', 'civicflow' );
 	} elseif ( is_singular() ) {
 		$excerpt = get_the_excerpt();
 		$desc = $excerpt ? wp_strip_all_tags( $excerpt ) : get_bloginfo( 'description' );
@@ -333,6 +332,46 @@ function unestra_organization_schema() {
 	echo '<script type="application/ld+json">' . wp_json_encode( array_filter( $schema ) ) . '</script>' . "\n";
 }
 add_action( 'wp_head', 'unestra_organization_schema', 3 );
+
+/**
+ * FAQPage structured data — mirrors the Q&A pairs in
+ * template-parts/pricing-faq.php. Attached only to the dedicated /pricing/
+ * page (not the homepage, which also renders the same pricing section) so
+ * the FAQPage schema has exactly one canonical location, matching Google's
+ * guidance against duplicating the same structured data across URLs.
+ */
+function unestra_pricing_faq_schema() {
+	if ( ! is_page( 'pricing' ) ) {
+		return;
+	}
+	$faqs = [
+		[ 'Are members limited?', 'No. Every current Unestra plan supports unlimited members.' ],
+		[ 'What is an administrative seat?', 'An administrative seat is used by an officer, staff member, leader, or other person who manages the organization. Ordinary member access does not consume an administrative seat.' ],
+		[ 'Is there a free trial?', 'Yes. New organizations receive a 30-day Unestra trial. Billing begins only after the organization selects a plan and completes checkout.' ],
+		[ 'Does Unestra receive our dues and donations?', 'Each organization connects its own Stripe account. Eligible collections are processed through Stripe and routed to the connected organization.' ],
+		[ 'Does Unestra store card numbers?', 'No. Checkout is hosted by Stripe, and Unestra does not collect or store complete card numbers in the application.' ],
+		[ 'Is Unestra a public social network?', 'No. Communication is organization-scoped and designed for private interaction between members and authorized organization staff.' ],
+		[ 'Does Unestra host video meetings?', 'No. Unestra can organize meeting information and provide links to services such as Zoom or Microsoft Teams, but it does not host the video meeting itself.' ],
+		[ 'What happens when the trial ends?', 'Protected organization access pauses until a current subscription is activated. Organization owners retain access to billing recovery, support, security, and required account functions.' ],
+	];
+	$entities = array_map(
+		function ( $faq ) {
+			return [
+				'@type'          => 'Question',
+				'name'           => $faq[0],
+				'acceptedAnswer' => [ '@type' => 'Answer', 'text' => $faq[1] ],
+			];
+		},
+		$faqs
+	);
+	$schema = [
+		'@context'   => 'https://schema.org',
+		'@type'      => 'FAQPage',
+		'mainEntity' => $entities,
+	];
+	echo '<script type="application/ld+json">' . wp_json_encode( $schema ) . '</script>' . "\n";
+}
+add_action( 'wp_head', 'unestra_pricing_faq_schema', 4 );
 
 // noindex any internal/preview query args, just in case (defense in depth —
 // this theme has no staging pages today, but costs nothing to guard against).

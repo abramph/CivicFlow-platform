@@ -86,7 +86,7 @@ get_header();
 						<h3>Set up your organization</h3>
 						<p>After logging in, you'll walk through a short setup wizard. You'll enter:</p>
 						<ul class="sg-list">
-							<li>Organization name and type (nonprofit, civic, church, association, etc.)</li>
+							<li>Organization name and type (PTA/PTO, church, union, or community organization)</li>
 							<li>Primary contact information</li>
 							<li>Fiscal year start month</li>
 							<li>Default dues cycle (monthly, quarterly, annually)</li>
@@ -98,36 +98,52 @@ get_header();
 					<div class="sg-step-num" aria-hidden="true">4</div>
 					<div class="sg-step-body">
 						<h3>Choose your plan</h3>
-						<p>Select the plan that fits your organization. You can upgrade at any time.</p>
+						<p>Unestra Cloud has a plan for each organization type. You can change plans at any time.</p>
 						<div class="sg-plan-compare">
 							<div class="sg-plan-card">
-								<p class="sg-plan-name">Essential</p>
+								<p class="sg-plan-name">PTA / PTO</p>
 								<p class="sg-plan-price">$49<span>/mo</span></p>
 								<ul>
-									<li>Up to 5 seats</li>
-									<li>Member management & dues</li>
-									<li>Events & campaigns</li>
-									<li>Financial tracking</li>
-									<li>Core reports</li>
+									<li>Unlimited members</li>
+									<li>10 administrative seats</li>
+									<li>Elections & volunteer shifts</li>
+									<li>Dues & fundraising</li>
 								</ul>
 							</div>
-							<div class="sg-plan-card sg-plan-popular">
-								<p class="sg-plan-badge">Most popular</p>
-								<p class="sg-plan-name">Elite</p>
-								<p class="sg-plan-price">$99<span>/mo</span></p>
+							<div class="sg-plan-card">
+								<p class="sg-plan-name">Community</p>
+								<p class="sg-plan-price">$59<span>/mo</span></p>
 								<ul>
-									<li>Everything in Essential</li>
-									<li>Advanced analytics</li>
-									<li>Communications module</li>
-									<li>Grant tracking</li>
-									<li>Priority support</li>
-									<li>Additional seats at $5/mo each</li>
+									<li>Unlimited members</li>
+									<li>10 administrative seats</li>
+									<li>Campaigns & fundraising</li>
+									<li>HOA requests, where enabled</li>
+								</ul>
+							</div>
+							<div class="sg-plan-card">
+								<p class="sg-plan-name">Church</p>
+								<p class="sg-plan-price">$79<span>/mo</span></p>
+								<ul>
+									<li>Unlimited members</li>
+									<li>15 administrative seats</li>
+									<li>Funds & recurring giving</li>
+									<li>Pledges & statements</li>
+								</ul>
+							</div>
+							<div class="sg-plan-card">
+								<p class="sg-plan-name">Union</p>
+								<p class="sg-plan-price">$129<span>/mo</span></p>
+								<ul>
+									<li>Unlimited members</li>
+									<li>15 administrative seats</li>
+									<li>Case management</li>
+									<li>Payroll-checkoff dues</li>
 								</ul>
 							</div>
 						</div>
 						<p class="sg-note">
 							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-							Save up to 10% with an annual plan. Pricing shown monthly.
+							Save the equivalent of one month with an annual plan. Pricing shown monthly — see <a href="<?php echo esc_url( home_url( '/pricing/' ) ); ?>">full pricing</a> for annual amounts.
 						</p>
 					</div>
 				</li>
@@ -408,7 +424,7 @@ get_header();
 
 				<div class="sg-faq-item">
 					<h3>How many users can I add?</h3>
-					<p>Cloud Essential includes 5 seats. Cloud Elite includes unlimited seats (additional seats billed per user). Desktop licenses include 5 seats with additional seats purchasable at $99 each (one-time).</p>
+					<p>Every Cloud plan includes unlimited members. Administrative seats — for officers, staff, and leaders who manage the organization — are included per plan (10 or 15, depending on your vertical); ordinary member access never consumes a seat. Desktop licenses include 5 seats with additional seats purchasable at $99 each (one-time).</p>
 				</div>
 
 				<div class="sg-faq-item">
@@ -438,7 +454,7 @@ get_header();
 
 				<div class="sg-faq-item">
 					<h3>What is the annual discount?</h3>
-					<p>Annual cloud plans save approximately 8% compared to monthly billing. Essential annual is $539/yr (vs $588 monthly). Elite annual is $1,089/yr (vs $1,188 monthly).</p>
+					<p>Annual billing saves the equivalent of one month compared to monthly billing, on every plan — see <a href="<?php echo esc_url( home_url( '/pricing/' ) ); ?>">full pricing</a> for the exact annual amount and savings for your organization's vertical.</p>
 				</div>
 
 			</div><!-- .sg-faq-grid -->
@@ -536,7 +552,8 @@ get_header();
 .sg-note-sm { font-size: 13px; color: #7a8f87; margin: .5rem 0 0; }
 
 /* Plan compare */
-.sg-plan-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
+.sg-plan-compare { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin: 1rem 0; }
+@media (max-width: 900px) { .sg-plan-compare { grid-template-columns: 1fr 1fr; } }
 .sg-plan-card { background: #fff; border: 1.5px solid #dde8e3; border-radius: 12px; padding: 1.25rem 1.5rem; position: relative; }
 .sg-plan-popular { border-color: #1D9E75; }
 .sg-plan-badge { position: absolute; top: -10px; left: 1rem; background: #1D9E75; color: #fff; font-size: 11px; font-weight: 700; padding: 2px 10px; border-radius: 20px; }

@@ -7,13 +7,13 @@
 
 $points = [
 	[
-		'title' => __( 'Built for your community', 'civicflow' ),
-		'desc'  => __( 'Designed specifically for nonprofits, civic groups, churches, associations, and advocacy organizations of all sizes.', 'civicflow' ),
+		'title' => __( 'Built for your organization type', 'civicflow' ),
+		'desc'  => __( 'Specialized experiences for PTA/PTO organizations, churches, unions, and community groups of all sizes.', 'civicflow' ),
 		'icon'  => '<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>',
 	],
 	[
-		'title' => __( 'Enterprise-grade security', 'civicflow' ),
-		'desc'  => __( 'Role-based access controls, complete audit trails, and full data privacy compliance keep your organization\'s data safe.', 'civicflow' ),
+		'title' => __( 'Role-based security', 'civicflow' ),
+		'desc'  => __( 'Role-based access controls and complete audit trails help keep your organization\'s data safe.', 'civicflow' ),
 		'icon'  => '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
 	],
 	[
@@ -54,7 +54,7 @@ $dashboard_rows = [
 			<div class="about-content">
 				<p class="section-label"><?php esc_html_e( 'About', 'civicflow' ); ?></p>
 				<h2 class="section-title" id="about-heading"><?php esc_html_e( 'Built for the organizations that build communities', 'civicflow' ); ?></h2>
-				<p><?php esc_html_e( 'Unestra was created to solve a real problem: nonprofits, churches, civic associations, and advocacy groups were losing time and money managing members across disconnected tools. We built a unified platform that makes administration effortless so leaders can focus on what matters — their people and their mission.', 'civicflow' ); ?></p>
+				<p><?php esc_html_e( 'Unestra was created to solve a real problem: PTA/PTO organizations, churches, unions, and community groups were losing time managing members across disconnected tools. We built one platform with specialized experiences for each, so leaders can focus on what matters — their people and their mission.', 'civicflow' ); ?></p>
 
 				<div class="about-points">
 					<?php foreach ( $points as $point ) : ?>

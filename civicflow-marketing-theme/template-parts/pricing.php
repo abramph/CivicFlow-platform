@@ -2,18 +2,109 @@
 /**
  * Template Part: Pricing Section
  *
+ * Four vertical-specific Cloud plans (PTA/PTO, Community, Church, Union) plus
+ * the separate one-time Desktop license. Plan data lives in one array and is
+ * looped, rather than four near-identical hardcoded blocks, so a price/seat
+ * change can never drift out of sync between cards.
+ *
  * @package Unestra
  */
 
 $check = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>';
-$dash  = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+
+$cloud_plans = [
+	'pta' => [
+		'label'    => __( 'PTA / PTO', 'civicflow' ),
+		'monthly'  => 49,
+		'annual'   => 539,
+		'save'     => 49,
+		'approx'   => 45,
+		'seats'    => 10,
+		'desc'     => __( 'Built for parent organizations and school-support associations — elections, volunteers, and dues in one place.', 'civicflow' ),
+		'features' => [
+			__( 'Unlimited members', 'civicflow' ),
+			__( 'Family & household records', 'civicflow' ),
+			__( 'Announcements & private communication', 'civicflow' ),
+			__( 'Events & RSVP', 'civicflow' ),
+			__( 'Volunteer shifts, sign-ups & check-in', 'civicflow' ),
+			__( 'Elections & secret-ballot voting', 'civicflow' ),
+			__( 'Dues & fundraising', 'civicflow' ),
+			__( 'Forms & QR member-information updates', 'civicflow' ),
+			__( 'Meeting & attendance records', 'civicflow' ),
+			__( 'Role-based officer access', 'civicflow' ),
+		],
+	],
+	'community' => [
+		'label'    => __( 'Community Organizations', 'civicflow' ),
+		'monthly'  => 59,
+		'annual'   => 649,
+		'save'     => 59,
+		'approx'   => 54,
+		'seats'    => 10,
+		'desc'     => __( 'For associations, clubs, HOAs, and neighborhood or alumni groups managing members and dues.', 'civicflow' ),
+		'features' => [
+			__( 'Unlimited members', 'civicflow' ),
+			__( 'Membership management', 'civicflow' ),
+			__( 'Announcements & private communication', 'civicflow' ),
+			__( 'Events & attendance', 'civicflow' ),
+			__( 'Dues & payment reporting', 'civicflow' ),
+			__( 'Campaigns & fundraising', 'civicflow' ),
+			__( 'Forms & QR member-information updates', 'civicflow' ),
+			__( 'Community & HOA requests, where enabled', 'civicflow' ),
+			__( 'Reports & exports', 'civicflow' ),
+			__( 'Role-based administration', 'civicflow' ),
+		],
+	],
+	'church' => [
+		'label'    => __( 'Church', 'civicflow' ),
+		'monthly'  => 79,
+		'annual'   => 869,
+		'save'     => 79,
+		'approx'   => 72,
+		'seats'    => 15,
+		'desc'     => __( 'For congregations focused on participation, communication, and voluntary giving.', 'civicflow' ),
+		'features' => [
+			__( 'Unlimited members', 'civicflow' ),
+			__( 'Member & household records', 'civicflow' ),
+			__( 'Announcements', 'civicflow' ),
+			__( 'Events & attendance', 'civicflow' ),
+			__( 'Funds & contribution programs', 'civicflow' ),
+			__( 'One-time & recurring giving', 'civicflow' ),
+			__( 'Contribution history & statements', 'civicflow' ),
+			__( 'Pledges — expressions of intent, not debt', 'civicflow' ),
+			__( 'Forms & QR member-information updates', 'civicflow' ),
+			__( 'Role-based ministry & administrative access', 'civicflow' ),
+		],
+	],
+	'union' => [
+		'label'    => __( 'Union', 'civicflow' ),
+		'monthly'  => 129,
+		'annual'   => 1419,
+		'save'     => 129,
+		'approx'   => 118,
+		'seats'    => 15,
+		'desc'     => __( 'For labor organizations focused on representation, membership, and member support.', 'civicflow' ),
+		'features' => [
+			__( 'Unlimited members', 'civicflow' ),
+			__( 'Membership & leadership records', 'civicflow' ),
+			__( 'Get Help & case-request workflows', 'civicflow' ),
+			__( 'Private member-to-staff communication', 'civicflow' ),
+			__( 'Case status & document support', 'civicflow' ),
+			__( 'Announcements, events & meetings', 'civicflow' ),
+			__( 'Attendance', 'civicflow' ),
+			__( 'Steward & role-based access', 'civicflow' ),
+			__( 'Dues, including payroll-checkoff support', 'civicflow' ),
+			__( 'Forms & QR member-information updates', 'civicflow' ),
+		],
+	],
+];
 ?>
 <section id="pricing" aria-labelledby="pricing-heading">
 	<div class="container">
 		<div class="section-header">
 			<p class="section-label"><?php esc_html_e( 'Pricing', 'civicflow' ); ?></p>
-			<h2 class="section-title" id="pricing-heading"><?php esc_html_e( 'Simple, transparent pricing', 'civicflow' ); ?></h2>
-			<p class="section-sub"><?php esc_html_e( 'Cloud subscription or a one-time desktop license — every plan includes the full feature set.', 'civicflow' ); ?></p>
+			<h2 class="section-title" id="pricing-heading"><?php esc_html_e( 'Simple, transparent pricing for every organization type', 'civicflow' ); ?></h2>
+			<p class="section-sub"><?php esc_html_e( 'Every Unestra Cloud plan includes unlimited members. Choose the vertical built for your organization.', 'civicflow' ); ?></p>
 		</div>
 
 		<!-- Monthly / Annual toggle -->
@@ -27,89 +118,77 @@ $dash  = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="cu
 			</button>
 		</div>
 
-		<!-- Three-column grid: Essential | Elite | Desktop -->
-		<div class="pricing-grid pricing-grid-3">
+		<!-- Four vertical-specific Cloud plans -->
+		<div class="pricing-grid pricing-grid-4">
+			<?php foreach ( $cloud_plans as $slug => $plan ) : ?>
+				<div class="pricing-card" aria-label="<?php echo esc_attr( sprintf( /* translators: %s: vertical name */ __( '%s plan', 'civicflow' ), $plan['label'] ) ); ?>">
+					<div class="pricing-version-tag tag-cloud"><?php esc_html_e( 'Cloud', 'civicflow' ); ?></div>
+					<h3><?php echo esc_html( $plan['label'] ); ?></h3>
 
-			<!-- Essential -->
-			<div class="pricing-card" aria-label="<?php esc_attr_e( 'Essential cloud plan', 'civicflow' ); ?>">
-				<div class="pricing-version-tag tag-cloud"><?php esc_html_e( 'Cloud', 'civicflow' ); ?></div>
-				<h3><?php esc_html_e( 'Essential', 'civicflow' ); ?></h3>
+					<div class="price-amount" data-monthly="<?php echo esc_attr( $plan['monthly'] ); ?>" data-annual="<?php echo esc_attr( $plan['annual'] ); ?>">
+						<span class="price-display">
+							$<?php echo esc_html( $plan['monthly'] ); ?><span class="price-period"><?php esc_html_e( '/mo', 'civicflow' ); ?></span>
+						</span>
+					</div>
+					<p class="price-note price-note-monthly"><?php esc_html_e( 'billed monthly', 'civicflow' ); ?></p>
+					<p class="price-note price-note-annual" style="display:none;">
+						<?php
+						echo esc_html(
+							sprintf(
+								/* translators: 1: annual price, 2: savings amount */
+								__( '$%1$s/year — save $%2$s', 'civicflow' ),
+								number_format( $plan['annual'] ),
+								$plan['save']
+							)
+						);
+						?>
+					</p>
 
-				<div class="price-amount" data-monthly="49" data-annual="539">
-					<span class="price-display">
-						$49<span class="price-period"><?php esc_html_e( '/mo', 'civicflow' ); ?></span>
-					</span>
+					<p class="price-desc"><?php echo esc_html( $plan['desc'] ); ?></p>
+
+					<ul class="pricing-features" aria-label="<?php echo esc_attr( sprintf( /* translators: %s: vertical name */ __( '%s plan features', 'civicflow' ), $plan['label'] ) ); ?>">
+						<?php foreach ( $plan['features'] as $feature ) : ?>
+							<li><?php echo $check; ?><?php echo esc_html( $feature ); ?></li>
+						<?php endforeach; ?>
+					</ul>
+
+					<p class="price-seat-note">
+						<?php
+						echo esc_html(
+							sprintf(
+								/* translators: %d: number of included administrative seats */
+								__( '%d administrative seats included', 'civicflow' ),
+								$plan['seats']
+							)
+						);
+						?>
+					</p>
+
+					<a href="https://app.getunestra.com/signup" class="pricing-btn filled" target="_blank" rel="noopener"><?php esc_html_e( 'Start free trial', 'civicflow' ); ?></a>
+					<p class="pricing-fine"><?php esc_html_e( '30-day free trial · No credit card required', 'civicflow' ); ?></p>
 				</div>
-				<p class="price-note price-note-monthly"><?php esc_html_e( 'billed monthly', 'civicflow' ); ?></p>
-				<p class="price-note price-note-annual" style="display:none;"><?php esc_html_e( '$539/year — save $49', 'civicflow' ); ?></p>
+			<?php endforeach; ?>
+		</div><!-- .pricing-grid -->
 
-				<p class="price-desc"><?php esc_html_e( 'Everything a growing organization needs to manage members, collect dues, and run events — up to 500 member records.', 'civicflow' ); ?></p>
+		<!-- Administrative seats explainer -->
+		<p class="pricing-seats-explainer">
+			<?php esc_html_e( 'Administrative seats are for officers, staff, leaders, and other users who manage the organization. Ordinary members can access their member experience without consuming an administrative seat.', 'civicflow' ); ?>
+			<br>
+			<?php esc_html_e( 'Need additional administrative access or a more complex organization structure? ', 'civicflow' ); ?>
+			<a href="#contact"><?php esc_html_e( 'Contact us to discuss your needs.', 'civicflow' ); ?></a>
+		</p>
 
-				<ul class="pricing-features" aria-label="<?php esc_attr_e( 'Essential plan features', 'civicflow' ); ?>">
-					<li><?php echo $check; ?><?php esc_html_e( 'Up to 500 member records', 'civicflow' ); ?></li>
-					<li><?php echo $check; ?><?php esc_html_e( 'Member management & dues tracking', 'civicflow' ); ?></li>
-					<li><?php echo $check; ?><?php esc_html_e( 'Contributions & payment reconciliation', 'civicflow' ); ?></li>
-					<li><?php echo $check; ?><?php esc_html_e( 'Events, meetings & attendance', 'civicflow' ); ?></li>
-					<li><?php echo $check; ?><?php esc_html_e( 'Campaigns & advocacy tools', 'civicflow' ); ?></li>
-					<li><?php echo $check; ?><?php esc_html_e( 'Email communications & blasts', 'civicflow' ); ?></li>
-					<li><?php echo $check; ?><?php esc_html_e( 'Document management', 'civicflow' ); ?></li>
-					<li><?php echo $check; ?><?php esc_html_e( 'PDF export & standard reports', 'civicflow' ); ?></li>
-					<li><?php echo $check; ?><?php esc_html_e( 'Role-based access & audit trails', 'civicflow' ); ?></li>
-					<li><?php echo $check; ?><?php esc_html_e( 'Automatic updates & backups', 'civicflow' ); ?></li>
-					<li><?php echo $dash; ?><?php esc_html_e( 'Advanced analytics', 'civicflow' ); ?></li>
-					<li><?php echo $dash; ?><?php esc_html_e( 'API access', 'civicflow' ); ?></li>
-				</ul>
+		<!-- Stripe / payment explanation -->
+		<p class="pricing-seats-explainer">
+			<?php esc_html_e( 'Payments are completed through Stripe-hosted checkout. Each organization connects its own Stripe account so eligible collections — dues, donations, event payments — are routed directly to the organization. Unestra does not collect or store complete card numbers in the app.', 'civicflow' ); ?>
+		</p>
 
-				<p class="price-seat-note">
-					<?php esc_html_e( 'Additional seats: ', 'civicflow' ); ?>
-					<span class="seat-monthly">+$8/mo each</span>
-					<span class="seat-annual" style="display:none;">+$88/yr each</span>
-				</p>
-
-				<a href="https://app.getunestra.com/signup" class="pricing-btn" target="_blank" rel="noopener"><?php esc_html_e( 'Start free trial', 'civicflow' ); ?></a>
-				<p class="pricing-fine"><?php esc_html_e( '30-day free trial · No credit card required', 'civicflow' ); ?></p>
-			</div>
-
-			<!-- Elite -->
-			<div class="pricing-card popular" aria-label="<?php esc_attr_e( 'Elite cloud plan', 'civicflow' ); ?>">
-				<div class="popular-badge"><?php esc_html_e( 'Most popular', 'civicflow' ); ?></div>
-				<div class="pricing-version-tag tag-cloud"><?php esc_html_e( 'Cloud', 'civicflow' ); ?></div>
-				<h3><?php esc_html_e( 'Elite', 'civicflow' ); ?></h3>
-
-				<div class="price-amount" data-monthly="99" data-annual="1089">
-					<span class="price-display">
-						$99<span class="price-period"><?php esc_html_e( '/mo', 'civicflow' ); ?></span>
-					</span>
-				</div>
-				<p class="price-note price-note-monthly"><?php esc_html_e( 'billed monthly', 'civicflow' ); ?></p>
-				<p class="price-note price-note-annual" style="display:none;"><?php esc_html_e( '$1,089/year — save $99', 'civicflow' ); ?></p>
-
-				<p class="price-desc"><?php esc_html_e( 'Unlimited members, advanced analytics, and API access — built for larger or fast-growing organizations.', 'civicflow' ); ?></p>
-
-				<ul class="pricing-features" aria-label="<?php esc_attr_e( 'Elite plan features', 'civicflow' ); ?>">
-					<li><?php echo $check; ?><?php esc_html_e( 'Unlimited member records', 'civicflow' ); ?></li>
-					<li><?php echo $check; ?><?php esc_html_e( 'Member management & dues tracking', 'civicflow' ); ?></li>
-					<li><?php echo $check; ?><?php esc_html_e( 'Contributions & payment reconciliation', 'civicflow' ); ?></li>
-					<li><?php echo $check; ?><?php esc_html_e( 'Events, meetings & attendance', 'civicflow' ); ?></li>
-					<li><?php echo $check; ?><?php esc_html_e( 'Campaigns & advocacy tools', 'civicflow' ); ?></li>
-					<li><?php echo $check; ?><?php esc_html_e( 'Email communications & blasts', 'civicflow' ); ?></li>
-					<li><?php echo $check; ?><?php esc_html_e( 'Document management', 'civicflow' ); ?></li>
-					<li><?php echo $check; ?><?php esc_html_e( 'Advanced reporting & analytics', 'civicflow' ); ?></li>
-					<li><?php echo $check; ?><?php esc_html_e( 'Role-based access & audit trails', 'civicflow' ); ?></li>
-					<li><?php echo $check; ?><?php esc_html_e( 'Automatic updates & backups', 'civicflow' ); ?></li>
-					<li><?php echo $check; ?><?php esc_html_e( 'Advanced analytics', 'civicflow' ); ?></li>
-					<li><?php echo $check; ?><?php esc_html_e( 'API access', 'civicflow' ); ?></li>
-				</ul>
-
-				<p class="price-seat-note">
-					<?php esc_html_e( 'Additional seats: ', 'civicflow' ); ?>
-					<span class="seat-monthly">+$5/mo each</span>
-					<span class="seat-annual" style="display:none;">+$55/yr each</span>
-				</p>
-
-				<a href="https://app.getunestra.com/signup" class="pricing-btn filled" target="_blank" rel="noopener"><?php esc_html_e( 'Start free trial', 'civicflow' ); ?></a>
-				<p class="pricing-fine"><?php esc_html_e( '30-day free trial · No credit card required', 'civicflow' ); ?></p>
-			</div>
+		<!-- Desktop license — separate, one-time product -->
+		<div class="section-header" style="margin-top:3.5rem;">
+			<p class="section-label"><?php esc_html_e( 'Prefer to self-host?', 'civicflow' ); ?></p>
+			<h3 class="section-title" style="font-size:1.4rem;"><?php esc_html_e( 'One-time desktop license', 'civicflow' ); ?></h3>
+		</div>
+		<div class="pricing-grid pricing-grid-desktop-solo">
 
 			<!-- Desktop -->
 			<div class="pricing-card pricing-card-desktop" aria-label="<?php esc_attr_e( 'Desktop license plan', 'civicflow' ); ?>">
@@ -144,7 +223,7 @@ $dash  = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="cu
 				</div>
 
 				<ul class="pricing-features" aria-label="<?php esc_attr_e( 'Desktop plan features', 'civicflow' ); ?>">
-					<li><?php echo $check; ?><?php esc_html_e( 'All features — full parity with Elite', 'civicflow' ); ?></li>
+					<li><?php echo $check; ?><?php esc_html_e( 'All features — full parity with Cloud plans', 'civicflow' ); ?></li>
 					<li><?php echo $check; ?><?php esc_html_e( 'Works fully offline', 'civicflow' ); ?></li>
 					<li><?php echo $check; ?><?php esc_html_e( 'Local data storage & full control', 'civicflow' ); ?></li>
 					<li><?php echo $check; ?><?php esc_html_e( '5 user seats included', 'civicflow' ); ?></li>
@@ -177,13 +256,15 @@ $dash  = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="cu
 				</p>
 			</div>
 
-		</div><!-- .pricing-grid -->
+		</div><!-- .pricing-grid-desktop-solo -->
 
 		<p class="pricing-footer-note">
 			<?php esc_html_e( 'Need help choosing? ', 'civicflow' ); ?>
 			<a href="#contact"><?php esc_html_e( 'Talk to our team', 'civicflow' ); ?></a>
 			<?php esc_html_e( ' — we\'ll recommend the right fit for your organization.', 'civicflow' ); ?>
 		</p>
+
+		<?php get_template_part( 'template-parts/pricing-faq' ); ?>
 
 	</div>
 </section>
@@ -222,8 +303,6 @@ $dash  = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="cu
 			if (!section) return;
 			section.querySelectorAll('.price-note-monthly').forEach(function (el) { el.style.display = isAnnual ? 'none' : ''; });
 			section.querySelectorAll('.price-note-annual').forEach(function (el) { el.style.display = isAnnual ? '' : 'none'; });
-			section.querySelectorAll('.seat-monthly').forEach(function (el) { el.style.display = isAnnual ? 'none' : ''; });
-			section.querySelectorAll('.seat-annual').forEach(function (el) { el.style.display = isAnnual ? '' : 'none'; });
 		});
 	}
 

@@ -225,6 +225,42 @@ input, select, textarea { font-family: var(--cf-font); }
 	color: var(--cf-text);
 }
 
+/* Solutions dropdown */
+.has-submenu { position: relative; }
+
+.submenu {
+	display: none;
+	flex-direction: column;
+	position: absolute;
+	top: 100%;
+	left: 0;
+	min-width: 220px;
+	background: #fff;
+	border: 1px solid var(--cf-border);
+	border-radius: var(--cf-radius-md);
+	box-shadow: var(--cf-shadow);
+	padding: 0.4rem;
+	gap: 2px;
+	z-index: 10;
+}
+
+.has-submenu:hover .submenu,
+.has-submenu:focus-within .submenu {
+	display: flex;
+}
+
+.submenu a {
+	display: block;
+	white-space: nowrap;
+	color: var(--cf-text-muted);
+}
+
+.submenu a:hover,
+.submenu a:focus-visible {
+	color: var(--cf-text);
+	background: var(--cf-bg-alt);
+}
+
 /* Mobile nav */
 @media (max-width: 768px) {
 	.nav-toggle { display: flex; }
@@ -244,6 +280,22 @@ input, select, textarea { font-family: var(--cf-font); }
 	.nav-menu.open { display: flex; }
 	.nav-menu a { border-radius: var(--cf-radius-md); }
 	.nav-menu .nav-cta { text-align: center; margin-left: 0; }
+
+	/* On mobile the nav is already a stacked list — show the Solutions
+	   submenu inline (indented) instead of an absolutely-positioned
+	   popover, since there's no room and no hover to trigger it. */
+	.submenu {
+		display: flex;
+		position: static;
+		border: none;
+		box-shadow: none;
+		padding-left: 1rem;
+	}
+	.submenu a { font-size: 13px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.submenu { transition: none; }
 }
 
 /* =============================================
@@ -1110,6 +1162,73 @@ input, select, textarea { font-family: var(--cf-font); }
 }
 
 .maintenance-label svg { stroke: var(--cf-green-dark); }
+
+/* =============================================
+   PRICING — four-vertical grid, seats/Stripe
+   explainer, and FAQ (Unestra vertical pricing)
+   ============================================= */
+
+.pricing-grid-4 {
+	grid-template-columns: repeat(4, 1fr);
+}
+
+.pricing-grid-desktop-solo {
+	grid-template-columns: minmax(260px, 420px);
+	justify-content: center;
+	margin-top: 1.5rem;
+}
+
+@media (max-width: 1024px) {
+	.pricing-grid-4 { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 768px) {
+	.pricing-grid-4 { grid-template-columns: 1fr; }
+	.pricing-grid-desktop-solo { grid-template-columns: 1fr; }
+}
+
+.pricing-seats-explainer {
+	max-width: 720px;
+	margin: 1.75rem auto 0;
+	text-align: center;
+	font-size: 13.5px;
+	line-height: 1.6;
+	color: var(--cf-text-muted);
+}
+
+.pricing-seats-explainer a { color: var(--cf-green-dark); font-weight: 600; }
+
+.pricing-faq {
+	max-width: 760px;
+	margin: 3.5rem auto 0;
+}
+
+.pricing-faq-heading {
+	font-size: 1.4rem;
+	font-weight: 700;
+	margin-bottom: 1.5rem;
+	text-align: center;
+}
+
+.pricing-faq-list {
+	display: flex;
+	flex-direction: column;
+	gap: 1.5rem;
+}
+
+.pricing-faq-item dt {
+	font-weight: 600;
+	font-size: 15px;
+	color: var(--cf-text);
+	margin-bottom: 0.35rem;
+}
+
+.pricing-faq-item dd {
+	font-size: 13.5px;
+	line-height: 1.6;
+	color: var(--cf-text-muted);
+	margin: 0;
+}
 
 .maintenance-price {
 	font-size: 1.5rem;

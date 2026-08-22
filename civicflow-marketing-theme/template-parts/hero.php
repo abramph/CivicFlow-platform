@@ -10,11 +10,11 @@
 
 		<div class="hero-badge" aria-hidden="true">
 			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-			<?php echo esc_html( cf_mod( 'hero_badge', 'Built for mission-driven organizations' ) ); ?>
+			<?php echo esc_html( cf_mod( 'hero_badge', 'One platform for PTAs, churches, unions & community groups' ) ); ?>
 		</div>
 
 		<?php
-		$heading = cf_mod( 'hero_heading', 'Everything your organization needs to thrive together' );
+		$heading = cf_mod( 'hero_heading', 'One platform, built around your organization' );
 		// Bold the last two words in green
 		$words   = explode( ' ', $heading );
 		$last    = array_splice( $words, -2 );
@@ -25,15 +25,15 @@
 			<?php echo esc_html( $plain ); ?> <span><?php echo esc_html( $green ); ?></span>
 		</h1>
 
-		<p class="hero-sub"><?php echo esc_html( cf_mod( 'hero_subtext', 'Unestra brings member management, dues, events, communications, finances, and reporting into one secure, easy-to-use platform — so you can focus on your mission, not your spreadsheets.' ) ); ?></p>
+		<p class="hero-sub"><?php echo esc_html( cf_mod( 'hero_subtext', 'Unestra gives PTA/PTO organizations, churches, unions, and community groups specialized tools to manage members, communication, events, forms, payments, and organization activity — on the web and mobile.' ) ); ?></p>
 
 		<div class="hero-btns">
 			<a href="https://app.getunestra.com/signup" class="btn btn-primary" target="_blank" rel="noopener">
 				<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-				<?php esc_html_e( 'Start free trial', 'civicflow' ); ?>
+				<?php esc_html_e( 'Start Your 30-Day Trial', 'civicflow' ); ?>
 			</a>
-			<a href="<?php echo esc_url( cf_mod( 'hero_btn2_url', '#contact' ) ); ?>" class="btn btn-secondary">
-				<?php echo esc_html( cf_mod( 'hero_btn2', 'Schedule a demo' ) ); ?>
+			<a href="<?php echo esc_url( cf_mod( 'hero_btn2_url', '#pricing' ) ); ?>" class="btn btn-secondary">
+				<?php echo esc_html( cf_mod( 'hero_btn2', 'View Pricing' ) ); ?>
 				<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
 			</a>
 		</div>

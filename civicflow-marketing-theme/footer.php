@@ -20,7 +20,7 @@
 				<?php } ?>
 					<?php bloginfo( 'name' ); ?>
 				</a>
-				<p><?php esc_html_e( 'The all-in-one platform for nonprofits, civic organizations, churches, associations, and community groups to manage members, finances, events, and more.', 'civicflow' ); ?></p>
+				<p><?php esc_html_e( 'One organization-management platform with specialized experiences for PTA/PTO organizations, churches, unions, and community groups — members, payments, events, and communications in one place.', 'civicflow' ); ?></p>
 			</div>
 
 			<!-- Footer nav columns -->
@@ -69,6 +69,7 @@
 				<a href="<?php echo esc_url( home_url( '/' ) ); ?>">getunestra.com</a>
 			</p>
 			<p><?php esc_html_e( 'Built for organizations that build communities', 'civicflow' ); ?></p>
+			<p><?php esc_html_e( 'Unestra is a product of APH Technologies, LLC. Subscription charges appear on your statement as billed by APH Technologies, LLC.', 'civicflow' ); ?></p>
 		</div>
 
 	</div><!-- .container -->
@@ -105,15 +106,20 @@ function civicflow_footer_product_nav() {
 
 function civicflow_footer_company_nav() {
 	echo '<ul>';
+	// Numerically-indexed pairs, not an associative array keyed by URL — see
+	// the comment on civicflow_footer_product_nav() above for why: two
+	// entries sharing a URL would silently collide.
 	$links = [
-		esc_url( home_url( '/about/' ) )        => 'About',
-		esc_url( home_url( '/solutions/' ) )    => 'Solutions',
-		esc_url( home_url( '/support/' ) )      => 'Support',
-		esc_url( home_url( '/support/#contact' ) ) => 'Contact',
-		'https://aphtechgroup.com'              => 'APH Technologies',
+		[ home_url( '/about/' ), 'About' ],
+		[ home_url( '/solutions/' ), 'Solutions' ],
+		[ home_url( '/support/' ), 'Support' ],
+		[ home_url( '/support/#contact' ), 'Contact' ],
+		[ 'https://app.getunestra.com/login', 'Sign In' ],
+		[ 'https://app.getunestra.com/signup', 'Start Trial' ],
+		[ 'https://aphtechgroup.com', 'APH Technologies' ],
 	];
-	foreach ( $links as $url => $label ) {
-		echo '<li><a href="' . esc_url( $url ) . '">' . esc_html( $label ) . '</a></li>';
+	foreach ( $links as $link ) {
+		echo '<li><a href="' . esc_url( $link[0] ) . '">' . esc_html( $link[1] ) . '</a></li>';
 	}
 	echo '</ul>';
 }
@@ -121,13 +127,14 @@ function civicflow_footer_company_nav() {
 function civicflow_footer_legal_nav() {
 	echo '<ul>';
 	$links = [
-		esc_url( home_url( '/privacy-policy/' ) ) => 'Privacy policy',
-		esc_url( home_url( '/terms/' ) )           => 'Terms of service',
-		esc_url( home_url( '/security/' ) )        => 'Security',
-		'mailto:security@getunestra.com'           => 'Report a vulnerability',
+		[ home_url( '/privacy-policy/' ), 'Privacy policy' ],
+		[ home_url( '/terms/' ), 'Terms of service' ],
+		[ home_url( '/security/' ), 'Security' ],
+		[ 'https://app.getunestra.com/delete-account', 'Delete account' ],
+		[ 'mailto:security@getunestra.com', 'Report a vulnerability' ],
 	];
-	foreach ( $links as $url => $label ) {
-		echo '<li><a href="' . esc_url( $url ) . '">' . esc_html( $label ) . '</a></li>';
+	foreach ( $links as $link ) {
+		echo '<li><a href="' . esc_url( $link[0] ) . '">' . esc_html( $link[1] ) . '</a></li>';
 	}
 	echo '</ul>';
 }

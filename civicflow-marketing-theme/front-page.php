@@ -10,6 +10,7 @@
 get_header();
 
 get_template_part( 'template-parts/hero' );
+get_template_part( 'template-parts/verticals' );
 get_template_part( 'template-parts/stats' );
 get_template_part( 'template-parts/features' );
 get_template_part( 'template-parts/platform' );

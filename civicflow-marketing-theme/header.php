@@ -67,14 +67,22 @@ function civicflow_fallback_nav() {
 	?>
 	<ul class="nav-menu" id="primary-menu" role="menubar">
 		<li role="none"><a href="<?php echo esc_url( $home . 'product/' ); ?>" role="menuitem">Product</a></li>
-		<li role="none"><a href="<?php echo esc_url( $home . 'solutions/' ); ?>" role="menuitem">Solutions</a></li>
+		<li role="none" class="has-submenu">
+			<a href="<?php echo esc_url( $home . 'solutions/' ); ?>" role="menuitem" aria-haspopup="true" aria-expanded="false">Solutions</a>
+			<ul class="submenu" role="menu">
+				<li role="none"><a href="<?php echo esc_url( $home . 'solutions/#pta' ); ?>" role="menuitem">PTA / PTO</a></li>
+				<li role="none"><a href="<?php echo esc_url( $home . 'solutions/#church' ); ?>" role="menuitem">Churches</a></li>
+				<li role="none"><a href="<?php echo esc_url( $home . 'solutions/#union' ); ?>" role="menuitem">Unions</a></li>
+				<li role="none"><a href="<?php echo esc_url( $home . 'solutions/#community' ); ?>" role="menuitem">Community Organizations</a></li>
+			</ul>
+		</li>
 		<li role="none"><a href="<?php echo esc_url( $home . 'pricing/' ); ?>" role="menuitem">Pricing</a></li>
 		<li role="none"><a href="<?php echo esc_url( $home . 'security/' ); ?>" role="menuitem">Security</a></li>
 		<li role="none"><a href="<?php echo esc_url( $home . 'downloads/' ); ?>" role="menuitem">Downloads</a></li>
 		<li role="none"><a href="<?php echo esc_url( $home . 'about/' ); ?>" role="menuitem">About</a></li>
 		<li role="none"><a href="<?php echo esc_url( $home . 'support/' ); ?>" role="menuitem">Support</a></li>
 		<li role="none"><a href="https://app.getunestra.com/login" role="menuitem">Sign In</a></li>
-		<li role="none"><a href="https://app.getunestra.com/signup" class="nav-cta" role="menuitem">Get started &rarr;</a></li>
+		<li role="none"><a href="https://app.getunestra.com/signup" class="nav-cta" role="menuitem">Start Free Trial</a></li>
 	</ul>
 	<?php
 }

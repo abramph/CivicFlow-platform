@@ -16,7 +16,7 @@ get_header();
 		</div>
 
 		<div class="ab-intro">
-			<p><?php esc_html_e( 'Unestra is a membership and organizational management platform built for nonprofits, civic associations, unions, churches, community groups, and other membership-based organizations. It brings member records, dues and payments, events and attendance, communications, and reporting into one connected system — available as a cloud portal, a member mobile app, and a desktop application.', 'civicflow' ); ?></p>
+			<p><?php esc_html_e( 'Unestra is one organization-management platform with specialized experiences for PTA/PTO organizations, churches, unions, and community organizations. It brings member records, dues and payments, events and attendance, communications, and reporting into one connected system — available as a cloud portal, a member mobile app, and a desktop application.', 'civicflow' ); ?></p>
 			<p><?php esc_html_e( 'The problem Unestra solves is a familiar one for anyone who has run an organization\'s administration by hand: member information scattered across spreadsheets, dues tracked separately from payments, event sign-ups managed in yet another tool, and no single place to see the whole picture. Unestra puts all of it in one system, so organization leaders and staff can spend less time on administrative overhead and more time on the work that matters to their members.', 'civicflow' ); ?></p>
 		</div>
 
