@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/mail";
 import { createAuditEvent } from "@/lib/audit";
+import { resolveOrganizationAccess } from "@/lib/subscription-gate";
 
 /**
  * PTA Vertical 2.0, PR PTA-G — volunteer shift reminders (brief §16). Emails
@@ -35,6 +36,31 @@ export async function sendVolunteerRemindersForOrganization(
   const windowHours = options.windowHours ?? DEFAULT_WINDOW_HOURS;
   const now = new Date();
   const windowEnd = new Date(now.getTime() + windowHours * 60 * 60 * 1000);
+
+  // E2E-1 finding: this is the shared function both the cron sweep
+  // (sendVolunteerRemindersAllOrganizations) AND the officer's manual "send
+  // reminders now" button (POST /api/labs/pta/volunteers/reminders) call --
+  // the manual path is already covered by requirePtaAccess's underlying
+  // requireOrganization -> assertOrganizationAccess, but the cron sweep
+  // called this with no billing check at all. Checked once here so both
+  // paths are covered identically, same as sendCommunicationCampaign /
+  // attemptSmsMessageResend. reminderSentAt is never set on a skip, so a
+  // billing-inactive org's due-soon signups are simply reconsidered on a
+  // later tick once billing is restored -- no FAILED-state bookkeeping
+  // needed for what's already a re-checked-every-tick query, not a queue.
+  const access = await resolveOrganizationAccess(organizationId);
+  if (!access.allowed) {
+    await createAuditEvent({
+      organizationId,
+      actorUserId: options.actorUserId ?? null,
+      actorEmail: options.actorEmail ?? null,
+      action: "pta_volunteer_reminders.blocked",
+      entityType: "organization",
+      entityId: organizationId,
+      metadata: { reason: "organization_subscription_required" },
+    });
+    return { organizationId, sent: 0, skippedNoEmail: 0, failed: 0 };
+  }
 
   const signups = await prisma.ptaVolunteerSignup.findMany({
     where: {

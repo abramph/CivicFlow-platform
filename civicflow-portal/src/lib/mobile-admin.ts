@@ -25,6 +25,7 @@ import { getEffectivePermissions } from "@/lib/role-permissions";
 import { getOrganizationLabAccess } from "@/lib/labs/access";
 import { getVerticalCapabilities, type CapabilityFlag } from "@/lib/vertical-capabilities";
 import { PERMISSIONS, type Permission, type Role } from "@/lib/rbac";
+import { assertOrganizationAccess } from "@/lib/subscription-gate";
 import type { OrganizationVertical } from "@prisma/client";
 
 export const MOBILE_ADMIN_LABS_FEATURE_KEY = "mobileAdmin";
@@ -139,4 +140,26 @@ export async function resolveMobileAdminCapabilities(
     role: membership.role,
     adminCapabilities,
   };
+}
+
+/**
+ * LAUNCH-BLOCKER subscription gate: the gating variant of
+ * resolveMobileAdminCapabilities(), for the ~18 Mobile Admin route handlers
+ * that call it directly to authorize a single request for one organization.
+ * Throws SubscriptionRequiredError (402) before doing any capability work if
+ * the organization is billing-inactive.
+ *
+ * Deliberately NOT folded into resolveMobileAdminCapabilities() itself —
+ * that function is also used by GET /api/mobile/organizations to build the
+ * org switcher across every organization the caller belongs to, where a
+ * billing-inactive org must still appear in the list (just without admin
+ * capabilities) rather than throwing and breaking the whole response. Only
+ * call sites authorizing a specific in-progress request should use this.
+ */
+export async function requireMobileAdminAccess(
+  organizationId: string,
+  userId: string
+): Promise<MobileAdminCapabilityResult> {
+  await assertOrganizationAccess(organizationId);
+  return resolveMobileAdminCapabilities(organizationId, userId);
 }

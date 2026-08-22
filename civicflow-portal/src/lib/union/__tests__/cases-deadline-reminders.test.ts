@@ -19,12 +19,20 @@ vi.mock("@/lib/prisma", () => ({
 
 vi.mock("@/lib/mail", () => ({ sendEmail: (...a: unknown[]) => sendEmail(...a) }));
 vi.mock("@/lib/push", () => ({ sendPushToTokens: (...a: unknown[]) => sendPushToTokens(...a) }));
-vi.mock("@/lib/audit", () => ({ createAuditEvent: vi.fn().mockResolvedValue(undefined) }));
+
+const createAuditEvent = vi.fn().mockResolvedValue(undefined);
+vi.mock("@/lib/audit", () => ({ createAuditEvent: (...a: unknown[]) => createAuditEvent(...a) }));
+
+const resolveOrganizationAccess = vi.fn();
+vi.mock("@/lib/subscription-gate", () => ({
+  resolveOrganizationAccess: (...a: unknown[]) => resolveOrganizationAccess(...a),
+}));
 
 beforeEach(() => {
   vi.clearAllMocks();
   findManyMobileDeviceToken.mockResolvedValue([]);
   createUnionCaseDeadlineReminderLog.mockResolvedValue({ id: "reminder-log-1" });
+  resolveOrganizationAccess.mockResolvedValue({ allowed: true, reason: null, trialEndsAt: null, subscriptionStatus: null, billingExempt: false });
 });
 
 function p2002(target: string[]) {
@@ -63,6 +71,21 @@ describe("sendUnionCaseDeadlineReminders", () => {
       })
     );
     expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: "rep@example.org" }));
+  });
+
+  it("E2E-1 finding: never claims the reminder log or notifies, and audit-logs a block, when the organization's billing is inactive", async () => {
+    findManyUnionCaseDeadline.mockResolvedValueOnce([APPROACHING_DEADLINE]);
+    resolveOrganizationAccess.mockResolvedValueOnce({ allowed: false, reason: "SUBSCRIPTION_CANCELED", trialEndsAt: null, subscriptionStatus: "cancelled", billingExempt: false });
+
+    const { sendUnionCaseDeadlineReminders } = await import("../cases");
+    const result = await sendUnionCaseDeadlineReminders();
+
+    expect(result.remindersSent).toBe(0);
+    expect(createUnionCaseDeadlineReminderLog).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: "org-1", action: "union_case_deadline_reminder.blocked" })
+    );
   });
 
   it("sends 'approaching' content (not overdue) for a deadline that hasn't passed yet", async () => {

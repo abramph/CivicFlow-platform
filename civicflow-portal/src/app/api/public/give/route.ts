@@ -7,6 +7,7 @@ import { derivePaymentNature, resolveCoveragePlan } from "@/lib/payments/cost-po
 import { attachStripeSession, createPendingPayment } from "@/lib/payments/pending-payments";
 import { getServerEnv } from "@/lib/env";
 import { logGivingEvent } from "@/lib/giving/telemetry";
+import { resolveOrganizationAccess, PUBLIC_UNAVAILABLE_MESSAGE } from "@/lib/subscription-gate";
 
 const bodySchema = z.object({
   slug: z.string().min(1).max(100),
@@ -38,6 +39,13 @@ export async function POST(request: Request) {
       fundId: input.fundId,
       amount: input.amount,
     });
+
+    // LAUNCH-BLOCKER subscription gate: a billing-inactive organization
+    // must not keep accepting gifts through the platform.
+    const access = await resolveOrganizationAccess(organizationId);
+    if (!access.allowed) {
+      return Response.json({ ok: false, error: PUBLIC_UNAVAILABLE_MESSAGE }, { status: 503 });
+    }
 
     // CONNECT-C (§14): public giving NEVER falls back to the platform
     // account — a 409 here surfaces as "not accepting online gifts" upstream.

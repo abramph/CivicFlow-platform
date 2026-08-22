@@ -42,7 +42,11 @@ describe.skipIf(!RUN_INTEGRATION)("HOA sendDeadlineReminders — real concurrenc
     prisma = new PrismaClient();
 
     const org = await prisma.organization.create({
-      data: { slug: `hoa-reminder-concurrency-${Date.now()}`, name: "HOA Reminder Concurrency Test Org", primaryVertical: "HOA" },
+      // billingExempt: this test exercises the ViolationReminderLog claim
+      // race, not billing state -- exempt so sendDeadlineReminders' billing
+      // check (added for the subscription-access-gate) never short-circuits
+      // it via a null trialEndsAt on a directly-created test org.
+      data: { slug: `hoa-reminder-concurrency-${Date.now()}`, name: "HOA Reminder Concurrency Test Org", primaryVertical: "HOA", billingExempt: true },
     });
     orgId = org.id;
 

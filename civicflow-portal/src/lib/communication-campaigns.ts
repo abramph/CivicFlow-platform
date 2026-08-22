@@ -5,6 +5,7 @@ import { createMemberTimelineEvent } from "@/lib/member-timeline";
 import { sendEmail } from "@/lib/mail";
 import { PlanFeatureError, requirePlanFeature } from "@/lib/plan-gate";
 import { prisma } from "@/lib/prisma";
+import { resolveOrganizationAccess } from "@/lib/subscription-gate";
 import { sendPushToTokens } from "@/lib/push";
 import { applySmsTemplateTokens, sendMemberSms } from "@/lib/sms-service";
 import { getSignedObjectUrl } from "@/lib/storage";
@@ -422,6 +423,34 @@ export async function sendCommunicationCampaign(input: {
     return { sent: 0, skipped: 0, failed: 0, remainingPending: 0, complete: true };
   }
 
+  // LAUNCH-BLOCKER subscription gate: re-checked fresh on every call, same
+  // as the plan-feature/WhatsApp checks below and for the same reason — a
+  // campaign scheduled while entitled but sent (by a "Send Now" click, the
+  // cron worker, or a resumed batch) after the organization's trial expires
+  // or its subscription lapses must not slip through. Marked FAILED
+  // immediately (rather than left READY, or silently skipped forever) so
+  // the cron worker never retries it — and so it becomes visible to staff
+  // in their own campaigns list rather than vanishing into limbo. Resuming
+  // it after access is restored is then an explicit staff action (the
+  // existing "Send Campaign" button, already shown for FAILED campaigns),
+  // never an automatic backlog blast.
+  {
+    const access = await resolveOrganizationAccess(input.organizationId);
+    if (!access.allowed) {
+      await prisma.communicationCampaign.update({ where: { id: campaign.id }, data: { status: "FAILED" } });
+      await createAuditEvent({
+        organizationId: input.organizationId,
+        actorUserId: input.actorUserId,
+        actorEmail: input.actorEmail,
+        action: "communication_campaign.blocked",
+        entityType: "communication_campaign",
+        entityId: campaign.id,
+        metadata: { reason: "organization_subscription_required", accessReason: access.reason },
+      });
+      throw new Error("This organization's Unestra subscription is not active.");
+    }
+  }
+
   // Re-checked fresh on every call — not just at creation time — so a
   // campaign scheduled while entitled but sent (by a "Send Now" click, the
   // cron worker, or a resumed batch) after a downgrade doesn't slip through.
@@ -629,6 +658,11 @@ export async function processScheduledCampaigns(limit = 50) {
   let failed = 0;
   for (const campaign of due) {
     try {
+      // LAUNCH-BLOCKER subscription gate: billing-inactive organizations are
+      // checked inside sendCommunicationCampaign() itself, alongside the
+      // existing plan-feature/WhatsApp-entitlement checks — see that
+      // function's doc comment for the "mark FAILED, don't retry forever,
+      // resend is an explicit staff action" policy this follows.
       const result = await sendCommunicationCampaign({ organizationId: campaign.organizationId, campaignId: campaign.id });
       if (result.complete) sent += 1;
     } catch (error) {

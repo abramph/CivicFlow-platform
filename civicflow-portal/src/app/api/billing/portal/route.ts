@@ -9,7 +9,11 @@ export async function POST(req: Request) {
     // Suppress unused warning — body is intentionally empty
     void req;
 
-    const { organizationId } = await requirePermission("billing:manage", "throw");
+    // Recovery-path allowlist (LAUNCH-BLOCKER subscription gate): an
+    // existing-subscription-management route must stay reachable even when
+    // the org itself is billing-inactive (past_due, canceled, etc.) — that's
+    // exactly when an owner needs the portal most.
+    const { organizationId } = await requirePermission("billing:manage", "throw", { skipEntitlementGate: true });
     const env = getServerEnv();
 
     const subscription = await prisma.subscription.findFirst({

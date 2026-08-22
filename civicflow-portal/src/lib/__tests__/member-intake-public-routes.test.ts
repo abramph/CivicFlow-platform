@@ -29,6 +29,18 @@ vi.mock("@/lib/member-intake/verification", () => ({
 vi.mock("@/lib/member-intake/update-engine", () => ({ applySubmission: (...a: unknown[]) => applySubmission(...a) }));
 vi.mock("@/lib/rate-limit", () => ({ requireRateLimit: vi.fn().mockResolvedValue(null), getClientIp: () => "203.0.113.5" }));
 
+// This suite tests submission orchestration, not the subscription gate —
+// assume every organization is allowed.
+vi.mock("@/lib/subscription-gate", () => ({
+  resolveOrganizationAccess: vi.fn().mockResolvedValue({
+    allowed: true,
+    reason: null,
+    trialEndsAt: null,
+    subscriptionStatus: null,
+    billingExempt: false,
+  }),
+}));
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -176,6 +188,20 @@ describe("POST /api/public/member-intake/[token]/verify/confirm", () => {
     expect(response.status).toBe(400);
     expect(applySubmission).not.toHaveBeenCalled();
   });
+
+  it("E2E-5 finding: collapses to the same not-found response as an unknown submission when the organization's billing is inactive -- never distinguishable to an anonymous caller", async () => {
+    const { resolveOrganizationAccess } = await import("@/lib/subscription-gate");
+    resolvePublicSubmissionOrgId.mockResolvedValue("org-a");
+    vi.mocked(resolveOrganizationAccess).mockResolvedValueOnce({ allowed: false, reason: "TRIAL_EXPIRED", trialEndsAt: null, subscriptionStatus: null, billingExempt: false });
+
+    const { POST } = await import("@/app/api/public/member-intake/[token]/verify/confirm/route");
+    const response = await POST(jsonRequest("https://app.test/api/public/member-intake/tok/verify/confirm", { submissionId: "sub-1", code: "123456" }), {
+      params: Promise.resolve({ token: "tok" }),
+    });
+    expect(response.status).toBe(404);
+    expect(verifySubmissionCode).not.toHaveBeenCalled();
+    expect(applySubmission).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /api/public/member-intake/[token]/verify/request", () => {
@@ -198,5 +224,18 @@ describe("POST /api/public/member-intake/[token]/verify/request", () => {
     });
     const body = await response.json();
     expect(body.data.maskedDestination).toBe("•••1234");
+  });
+
+  it("E2E-1/E2E-5 finding: never sends a real code (SMS/email) and collapses to the same not-found response as an unknown submission when the organization's billing is inactive", async () => {
+    const { resolveOrganizationAccess } = await import("@/lib/subscription-gate");
+    resolvePublicSubmissionOrgId.mockResolvedValue("org-a");
+    vi.mocked(resolveOrganizationAccess).mockResolvedValueOnce({ allowed: false, reason: "SUBSCRIPTION_PAST_DUE", trialEndsAt: null, subscriptionStatus: "past_due", billingExempt: false });
+
+    const { POST } = await import("@/app/api/public/member-intake/[token]/verify/request/route");
+    const response = await POST(jsonRequest("https://app.test/api/public/member-intake/tok/verify/request", { submissionId: "sub-1" }), {
+      params: Promise.resolve({ token: "tok" }),
+    });
+    expect(response.status).toBe(404);
+    expect(requestVerification).not.toHaveBeenCalled();
   });
 });

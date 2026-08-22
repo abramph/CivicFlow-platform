@@ -16,6 +16,19 @@ vi.mock("@/lib/payment-link-offline-reports", () => ({
   createPaymentLinkOfflineReportAndNotify: (...args: unknown[]) => createPaymentLinkOfflineReportAndNotify(...args),
 }));
 
+// This suite tests offline-report method-gating logic, not the subscription
+// gate — assume every organization is allowed.
+vi.mock("@/lib/subscription-gate", () => ({
+  resolveOrganizationAccess: vi.fn().mockResolvedValue({
+    allowed: true,
+    reason: null,
+    trialEndsAt: null,
+    subscriptionStatus: null,
+    billingExempt: false,
+  }),
+  PUBLIC_UNAVAILABLE_MESSAGE: "This organization's online services are temporarily unavailable. Please contact the organization directly.",
+}));
+
 import { POST } from "@/app/api/pay/[slug]/offline-report/route";
 
 function buildRequest(body: object) {

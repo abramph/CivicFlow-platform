@@ -31,7 +31,10 @@ function cloudPlanIdFor(vertical: "PTA" | "COMMUNITY" | "CHURCH" | "UNION", inte
 
 export async function POST(req: Request) {
   return withApiErrorHandling(async () => {
-    const { organizationId } = await requirePermission("billing:manage", "throw");
+    // Recovery-path allowlist (LAUNCH-BLOCKER subscription gate): checkout-
+    // session creation must stay reachable for a trial-expired/unsubscribed
+    // organization — this route IS the recovery path.
+    const { organizationId } = await requirePermission("billing:manage", "throw", { skipEntitlementGate: true });
 
     const body = await parseJsonBody(req, checkoutSchema);
     const env = getServerEnv();

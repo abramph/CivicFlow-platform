@@ -64,6 +64,11 @@ vi.mock("@/lib/audit", () => ({ createAuditEvent: (...a: unknown[]) => createAud
 vi.mock("@/lib/mail", () => ({ sendEmail: (...a: unknown[]) => sendEmail(...a) }));
 vi.mock("@/lib/push", () => ({ sendPushToTokens: (...a: unknown[]) => sendPushToTokens(...a) }));
 
+const resolveOrganizationAccess = vi.fn();
+vi.mock("@/lib/subscription-gate", () => ({
+  resolveOrganizationAccess: (...a: unknown[]) => resolveOrganizationAccess(...a),
+}));
+
 beforeEach(() => {
   vi.clearAllMocks();
   transaction.mockImplementation((fn: (tx: typeof txClient) => unknown) => fn(txClient));
@@ -71,6 +76,7 @@ beforeEach(() => {
   findManyMobileDeviceToken.mockResolvedValue([]);
   updateManyViolation.mockResolvedValue({ count: 1 });
   createViolationReminderLog.mockResolvedValue({ id: "reminder-log-1" });
+  resolveOrganizationAccess.mockResolvedValue({ allowed: true, reason: null, trialEndsAt: null, subscriptionStatus: null, billingExempt: false });
 });
 
 function p2002(target: string[]) {
@@ -409,6 +415,22 @@ describe("sendDeadlineReminders", () => {
     expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: "resident@example.org" }));
     expect(createViolationNotice).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ noticeType: "DEADLINE_REMINDER" }) })
+    );
+  });
+
+  it("E2E-1 finding: never claims the notice or resolves residents, and audit-logs a block, when the organization's billing is inactive -- and the violation is naturally reconsidered on a later tick (no claim burned)", async () => {
+    findManyViolation.mockResolvedValueOnce([DUE_VIOLATION]);
+    resolveOrganizationAccess.mockResolvedValueOnce({ allowed: false, reason: "TRIAL_EXPIRED", trialEndsAt: null, subscriptionStatus: null, billingExempt: false });
+
+    const { sendDeadlineReminders } = await import("../violations");
+    const result = await sendDeadlineReminders();
+
+    expect(result.remindersSent).toBe(0);
+    expect(createViolationNotice).not.toHaveBeenCalled();
+    expect(findManyPropertyResident).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: "org-1", action: "hoa_violation_reminder.blocked" })
     );
   });
 

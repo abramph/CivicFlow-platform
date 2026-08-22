@@ -4,6 +4,7 @@ import { requirePermission } from "@/lib/auth-guards";
 import { prisma } from "@/lib/prisma";
 import { getSignedObjectUrl } from "@/lib/storage";
 import { createAuditEvent } from "@/lib/audit";
+import { assertOrganizationAccess } from "@/lib/subscription-gate";
 
 /** CORE-GIVE-G — statement download: the subject themself (member session)
  * or a statements:generate holder. Signed URL; every download audited
@@ -58,6 +59,15 @@ export async function GET(_request: Request, { params }: { params: Promise<{ sta
       actorUserId = session.userId;
       actorEmail = session.userEmail;
     }
+
+    // E2E-1 finding: the staff fallback above already gates through
+    // requirePermission -> requireOrganization -> assertOrganizationAccess,
+    // but the member-self-service branches (direct owner, household) never
+    // touched the billing gate at all - a member of a billing-inactive org
+    // could still download real financial/tax statements. Checking here,
+    // unconditionally, closes that gap for every authorization path
+    // without having to duplicate it into each branch above.
+    await assertOrganizationAccess(statement.organizationId);
 
     await createAuditEvent({
       organizationId: statement.organizationId,

@@ -49,6 +49,15 @@ vi.mock("@/lib/prisma", () => ({
 const createAuditEvent = vi.fn().mockResolvedValue(undefined);
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...args: unknown[]) => createAuditEvent(...args) }));
 
+// This suite tests campaign send/scheduling logic, not the subscription
+// gate — defaults to "allowed", overridden per-test for the LAUNCH-BLOCKER
+// billing-gate cases below.
+const resolveOrganizationAccess = vi.fn();
+vi.mock("@/lib/subscription-gate", () => ({
+  resolveOrganizationAccess: (...args: unknown[]) => resolveOrganizationAccess(...args),
+}));
+const ALLOWED_ACCESS = { allowed: true, reason: null, trialEndsAt: null, subscriptionStatus: null, billingExempt: false } as const;
+
 vi.mock("@/lib/member-timeline", () => ({ createMemberTimelineEvent: vi.fn().mockResolvedValue(undefined) }));
 
 const sendEmail = vi.fn().mockResolvedValue({ sent: true, skipped: false });
@@ -123,6 +132,55 @@ describe("sendCommunicationCampaign", () => {
     sendPushToTokens.mockClear();
     resolvePtaHouseholdAdultUserIdsBatch.mockClear();
     resolvePtaHouseholdAdultUserIdsBatch.mockResolvedValue(new Map());
+    resolveOrganizationAccess.mockReset();
+    resolveOrganizationAccess.mockResolvedValue(ALLOWED_ACCESS);
+  });
+
+  it("LAUNCH-BLOCKER: marks a billing-inactive organization's campaign FAILED immediately, with an audit event, instead of sending or leaving it retryable forever", async () => {
+    resolveOrganizationAccess.mockResolvedValueOnce({
+      allowed: false,
+      reason: "TRIAL_EXPIRED",
+      trialEndsAt: null,
+      subscriptionStatus: null,
+      billingExempt: false,
+    });
+    findFirstCampaign.mockResolvedValueOnce(makeCampaign({ status: "READY" }));
+
+    await expect(sendCommunicationCampaign({ organizationId: "org-a", campaignId: "campaign-1" })).rejects.toThrow(
+      "This organization's Unestra subscription is not active."
+    );
+
+    expect(updateCampaign).toHaveBeenCalledWith({ where: { id: "campaign-1" }, data: { status: "FAILED" } });
+    // Exactly one audit event for the failure — no duplicate, no
+    // additional "attempted" or "succeeded" event alongside it.
+    expect(createAuditEvent).toHaveBeenCalledTimes(1);
+    expect(createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "communication_campaign.blocked",
+        entityId: "campaign-1",
+        metadata: expect.objectContaining({ reason: "organization_subscription_required", accessReason: "TRIAL_EXPIRED" }),
+      })
+    );
+    expect(findManyRecipient).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("E2E-6: does not retry a FAILED campaign indefinitely — a second call short-circuits before ever re-checking billing", async () => {
+    findFirstCampaign.mockResolvedValueOnce(makeCampaign({ status: "FAILED" }));
+
+    const result = await sendCommunicationCampaign({ organizationId: "org-a", campaignId: "campaign-1" });
+
+    expect(result).toEqual({ sent: 0, skipped: 0, failed: 0, remainingPending: 0, complete: true });
+    expect(resolveOrganizationAccess).not.toHaveBeenCalled();
+    expect(updateCampaign).not.toHaveBeenCalled();
+  });
+
+  it("does not re-check organization access for a campaign that already short-circuits as SENT — the gate only matters for campaigns that would actually attempt to send", async () => {
+    findFirstCampaign.mockResolvedValueOnce(makeCampaign({ status: "SENT" }));
+
+    await sendCommunicationCampaign({ organizationId: "org-a", campaignId: "campaign-1" });
+
+    expect(resolveOrganizationAccess).not.toHaveBeenCalled();
   });
 
   it("short-circuits without reprocessing when the campaign is already SENT", async () => {

@@ -1,6 +1,7 @@
 import { requireMobileAuth, MobileForbiddenError } from "@/lib/mobile-auth";
 import { resolveMobileAdminCapabilities, type AdminCapabilityFlag } from "@/lib/mobile-admin";
 import { getEffectivePermissions } from "@/lib/role-permissions";
+import { assertOrganizationAccess } from "@/lib/subscription-gate";
 import type { Permission, Role } from "@/lib/rbac";
 
 /**
@@ -35,6 +36,8 @@ export async function requireMobilePaymentsPermission(
   if (!admin.available || !admin.adminCapabilities.includes(capabilityFlag) || !admin.role) {
     throw new MobileForbiddenError("No mobile payments/reports administration access for this organization");
   }
+
+  await assertOrganizationAccess(organizationId);
 
   const effective = await getEffectivePermissions(organizationId, admin.role as Role);
   if (!effective.includes(permission)) {

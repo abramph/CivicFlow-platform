@@ -1,6 +1,6 @@
 import { withApiErrorHandling } from "@/lib/api-route";
 import { requireMobileAuth, MobileForbiddenError } from "@/lib/mobile-auth";
-import { resolveMobileAdminCapabilities } from "@/lib/mobile-admin";
+import { requireMobileAdminAccess } from "@/lib/mobile-admin";
 import { prisma } from "@/lib/prisma";
 import { createAuditEvent } from "@/lib/audit";
 import { ValidationError, parseJsonBody, z } from "@/lib/validation";
@@ -16,7 +16,7 @@ const createSchema = z.object({
 
 async function requireManageAttendance(request: Request, organizationId: string) {
   const { userId, email } = await requireMobileAuth(request);
-  const admin = await resolveMobileAdminCapabilities(organizationId, userId);
+  const admin = await requireMobileAdminAccess(organizationId, userId);
   if (!admin.available || !admin.adminCapabilities.includes("manageAttendance")) {
     throw new MobileForbiddenError("No mobile attendance administration access for this organization");
   }

@@ -27,6 +27,7 @@ import { authOptions } from "@/lib/authOptions";
 import { roleRank, type Permission, type Role } from "@/lib/rbac";
 import { getEffectivePermissions } from "@/lib/role-permissions";
 import { getPlatformAccessForUser, hasPlatformRole } from "@/lib/platform-access";
+import { assertOrganizationAccess, SubscriptionRequiredError } from "@/lib/subscription-gate";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -83,8 +84,22 @@ export async function requireAuth(): Promise<AuthedSession> {
  *               organization/membership becoming invalid mid-session used to
  *               surface as an uncaught 500 from any API route calling this
  *               without a safe mode).
+ * @param options.skipEntitlementGate LAUNCH-BLOCKER: every call site is
+ *               gated by assertOrganizationAccess() by default — a trial-
+ *               expired or unsubscribed organization is redirected to
+ *               /subscription-required (pages) or throws
+ *               SubscriptionRequiredError/402 (route handlers, via
+ *               onFail: "throw"). Pass true ONLY for the explicit recovery
+ *               allowlist (billing/checkout, billing/portal, the billing
+ *               settings page, org selection is separate and doesn't call
+ *               this at all) — see docs on the subscription gate for the
+ *               full allowed-route list. Never add a call site to this list
+ *               to route around a bug; that defeats the entire gate.
  */
-export async function requireOrganization(onFail: "redirect" | "throw" = "redirect"): Promise<{
+export async function requireOrganization(
+  onFail: "redirect" | "throw" = "redirect",
+  options?: { skipEntitlementGate?: boolean }
+): Promise<{
   session: OrgSession;
   organizationId: string;
   role: Role;
@@ -103,6 +118,24 @@ export async function requireOrganization(onFail: "redirect" | "throw" = "redire
   }
 
   const orgSession = session as OrgSession;
+
+  if (!options?.skipEntitlementGate) {
+    if (onFail === "throw") {
+      // Lets SubscriptionRequiredError propagate to withApiErrorHandling,
+      // which returns the structured 402 body (see api-route.ts).
+      await assertOrganizationAccess(orgSession.organizationId);
+    } else {
+      try {
+        await assertOrganizationAccess(orgSession.organizationId);
+      } catch (err) {
+        if (err instanceof SubscriptionRequiredError) {
+          redirect("/subscription-required");
+        }
+        throw err;
+      }
+    }
+  }
+
   const effectivePermissions = await getEffectivePermissions(orgSession.organizationId, orgSession.role);
   const can: PermissionChecker = (permission) => effectivePermissions.includes(permission);
 
@@ -124,9 +157,10 @@ export async function requireOrganization(onFail: "redirect" | "throw" = "redire
  */
 export async function requirePermission(
   permission: Permission,
-  onForbidden: "redirect" | "throw" = "redirect"
+  onForbidden: "redirect" | "throw" = "redirect",
+  options?: { skipEntitlementGate?: boolean }
 ): Promise<{ session: OrgSession; organizationId: string; role: Role; can: PermissionChecker }> {
-  const { session, organizationId, role, can } = await requireOrganization(onForbidden);
+  const { session, organizationId, role, can } = await requireOrganization(onForbidden, options);
 
   if (!can(permission)) {
     if (onForbidden === "throw") {
@@ -146,9 +180,10 @@ export async function requirePermission(
  */
 export async function requireRole(
   minimumRole: Role,
-  onForbidden: "redirect" | "throw" = "redirect"
+  onForbidden: "redirect" | "throw" = "redirect",
+  options?: { skipEntitlementGate?: boolean }
 ): Promise<{ session: OrgSession; organizationId: string; role: Role; can: PermissionChecker }> {
-  const { session, organizationId, role, can } = await requireOrganization(onForbidden);
+  const { session, organizationId, role, can } = await requireOrganization(onForbidden, options);
 
   if (!roleAtLeast(role, minimumRole)) {
     if (onForbidden === "throw") {

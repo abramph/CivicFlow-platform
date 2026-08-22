@@ -15,6 +15,21 @@ vi.mock("@/lib/role-permissions", () => ({
 
 vi.mock("@/lib/authOptions", () => ({ authOptions: {} }));
 
+// This suite tests session/permission logic, not the subscription gate —
+// assume every organization is allowed unless a test explicitly overrides
+// this to exercise the gate itself.
+const assertOrganizationAccess = vi.fn().mockResolvedValue({
+  allowed: true,
+  reason: null,
+  trialEndsAt: null,
+  subscriptionStatus: null,
+  billingExempt: false,
+});
+vi.mock("@/lib/subscription-gate", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/subscription-gate")>();
+  return { ...actual, assertOrganizationAccess: (...args: unknown[]) => assertOrganizationAccess(...args) };
+});
+
 import {
   requireOrganization,
   requirePermission,
@@ -37,6 +52,13 @@ describe("requireOrganization — throw mode (issue #41)", () => {
     getServerSession.mockReset();
     redirect.mockClear();
     getEffectivePermissions.mockReset();
+    assertOrganizationAccess.mockReset().mockResolvedValue({
+      allowed: true,
+      reason: null,
+      trialEndsAt: null,
+      subscriptionStatus: null,
+      billingExempt: false,
+    });
   });
 
   it("throws UnauthenticatedError (401) instead of redirecting when there is no session", async () => {

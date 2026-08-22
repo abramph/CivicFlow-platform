@@ -21,6 +21,7 @@ import { GovernanceDocumentError } from "@/lib/governance-documents";
 import { FinanceError } from "@/lib/finance-errors";
 import { AccountDeletionError } from "@/lib/account-deletion";
 import { MemberIntakeError } from "@/lib/member-intake/errors";
+import { SubscriptionRequiredError } from "@/lib/subscription-gate";
 
 export async function withApiErrorHandling(
   fn: () => Promise<Response>
@@ -112,6 +113,22 @@ export async function withApiErrorHandling(
       }
       if (error instanceof MobileAuthError || error instanceof MobileForbiddenError) {
         return jsonError(error.message, error.status);
+      }
+      if (error instanceof SubscriptionRequiredError) {
+        // E2E-10 finding: an earlier version of this branch used
+        // {code, reason, message} — diverging from the {ok, error, code}
+        // shape every sibling branch in this file uses (see
+        // PlanFeatureError/AdminSeatLimitError/etc. above). Both the web
+        // client (data.error) and the mobile client (apiFetch reads
+        // payload?.error/payload?.ok) depend on that shape; the divergent
+        // one silently degraded to a generic "Request failed" on mobile
+        // instead of the safe, pre-approved message from
+        // subscription-gate.ts's accessDenialMessage(). Never include
+        // Stripe identifiers or other internal billing detail here.
+        return Response.json(
+          { ok: false, error: error.message, code: error.code, reason: error.reason },
+          { status: error.status }
+        );
       }
       const referenceId = crypto.randomUUID().slice(0, 8);
       Sentry.captureException(error, { tags: { referenceId } });

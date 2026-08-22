@@ -9,6 +9,7 @@ import { createMeetingMinutesDraft } from "./minutes-review";
 import { recordAudioMinutesTranscribed, recordAudioMinutesUploaded, recordMinutesGenerationJob, recordTranscriptionJob } from "./usage";
 import { estimateGenerationCostCents, estimateTranscriptionCostCents } from "./cost-constants";
 import { MeetingIntelligenceError } from "./errors";
+import { resolveOrganizationAccess, accessDenialMessage } from "@/lib/subscription-gate";
 
 /**
  * Meeting Intelligence MVP — background worker. Reuses the platform's
@@ -93,6 +94,24 @@ async function organizationLabsActive(organizationId: string): Promise<boolean> 
   return access.available;
 }
 
+/**
+ * E2E-1 finding: Labs enrollment (organizationLabsActive above) and billing
+ * status are independent — an org can stay Labs-enrolled after its
+ * subscription lapses, and this worker would keep submitting recordings to
+ * the (billable) transcription provider and calling the (billable) minutes
+ * generator on its behalf. Checked at the same two re-gate points as the
+ * Labs check, for the same reason: a step already committed to the vendor
+ * finishes, but no *new* billable vendor call starts for a billing-inactive
+ * org. Reuses the FAILED job state + failJob's existing audit trail —
+ * resuming is an explicit staff action (re-queueing), never automatic.
+ * Returns null when access is allowed, or the fail message to use when not.
+ */
+async function billingDenialMessage(organizationId: string): Promise<string | null> {
+  const access = await resolveOrganizationAccess(organizationId);
+  if (access.allowed) return null;
+  return accessDenialMessage(access.reason!);
+}
+
 async function failJob(jobId: string, organizationId: string, code: string, message: string) {
   await transitionJob({ jobId, organizationId, to: "FAILED", failureCode: code, failureMessage: message });
 }
@@ -117,6 +136,12 @@ export async function processQueuedMeetingIntelligenceJobs(limit = BATCH_LIMIT):
       }
       if (!(await organizationLabsActive(job.organizationId))) {
         await failJob(job.id, job.organizationId, "MEETING_INTELLIGENCE_ENROLLMENT_DISABLED", "Labs enrollment was disabled before this job could be submitted for processing.");
+        failed += 1;
+        continue;
+      }
+      const billingDenial = await billingDenialMessage(job.organizationId);
+      if (billingDenial) {
+        await failJob(job.id, job.organizationId, "ORGANIZATION_SUBSCRIPTION_REQUIRED", billingDenial);
         failed += 1;
         continue;
       }
@@ -239,6 +264,12 @@ export async function pollTranscribingMeetingIntelligenceJobs(limit = BATCH_LIMI
       // already completed is preserved either way (see module doc above).
       if (!(await organizationLabsActive(job.organizationId))) {
         await failJob(job.id, job.organizationId, "MEETING_INTELLIGENCE_ENROLLMENT_DISABLED", "Labs enrollment was disabled before minutes could be generated. The transcript has been preserved.");
+        failed += 1;
+        continue;
+      }
+      const minutesBillingDenial = await billingDenialMessage(job.organizationId);
+      if (minutesBillingDenial) {
+        await failJob(job.id, job.organizationId, "ORGANIZATION_SUBSCRIPTION_REQUIRED", `${minutesBillingDenial} The transcript has been preserved.`);
         failed += 1;
         continue;
       }

@@ -5,6 +5,7 @@ import { resolvePublicIntakeForm } from "@/lib/member-intake/forms";
 import { recordSubmission } from "@/lib/member-intake/submissions";
 import { requestVerification } from "@/lib/member-intake/verification";
 import { applySubmission } from "@/lib/member-intake/update-engine";
+import { resolveOrganizationAccess } from "@/lib/subscription-gate";
 
 const bodySchema = z.object({
   fieldValues: z.record(z.string(), z.unknown()),
@@ -36,6 +37,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
     const { token } = await params;
     const publicForm = await resolvePublicIntakeForm(token);
     if (!publicForm) return Response.json({ ok: false, error: "This form isn't available." }, { status: 404 });
+
+    // LAUNCH-BLOCKER subscription gate: a billing-inactive organization's
+    // form must collapse to the exact same "isn't available" response as an
+    // unknown/inactive/expired token, per this route's own doc comment above
+    // — an anonymous caller must never be able to distinguish the two.
+    const access = await resolveOrganizationAccess(publicForm.organizationId);
+    if (!access.allowed) return Response.json({ ok: false, error: "This form isn't available." }, { status: 404 });
 
     const input = await parseJsonBody(request, bodySchema);
     const recorded = await recordSubmission({

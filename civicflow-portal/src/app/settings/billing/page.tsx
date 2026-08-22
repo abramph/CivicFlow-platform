@@ -19,7 +19,11 @@ export default async function BillingSettingsPage({
   searchParams: SearchParams;
 }) {
   const params = await searchParams;
-  const { organizationId, role, can } = await requirePermission("billing:read");
+  // Recovery-path allowlist (LAUNCH-BLOCKER subscription gate): this page IS
+  // "existing-subscription management" / "billing interval selection" — it
+  // must stay reachable for a trial-expired/unsubscribed organization so the
+  // owner can actually see pricing and subscribe.
+  const { organizationId, role, can } = await requirePermission("billing:read", "redirect", { skipEntitlementGate: true });
 
   const [organization, subscription, memberCheck, trial, adminSeats] = await Promise.all([
     prisma.organization.findUnique({

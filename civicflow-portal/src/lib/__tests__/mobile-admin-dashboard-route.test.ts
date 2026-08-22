@@ -14,6 +14,11 @@ vi.mock("@/lib/mobile-auth", () => ({
 const resolveMobileAdminCapabilities = vi.fn();
 vi.mock("@/lib/mobile-admin", () => ({
   resolveMobileAdminCapabilities: (...args: unknown[]) => resolveMobileAdminCapabilities(...args),
+  // requireMobileAdminAccess is the subscription-gated wrapper the route
+  // now calls — delegate straight to the same mock so existing
+  // resolveMobileAdminCapabilities setups keep driving these tests
+  // unchanged (this suite isn't testing the billing gate itself).
+  requireMobileAdminAccess: (...args: unknown[]) => resolveMobileAdminCapabilities(...args),
 }));
 
 const listPendingPtaVolunteerHourEntries = vi.fn();

@@ -1,6 +1,7 @@
 import { requireMobileAuth, MobileForbiddenError } from "@/lib/mobile-auth";
 import { resolveMobileAdminCapabilities } from "@/lib/mobile-admin";
 import { getEffectivePermissions } from "@/lib/role-permissions";
+import { assertOrganizationAccess } from "@/lib/subscription-gate";
 import type { Permission, Role } from "@/lib/rbac";
 
 /**
@@ -24,6 +25,8 @@ export async function requireMobilePtaHouseholdsPermission(request: Request, org
   if (!admin.available || !admin.adminCapabilities.includes("managePtaHouseholds") || !admin.role) {
     throw new MobileForbiddenError("No mobile PTA household administration access for this organization");
   }
+
+  await assertOrganizationAccess(organizationId);
 
   const effective = await getEffectivePermissions(organizationId, admin.role as Role);
   if (!effective.includes(permission)) {

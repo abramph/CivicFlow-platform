@@ -68,6 +68,18 @@ vi.mock("@/lib/communications/channel", () => ({
 const getWhatsAppEntitlement = vi.fn();
 vi.mock("@/lib/whatsapp/entitlement", () => ({ getWhatsAppEntitlement: (...args: unknown[]) => getWhatsAppEntitlement(...args) }));
 
+// This suite tests WhatsApp send behavior, not the subscription gate —
+// assume every organization is allowed.
+vi.mock("@/lib/subscription-gate", () => ({
+  resolveOrganizationAccess: vi.fn().mockResolvedValue({
+    allowed: true,
+    reason: null,
+    trialEndsAt: null,
+    subscriptionStatus: null,
+    billingExempt: false,
+  }),
+}));
+
 import { sendCommunicationCampaign } from "@/lib/communication-campaigns";
 
 function makeCampaign(overrides: Record<string, unknown> = {}) {

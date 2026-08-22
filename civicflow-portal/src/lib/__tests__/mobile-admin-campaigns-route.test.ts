@@ -14,6 +14,7 @@ vi.mock("@/lib/mobile-auth", () => ({
 const resolveMobileAdminCapabilities = vi.fn();
 vi.mock("@/lib/mobile-admin", () => ({
   resolveMobileAdminCapabilities: (...args: unknown[]) => resolveMobileAdminCapabilities(...args),
+  requireMobileAdminAccess: (...args: unknown[]) => resolveMobileAdminCapabilities(...args),
 }));
 
 const findManyCampaign = vi.fn();

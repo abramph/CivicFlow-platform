@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { createAuditEvent } from "@/lib/audit";
 import { sendEmail } from "@/lib/mail";
 import { sendPushToTokens } from "@/lib/push";
+import { resolveOrganizationAccess } from "@/lib/subscription-gate";
 import { HoaError } from "./errors";
 
 type TxClient = Prisma.TransactionClient;
@@ -586,9 +587,38 @@ export async function sendDeadlineReminders(reminderWindowDays = 3): Promise<{ r
   });
   if (dueSoon.length === 0) return { remindersSent: 0 };
 
+  // E2E-1 finding: this cron previously ran with no billing check at all.
+  // Unlike CommunicationCampaign/EmailReminderLog/SmsMessage, a due-soon
+  // violation isn't a discrete queued item with its own FAILED state — the
+  // same violation is reconsidered on every tick as its offset counts down,
+  // so a billing-inactive org's violation simply isn't claimed today (no
+  // ViolationNotice/ViolationReminderLog row burned) and is naturally
+  // reconsidered on a later tick, without needing FAILED-state bookkeeping.
+  // Cached per organizationId since one tick's dueSoon list commonly spans
+  // many violations for the same org.
+  const billingActiveByOrg = new Map<string, boolean>();
+  async function isBillingActive(organizationId: string): Promise<boolean> {
+    const cached = billingActiveByOrg.get(organizationId);
+    if (cached !== undefined) return cached;
+    const access = await resolveOrganizationAccess(organizationId);
+    billingActiveByOrg.set(organizationId, access.allowed);
+    return access.allowed;
+  }
+
   let remindersSent = 0;
   for (const violation of dueSoon) {
     if (!violation.cureByDate) continue;
+    if (!(await isBillingActive(violation.organizationId))) {
+      await createAuditEvent({
+        organizationId: violation.organizationId,
+        actorUserId: null,
+        action: "hoa_violation_reminder.blocked",
+        entityType: "violation",
+        entityId: violation.id,
+        metadata: { reason: "organization_subscription_required" },
+      });
+      continue;
+    }
     const dueOffsetDays = Math.floor((violation.cureByDate.getTime() - now.getTime()) / MS_PER_DAY);
     const body = `Your ${violation.violationType} violation must be resolved by ${violation.cureByDate.toLocaleDateString()}.`;
 

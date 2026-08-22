@@ -1,6 +1,6 @@
 import { withApiErrorHandling } from "@/lib/api-route";
 import { requireMobileAuth, MobileForbiddenError } from "@/lib/mobile-auth";
-import { resolveMobileAdminCapabilities } from "@/lib/mobile-admin";
+import { requireMobileAdminAccess } from "@/lib/mobile-admin";
 import { terminateMember } from "@/lib/member-lifecycle";
 import { TERMINATION_REASONS } from "@/lib/member-lifecycle-reasons";
 import { parseJsonBody, z } from "@/lib/validation";
@@ -38,7 +38,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ mem
 
     const { organizationId, ...input } = await parseJsonBody(request, terminateMobileMemberSchema);
     const { userId, email } = await requireMobileAuth(request);
-    const admin = await resolveMobileAdminCapabilities(organizationId, userId);
+    const admin = await requireMobileAdminAccess(organizationId, userId);
     if (!admin.available || !admin.adminCapabilities.includes("manageMembers")) {
       throw new MobileForbiddenError("No mobile member administration access for this organization");
     }

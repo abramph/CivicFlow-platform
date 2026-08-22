@@ -13,12 +13,19 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
 
     const message = await prisma.smsMessage.findUnique({ where: { id } });
     if (!message) throw new ValidationError("Message not found.");
-    if (message.status !== "FAILED") throw new ValidationError("Only failed messages can be retried.");
 
-    await prisma.smsMessage.update({
-      where: { id },
+    // E2E-6 finding: the previous findUnique-then-update had a TOCTOU gap —
+    // two concurrent Retry clicks could both pass the status check before
+    // either write landed, both flip to RETRYING, and both call sendSms.
+    // Making the FAILED->RETRYING transition itself the atomic claim (like
+    // the campaign FAILED->READY reset) means only one concurrent request
+    // can ever win it; the loser sees count 0 and fails cleanly instead of
+    // double-sending.
+    const claimed = await prisma.smsMessage.updateMany({
+      where: { id, status: "FAILED" },
       data: { status: "RETRYING", retryCount: { increment: 1 }, nextRetryAt: new Date() },
     });
+    if (claimed.count === 0) throw new ValidationError("Only failed messages can be retried.");
 
     const updated = await attemptSmsMessageResend(message);
 

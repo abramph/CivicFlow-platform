@@ -19,7 +19,14 @@ vi.mock("@/lib/labs/access", () => ({
   getOrganizationLabAccess: (...args: unknown[]) => getOrganizationLabAccessMock(...args),
 }));
 
-import { resolveMobileAdminCapabilities, MOBILE_ADMIN_LABS_FEATURE_KEY } from "@/lib/mobile-admin";
+const assertOrganizationAccess = vi.fn();
+vi.mock("@/lib/subscription-gate", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/subscription-gate")>();
+  return { ...actual, assertOrganizationAccess: (...args: unknown[]) => assertOrganizationAccess(...args) };
+});
+
+import { resolveMobileAdminCapabilities, requireMobileAdminAccess, MOBILE_ADMIN_LABS_FEATURE_KEY } from "@/lib/mobile-admin";
+import { SubscriptionRequiredError } from "@/lib/subscription-gate";
 
 function labAccess(available: boolean) {
   return { featureKey: MOBILE_ADMIN_LABS_FEATURE_KEY, exists: true, lifecycle: "INTERNAL", entitled: true, enrolled: available, enabled: available, available, denialReason: available ? null : "LAB_FEATURE_NOT_ENROLLED" };
@@ -133,5 +140,40 @@ describe("resolveMobileAdminCapabilities", () => {
     const result = await resolveMobileAdminCapabilities("org-a", "user-1");
 
     expect(result).toEqual({ available: false, role: "STAFF", adminCapabilities: [] });
+  });
+});
+
+describe("requireMobileAdminAccess — the LAUNCH-BLOCKER subscription-gated wrapper", () => {
+  beforeEach(() => {
+    findFirstMembership.mockReset();
+    findUniqueOrganization.mockReset();
+    getEffectivePermissionsMock.mockReset();
+    getOrganizationLabAccessMock.mockReset();
+    assertOrganizationAccess.mockReset();
+  });
+
+  it("throws SubscriptionRequiredError before doing any capability lookup when the organization is billing-inactive", async () => {
+    assertOrganizationAccess.mockRejectedValueOnce(new SubscriptionRequiredError("TRIAL_EXPIRED", "Your organization's Unestra trial has ended."));
+
+    await expect(requireMobileAdminAccess("org-a", "user-1")).rejects.toBeInstanceOf(SubscriptionRequiredError);
+    expect(getOrganizationLabAccessMock).not.toHaveBeenCalled();
+  });
+
+  it("delegates to resolveMobileAdminCapabilities and returns its result when access is allowed", async () => {
+    assertOrganizationAccess.mockResolvedValueOnce({
+      allowed: true,
+      reason: null,
+      trialEndsAt: null,
+      subscriptionStatus: null,
+      billingExempt: false,
+    });
+    getOrganizationLabAccessMock.mockResolvedValueOnce(labAccess(true));
+    findFirstMembership.mockResolvedValueOnce({ role: "ORG_OWNER" });
+    findUniqueOrganization.mockResolvedValueOnce({ primaryVertical: "COMMUNITY" });
+    getEffectivePermissionsMock.mockResolvedValueOnce(["members:write"]);
+
+    const result = await requireMobileAdminAccess("org-a", "user-1");
+
+    expect(result.role).toBe("ORG_OWNER");
   });
 });
