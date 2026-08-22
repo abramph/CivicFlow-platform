@@ -15,7 +15,21 @@ vi.mock("next/headers", () => ({
   cookies: () => Promise.resolve({ get: getCookie }),
 }));
 
+const ALLOWED_ACCESS = { allowed: true, reason: null, trialEndsAt: null, subscriptionStatus: null, billingExempt: false };
+const assertOrganizationAccess = vi.fn().mockResolvedValue(ALLOWED_ACCESS);
+vi.mock("@/lib/subscription-gate", () => ({
+  assertOrganizationAccess: (...args: unknown[]) => assertOrganizationAccess(...args),
+  SubscriptionRequiredError: class SubscriptionRequiredError extends Error {
+    status = 402;
+    code = "ORGANIZATION_SUBSCRIPTION_REQUIRED";
+    constructor(readonly reason: string, message: string) {
+      super(message);
+    }
+  },
+}));
+
 import { getMemberWebSession, requireMemberWebSession } from "@/lib/member-web-session";
+import { SubscriptionRequiredError } from "@/lib/subscription-gate";
 
 const memberOrgA = {
   organizationId: "org-a",
@@ -133,6 +147,8 @@ describe("requireMemberWebSession", () => {
     getUserOrgMemberships.mockReset();
     getCookie.mockReset();
     getCookie.mockReturnValue(undefined);
+    assertOrganizationAccess.mockReset();
+    assertOrganizationAccess.mockResolvedValue(ALLOWED_ACCESS);
   });
 
   it("throws ForbiddenError when the caller isn't a member of the requested org", async () => {
@@ -140,6 +156,7 @@ describe("requireMemberWebSession", () => {
     getUserOrgMemberships.mockResolvedValueOnce([memberOrgA]);
 
     await expect(requireMemberWebSession("org-not-a-member-of")).rejects.toThrow();
+    expect(assertOrganizationAccess).not.toHaveBeenCalled();
   });
 
   it("resolves for a valid membership", async () => {
@@ -149,5 +166,25 @@ describe("requireMemberWebSession", () => {
     const result = await requireMemberWebSession("org-a");
 
     expect(result.organizationId).toBe("org-a");
+    expect(assertOrganizationAccess).toHaveBeenCalledWith("org-a");
+  });
+
+  it("E2E-1 finding: checks tenant membership BEFORE billing — a caller who isn't a member never reaches the billing check, even for a billing-inactive org", async () => {
+    getServerSession.mockResolvedValueOnce({ userId: "user-1" });
+    getUserOrgMemberships.mockResolvedValueOnce([memberOrgA]);
+    assertOrganizationAccess.mockRejectedValueOnce(new Error("should never be called"));
+
+    await expect(requireMemberWebSession("org-not-a-member-of")).rejects.toThrow("No active member session");
+    expect(assertOrganizationAccess).not.toHaveBeenCalled();
+  });
+
+  it("E2E-1 finding: propagates SubscriptionRequiredError (402) for a real member of a billing-inactive org — this is the chokepoint for every giving/* and member-portal/* API route", async () => {
+    getServerSession.mockResolvedValueOnce({ userId: "user-1" });
+    getUserOrgMemberships.mockResolvedValueOnce([memberOrgA]);
+    assertOrganizationAccess.mockRejectedValueOnce(
+      new SubscriptionRequiredError("TRIAL_EXPIRED", "Your organization's Unestra trial has ended.")
+    );
+
+    await expect(requireMemberWebSession("org-a")).rejects.toThrow(SubscriptionRequiredError);
   });
 });

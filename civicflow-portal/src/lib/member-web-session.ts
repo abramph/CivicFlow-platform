@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/authOptions";
 import { ForbiddenError } from "@/lib/auth-guards";
 import { ACTIVE_ORG_COOKIE, getUserOrgMemberships } from "@/lib/org-context";
+import { assertOrganizationAccess } from "@/lib/subscription-gate";
 
 /**
  * @deprecated Superseded by ACTIVE_ORG_COOKIE (src/lib/org-context.ts), which
@@ -76,11 +77,20 @@ export async function getMemberWebSession(requestedOrgId?: string): Promise<Memb
  * membership in the given organizationId, throwing (not redirecting) on
  * failure. organizationId is re-verified server-side, never trusted from
  * the request body alone.
+ *
+ * E2E-1 finding: this is the chokepoint for every giving/* and
+ * member-portal/* API route (contributions, pledges, recurring giving,
+ * statements, dues checkout, attendance check-in, messaging,
+ * notifications) — none of it previously went through
+ * assertOrganizationAccess. Tenant membership is checked first, same as
+ * the mobile guards, so a caller who isn't really a member of this org
+ * never reaches the billing check for it.
  */
 export async function requireMemberWebSession(organizationId: string): Promise<MemberWebSession> {
   const memberSession = await getMemberWebSession(organizationId);
   if (!memberSession || memberSession.organizationId !== organizationId) {
     throw new ForbiddenError("No active member session for this organization");
   }
+  await assertOrganizationAccess(organizationId);
   return memberSession;
 }

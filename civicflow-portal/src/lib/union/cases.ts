@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { createAuditEvent } from "@/lib/audit";
 import { sendEmail } from "@/lib/mail";
 import { sendPushToTokens } from "@/lib/push";
+import { resolveOrganizationAccess } from "@/lib/subscription-gate";
 import { UnionError } from "./errors";
 
 /**
@@ -813,10 +814,35 @@ export async function sendUnionCaseDeadlineReminders(reminderWindowDays = 3): Pr
   });
   if (dueSoon.length === 0) return { remindersSent: 0 };
 
+  // E2E-1 finding: same shape as sendDeadlineReminders (hoa/violations.ts)
+  // — a due-soon deadline isn't a discrete queued item with a FAILED state,
+  // it's reconsidered on every tick as its offset counts down, so a
+  // billing-inactive org's deadline simply isn't claimed today and is
+  // naturally reconsidered on a later tick.
+  const billingActiveByOrg = new Map<string, boolean>();
+  async function isBillingActive(organizationId: string): Promise<boolean> {
+    const cached = billingActiveByOrg.get(organizationId);
+    if (cached !== undefined) return cached;
+    const access = await resolveOrganizationAccess(organizationId);
+    billingActiveByOrg.set(organizationId, access.allowed);
+    return access.allowed;
+  }
+
   let remindersSent = 0;
   for (const deadline of dueSoon) {
     const recipientOrgMemberId = deadline.responsibleOrgMemberId ?? deadline.case.assignedToOrgMemberId;
     if (!recipientOrgMemberId) continue; // no one to notify -- deadline predates assignment
+    if (!(await isBillingActive(deadline.organizationId))) {
+      await createAuditEvent({
+        organizationId: deadline.organizationId,
+        actorUserId: null,
+        action: "union_case_deadline_reminder.blocked",
+        entityType: "union_case_deadline",
+        entityId: deadline.id,
+        metadata: { reason: "organization_subscription_required" },
+      });
+      continue;
+    }
 
     const dueOffsetDays = Math.floor((deadline.dueAt.getTime() - now.getTime()) / MS_PER_DAY);
     const overdue = dueOffsetDays < 0;

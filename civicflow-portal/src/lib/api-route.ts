@@ -115,11 +115,18 @@ export async function withApiErrorHandling(
         return jsonError(error.message, error.status);
       }
       if (error instanceof SubscriptionRequiredError) {
-        // Never include Stripe identifiers or other internal billing detail
-        // here — error.message is already the safe, pre-approved copy from
-        // subscription-gate.ts's accessDenialMessage().
+        // E2E-10 finding: an earlier version of this branch used
+        // {code, reason, message} — diverging from the {ok, error, code}
+        // shape every sibling branch in this file uses (see
+        // PlanFeatureError/AdminSeatLimitError/etc. above). Both the web
+        // client (data.error) and the mobile client (apiFetch reads
+        // payload?.error/payload?.ok) depend on that shape; the divergent
+        // one silently degraded to a generic "Request failed" on mobile
+        // instead of the safe, pre-approved message from
+        // subscription-gate.ts's accessDenialMessage(). Never include
+        // Stripe identifiers or other internal billing detail here.
         return Response.json(
-          { code: error.code, reason: error.reason, message: error.message },
+          { ok: false, error: error.message, code: error.code, reason: error.reason },
           { status: error.status }
         );
       }

@@ -3,6 +3,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const getOrganizationLabAccess = vi.fn();
 vi.mock("@/lib/labs/access", () => ({ getOrganizationLabAccess: (...args: unknown[]) => getOrganizationLabAccess(...args) }));
 
+const resolveOrganizationAccess = vi.fn();
+vi.mock("@/lib/subscription-gate", () => ({
+  resolveOrganizationAccess: (...args: unknown[]) => resolveOrganizationAccess(...args),
+  accessDenialMessage: (reason: string) => `Access denied: ${reason}`,
+}));
+
 const findManyJob = vi.fn();
 const updateManyJob = vi.fn();
 const findUniqueTranscript = vi.fn();
@@ -80,6 +86,7 @@ vi.mock("../usage", () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   getOrganizationLabAccess.mockResolvedValue({ available: true });
+  resolveOrganizationAccess.mockResolvedValue({ allowed: true, reason: null, trialEndsAt: null, subscriptionStatus: null, billingExempt: false });
   updateManyJob.mockResolvedValue({ count: 1 }); // claim succeeds by default
 });
 
@@ -105,6 +112,18 @@ describe("processQueuedMeetingIntelligenceJobs", () => {
     expect(result.failed).toBe(1);
     expect(submit).not.toHaveBeenCalled();
     expect(transitionJob).toHaveBeenCalledWith(expect.objectContaining({ to: "FAILED", failureCode: "MEETING_INTELLIGENCE_ENROLLMENT_DISABLED" }));
+  });
+
+  it("E2E-1 finding: fails a job immediately (never submits to the paid transcription provider) when the organization's billing is inactive, even if Labs enrollment is still active", async () => {
+    findManyJob.mockResolvedValueOnce([queuedJob()]);
+    resolveOrganizationAccess.mockResolvedValueOnce({ allowed: false, reason: "TRIAL_EXPIRED", trialEndsAt: null, subscriptionStatus: null, billingExempt: false });
+
+    const { processQueuedMeetingIntelligenceJobs } = await import("../worker");
+    const result = await processQueuedMeetingIntelligenceJobs();
+
+    expect(result.failed).toBe(1);
+    expect(submit).not.toHaveBeenCalled();
+    expect(transitionJob).toHaveBeenCalledWith(expect.objectContaining({ to: "FAILED", failureCode: "ORGANIZATION_SUBSCRIPTION_REQUIRED" }));
   });
 
   it("fails a job with a stable code when the recording object is missing", async () => {
@@ -306,6 +325,25 @@ describe("pollTranscribingMeetingIntelligenceJobs", () => {
     expect(createTranscript).toHaveBeenCalledTimes(1); // transcript preserved
     expect(transitionJob).toHaveBeenCalledWith(expect.objectContaining({ to: "TRANSCRIBED" }));
     expect(transitionJob).toHaveBeenCalledWith(expect.objectContaining({ to: "FAILED", failureCode: "MEETING_INTELLIGENCE_ENROLLMENT_DISABLED" }));
+    expect(generateMeetingMinutes).not.toHaveBeenCalled();
+    expect(result.failed).toBe(1);
+  });
+
+  it("E2E-1 finding: stops at TRANSCRIBED (preserving the transcript, never calling the billable minutes generator) when the organization's billing is inactive, even if Labs enrollment is still active", async () => {
+    findManyJob.mockResolvedValueOnce([transcribingJob()]);
+    getStatus.mockResolvedValueOnce({
+      status: "completed",
+      result: { language: "en", durationMs: 600_000, fullText: "hello", segments: [], speakerCount: 0 },
+    });
+    findUniqueTranscript.mockResolvedValueOnce(null);
+    resolveOrganizationAccess.mockResolvedValueOnce({ allowed: false, reason: "SUBSCRIPTION_PAST_DUE", trialEndsAt: null, subscriptionStatus: "past_due", billingExempt: false });
+
+    const { pollTranscribingMeetingIntelligenceJobs } = await import("../worker");
+    const result = await pollTranscribingMeetingIntelligenceJobs();
+
+    expect(createTranscript).toHaveBeenCalledTimes(1); // transcript preserved
+    expect(transitionJob).toHaveBeenCalledWith(expect.objectContaining({ to: "TRANSCRIBED" }));
+    expect(transitionJob).toHaveBeenCalledWith(expect.objectContaining({ to: "FAILED", failureCode: "ORGANIZATION_SUBSCRIPTION_REQUIRED" }));
     expect(generateMeetingMinutes).not.toHaveBeenCalled();
     expect(result.failed).toBe(1);
   });

@@ -16,6 +16,11 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/mail", () => ({ sendEmail: (...args: unknown[]) => sendEmail(...args) }));
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...args: unknown[]) => createAuditEvent(...args) }));
 
+const resolveOrganizationAccess = vi.fn();
+vi.mock("@/lib/subscription-gate", () => ({
+  resolveOrganizationAccess: (...args: unknown[]) => resolveOrganizationAccess(...args),
+}));
+
 import { sendVolunteerRemindersForOrganization } from "@/lib/labs/pta/volunteer-reminders";
 
 function signup(overrides: Record<string, unknown> = {}) {
@@ -36,9 +41,23 @@ function signup(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   sendEmail.mockResolvedValue({ sent: true });
+  resolveOrganizationAccess.mockResolvedValue({ allowed: true, reason: null, trialEndsAt: null, subscriptionStatus: null, billingExempt: false });
 });
 
 describe("sendVolunteerRemindersForOrganization", () => {
+  it("E2E-1 finding: never queries signups or sends, and audit-logs a block, when the organization's billing is inactive -- covers both the cron sweep and the officer's manual send-now action, since this is the shared function both call", async () => {
+    resolveOrganizationAccess.mockResolvedValueOnce({ allowed: false, reason: "TRIAL_EXPIRED", trialEndsAt: null, subscriptionStatus: null, billingExempt: false });
+
+    const result = await sendVolunteerRemindersForOrganization("org-1", { actorUserId: "user-1", actorEmail: "officer@example.org" });
+
+    expect(result).toEqual({ organizationId: "org-1", sent: 0, skippedNoEmail: 0, failed: 0 });
+    expect(findManySignups).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: "org-1", actorUserId: "user-1", actorEmail: "officer@example.org", action: "pta_volunteer_reminders.blocked" })
+    );
+  });
+
   it("only targets un-reminded SIGNED_UP signups inside the window", async () => {
     findManySignups.mockResolvedValueOnce([]);
     await sendVolunteerRemindersForOrganization("org-1");

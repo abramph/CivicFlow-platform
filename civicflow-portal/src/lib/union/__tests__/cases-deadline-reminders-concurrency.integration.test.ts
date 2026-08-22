@@ -41,7 +41,12 @@ describe.skipIf(!RUN_INTEGRATION)("Union sendUnionCaseDeadlineReminders — real
     prisma = new PrismaClient();
 
     const org = await prisma.organization.create({
-      data: { slug: `union-reminder-concurrency-${Date.now()}`, name: "Union Reminder Concurrency Test Org", primaryVertical: "UNION" },
+      // billingExempt: this test exercises the UnionCaseDeadlineReminderLog
+      // claim race, not billing state -- exempt so
+      // sendUnionCaseDeadlineReminders' billing check (added for the
+      // subscription-access-gate) never short-circuits it via a null
+      // trialEndsAt on a directly-created test org.
+      data: { slug: `union-reminder-concurrency-${Date.now()}`, name: "Union Reminder Concurrency Test Org", primaryVertical: "UNION", billingExempt: true },
     });
     orgId = org.id;
 
