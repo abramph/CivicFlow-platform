@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/authOptions";
 import { MemberNotificationSettingsForm } from "@/components/forms/MemberNotificationSettingsForm";
+import { PublicSmsOptInPreview } from "@/components/forms/PublicSmsOptInPreview";
 import { getMemberWebSession } from "@/lib/member-web-session";
 import { formatSmsOptInMethod } from "@/lib/sms-consent-text";
 import { prisma } from "@/lib/prisma";
@@ -37,8 +38,11 @@ export default async function SmsOptInPage({ searchParams }: { searchParams: Pro
 
         <div className="border-t border-slate-200 pt-6">
           {!session?.userId ? (
-            <div className="space-y-3">
-              <p className="text-sm text-slate-600">Sign in to your Unestra account to turn on SMS notifications.</p>
+            <div className="space-y-4">
+              <PublicSmsOptInPreview />
+              <p className="text-sm text-slate-600">
+                Enter your number above, then sign in or create an account to confirm it and start receiving texts.
+              </p>
               <Link
                 href={`/login?callbackUrl=${encodeURIComponent(org ? `/sms-opt-in?org=${org}` : "/sms-opt-in")}`}
                 className="block w-full rounded-lg bg-emerald-600 px-4 py-2 text-center text-sm font-semibold text-white hover:bg-emerald-700"
@@ -55,9 +59,15 @@ export default async function SmsOptInPage({ searchParams }: { searchParams: Pro
           ) : memberSession ? (
             <MemberSmsOptInSection organizationId={memberSession.organizationId} memberId={memberSession.memberId} />
           ) : (
-            <div className="space-y-2 text-sm text-slate-600">
-              <p>We couldn&apos;t find a membership on file for your account.</p>
-              <p>Contact your organization to be added as a member, or check your account&apos;s Notification Settings if you manage SMS preferences elsewhere.</p>
+            <div className="space-y-4">
+              <PublicSmsOptInPreview disabled />
+              <div className="space-y-2 text-sm text-slate-600">
+                <p>We couldn&apos;t find a membership on file for your account with this organization.</p>
+                <p>
+                  Contact your organization to be added as a member, or check your account&apos;s Notification
+                  Settings if you manage SMS preferences for a different organization.
+                </p>
+              </div>
             </div>
           )}
         </div>
