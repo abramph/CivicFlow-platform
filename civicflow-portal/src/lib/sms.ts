@@ -59,9 +59,15 @@ async function sendViaTwilio(
   input: { to: string; body: string },
   credentials: NonNullable<Awaited<ReturnType<typeof getEffectiveTwilioCredentials>>>
 ): Promise<SendSmsResult> {
-  const { accountSid, authToken, messagingServiceSid, fromNumber } = credentials;
+  const { accountSid, authToken, apiKey, apiSecret, messagingServiceSid, fromNumber } = credentials;
 
-  const basicAuth = Buffer.from(`${accountSid}:${authToken}`).toString("base64");
+  // Prefer a scoped API Key/Secret over the account-wide Auth Token when
+  // both are configured -- least privilege, independently revocable. The
+  // account SID in the request path is always the account SID regardless
+  // of which credential authenticates the request.
+  const basicAuthUser = apiKey && apiSecret ? apiKey : accountSid;
+  const basicAuthPass = apiKey && apiSecret ? apiSecret : authToken;
+  const basicAuth = Buffer.from(`${basicAuthUser}:${basicAuthPass}`).toString("base64");
   const body = new URLSearchParams({ To: input.to, Body: input.body, StatusCallback: buildStatusCallbackUrl() });
   if (messagingServiceSid) {
     body.set("MessagingServiceSid", messagingServiceSid);
