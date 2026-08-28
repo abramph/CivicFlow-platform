@@ -252,3 +252,31 @@ describe("createAssignment — validation", () => {
     expect(createAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "pta.volunteer_hours.assignment_created" }));
   });
 });
+
+describe("resolveHouseholdRequirement — tenant isolation (VH-I audit finding)", () => {
+  beforeEach(() => {
+    getVolunteerRequirementPeriod.mockResolvedValue({ id: "period-1", requiredMinutesDefault: 1200 });
+    findManyAssignments.mockResolvedValue([]);
+    findManyStudents.mockResolvedValue([]);
+    countAdults.mockResolvedValue(0);
+    findFirstSchoolYear.mockResolvedValue(null);
+  });
+
+  it("rejects a householdId that does not belong to the calling organization, before touching any other table", async () => {
+    findFirstHousehold.mockResolvedValue(null); // not found in THIS org
+    const { resolveHouseholdRequirement } = await import("../assignments");
+    await expect(resolveHouseholdRequirement("org-A", "period-1", "hh-belongs-to-org-B")).rejects.toMatchObject({
+      code: "PTA_HOUSEHOLD_NOT_FOUND",
+    });
+    expect(findFirstHousehold).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "hh-belongs-to-org-B", organizationId: "org-A" } }));
+    // Never reaches the household-scope-context queries for a foreign household.
+    expect(findUniqueHousehold).not.toHaveBeenCalled();
+  });
+
+  it("resolves normally once the household is confirmed to belong to this organization", async () => {
+    findFirstHousehold.mockResolvedValue({ id: "hh-1" });
+    findUniqueHousehold.mockResolvedValue({ orgMemberId: null });
+    const { resolveHouseholdRequirement } = await import("../assignments");
+    await expect(resolveHouseholdRequirement("org-A", "period-1", "hh-1")).resolves.toMatchObject({ requiredMinutes: 1200 });
+  });
+});

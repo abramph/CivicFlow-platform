@@ -283,11 +283,29 @@ export function computeHouseholdRequirement(
   };
 }
 
+/**
+ * VH-I tenant-isolation audit finding: this is the single shared entry
+ * point every other module calls with a householdId (elections, purchases,
+ * assessments, corrections) — some of those callers pass a client-supplied
+ * householdId with no upstream ownership check of their own. Downstream
+ * queries (ledger, dues account) are all correctly organizationId-scoped
+ * and would silently return empty for a foreign household, so this was
+ * never an actual cross-org DATA LEAK — but it would compute a nonsensical
+ * "period default, no assignment" result for a household that doesn't
+ * belong to this org at all, rather than failing closed. Fixed once here
+ * so every caller is protected transitively.
+ */
+async function assertHouseholdBelongsToOrganization(organizationId: string, householdId: string) {
+  const household = await prisma.ptaHousehold.findFirst({ where: { id: householdId, organizationId }, select: { id: true } });
+  if (!household) throw new PtaError("PTA_HOUSEHOLD_NOT_FOUND", "Household not found in this organization.");
+}
+
 export async function resolveHouseholdRequirement(
   organizationId: string,
   periodId: string,
   householdId: string
 ): Promise<HouseholdRequirementResult> {
+  await assertHouseholdBelongsToOrganization(organizationId, householdId);
   const [period, assignments, context] = await Promise.all([
     getVolunteerRequirementPeriod(organizationId, periodId),
     prisma.ptaVolunteerRequirementAssignment.findMany({ where: { organizationId, periodId } }),

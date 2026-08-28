@@ -76,7 +76,7 @@ starts clean from the spec.
 - VH-F: ✅ built + tested locally (not merged/deployed) — checkout & payment
 - VH-G: ✅ built + tested locally (not merged/deployed) — assessment batch & posting
 - VH-H: ✅ built + tested locally (not merged/deployed) — corrections/reversals/refunds
-- VH-I: 🔲 not started — permissions rollout
+- VH-I: ✅ built + tested locally (not merged/deployed) — permissions rollout + tenant-isolation audit
 - VH-J: 🔲 not started — reporting foundation + Reports A-D
 - VH-K: 🔲 not started — Reports E-G + background export + family self-service
 - VH-L: 🔲 not started — notifications, audit UI, compatibility tests, mobile spec doc, final verification
@@ -151,10 +151,11 @@ timezone snapshot, audit events, not-found/cross-org isolation). Full
 existing suite green (329 PTA tests, 29 rbac/role-permission tests, no
 regressions). Typecheck + lint clean on every touched/new file.
 
-**Not yet built** (later stages): permission-matrix audit (VH-I) and
-the full reporting/Excel center (VH-J/K). Every core financial/hour
-mechanic described in the spec is now built and testable end-to-end on
-this branch, including corrections/reversals/refunds.
+**Not yet built** (later stages): the full reporting/Excel center
+(VH-J/K), notifications, mobile spec doc, and final verification
+(VH-L). Every core financial/hour mechanic, permission, and
+tenant-isolation guarantee described in the spec is now built, audited,
+and tested end-to-end on this branch.
 
 ## VH-B — Assignment, scoping & exemptions
 
@@ -634,3 +635,52 @@ Stripe-refunds-against-its-own-account, offline-skips-Stripe, deficit
 warning true/false, and the overpayment-only-when-purchased-contributed
 distinction. Full suite green (491 PTA/cost-policy/payments tests),
 typecheck/lint clean, production build verified.
+
+## VH-I — Permissions rollout & tenant-isolation audit
+
+No schema changes — all 11 `pta:volunteer-*` permissions and their
+role-bundle wiring already landed in VH-A (front-loaded then, since the
+full role split was already finalized in the approved plan). This
+stage's actual work was verification: a systematic audit of every
+route + a full permission-matrix test suite, plus one real fix the
+audit surfaced.
+
+**Route audit**: read every one of the ~30 `/api/labs/pta/volunteer-hours/**`
+route handlers built across VH-A..H and confirmed each uses either
+`requireVolunteerHoursAccess` (officer) or
+`requireVolunteerHoursHouseholdAccess` (family self-service) — no route
+bypasses the flag+permission guard layer — and that the
+permission↔capability pairing matches intent everywhere (e.g. offline
+assessment-charge payments check the `assessments` capability, offline
+buyout payments check `buyout`; nothing is cross-wired). No gaps found.
+
+**Permission-matrix tests** (`rbac-volunteer-hours.test.ts`, 17 new
+tests): every one of the 11 permissions checked against all 7 roles —
+confirms in code, not just documentation, that FINANCE never gets
+requirements/assessment authority, STAFF never gets pricing/payment/
+financial-report authority, both share general reports as the one
+deliberate overlap, READ_ONLY sees hours but never money, and
+ORG_OWNER/SUPER_ADMIN/MEMBER hold the unconditional all/none rails.
+
+**Real tenant-isolation gap found and fixed**: `resolveHouseholdRequirement`
+(the shared entry point every buyout/assessment/correction function
+calls with a `householdId`) never validated that the household actually
+belonged to the calling organization before reading it. Downstream
+queries (ledger entries, dues accounts) are all independently
+`organizationId`-scoped and would have returned empty for a foreign
+household, so this was never an exploitable cross-org DATA LEAK — but
+`checkForOverpaymentAfterRequirementChange` and the offline-payment
+recording routes accept a client-supplied `householdId` directly with
+no upstream ownership check of their own, and would have silently
+computed a nonsensical "period default, nothing on file" result for a
+household from a different org instead of failing closed. Fixed once
+in the shared function (`assertHouseholdBelongsToOrganization`,
+mirroring the exact `findFirst({id, organizationId})` → 404-equivalent
+pattern used everywhere else in this codebase) so every caller across
+VH-E/F/G/H is protected transitively — no need to patch each call site
+individually. 2 new regression tests confirm the rejection and the
+happy path.
+
+**Tests**: 17 in `rbac-volunteer-hours.test.ts` + 2 in `assignments.test.ts`
+(the tenant-isolation fix). Full suite green (539 tests, zero
+regressions from the fix). Typecheck + lint clean.
