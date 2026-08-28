@@ -328,6 +328,44 @@ export async function POST(request: Request) {
           break;
         }
 
+        // Volunteer Hour Requirements & Buyout program, VH-F
+        // (docs/pta-volunteer-hours.md): a family's buyout purchase.
+        // Mirrors the "giving" branch's structure exactly, but never
+        // re-quotes — recordVolunteerBuyoutPurchase validates the paid
+        // total against the ALREADY-SNAPSHOTTED purchase row created at
+        // checkout time (the rate-lock point), same rigor as giving's
+        // coverage-split cross-check.
+        if (session.metadata?.paymentType === "pta-volunteer-buyout" && session.payment_status === "paid") {
+          const purchaseId = session.metadata?.buyoutPurchaseId;
+          if (!purchaseId) {
+            console.error(JSON.stringify({ event: "pta_volunteer_buyout_webhook_missing_purchase_id", sessionId: session.id, organizationId }));
+            break;
+          }
+          const { recordVolunteerBuyoutPurchase } = await import("@/lib/labs/pta/volunteer-hours/purchases");
+          const result = await recordVolunteerBuyoutPurchase({
+            organizationId,
+            purchaseId,
+            amountTotalCents: session.amount_total ?? 0,
+            stripeConnectedAccountId: connectedAccountId,
+            providerPaymentIntentId:
+              typeof session.payment_intent === "string" ? session.payment_intent : (session.payment_intent?.id ?? null),
+            providerSessionId: session.id,
+          });
+          if (result.outcome === "REJECTED") {
+            console.error(
+              JSON.stringify({ event: "pta_volunteer_buyout_webhook_rejected", reason: result.reason, sessionId: session.id, organizationId })
+            );
+          }
+          await createAuditEvent({
+            organizationId,
+            action: "update",
+            entityType: "stripe_webhook",
+            entityId: session.id,
+            metadata: { eventType: event.type, ptaVolunteerBuyout: true, connected: true, outcome: result.outcome },
+          });
+          break;
+        }
+
         // CONNECT-E: dues / campaign / event contributions collected via a
         // payment link. Mirrors the platform webhook's own paymentLinkId
         // branch exactly (§8 legacy coexistence — that branch stays in

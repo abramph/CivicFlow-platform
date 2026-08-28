@@ -50,6 +50,8 @@ export function PtaVolunteerRequirementCard({ buyoutAvailable }: { buyoutAvailab
   const [acknowledged, setAcknowledged] = useState(false);
   const [electing, setElecting] = useState(false);
   const [electionSaved, setElectionSaved] = useState(false);
+  const [savedElectionId, setSavedElectionId] = useState<string | null>(null);
+  const [checkingOut, setCheckingOut] = useState(false);
 
   const [disputeText, setDisputeText] = useState("");
   const [disputePending, setDisputePending] = useState(false);
@@ -124,10 +126,39 @@ export function PtaVolunteerRequirementCard({ buyoutAvailable }: { buyoutAvailab
         return;
       }
       setElectionSaved(true);
+      setSavedElectionId(data.data?.id ?? null);
     } catch {
       setError("Unable to connect. Please try again.");
     } finally {
       setElecting(false);
+    }
+  }
+
+  async function startCheckout() {
+    if (!summary) return;
+    setCheckingOut(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/labs/pta/volunteer-hours/my-household/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          periodId: summary.period.id,
+          electionId: savedElectionId,
+          electionType,
+          ...(electionType === "PARTIAL_BUYOUT" ? { hoursElectedMinutes: Math.round(Number(hoursWanted || 0) * 60) } : {}),
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        setError(data?.error || "Unable to start checkout.");
+        return;
+      }
+      window.location.href = data.url;
+    } catch {
+      setError("Unable to connect. Please try again.");
+    } finally {
+      setCheckingOut(false);
     }
   }
 
@@ -273,9 +304,19 @@ export function PtaVolunteerRequirementCard({ buyoutAvailable }: { buyoutAvailab
           ) : null}
 
           {electionSaved ? (
-            <p className="text-sm font-medium text-emerald-700">
-              Your choice has been recorded. An officer will follow up with instructions to complete payment if needed.
-            </p>
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-emerald-700">Your choice has been recorded.</p>
+              {electionType !== "VOLUNTEER" ? (
+                <button
+                  type="button"
+                  disabled={checkingOut}
+                  onClick={startCheckout}
+                  className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
+                >
+                  {checkingOut ? "Redirecting..." : "Pay now"}
+                </button>
+              ) : null}
+            </div>
           ) : null}
         </div>
       ) : null}

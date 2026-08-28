@@ -73,7 +73,7 @@ starts clean from the spec.
 - VH-C: ✅ built + tested locally (not merged/deployed) — pricing window engine
 - VH-D: ✅ built + tested locally (not merged/deployed) — unified ledger
 - VH-E: ✅ built + tested locally (not merged/deployed) — family dashboard + buyout election + dispute reporting
-- VH-F: 🔲 not started — checkout & payment
+- VH-F: ✅ built + tested locally (not merged/deployed) — checkout & payment
 - VH-G: 🔲 not started — assessment batch & posting
 - VH-H: 🔲 not started — corrections/reversals/refunds
 - VH-I: 🔲 not started — permissions rollout
@@ -151,10 +151,10 @@ timezone snapshot, audit events, not-found/cross-org isolation). Full
 existing suite green (329 PTA tests, 29 rbac/role-permission tests, no
 regressions). Typecheck + lint clean on every touched/new file.
 
-**Not yet built** (later stages): checkout/payment (VH-F), assessment
-posting (VH-G), and everything downstream. Families can now see their
-requirement and RECORD a buyout election, but nothing is charged or
-credited yet — election is deliberately not payment.
+**Not yet built** (later stages): assessment posting (VH-G) and
+everything downstream. Families can now actually pay for a buyout via
+Stripe (or an admin can record an offline payment), and purchased hours
+are credited to the ledger on confirmed payment.
 
 ## VH-B — Assignment, scoping & exemptions
 
@@ -414,3 +414,75 @@ matching the spec's exact buyout acceptance scenario — 8h @ $15/hr =
 $120 — snapshot-on-record, never-touches-the-ledger) + 4 in
 `disputes.test.ts`. Full existing suite green (410 PTA tests).
 Typecheck + lint clean.
+
+## VH-F — Buyout checkout & payment
+
+Migration `20260828030356_vh_f_buyout_purchases` — purely additive (2
+enums, 1 new table).
+
+**Reused, not duplicated**: the entire checkout is built on the
+existing Stripe Connect + COST-POLICY v2 infrastructure —
+`resolveConnectedAccountForCharges`/`getStripeForMode` (org's own
+connected account, never the platform's), `createPendingPayment`/
+`attachStripeSession`/`settlePendingPaymentBySession` (the same
+first-party pre-checkout record + idempotent settle used by every other
+payment flow in the app), and `resolveCoveragePlan` for the same
+voluntary processing-cost-coverage families already see when giving.
+Extended `PaymentPurpose` (`src/lib/payments/cost-policy.ts`) with
+`"pta-volunteer-buyout"`, classified `VOLUNTARY` nature — never a
+donation or tax-deductible contribution (spec §17), enforced by the
+webhook branch recording it as a `PtaVolunteerBuyoutPurchase`, never a
+`Contribution`.
+
+**Rate lock, honestly scoped**: Stripe Checkout Sessions require a
+fixed `unit_amount` at creation, so the quote is always re-derived
+fresh (`buildBuyoutQuote`, never a client-supplied amount or a reused
+stale election snapshot) at the moment checkout is created — this IS
+the `CHECKOUT_START` lock point structurally, not just by convention.
+Documented as a deliberate simplification versus a literal
+`PAYMENT_SUCCESS` re-quote, which isn't meaningful for a
+synchronous-card Checkout Session flow (the amount Stripe already
+collected can't retroactively change); `lockTiming` remains a real,
+tested column for VH-G/future async-payment-method work.
+
+**Webhook** (`src/app/api/webhooks/stripe-connect/route.ts`): a new
+branch mirrors the existing `giving`/`public-giving` branches exactly
+— added *after* the shared `settlePendingPaymentBySession` step that
+already runs for every purpose. `recordVolunteerBuyoutPurchase`
+(`purchases.ts`) never re-quotes; it validates the paid total and
+connected account against the row already snapshotted at checkout
+time, and is idempotent via the same compare-and-swap
+(`updateMany`-with-status-guard, re-check-on-lost-race) pattern as
+`settlePendingPaymentBySession` itself — confirmed by dedicated replay
+and lost-race tests. On success it posts two ledger entries (PURCHASE
+for the hours, PAYMENT_ELECTRONIC for the money) via VH-D's
+already-idempotent `postLedgerEntry`.
+
+**Offline path**: `recordOfflineVolunteerBuyoutPurchase` mirrors
+`resolveAndRecordDuesPayment`'s shape — an authorized administrator
+records cash/check/Zelle/CashApp/other, and credit posts immediately
+(the recording *is* the verification step, spec §7). Gated by the
+dedicated `pta:volunteer-payments:record-offline` permission (FINANCE
+bundle, not STAFF — matches the plan's money-side/hours-side split).
+
+**API**: `/api/labs/pta/volunteer-hours/my-household/checkout` (family
+self-service, rate-limited like every other checkout endpoint) +
+`/api/labs/pta/volunteer-hours/periods/[periodId]/purchases/offline`
+(admin).
+
+**UI**: the family "Pay now" button (added to
+`PtaVolunteerRequirementCard`) redirects to the returned Stripe
+Checkout URL after an election is recorded. New
+`PtaVolunteerOfflinePaymentForm` on the period detail admin page.
+
+**Tests**: 12 in `purchases.test.ts` — checkout never trusts a
+client-supplied amount (explicit hostile-payload test), classified
+correctly for Stripe, created on the org's own connected account;
+webhook idempotency (not-found, already-completed replay, amount
+mismatch, connected-account mismatch, lost-race, and the exact buyout
+acceptance-scenario numbers: 8h/$120 posts a 480-minute/12000-cent
+PURCHASE entry); offline recording posts both ledger entries and
+rejects a VOLUNTEER election type. Full suite green (458 PTA/cost-
+policy/payments tests, zero regressions in existing giving/cost-policy
+tests despite touching shared infrastructure). Typecheck + lint clean;
+production build verified.

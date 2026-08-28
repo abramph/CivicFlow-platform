@@ -8,6 +8,7 @@ import { listPricingWindows } from "@/lib/labs/pta/volunteer-hours/pricing";
 import { PageHeader, SectionCard } from "@/components/app/PageChrome";
 import { PtaVolunteerAssignmentsManager } from "@/components/labs/pta/PtaVolunteerAssignmentsManager";
 import { PtaVolunteerDisputesManager } from "@/components/labs/pta/PtaVolunteerDisputesManager";
+import { PtaVolunteerOfflinePaymentForm } from "@/components/labs/pta/PtaVolunteerOfflinePaymentForm";
 import { PtaVolunteerPricingWindowsManager } from "@/components/labs/pta/PtaVolunteerPricingWindowsManager";
 
 export default async function PtaVolunteerPeriodAssignmentsPage({ params }: { params: Promise<{ periodId: string }> }) {
@@ -27,6 +28,7 @@ export default async function PtaVolunteerPeriodAssignmentsPage({ params }: { pa
 
   const canViewPricing = can("pta:volunteer-buyout-pricing:manage");
   const buyoutAvailable = canViewPricing && (await checkVolunteerHoursAvailable(organizationId, "buyout"));
+  const canRecordOfflinePayments = can("pta:volunteer-payments:record-offline") && buyoutAvailable;
 
   const [assignments, pricingWindows, disputes] = await Promise.all([
     listPeriodAssignments(organizationId, periodId),
@@ -59,6 +61,14 @@ export default async function PtaVolunteerPeriodAssignmentsPage({ params }: { pa
             windows={pricingWindows.map((w) => ({ ...w, startAt: w.startAt.toISOString(), endAt: w.endAt.toISOString() }))}
             canManage={canViewPricing}
           />
+        </SectionCard>
+      ) : null}
+      {canRecordOfflinePayments ? (
+        <SectionCard
+          title="Record an offline buyout payment"
+          description="Cash, check, Zelle, Cash App, or other approved offline payment. Purchased hours are credited immediately — this is the verification step."
+        >
+          <PtaVolunteerOfflinePaymentForm periodId={periodId} />
         </SectionCard>
       ) : null}
       <SectionCard title="Family-reported issues" description="Missing or incorrect volunteer records reported by families for this period.">

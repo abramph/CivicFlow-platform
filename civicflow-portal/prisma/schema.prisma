@@ -800,6 +800,7 @@ model Organization {
   ptaVolunteerLedgerEntries          PtaVolunteerLedgerEntry[]
   ptaVolunteerBuyoutElections        PtaVolunteerBuyoutElection[]
   ptaVolunteerHourDisputes           PtaVolunteerHourDispute[]
+  ptaVolunteerBuyoutPurchases        PtaVolunteerBuyoutPurchase[]
 
   hoaProperties             Property[]
   hoaPropertyResidents      PropertyResident[]
@@ -4668,6 +4669,7 @@ model PtaHousehold {
   volunteerLedgerEntries          PtaVolunteerLedgerEntry[]
   volunteerBuyoutElections        PtaVolunteerBuyoutElection[]
   volunteerHourDisputes           PtaVolunteerHourDispute[]
+  volunteerBuyoutPurchases        PtaVolunteerBuyoutPurchase[]
 
   @@unique([organizationId, displayName, schoolYear])
   @@index([organizationId])
@@ -5243,6 +5245,7 @@ model PtaVolunteerRequirementPeriod {
   ledgerEntries   PtaVolunteerLedgerEntry[]
   buyoutElections PtaVolunteerBuyoutElection[]
   hourDisputes    PtaVolunteerHourDispute[]
+  buyoutPurchases PtaVolunteerBuyoutPurchase[]
 
   @@index([organizationId, status])
   @@index([organizationId, startsOn, endsOn])
@@ -5541,6 +5544,7 @@ model PtaVolunteerBuyoutElection {
   organization Organization                  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   period       PtaVolunteerRequirementPeriod @relation(fields: [requirementPeriodId], references: [id], onDelete: Cascade)
   household    PtaHousehold                  @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  purchases    PtaVolunteerBuyoutPurchase[]
 
   @@index([organizationId, requirementPeriodId, householdId])
   @@index([organizationId, householdId])
@@ -5576,6 +5580,80 @@ model PtaVolunteerHourDispute {
 
   @@index([organizationId, requirementPeriodId, status])
   @@index([organizationId, householdId])
+}
+
+/// Volunteer Hour Requirements & Buyout program, VH-F (docs/pta-volunteer-hours.md).
+enum PtaVolunteerPurchaseStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum PtaVolunteerPurchasePaymentMethod {
+  STRIPE
+  CASH
+  CHECK
+  ZELLE
+  CASH_APP
+  OTHER
+}
+
+/// A confirmed (or in-flight) buyout purchase. Every pricing/hours field is
+/// a permanent snapshot taken at checkout-creation time — mirrors the
+/// program-wide snapshot-on-transaction discipline; a later pricing-window
+/// edit must never reinterpret this row. Reuses the generic PendingPayment/
+/// Stripe-Connect checkout infrastructure (pendingPaymentId) rather than
+/// inventing parallel payment plumbing — see PendingPayment.paymentPurpose
+/// = "pta-volunteer-buyout".
+model PtaVolunteerBuyoutPurchase {
+  id                       String                            @id @default(cuid())
+  organizationId           String
+  /// The election this purchase fulfills, when the family went through the
+  /// VH-E election flow first. Nullable — an admin can record an offline
+  /// payment for a family that verbally agreed without a formal election.
+  electionId               String?
+  requirementPeriodId      String
+  householdId              String
+  /// FULL_BUYOUT or PARTIAL_BUYOUT only — a purchase can't exist for a
+  /// VOLUNTEER election.
+  electionType             PtaVolunteerElectionType
+  hoursElectedMinutes      Int
+  rateType                 PtaVolunteerRateType
+  rateCents                Int
+  baseAmountCents          Int
+  /// Voluntary processing-cost coverage the family opted into, mirroring
+  /// Contribution/DuesPayment's coverage split — the ledger's PURCHASE
+  /// entry always credits baseAmountCents worth of hours, never inflated
+  /// by coverage.
+  coverageAmountCents      Int                               @default(0)
+  totalCents               Int
+  pricingWindowId          String?
+  status                   PtaVolunteerPurchaseStatus        @default(PENDING)
+  paymentMethod            PtaVolunteerPurchasePaymentMethod
+  stripeConnectedAccountId String?
+  /// Links to the generic COST-POLICY v2 pending-payment record this
+  /// purchase settles through (Stripe path only).
+  pendingPaymentId         String?
+  providerPaymentIntentId  String?
+  providerSessionId        String?                           @unique
+  offlineReference         String?
+  offlineNotes             String?
+  /// Set only for admin-recorded offline payments — null for a
+  /// family-initiated Stripe purchase.
+  recordedByUserId         String?
+  refundedAmountCents      Int                               @default(0)
+  completedAt              DateTime?
+  createdAt                DateTime                          @default(now())
+  updatedAt                DateTime                          @updatedAt
+
+  organization Organization                  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  election     PtaVolunteerBuyoutElection?   @relation(fields: [electionId], references: [id], onDelete: SetNull)
+  period       PtaVolunteerRequirementPeriod @relation(fields: [requirementPeriodId], references: [id], onDelete: Cascade)
+  household    PtaHousehold                  @relation(fields: [householdId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, requirementPeriodId, householdId])
+  @@index([organizationId, status])
 }
 
 /// PTA Vertical 2.0, PR PTA-B — lifecycle status. A committee is never hard
