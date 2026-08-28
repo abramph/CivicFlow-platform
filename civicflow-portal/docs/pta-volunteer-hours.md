@@ -75,7 +75,7 @@ starts clean from the spec.
 - VH-E: ✅ built + tested locally (not merged/deployed) — family dashboard + buyout election + dispute reporting
 - VH-F: ✅ built + tested locally (not merged/deployed) — checkout & payment
 - VH-G: ✅ built + tested locally (not merged/deployed) — assessment batch & posting
-- VH-H: 🔲 not started — corrections/reversals/refunds
+- VH-H: ✅ built + tested locally (not merged/deployed) — corrections/reversals/refunds
 - VH-I: 🔲 not started — permissions rollout
 - VH-J: 🔲 not started — reporting foundation + Reports A-D
 - VH-K: 🔲 not started — Reports E-G + background export + family self-service
@@ -151,10 +151,10 @@ timezone snapshot, audit events, not-found/cross-org isolation). Full
 existing suite green (329 PTA tests, 29 rbac/role-permission tests, no
 regressions). Typecheck + lint clean on every touched/new file.
 
-**Not yet built** (later stages): corrections/reversals/refunds (VH-H),
-permission-matrix audit (VH-I), and the full reporting/Excel center
-(VH-J/K). Every core financial/hour mechanic described in the spec is
-now built and testable end-to-end on this branch.
+**Not yet built** (later stages): permission-matrix audit (VH-I) and
+the full reporting/Excel center (VH-J/K). Every core financial/hour
+mechanic described in the spec is now built and testable end-to-end on
+this branch, including corrections/reversals/refunds.
 
 ## VH-B — Assignment, scoping & exemptions
 
@@ -562,3 +562,75 @@ EXCLUDED lines never charged) + 8 in `assessment-payments.test.ts`
 (cross-household tenant isolation, already-paid rejection, webhook
 idempotency). Full suite green (480 PTA/cost-policy/payments tests).
 Typecheck + lint clean; production build verified.
+
+## VH-H — Corrections, reversals & refunds
+
+Migration `20260828032356_vh_h_corrections_reversals_refunds` — purely
+additive (2 enums, 1 new table, 1 nullable-safe `refundedMinutes`
+column with a `@default(0)` on the existing buyout-purchase table).
+
+**The pattern throughout (spec §21)**: nothing here auto-charges or
+auto-refunds — every case that could create a financial surprise posts
+a `PtaVolunteerReviewFlag` for a human instead of resolving itself.
+
+**`reverseHourEntry`** deliberately does NOT introduce a parallel
+correction mechanism — it delegates straight to the existing
+`adjustPtaVolunteerHourEntry` (which VH-D already wired to mirror a
+`CORRECTED` ledger entry), then checks whether the household has any
+posted assessment charge; if so, the correction still succeeds but
+posts a `CORRECTION_AFTER_ASSESSMENT_POSTED` flag rather than
+generating any automatic supplemental charge.
+
+**`refundPurchasedHours`** supports partial refunds, tracked via two
+new cumulative columns on the purchase (`refundedAmountCents`,
+`refundedMinutes`), validated against what's still refundable on each
+call. Stripe-paid purchases refund through Stripe against the
+purchase's OWN stored `stripeConnectedAccountId`/
+`providerPaymentIntentId` — never the org's current settings (same
+rule as `giving/refunds.ts`) — confirmed by a dedicated test. Marks
+success only on Stripe's synchronous `"succeeded"` response; a
+`charge.refunded` webhook confirmation path is a **documented V1
+simplification** (same posture as VH-F's checkout-time rate lock — this
+program doesn't yet have an async-refund scenario in its own test
+matrix). Every refund posts both a `PURCHASE_REFUND` ledger entry
+(hours) and a `REFUND` entry (money), keyed by Stripe's own refund id
+when available (free per-refund idempotency, mirroring
+`ContributionRefundEvent`'s pattern) or a generated id for offline
+refunds. If the reversal leaves the family still owing hours, a
+`REFUND_CREATES_DEFICIT` flag posts — informational only, never
+blocking.
+
+**`checkForOverpaymentAfterRequirementChange`** is deliberately a
+standalone function, NOT wired into VH-B's `createAssignment` — calling
+it automatically from inside that already-tested path would require
+mocking additional Prisma models in all 23 of VH-B's existing tests for
+zero behavior change on the happy path. Exposed instead as its own API
+the assignment-rules UI can call as a follow-up after creating a
+requirement-reducing HOUSEHOLD assignment. Only flags when the excess
+came from *purchased* hours specifically (`purchasedMinutes > 0`) —
+pure over-volunteering past the requirement is not a financial concern
+and is deliberately never flagged (a dedicated regression test confirms
+this distinction).
+
+**Verified**: "excess volunteer hours must not create a negative
+balance or automatically transfer to another period" — already
+structurally true everywhere `remainingMinutes` is computed
+(`Math.max(0, ...)` throughout VH-D/E/G); no carryover mechanism exists
+anywhere in the program, confirmed by review rather than newly built
+here.
+
+**API**: `/api/labs/pta/volunteer-hours/periods/[periodId]/{hour-entries/[entryId]/reverse,purchases/[purchaseId]/refund,check-overpayment,review-flags{,/[flagId]/resolve}}`.
+
+**UI**: new "Flagged for review" section
+(`PtaVolunteerReviewFlagsManager`) on the period detail admin page.
+Refund/reverse initiation is API-only in this stage (no dedicated form)
+— a deliberate, documented scope cut given these are comparatively rare
+admin actions and the reporting stages (VH-J/K) are the largest
+remaining surface; a follow-up can add the UI without any API change.
+
+**Tests**: 17 in `corrections.test.ts` covering all three functions —
+delegation (never a parallel correction path), flag-only-when-posted,
+Stripe-refunds-against-its-own-account, offline-skips-Stripe, deficit
+warning true/false, and the overpayment-only-when-purchased-contributed
+distinction. Full suite green (491 PTA/cost-policy/payments tests),
+typecheck/lint clean, production build verified.

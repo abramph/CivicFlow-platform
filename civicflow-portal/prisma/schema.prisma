@@ -804,6 +804,7 @@ model Organization {
   ptaVolunteerAssessmentBatches      PtaVolunteerAssessmentBatch[]
   ptaVolunteerAssessmentLines        PtaVolunteerAssessmentLine[]
   ptaVolunteerAssessmentCharges      PtaVolunteerAssessmentCharge[]
+  ptaVolunteerReviewFlags            PtaVolunteerReviewFlag[]
 
   hoaProperties             Property[]
   hoaPropertyResidents      PropertyResident[]
@@ -4675,6 +4676,7 @@ model PtaHousehold {
   volunteerBuyoutPurchases        PtaVolunteerBuyoutPurchase[]
   volunteerAssessmentLines        PtaVolunteerAssessmentLine[]
   volunteerAssessmentCharges      PtaVolunteerAssessmentCharge[]
+  volunteerReviewFlags            PtaVolunteerReviewFlag[]
 
   @@unique([organizationId, displayName, schoolYear])
   @@index([organizationId])
@@ -5254,6 +5256,7 @@ model PtaVolunteerRequirementPeriod {
   assessmentBatches PtaVolunteerAssessmentBatch[]
   assessmentLines   PtaVolunteerAssessmentLine[]
   assessmentCharges PtaVolunteerAssessmentCharge[]
+  reviewFlags       PtaVolunteerReviewFlag[]
 
   @@index([organizationId, status])
   @@index([organizationId, startsOn, endsOn])
@@ -5651,6 +5654,11 @@ model PtaVolunteerBuyoutPurchase {
   /// family-initiated Stripe purchase.
   recordedByUserId         String?
   refundedAmountCents      Int                               @default(0)
+  /// VH-H: cumulative minutes reversed via refundPurchasedHours — tracked
+  /// separately from refundedAmountCents since a partial refund's hour
+  /// count isn't always a simple proportional derivation (e.g. a
+  /// goodwill/admin-adjusted refund amount).
+  refundedMinutes          Int                               @default(0)
   completedAt              DateTime?
   createdAt                DateTime                          @default(now())
   updatedAt                DateTime                          @updatedAt
@@ -5798,6 +5806,50 @@ model PtaVolunteerAssessmentCharge {
 
   @@index([organizationId, requirementPeriodId, householdId])
   @@index([organizationId, status])
+}
+
+/// Volunteer Hour Requirements & Buyout program, VH-H (docs/pta-volunteer-hours.md).
+/// spec §21: corrections never auto-charge or auto-refund — they surface a
+/// flag for a human to review instead.
+enum PtaVolunteerReviewFlagType {
+  /// A verified-hour entry was corrected/reversed after an assessment batch
+  /// already posted for this household+period.
+  CORRECTION_AFTER_ASSESSMENT_POSTED
+  /// A household's resolved requirement was reduced (VH-B assignment edit)
+  /// after they already purchased/verified more than the new requirement.
+  POTENTIAL_OVERPAYMENT_AFTER_REQUIREMENT_REDUCED
+  /// Refunding purchased hours would leave the household below their
+  /// requirement with insufficient time to make it up.
+  REFUND_CREATES_DEFICIT
+}
+
+enum PtaVolunteerReviewFlagStatus {
+  OPEN
+  RESOLVED
+}
+
+model PtaVolunteerReviewFlag {
+  id                  String                       @id @default(cuid())
+  organizationId      String
+  requirementPeriodId String
+  householdId         String
+  flagType            PtaVolunteerReviewFlagType
+  description         String
+  sourceType          String?
+  sourceId            String?
+  status              PtaVolunteerReviewFlagStatus @default(OPEN)
+  resolvedByUserId    String?
+  resolvedAt          DateTime?
+  resolutionNotes     String?
+  createdAt           DateTime                     @default(now())
+  updatedAt           DateTime                     @updatedAt
+
+  organization Organization                  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  period       PtaVolunteerRequirementPeriod @relation(fields: [requirementPeriodId], references: [id], onDelete: Cascade)
+  household    PtaHousehold                  @relation(fields: [householdId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, requirementPeriodId, status])
+  @@index([organizationId, householdId])
 }
 
 /// PTA Vertical 2.0, PR PTA-B — lifecycle status. A committee is never hard
