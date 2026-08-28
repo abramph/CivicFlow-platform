@@ -1,11 +1,13 @@
 import { notFound } from "next/navigation";
 import { getPtaPageGate } from "@/lib/labs/pta/guard";
+import { listAssessmentBatches, getAssessmentBatch } from "@/lib/labs/pta/volunteer-hours/assessments";
 import { listPeriodAssignments } from "@/lib/labs/pta/volunteer-hours/assignments";
 import { listPeriodDisputes } from "@/lib/labs/pta/volunteer-hours/disputes";
 import { checkVolunteerHoursAvailable } from "@/lib/labs/pta/volunteer-hours/guard";
 import { getVolunteerRequirementPeriod } from "@/lib/labs/pta/volunteer-hours/periods";
 import { listPricingWindows } from "@/lib/labs/pta/volunteer-hours/pricing";
 import { PageHeader, SectionCard } from "@/components/app/PageChrome";
+import { PtaVolunteerAssessmentManager } from "@/components/labs/pta/PtaVolunteerAssessmentManager";
 import { PtaVolunteerAssignmentsManager } from "@/components/labs/pta/PtaVolunteerAssignmentsManager";
 import { PtaVolunteerDisputesManager } from "@/components/labs/pta/PtaVolunteerDisputesManager";
 import { PtaVolunteerOfflinePaymentForm } from "@/components/labs/pta/PtaVolunteerOfflinePaymentForm";
@@ -29,12 +31,16 @@ export default async function PtaVolunteerPeriodAssignmentsPage({ params }: { pa
   const canViewPricing = can("pta:volunteer-buyout-pricing:manage");
   const buyoutAvailable = canViewPricing && (await checkVolunteerHoursAvailable(organizationId, "buyout"));
   const canRecordOfflinePayments = can("pta:volunteer-payments:record-offline") && buyoutAvailable;
+  const canManageAssessments = can("pta:volunteer-assessments:preview-post") && (await checkVolunteerHoursAvailable(organizationId, "assessments"));
 
-  const [assignments, pricingWindows, disputes] = await Promise.all([
+  const [assignments, pricingWindows, disputes, assessmentBatches] = await Promise.all([
     listPeriodAssignments(organizationId, periodId),
     buyoutAvailable ? listPricingWindows(organizationId, periodId) : Promise.resolve([]),
     listPeriodDisputes(organizationId, periodId),
+    canManageAssessments ? listAssessmentBatches(organizationId, periodId) : Promise.resolve([]),
   ]);
+  const draftBatchSummary = assessmentBatches.find((b) => b.status === "DRAFT");
+  const draftBatch = draftBatchSummary ? await getAssessmentBatch(organizationId, draftBatchSummary.id) : null;
 
   return (
     <main className="space-y-6">
@@ -69,6 +75,25 @@ export default async function PtaVolunteerPeriodAssignmentsPage({ params }: { pa
           description="Cash, check, Zelle, Cash App, or other approved offline payment. Purchased hours are credited immediately — this is the verification step."
         >
           <PtaVolunteerOfflinePaymentForm periodId={periodId} />
+        </SectionCard>
+      ) : null}
+      {canManageAssessments ? (
+        <SectionCard
+          title="Remaining-hours assessment"
+          description="Preview, review, and post charges for hours left unmet at period end. Posting is duplicate-proof and creates one obligation per included family."
+        >
+          <PtaVolunteerAssessmentManager
+            periodId={periodId}
+            draftBatch={
+              draftBatch
+                ? {
+                    ...draftBatch,
+                    createdAt: draftBatch.createdAt.toISOString(),
+                    lines: draftBatch.lines.map((l) => ({ ...l })),
+                  }
+                : null
+            }
+          />
         </SectionCard>
       ) : null}
       <SectionCard title="Family-reported issues" description="Missing or incorrect volunteer records reported by families for this period.">

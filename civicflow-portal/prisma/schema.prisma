@@ -801,6 +801,9 @@ model Organization {
   ptaVolunteerBuyoutElections        PtaVolunteerBuyoutElection[]
   ptaVolunteerHourDisputes           PtaVolunteerHourDispute[]
   ptaVolunteerBuyoutPurchases        PtaVolunteerBuyoutPurchase[]
+  ptaVolunteerAssessmentBatches      PtaVolunteerAssessmentBatch[]
+  ptaVolunteerAssessmentLines        PtaVolunteerAssessmentLine[]
+  ptaVolunteerAssessmentCharges      PtaVolunteerAssessmentCharge[]
 
   hoaProperties             Property[]
   hoaPropertyResidents      PropertyResident[]
@@ -4670,6 +4673,8 @@ model PtaHousehold {
   volunteerBuyoutElections        PtaVolunteerBuyoutElection[]
   volunteerHourDisputes           PtaVolunteerHourDispute[]
   volunteerBuyoutPurchases        PtaVolunteerBuyoutPurchase[]
+  volunteerAssessmentLines        PtaVolunteerAssessmentLine[]
+  volunteerAssessmentCharges      PtaVolunteerAssessmentCharge[]
 
   @@unique([organizationId, displayName, schoolYear])
   @@index([organizationId])
@@ -5239,13 +5244,16 @@ model PtaVolunteerRequirementPeriod {
   createdAt                DateTime                 @default(now())
   updatedAt                DateTime                 @updatedAt
 
-  organization    Organization                        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  assignments     PtaVolunteerRequirementAssignment[]
-  pricingWindows  PtaVolunteerPricingWindow[]
-  ledgerEntries   PtaVolunteerLedgerEntry[]
-  buyoutElections PtaVolunteerBuyoutElection[]
-  hourDisputes    PtaVolunteerHourDispute[]
-  buyoutPurchases PtaVolunteerBuyoutPurchase[]
+  organization      Organization                        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assignments       PtaVolunteerRequirementAssignment[]
+  pricingWindows    PtaVolunteerPricingWindow[]
+  ledgerEntries     PtaVolunteerLedgerEntry[]
+  buyoutElections   PtaVolunteerBuyoutElection[]
+  hourDisputes      PtaVolunteerHourDispute[]
+  buyoutPurchases   PtaVolunteerBuyoutPurchase[]
+  assessmentBatches PtaVolunteerAssessmentBatch[]
+  assessmentLines   PtaVolunteerAssessmentLine[]
+  assessmentCharges PtaVolunteerAssessmentCharge[]
 
   @@index([organizationId, status])
   @@index([organizationId, startsOn, endsOn])
@@ -5651,6 +5659,142 @@ model PtaVolunteerBuyoutPurchase {
   election     PtaVolunteerBuyoutElection?   @relation(fields: [electionId], references: [id], onDelete: SetNull)
   period       PtaVolunteerRequirementPeriod @relation(fields: [requirementPeriodId], references: [id], onDelete: Cascade)
   household    PtaHousehold                  @relation(fields: [householdId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, requirementPeriodId, householdId])
+  @@index([organizationId, status])
+}
+
+/// Volunteer Hour Requirements & Buyout program, VH-G (docs/pta-volunteer-hours.md).
+/// The remaining-hours assessment workflow (spec §18): preview (no
+/// obligations), admin review/exclude, then post (one charge per included
+/// family, atomically, duplicate-post-proof).
+enum PtaVolunteerAssessmentBatchStatus {
+  DRAFT
+  POSTED
+  CANCELLED
+}
+
+enum PtaVolunteerAssessmentLineStatus {
+  INCLUDED
+  EXCLUDED
+  POSTED
+}
+
+enum PtaVolunteerAssessmentChargeStatus {
+  PENDING
+  PARTIAL
+  PAID
+  VOID
+}
+
+model PtaVolunteerAssessmentBatch {
+  id                  String                            @id @default(cuid())
+  organizationId      String
+  requirementPeriodId String
+  status              PtaVolunteerAssessmentBatchStatus @default(DRAFT)
+  /// A supplemental/correction batch references the batch it supplements —
+  /// the original's posted lines/charges are never mutated (spec §18
+  /// "explicit correction workflow for supplemental assessments").
+  supersedesBatchId   String?
+  /// Snapshot of the FINAL_ASSESSMENT rate resolved at preview time — every
+  /// line's assessmentCents derives from THIS value, not a live re-resolve,
+  /// so editing the rate after preview never silently changes what's about
+  /// to post.
+  rateCents           Int
+  pricingWindowId     String?
+  previewedAt         DateTime                          @default(now())
+  previewedByUserId   String?
+  postedAt            DateTime?
+  postedByUserId      String?
+  cancelledAt         DateTime?
+  notes               String?
+  createdAt           DateTime                          @default(now())
+  updatedAt           DateTime                          @updatedAt
+
+  organization Organization                   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  period       PtaVolunteerRequirementPeriod  @relation(fields: [requirementPeriodId], references: [id], onDelete: Cascade)
+  supersedes   PtaVolunteerAssessmentBatch?   @relation("PtaVolunteerAssessmentBatchSupersedes", fields: [supersedesBatchId], references: [id], onDelete: SetNull)
+  supersededBy PtaVolunteerAssessmentBatch[]  @relation("PtaVolunteerAssessmentBatchSupersedes")
+  lines        PtaVolunteerAssessmentLine[]
+  charges      PtaVolunteerAssessmentCharge[]
+
+  @@index([organizationId, requirementPeriodId])
+  @@index([organizationId, status])
+}
+
+/// One row per household considered for assessment — every figure is a
+/// snapshot taken at preview time (spec §18's assessment-preview
+/// breakdown), so the number an admin reviews is EXACTLY the number that
+/// posts, never silently recomputed in between.
+model PtaVolunteerAssessmentLine {
+  id                      String                           @id @default(cuid())
+  organizationId          String
+  batchId                 String
+  householdId             String
+  adjustedRequiredMinutes Int
+  verifiedMinutes         Int
+  purchasedMinutes        Int
+  creditMinutes           Int
+  waivedMinutes           Int
+  remainingMinutes        Int
+  assessmentCents         Int
+  status                  PtaVolunteerAssessmentLineStatus @default(INCLUDED)
+  /// Required (validated in code) whenever status is set to EXCLUDED —
+  /// mirrors VH-B's non-STANDARD-assignment-needs-a-reason rule.
+  excludeReason           String?
+  createdAt               DateTime                         @default(now())
+  updatedAt               DateTime                         @updatedAt
+
+  organization                    Organization                   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  batch                           PtaVolunteerAssessmentBatch    @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  household                       PtaHousehold                   @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  charge                          PtaVolunteerAssessmentCharge?
+  ptaVolunteerRequirementPeriod   PtaVolunteerRequirementPeriod? @relation(fields: [ptaVolunteerRequirementPeriodId], references: [id])
+  ptaVolunteerRequirementPeriodId String?
+
+  @@unique([batchId, householdId])
+  @@index([organizationId, batchId])
+}
+
+/// The posted obligation — deliberately its own lightweight model rather
+/// than reusing DuesCharge/DuesAccount: DuesCharge requires a DuesAccount
+/// FK and feeds the existing membership-dues balance/reports a parent
+/// already sees, and mixing a volunteer assessment into that view would
+/// contradict spec §17's "classify these payments separately." Payment
+/// state lives directly on the charge (amountPaidCents/status) rather than
+/// a separate payment-attempt model — V1 assumes one successful payment per
+/// charge, matching PendingPayment's own settle-once model; the columns
+/// here already support adding multi-attempt tracking later without a
+/// migration if partial/installment payment is ever needed.
+model PtaVolunteerAssessmentCharge {
+  id                       String                             @id @default(cuid())
+  organizationId           String
+  requirementPeriodId      String
+  householdId              String
+  batchId                  String
+  lineId                   String                             @unique
+  amountCents              Int
+  amountPaidCents          Int                                @default(0)
+  refundedCents            Int                                @default(0)
+  status                   PtaVolunteerAssessmentChargeStatus @default(PENDING)
+  dueDate                  DateTime?
+  paymentMethod            PtaVolunteerPurchasePaymentMethod?
+  stripeConnectedAccountId String?
+  pendingPaymentId         String?
+  providerPaymentIntentId  String?
+  providerSessionId        String?                            @unique
+  offlineReference         String?
+  offlineNotes             String?
+  recordedByUserId         String?
+  paidAt                   DateTime?
+  createdAt                DateTime                           @default(now())
+  updatedAt                DateTime                           @updatedAt
+
+  organization Organization                  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  period       PtaVolunteerRequirementPeriod @relation(fields: [requirementPeriodId], references: [id], onDelete: Cascade)
+  household    PtaHousehold                  @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  batch        PtaVolunteerAssessmentBatch   @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  line         PtaVolunteerAssessmentLine    @relation(fields: [lineId], references: [id], onDelete: Cascade)
 
   @@index([organizationId, requirementPeriodId, householdId])
   @@index([organizationId, status])

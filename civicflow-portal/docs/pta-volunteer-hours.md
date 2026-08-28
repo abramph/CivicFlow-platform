@@ -74,7 +74,7 @@ starts clean from the spec.
 - VH-D: ✅ built + tested locally (not merged/deployed) — unified ledger
 - VH-E: ✅ built + tested locally (not merged/deployed) — family dashboard + buyout election + dispute reporting
 - VH-F: ✅ built + tested locally (not merged/deployed) — checkout & payment
-- VH-G: 🔲 not started — assessment batch & posting
+- VH-G: ✅ built + tested locally (not merged/deployed) — assessment batch & posting
 - VH-H: 🔲 not started — corrections/reversals/refunds
 - VH-I: 🔲 not started — permissions rollout
 - VH-J: 🔲 not started — reporting foundation + Reports A-D
@@ -151,10 +151,10 @@ timezone snapshot, audit events, not-found/cross-org isolation). Full
 existing suite green (329 PTA tests, 29 rbac/role-permission tests, no
 regressions). Typecheck + lint clean on every touched/new file.
 
-**Not yet built** (later stages): assessment posting (VH-G) and
-everything downstream. Families can now actually pay for a buyout via
-Stripe (or an admin can record an offline payment), and purchased hours
-are credited to the ledger on confirmed payment.
+**Not yet built** (later stages): corrections/reversals/refunds (VH-H),
+permission-matrix audit (VH-I), and the full reporting/Excel center
+(VH-J/K). Every core financial/hour mechanic described in the spec is
+now built and testable end-to-end on this branch.
 
 ## VH-B — Assignment, scoping & exemptions
 
@@ -486,3 +486,79 @@ rejects a VOLUNTEER election type. Full suite green (458 PTA/cost-
 policy/payments tests, zero regressions in existing giving/cost-policy
 tests despite touching shared infrastructure). Typecheck + lint clean;
 production build verified.
+
+## VH-G — Assessment batch & posting
+
+Migration `20260828031258_vh_g_assessment_batches` — purely additive (3
+enums, 3 new tables).
+
+**Deliberately its own model family, not DuesCharge/DuesAccount**:
+`PtaVolunteerAssessmentCharge` could have reused the existing dues
+obligation pipeline (`PtaHousehold.orgMemberId` already gives every
+household a billing identity), but doing so would require an
+auto-provisioned `DuesAccount`/`Category` and would surface volunteer
+assessments inside a parent's existing membership-dues balance/reports
+— directly contradicting spec §17's "classify these payments
+separately." Kept as a lightweight parallel model instead, reusing the
+expensive/risky PAYMENT-PROCESSING layer (Stripe Connect, PendingPayment,
+cost-policy) exactly as VH-F does, while keeping the OBLIGATION-TRACKING
+layer purpose-built and visually/semantically separate from real dues.
+Documented as a deliberate architectural judgment call, not an
+oversight.
+
+**Preview** (`previewAssessmentBatch`): a pure computation — persists a
+DRAFT batch + one line per non-exempt household with `remainingMinutes
+> 0` (using the identical remaining-hours formula as VH-E's family
+summary), snapshotting the `FINAL_ASSESSMENT` rate and every
+contributing figure at that moment. Calling preview again reuses the
+existing DRAFT batch rather than creating a duplicate, so in-progress
+admin exclusions survive a reload. Verified against the spec's exact
+end-of-period acceptance scenario: required 20h, verified 12h,
+purchased 3h, waived 0h → remaining 5h × $25/hr = **$125**.
+
+**Review**: `excludeAssessmentLine`/`includeAssessmentLine` — reason
+required to exclude (mirrors VH-B's non-STANDARD-needs-a-reason rule),
+only permitted while the batch is still DRAFT.
+
+**Post** (`postAssessmentBatch`): an interactive `$transaction` —
+first a compare-and-swap `updateMany(status: DRAFT → POSTED)` claims
+the batch (a lost race throws "already posted," duplicate-post-proof,
+same pattern as `settlePendingPaymentBySession`), then one
+`PtaVolunteerAssessmentCharge` + one idempotent `ASSESSMENT_CHARGE`
+ledger entry per INCLUDED line; EXCLUDED lines generate neither.
+Supplemental/correction batches carry `supersedesBatchId` — posted
+lines are never mutated by a later batch.
+
+**Payment collection** (`assessment-payments.ts`): mirrors VH-F's
+Stripe Connect pattern closely, classified `"pta-volunteer-assessment"`
+(`FIXED_OBLIGATION` nature — the family genuinely owes this, unlike the
+buyout's `VOLUNTARY` classification). Payment state lives directly on
+the charge (`amountPaidCents`/`status`) rather than a separate
+payment-attempt model — a deliberate V1 simplification (documented in
+the model's own schema comment) since nothing in the spec requires
+installment/partial-payment support yet, and the columns already
+support adding it later without a migration. The family checkout route
+double-checks `householdId` server-side before even looking up the
+charge — cross-household lookups return not-found, never a 403 that
+would confirm the charge exists.
+
+**Webhook**: a new `"pta-volunteer-assessment"` branch added alongside
+VH-F's buyout branch, same structure.
+
+**API**: full admin batch lifecycle under
+`/api/labs/pta/volunteer-hours/periods/[periodId]/assessments{,/[batchId]{,/lines/[lineId],/post,/cancel},/charges/[chargeId]/offline}`
++ family-facing `/api/labs/pta/volunteer-hours/my-household/assessments{,/[chargeId]/checkout}`.
+
+**UI**: `PtaVolunteerAssessmentManager` (preview table with per-line
+exclude/include + post/cancel) on the period detail admin page; the
+family "My PTA" card now shows any open assessment charge with a "Pay
+assessment" button.
+
+**Tests**: 14 in `assessments.test.ts` (the exact $125 acceptance
+scenario, exempt/zero-remaining households correctly skipped, no
+FINAL_ASSESSMENT-rate rejection, preview reuses existing DRAFT rather
+than duplicating, exclude-requires-reason, duplicate-post rejection,
+EXCLUDED lines never charged) + 8 in `assessment-payments.test.ts`
+(cross-household tenant isolation, already-paid rejection, webhook
+idempotency). Full suite green (480 PTA/cost-policy/payments tests).
+Typecheck + lint clean; production build verified.

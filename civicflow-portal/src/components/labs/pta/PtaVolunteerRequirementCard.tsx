@@ -57,6 +57,42 @@ export function PtaVolunteerRequirementCard({ buyoutAvailable }: { buyoutAvailab
   const [disputePending, setDisputePending] = useState(false);
   const [disputeSubmitted, setDisputeSubmitted] = useState(false);
 
+  const [assessmentCharges, setAssessmentCharges] = useState<
+    Array<{ id: string; amountCents: number; amountPaidCents: number; status: string }>
+  >([]);
+  const [payingChargeId, setPayingChargeId] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/labs/pta/volunteer-hours/my-household/assessments")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.ok) setAssessmentCharges(data.data ?? []);
+      })
+      .catch(() => {});
+  }, []);
+
+  async function payAssessment(chargeId: string) {
+    setPayingChargeId(chargeId);
+    setError(null);
+    try {
+      const res = await fetch(`/api/labs/pta/volunteer-hours/my-household/assessments/${chargeId}/checkout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        setError(data?.error || "Unable to start checkout.");
+        return;
+      }
+      window.location.href = data.url;
+    } catch {
+      setError("Unable to connect. Please try again.");
+    } finally {
+      setPayingChargeId(null);
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -224,6 +260,25 @@ export function PtaVolunteerRequirementCard({ buyoutAvailable }: { buyoutAvailab
       {summary.totals.outstandingBalanceCents > 0 ? (
         <p className="text-sm font-medium text-amber-700">Outstanding balance: {money(summary.totals.outstandingBalanceCents)}</p>
       ) : null}
+
+      {assessmentCharges
+        .filter((c) => c.status !== "PAID" && c.status !== "VOID")
+        .map((c) => (
+          <div key={c.id} className="flex items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 p-4">
+            <div>
+              <p className="text-sm font-semibold text-slate-900">Remaining-hours assessment</p>
+              <p className="text-sm text-slate-700">{money(c.amountCents - c.amountPaidCents)} due</p>
+            </div>
+            <button
+              type="button"
+              disabled={payingChargeId === c.id}
+              onClick={() => payAssessment(c.id)}
+              className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
+            >
+              {payingChargeId === c.id ? "Redirecting..." : "Pay assessment"}
+            </button>
+          </div>
+        ))}
 
       {buyoutAvailable && !summary.requirement.exempt ? (
         <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
