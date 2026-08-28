@@ -796,6 +796,7 @@ model Organization {
   ptaBallotChoices                   PtaBallotChoice[]
   ptaVolunteerRequirementPeriods     PtaVolunteerRequirementPeriod[]
   ptaVolunteerRequirementAssignments PtaVolunteerRequirementAssignment[]
+  ptaVolunteerPricingWindows         PtaVolunteerPricingWindow[]
 
   hoaProperties             Property[]
   hoaPropertyResidents      PropertyResident[]
@@ -5196,8 +5197,9 @@ model PtaVolunteerRequirementPeriod {
   createdAt                DateTime                 @default(now())
   updatedAt                DateTime                 @updatedAt
 
-  organization Organization                        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  assignments  PtaVolunteerRequirementAssignment[]
+  organization   Organization                        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assignments    PtaVolunteerRequirementAssignment[]
+  pricingWindows PtaVolunteerPricingWindow[]
 
   @@index([organizationId, status])
   @@index([organizationId, startsOn, endsOn])
@@ -5277,6 +5279,63 @@ model PtaVolunteerRequirementAssignment {
   @@index([organizationId, periodId])
   @@index([organizationId, householdId])
   @@index([periodId, scopeType, scopeRefId])
+}
+
+/// Volunteer Hour Requirements & Buyout program, VH-C (docs/pta-volunteer-hours.md).
+/// FULL_BUYOUT and PER_HOUR are the family's own voluntary advance-purchase
+/// rates; FINAL_ASSESSMENT is the rate applied to unmet hours at period end
+/// (VH-G). These are deliberately separate values an org can set
+/// independently — e.g. a cheap early per-hour rate but a steep final
+/// assessment rate, or vice versa. "Early/standard/late" from the spec's
+/// example table are just window names/date ranges, not a fourth enum
+/// dimension — the same effect is achieved with three FULL_BUYOUT windows
+/// (or three PER_HOUR windows) covering consecutive date ranges.
+enum PtaVolunteerRateType {
+  FULL_BUYOUT
+  PER_HOUR
+  FINAL_ASSESSMENT
+}
+
+/// CHECKOUT_START freezes the rate the instant a purchase/checkout record is
+/// created; PAYMENT_SUCCESS re-resolves at webhook-confirmation time and
+/// fails the checkout if no window is active then. See VH-F.
+enum PtaVolunteerRateLockTiming {
+  CHECKOUT_START
+  PAYMENT_SUCCESS
+}
+
+model PtaVolunteerPricingWindow {
+  id                  String                     @id @default(cuid())
+  organizationId      String
+  periodId            String
+  name                String
+  startAt             DateTime
+  endAt               DateTime
+  /// Snapshotted from the period's timezone at creation — same
+  /// snapshot-on-transaction discipline as PtaVolunteerRequirementPeriod.timezone.
+  timezone            String
+  rateType            PtaVolunteerRateType
+  /// Flat total for FULL_BUYOUT; per-hour rate for PER_HOUR/FINAL_ASSESSMENT.
+  /// Integer cents — this is pure configuration, not a settled transaction,
+  /// so it does not need DuesPayment's dollars+cents split (that split
+  /// exists to separate an authoritative principal from Stripe-derived
+  /// reconciliation data, which doesn't apply here).
+  amountCents         Int
+  /// If true, this rate is only offered during a family's first election
+  /// (VH-E) — not for later ad-hoc top-up purchases. Enforcement lives in
+  /// VH-E/VH-F; this column is pure configuration.
+  contractSigningOnly Boolean                    @default(false)
+  active              Boolean                    @default(true)
+  lockTiming          PtaVolunteerRateLockTiming @default(PAYMENT_SUCCESS)
+  createdByUserId     String?
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
+
+  organization Organization                  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  period       PtaVolunteerRequirementPeriod @relation(fields: [periodId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, periodId])
+  @@index([periodId, rateType, active])
 }
 
 /// PTA Vertical 2.0, PR PTA-B — lifecycle status. A committee is never hard

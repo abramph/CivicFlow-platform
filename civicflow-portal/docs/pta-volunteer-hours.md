@@ -70,7 +70,7 @@ starts clean from the spec.
 
 - VH-A: ✅ built + tested locally (not merged/deployed) — flags + requirement periods
 - VH-B: ✅ built + tested locally (not merged/deployed) — assignment/scoping/exemptions
-- VH-C: 🔲 not started — pricing window engine
+- VH-C: ✅ built + tested locally (not merged/deployed) — pricing window engine
 - VH-D: 🔲 not started — unified ledger
 - VH-E: 🔲 not started — family dashboard + buyout election + dispute reporting
 - VH-F: 🔲 not started — checkout & payment
@@ -151,11 +151,11 @@ timezone snapshot, audit events, not-found/cross-org isolation). Full
 existing suite green (329 PTA tests, 29 rbac/role-permission tests, no
 regressions). Typecheck + lint clean on every touched/new file.
 
-**Not yet built** (later stages): pricing windows (VH-C), the unified
-ledger (VH-D), and everything downstream. The settings page currently
-lets an admin define a period's default required hours and per-family
-assignment rules only — no buyout, no payment, no report queries
-consult these tables yet.
+**Not yet built** (later stages): the unified ledger (VH-D) and
+everything downstream. The settings pages currently let an admin define
+a period's default required hours, per-family assignment rules, and
+buyout pricing — but no purchase, payment, or report query consults
+these tables yet (nothing can actually be bought).
 
 ## VH-B — Assignment, scoping & exemptions
 
@@ -222,3 +222,64 @@ explicit no-implicit-multiplication regression test, WAIVER
 full-vs-partial, EXEMPT_TEMPORARY expiry fallthrough, cross-household
 isolation, validation rules, audit events). Full existing suite green
 (352 PTA tests). Typecheck + lint clean.
+
+## VH-C — Pricing window engine
+
+Migration `20260828023915_vh_c_pricing_windows` — purely additive (2
+enums, 1 new table with FKs to `Organization` and
+`PtaVolunteerRequirementPeriod`). This is the one genuinely net-new
+piece of infrastructure in the whole program — no time-windowed/dated
+pricing pattern existed anywhere in the codebase before this (confirmed
+during initial architecture review).
+
+**Model**: `PtaVolunteerPricingWindow`
+(`src/lib/labs/pta/volunteer-hours/pricing.ts`) — `rateType`
+(FULL_BUYOUT/PER_HOUR/FINAL_ASSESSMENT) × a date range × `amountCents`
+(integer cents — pure configuration, doesn't need `DuesPayment`'s
+dollars+cents split since it isn't a settled transaction). The spec's
+"early/standard/late" rate tiers are just window names/date ranges, not
+a fourth enum dimension — three consecutive `FULL_BUYOUT` (or
+`PER_HOUR`) windows produce the same effect with less schema surface.
+`FINAL_ASSESSMENT` is a deliberately separate rate from the voluntary
+`PER_HOUR` advance rate (an org can price them independently), consumed
+by VH-G's assessment engine. `timezone` is snapshotted from the
+period's timezone at creation (same discipline as VH-A). `lockTiming`
+(CHECKOUT_START/PAYMENT_SUCCESS) and `contractSigningOnly` are pure
+configuration columns — VH-F is where their behavior is actually
+enforced.
+
+**Resolution**: `resolveVolunteerBuyoutRate(orgId, periodId, rateType,
+atInstant)` — the sole server-side price authority every checkout/
+assessment call site must use; never accepts a client-supplied price.
+Returns the ACTIVE window of the requested type whose `[startAt,
+endAt)` contains the instant, or `null` if nothing is configured (never
+fabricates a rate).
+
+**Overlap prevention**: `assertNoOverlap` rejects a write whose range
+intersects another ACTIVE window of the *same* rateType in the same
+period — scoped per rateType (a `FULL_BUYOUT` window and a `PER_HOUR`
+window are free to overlap in time; two `PER_HOUR` windows are not). An
+inactive window never conflicts, mirroring VH-A/B's DRAFT-never-conflicts
+posture.
+
+**Permissions**: all pricing-window CRUD (any rateType, including
+`FINAL_ASSESSMENT`) sits behind `pta:volunteer-buyout-pricing:manage` +
+the `buyout` capability flag — configuring a rate is a pricing decision,
+not a posting authorization. VH-G's actual assessment *posting* stays
+separately gated by `pta:volunteer-assessments:preview-post` +
+`assessments` flag, preserving "buyout config doesn't authorize
+assessment posting."
+
+**API**: `/api/labs/pta/volunteer-hours/periods/[periodId]/pricing-windows`
+(GET, POST), `.../pricing-windows/[windowId]` (PATCH, DELETE).
+
+**UI**: new "Pricing windows" section on the period detail page
+(`PtaVolunteerPricingWindowsManager`) — list with activate/deactivate/
+remove, plus a create form. Shown only once the `buyout` capability is
+actually enabled.
+
+**Tests**: 12 new (validation, timezone snapshot, audit events, overlap
+matrix incl. adjacent-non-overlapping and different-rateType and
+inactive-window cases, edit-excludes-self, rate resolution incl.
+no-match-returns-null). Full existing suite green (364 PTA tests).
+Typecheck + lint clean.
