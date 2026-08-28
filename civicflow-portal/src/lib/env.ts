@@ -93,6 +93,12 @@ const serverEnvSchema = z.object({
   // PtaProfile flag — unset/false means the feature is fully dark regardless
   // of org configuration. Mirrors ENABLE_EMAIL_SEND's string-flag pattern.
   PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED: z.string().optional(),
+  // Pilot-rollout allowlist for the same feature: comma-separated exact
+  // Organization IDs. Checked AFTER the platform switch and BEFORE any
+  // per-org PtaProfile flag — see isPtaVolunteerHoursOrgAllowed() below for
+  // the parsing/fail-closed rules. Unset/empty means no organization is
+  // eligible, even with the platform switch on.
+  PTA_VOLUNTEER_HOURS_ALLOWED_ORG_IDS: z.string().optional(),
   // Base64-encoded 32-byte AES-256-GCM key for encrypting Twilio credentials
   // stored in PlatformSmsSettings (see lib/crypto-secrets.ts). Optional at
   // boot like the other SMS_* vars — only required once a super admin
@@ -167,6 +173,7 @@ export function getServerEnv(): ServerEnv {
     ENABLE_EMAIL_SEND: process.env.ENABLE_EMAIL_SEND,
     SMS_CREDENTIAL_ENCRYPTION_KEY: process.env.SMS_CREDENTIAL_ENCRYPTION_KEY,
     PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED: process.env.PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED,
+    PTA_VOLUNTEER_HOURS_ALLOWED_ORG_IDS: process.env.PTA_VOLUNTEER_HOURS_ALLOWED_ORG_IDS,
   };
 
   if (raw.NODE_ENV === "production") {
@@ -237,6 +244,7 @@ export function getServerEnv(): ServerEnv {
     CRON_SECRET: parsed.CRON_SECRET,
     SMS_CREDENTIAL_ENCRYPTION_KEY: parsed.SMS_CREDENTIAL_ENCRYPTION_KEY,
     PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED: parsed.PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED,
+    PTA_VOLUNTEER_HOURS_ALLOWED_ORG_IDS: parsed.PTA_VOLUNTEER_HOURS_ALLOWED_ORG_IDS,
   };
 
   return cached;
@@ -259,6 +267,61 @@ export function isPtaVolunteerHoursPlatformEnabled() {
     env.PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED === "1" ||
     env.PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED === "true"
   );
+}
+
+// Organization IDs in this schema are Prisma cuid()s: lowercase alphanumeric,
+// no separators. This pattern is deliberately a little looser than the exact
+// cuid() internal structure (rather than pinned to "starts with c, 25 chars")
+// so a legitimate future ID scheme change doesn't silently start rejecting
+// every entry — it exists to reject obviously-wrong values ("*", "all",
+// "true", mixed case, IDs with stray whitespace/punctuation), not to be a
+// precise cuid validator.
+const PLAUSIBLE_ORG_ID_PATTERN = /^[a-z0-9]{20,32}$/;
+
+/**
+ * Parses PTA_VOLUNTEER_HOURS_ALLOWED_ORG_IDS into a de-duplicated set of
+ * exact organization IDs. Every rule here is fail-closed by construction:
+ * - Missing/empty value -> empty set (no organization is eligible).
+ * - Each entry is trimmed; empty entries (leading/trailing/double commas)
+ *   are dropped, never counted as a match-everything wildcard.
+ * - Entries that don't look like a plausible organization ID are dropped
+ *   individually — never included, never crash the parse, never fall back
+ *   to "allow everything." This is also what keeps "*", "all", "true", "1"
+ *   etc. from ever being treated as universal access: none of them match
+ *   PLAUSIBLE_ORG_ID_PATTERN, so none of them are ever added to the set.
+ * - Comparison is a plain Set.has() against the caller's exact organizationId
+ *   string — case-sensitive (organization IDs are not documented as
+ *   case-insensitive anywhere in this schema, and Postgres text equality on
+ *   the underlying column is case-sensitive too, so a case-sensitive check
+ *   here matches how the ID actually resolves in the database), and always
+ *   a full-string match — a listed ID can never partially match another.
+ * Never logs the parsed set or the raw env value — callers should only ever
+ * observe a boolean membership result, never the allowlist's contents.
+ */
+function parsePtaVolunteerHoursAllowedOrgIds(): ReadonlySet<string> {
+  const raw = getServerEnv().PTA_VOLUNTEER_HOURS_ALLOWED_ORG_IDS;
+  const ids = new Set<string>();
+  if (!raw) return ids;
+  for (const entry of raw.split(",")) {
+    const trimmed = entry.trim();
+    if (!trimmed) continue;
+    if (!PLAUSIBLE_ORG_ID_PATTERN.test(trimmed)) continue;
+    ids.add(trimmed);
+  }
+  return ids;
+}
+
+/**
+ * Pilot-rollout allowlist check for the PTA/PTO Volunteer Requirements &
+ * Buyout feature. Distinct from, and enforced IN ADDITION TO, both the
+ * platform switch (isPtaVolunteerHoursPlatformEnabled) and each org's own
+ * PtaProfile capability flags — every guard must check all three, in that
+ * order, never inferring one from another. An organization not on this list
+ * is denied even if the platform switch is on and even if that org's own
+ * database flags are already true.
+ */
+export function isPtaVolunteerHoursOrgAllowed(organizationId: string): boolean {
+  return parsePtaVolunteerHoursAllowedOrgIds().has(organizationId);
 }
 
 /** Base URL for member-facing universal links / web fallback pages. */

@@ -252,6 +252,12 @@ describe("sendVolunteerHoursNotificationsAllOrganizations", () => {
     return sendVolunteerHoursNotificationsAllOrganizations();
   }
 
+  // Cuid-shaped fictional org ID — the real (unmocked) allowlist parser in
+  // this describe block requires something that passes its plausible-ID
+  // pattern, unlike the plain "org-1" convention used elsewhere in this file.
+  const ALLOWLISTED_ORG = "aaaaaaaaaaaaaaaaaaaaaaaaa";
+  const NOT_ALLOWLISTED_ORG = "bbbbbbbbbbbbbbbbbbbbbbbbb";
+
   it.each([
     ["missing", undefined],
     ["empty string", ""],
@@ -274,7 +280,8 @@ describe("sendVolunteerHoursNotificationsAllOrganizations", () => {
     "platform variable %s: still requires each organization's own notifications+requirements flags",
     async (_label, value) => {
       process.env.PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED = value;
-      findManyProfiles.mockResolvedValue([{ organizationId: "org-1" }]);
+      process.env.PTA_VOLUNTEER_HOURS_ALLOWED_ORG_IDS = ALLOWLISTED_ORG;
+      findManyProfiles.mockResolvedValue([{ organizationId: ALLOWLISTED_ORG }]);
       listVolunteerRequirementPeriods.mockResolvedValue([
         { id: "period-1", status: "ACTIVE", volunteerDeadline: new Date("2027-01-10T00:00:00Z") },
         { id: "period-2", status: "CLOSED", volunteerDeadline: null },
@@ -319,7 +326,8 @@ describe("sendVolunteerHoursNotificationsAllOrganizations", () => {
 
   it("repeated sweep does not send a duplicate notification for the same household/period", async () => {
     process.env.PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED = "1";
-    findManyProfiles.mockResolvedValue([{ organizationId: "org-1" }]);
+    process.env.PTA_VOLUNTEER_HOURS_ALLOWED_ORG_IDS = ALLOWLISTED_ORG;
+    findManyProfiles.mockResolvedValue([{ organizationId: ALLOWLISTED_ORG }]);
     listVolunteerRequirementPeriods.mockResolvedValue([
       { id: "period-1", status: "ACTIVE", volunteerDeadline: new Date("2027-01-10T00:00:00Z") },
     ]);
@@ -346,5 +354,44 @@ describe("sendVolunteerHoursNotificationsAllOrganizations", () => {
     const second = await runSweep();
     expect(second.totalSent).toBe(0);
     expect(sendEmail).toHaveBeenCalledTimes(1); // still just the one call from the first sweep
+  });
+
+  it("pilot allowlist: a non-allowlisted organization is never processed, even though it matches the notifications+requirements where-filter", async () => {
+    process.env.PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED = "true";
+    process.env.PTA_VOLUNTEER_HOURS_ALLOWED_ORG_IDS = ALLOWLISTED_ORG; // NOT_ALLOWLISTED_ORG deliberately absent
+    findManyProfiles.mockResolvedValue([{ organizationId: NOT_ALLOWLISTED_ORG }]);
+
+    const result = await runSweep();
+
+    expect(listVolunteerRequirementPeriods).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(result).toEqual({ organizationsProcessed: 0, totalSent: 0 });
+  });
+
+  it("pilot allowlist: a mixed batch processes only the allowlisted organization, never the other one", async () => {
+    process.env.PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED = "true";
+    process.env.PTA_VOLUNTEER_HOURS_ALLOWED_ORG_IDS = ALLOWLISTED_ORG;
+    findManyProfiles.mockResolvedValue([{ organizationId: ALLOWLISTED_ORG }, { organizationId: NOT_ALLOWLISTED_ORG }]);
+    listVolunteerRequirementPeriods.mockResolvedValue([]);
+
+    const result = await runSweep();
+
+    expect(listVolunteerRequirementPeriods).toHaveBeenCalledTimes(1);
+    expect(listVolunteerRequirementPeriods).toHaveBeenCalledWith(ALLOWLISTED_ORG);
+    expect(result.organizationsProcessed).toBe(1);
+  });
+
+  it("pilot allowlist: a stored ptaVolunteerNotificationsEnabled=true for a since-de-allowlisted organization does not resume processing", async () => {
+    process.env.PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED = "true";
+    process.env.PTA_VOLUNTEER_HOURS_ALLOWED_ORG_IDS = ALLOWLISTED_ORG; // simulates the org having been removed from the allowlist
+    // findManyProfiles is mocked, but in production this where-filter would
+    // still return NOT_ALLOWLISTED_ORG if its DB flags never got flipped
+    // back off — the allowlist filter must catch it regardless.
+    findManyProfiles.mockResolvedValue([{ organizationId: NOT_ALLOWLISTED_ORG }]);
+
+    const result = await runSweep();
+
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(result.organizationsProcessed).toBe(0);
   });
 });

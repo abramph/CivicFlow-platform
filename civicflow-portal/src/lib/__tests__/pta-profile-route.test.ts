@@ -6,8 +6,10 @@ vi.mock("@/lib/labs/pta/guard", () => ({
 }));
 
 const isPtaVolunteerHoursPlatformEnabled = vi.fn();
+const isPtaVolunteerHoursOrgAllowed = vi.fn();
 vi.mock("@/lib/env", () => ({
   isPtaVolunteerHoursPlatformEnabled: () => isPtaVolunteerHoursPlatformEnabled(),
+  isPtaVolunteerHoursOrgAllowed: (...a: unknown[]) => isPtaVolunteerHoursOrgAllowed(...a),
 }));
 
 const getPtaProfile = vi.fn();
@@ -34,6 +36,11 @@ describe("PUT /api/labs/pta/profile — volunteer-hours platform kill-switch", (
     vi.clearAllMocks();
     requirePtaAccess.mockResolvedValue({ organizationId: "org-1", session: { userId: "u1", userEmail: "officer@example.com" } });
     upsertPtaProfile.mockResolvedValue({ id: "profile-1" });
+    // Default to allowlisted so every pre-existing test in this file (written
+    // before the pilot allowlist existed) keeps exercising exactly the
+    // platform-switch behavior it always did. Allowlist-specific tests below
+    // override this per-case.
+    isPtaVolunteerHoursOrgAllowed.mockReturnValue(true);
   });
 
   it("rejects a write to a volunteer-hours flag when the platform switch is off — direct API call fails closed", async () => {
@@ -108,6 +115,54 @@ describe("PUT /api/labs/pta/profile — volunteer-hours platform kill-switch", (
     expect(first.status).toBe(403);
     expect(second.status).toBe(403);
     expect(upsertPtaProfile).not.toHaveBeenCalled();
+  });
+
+  it("rejects a volunteer-hours flag write when the platform is on but the organization isn't allowlisted", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(true);
+    isPtaVolunteerHoursOrgAllowed.mockReturnValue(false);
+
+    const response = await PUT(putRequest({ ...BASE_BODY, ptaVolunteerRequirementsEnabled: true }));
+    const data = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(data.ok).toBe(false);
+    expect(upsertPtaProfile).not.toHaveBeenCalled();
+  });
+
+  it("accepts a permitted volunteer-hours flag write once the platform is on AND the organization is allowlisted", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(true);
+    isPtaVolunteerHoursOrgAllowed.mockReturnValue(true);
+
+    const response = await PUT(putRequest({ ...BASE_BODY, ptaVolunteerRequirementsEnabled: true }));
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data.ok).toBe(true);
+  });
+
+  it("does not block ordinary profile edits that touch none of the six flags, even when the organization isn't allowlisted", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(true);
+    isPtaVolunteerHoursOrgAllowed.mockReturnValue(false);
+
+    const response = await PUT(putRequest(BASE_BODY));
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data.ok).toBe(true);
+  });
+
+  it("the platform-off response and the not-allowlisted response are indistinguishable — never reveals whether another organization is allowlisted", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(false);
+    const platformOffResponse = await PUT(putRequest({ ...BASE_BODY, ptaVolunteerRequirementsEnabled: true }));
+    const platformOffData = await platformOffResponse.json();
+
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(true);
+    isPtaVolunteerHoursOrgAllowed.mockReturnValue(false);
+    const notAllowlistedResponse = await PUT(putRequest({ ...BASE_BODY, ptaVolunteerRequirementsEnabled: true }));
+    const notAllowlistedData = await notAllowlistedResponse.json();
+
+    expect(platformOffResponse.status).toBe(notAllowlistedResponse.status);
+    expect(platformOffData.error).toBe(notAllowlistedData.error);
   });
 });
 

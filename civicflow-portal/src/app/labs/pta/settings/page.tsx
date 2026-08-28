@@ -1,4 +1,4 @@
-import { isPtaVolunteerHoursPlatformEnabled } from "@/lib/env";
+import { isPtaVolunteerHoursOrgAllowed, isPtaVolunteerHoursPlatformEnabled } from "@/lib/env";
 import { getPtaPageGate } from "@/lib/labs/pta/guard";
 import { getPtaProfile } from "@/lib/labs/pta/profile";
 import { getSchoolYearContext } from "@/lib/labs/pta/school-years";
@@ -24,21 +24,27 @@ export default async function PtaSettingsPage() {
   const [profile, schoolYears] = await Promise.all([getPtaProfile(organizationId), getSchoolYearContext(organizationId)]);
 
   // The toggle panel (can the org turn this feature ON at all) is gated on
-  // holding a manage permission AND the platform kill-switch — while the
-  // platform is dark, no org admin (including one acting as SUPER_ADMIN,
-  // whose org-scoped permissions equal ORG_OWNER's) can see or flip these
-  // flags, so an org can't pre-stage itself to activate the instant the
-  // platform switch later flips on. Once the platform switch is on, this
-  // reverts to permission-only gating — otherwise nobody could ever turn
-  // the feature on in the first place. The periods manager below it is
-  // gated purely on the requirements flag (+ platform switch) actually
-  // being on, unchanged.
-  const canManageAnyVolunteerHoursCapability = canViewVolunteerHoursSettingsPanel(isPtaVolunteerHoursPlatformEnabled(), {
-    canManageRequirements: can("pta:volunteer-requirements:manage"),
-    canManageBuyoutPricing: can("pta:volunteer-buyout-pricing:manage"),
-    canManageAssessments: can("pta:volunteer-assessments:preview-post"),
-    canManageReportsExport: can("pta:volunteer-reports:export"),
-  });
+  // holding a manage permission AND the platform kill-switch AND the pilot
+  // allowlist — while the platform is dark, OR this org simply isn't on the
+  // allowlist, no org admin (including one acting as SUPER_ADMIN, whose
+  // org-scoped permissions equal ORG_OWNER's) can see or flip these flags,
+  // so a non-pilot org can't pre-stage itself to activate the instant the
+  // platform switch flips on or the allowlist later grows. Once both the
+  // platform switch and the allowlist are on for this org, this reverts to
+  // permission-only gating — otherwise nobody could ever turn the feature on
+  // in the first place. The periods manager below it is gated purely on the
+  // requirements flag (+ platform switch + allowlist, all inside
+  // requireVolunteerHoursFlag) actually being on, unchanged.
+  const canManageAnyVolunteerHoursCapability = canViewVolunteerHoursSettingsPanel(
+    isPtaVolunteerHoursPlatformEnabled(),
+    isPtaVolunteerHoursOrgAllowed(organizationId),
+    {
+      canManageRequirements: can("pta:volunteer-requirements:manage"),
+      canManageBuyoutPricing: can("pta:volunteer-buyout-pricing:manage"),
+      canManageAssessments: can("pta:volunteer-assessments:preview-post"),
+      canManageReportsExport: can("pta:volunteer-reports:export"),
+    }
+  );
   const canViewVolunteerRequirements = can("pta:volunteer-requirements:view");
   const volunteerHoursAvailable =
     canViewVolunteerRequirements && (await checkVolunteerHoursAvailable(organizationId, "requirements"));
