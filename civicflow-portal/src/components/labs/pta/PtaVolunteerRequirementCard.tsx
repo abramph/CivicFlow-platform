@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type ElectionType = "VOLUNTEER" | "FULL_BUYOUT" | "PARTIAL_BUYOUT";
 
@@ -39,6 +40,7 @@ function money(cents: number) {
  * up, per spec §6's phone/tablet/desktop requirement.
  */
 export function PtaVolunteerRequirementCard({ buyoutAvailable }: { buyoutAvailable: boolean }) {
+  const router = useRouter();
   const [summary, setSummary] = useState<SummaryLike | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -54,7 +56,7 @@ export function PtaVolunteerRequirementCard({ buyoutAvailable }: { buyoutAvailab
   const [checkingOut, setCheckingOut] = useState(false);
 
   const [disputeText, setDisputeText] = useState("");
-  const [disputePending, setDisputePending] = useState(false);
+  const [pendingDispute, setPendingDispute] = useState(false);
   const [disputeSubmitted, setDisputeSubmitted] = useState(false);
 
   const [assessmentCharges, setAssessmentCharges] = useState<
@@ -85,6 +87,7 @@ export function PtaVolunteerRequirementCard({ buyoutAvailable }: { buyoutAvailab
         setError(data?.error || "Unable to start checkout.");
         return;
       }
+      router.refresh();
       window.location.href = data.url;
     } catch {
       setError("Unable to connect. Please try again.");
@@ -134,6 +137,7 @@ export function PtaVolunteerRequirementCard({ buyoutAvailable }: { buyoutAvailab
         return;
       }
       setQuote(data.data);
+      router.refresh();
     } catch {
       setError("Unable to connect. Please try again.");
     } finally {
@@ -163,6 +167,7 @@ export function PtaVolunteerRequirementCard({ buyoutAvailable }: { buyoutAvailab
       }
       setElectionSaved(true);
       setSavedElectionId(data.data?.id ?? null);
+      router.refresh();
     } catch {
       setError("Unable to connect. Please try again.");
     } finally {
@@ -190,6 +195,7 @@ export function PtaVolunteerRequirementCard({ buyoutAvailable }: { buyoutAvailab
         setError(data?.error || "Unable to start checkout.");
         return;
       }
+      router.refresh();
       window.location.href = data.url;
     } catch {
       setError("Unable to connect. Please try again.");
@@ -200,7 +206,7 @@ export function PtaVolunteerRequirementCard({ buyoutAvailable }: { buyoutAvailab
 
   async function submitDispute() {
     if (!summary || !disputeText.trim()) return;
-    setDisputePending(true);
+    setPendingDispute(true);
     setError(null);
     try {
       const res = await fetch("/api/labs/pta/volunteer-hours/my-household/disputes", {
@@ -215,10 +221,11 @@ export function PtaVolunteerRequirementCard({ buyoutAvailable }: { buyoutAvailab
       }
       setDisputeSubmitted(true);
       setDisputeText("");
+      router.refresh();
     } catch {
       setError("Unable to connect. Please try again.");
     } finally {
-      setDisputePending(false);
+      setPendingDispute(false);
     }
   }
 
@@ -387,11 +394,11 @@ export function PtaVolunteerRequirementCard({ buyoutAvailable }: { buyoutAvailab
         />
         <button
           type="button"
-          disabled={disputePending || !disputeText.trim()}
+          disabled={pendingDispute || !disputeText.trim()}
           onClick={submitDispute}
           className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-50"
         >
-          {disputePending ? "Submitting..." : "Submit report"}
+          {pendingDispute ? "Submitting..." : "Submit report"}
         </button>
         {disputeSubmitted ? <p className="text-sm text-emerald-700">Thanks — an officer will review this.</p> : null}
       </div>

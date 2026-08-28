@@ -684,3 +684,148 @@ happy path.
 **Tests**: 17 in `rbac-volunteer-hours.test.ts` + 2 in `assignments.test.ts`
 (the tenant-isolation fix). Full suite green (539 tests, zero
 regressions from the fix). Typecheck + lint clean.
+
+## VH-J — Reporting foundation + Reports A-D
+
+New dependency: `exceljs ^4.4.0`. The installed `xlsx` (SheetJS
+community edition) can't write bold header rows or cell-level number
+formats — a Pro-only feature — so real formatted `.xlsx` needed a
+second library, scoped entirely to this reporting module.
+
+**Architecture** (`src/lib/labs/pta/volunteer-hours/reports/`): one
+`build*ReportData(organizationId, filters, generatedByName)` function
+per report, returning a shared `ReportData<Row> = { info, summary,
+rows }` shape. Both the on-screen JSON API route and the `.xlsx`
+export route call the *exact same* function and pass the *exact same*
+`ReportData` into `buildVolunteerReportWorkbook` — there is no
+separate export-only code path that could compute different numbers,
+so the on-screen and downloaded totals cannot structurally diverge
+(this is the anti-divergence guarantee, verified by tests below, not
+just an intention).
+
+- `shared.ts` — `resolveReportHouseholds` (household/grade/classroom
+  scoping, reusing VH-B's current-year enrollment lookup),
+  `buildHouseholdReportContexts` (composes VH-B's
+  `resolveHouseholdRequirement` + VH-D's `getHouseholdLedgerTotals` —
+  the one shared per-household computation every report in this
+  program builds on, so "verified means APPROVED-only" etc. can never
+  drift between reports), `buildReportInfo`, `parseVolunteerReportFilters`
+  (shared query-string parsing so the JSON and export routes derive
+  identical filters from the same request shape), `resolveGeneratedByName`.
+- `xlsx-builder.ts` — `buildVolunteerReportWorkbook<Row>(data, columns)`:
+  a 3-worksheet workbook (Report Information / Summary / Detailed
+  Data) built with exceljs. Detailed Data gets a bold+shaded frozen
+  header row, a column autofilter, per-column number formats (hours as
+  h with 2 decimals, currency as `$#,##0.00`, percent, integer, date),
+  and a bold totals row summing only numeric columns. All text cells
+  pass through the existing `sanitizeFormulaCell` (spec's
+  formula-injection requirement, same helper the CSV exporter uses).
+- Reports A-D (`family-summary.ts`, `detail-activity.ts`,
+  `event-hours.ts`, `compliance.ts`): each exports both its
+  `build*ReportData` function and a `*_COLUMNS: ReportColumn[]` array
+  consumed by the workbook builder.
+  - **A — Family Volunteer Summary**: one row per household, derives a
+    9-state `requirementStatus` (NOT_STARTED/IN_PROGRESS/MET_SERVICE/
+    MET_BUYOUT/MET_COMBINED/EXEMPT/OVERDUE/ASSESSMENT_DUE/
+    ASSESSMENT_PAID) from the shared context plus buyout-purchase and
+    assessment-charge history.
+  - **B — Detailed Family Volunteer Activity**: one row per raw hour
+    entry. `PtaVolunteerHourEntry` has no Prisma relations to
+    household/opportunity/slot (only a real `signup` relation) — every
+    join here is a deliberate manual batch fetch-and-merge
+    (`Promise.all` + `Map`s keyed by extracted ID sets), not a nested
+    `include`.
+  - **C — Event Volunteer-Hours**: one row per event, aggregated
+    across every linked opportunity. `PtaVolunteerSignup` has no
+    `opportunityId` of its own, only `slotId` (a real relation) — signups
+    attribute to an event via `slot.opportunityId`, resolved with an
+    explicit slot lookup and a `slotId -> opportunityId` map before the
+    signup query runs.
+  - **D — Volunteer Requirement Compliance**: adds a deadline
+    countdown and a *live estimate* (never a posted charge) of what an
+    unposted final assessment would currently charge, using the active
+    `FINAL_ASSESSMENT` pricing window — explicitly never fabricates a
+    rate when none is active.
+
+**API routes** (8 new files under
+`/api/labs/pta/volunteer-hours/periods/[periodId]/reports/{report}/{,/export}`):
+each pair shares the identical guard
+(`requireVolunteerHoursAccess("pta:volunteer-reports:view"|":export", "reports")`),
+filter parsing, and `generatedByName` resolution; the export route
+additionally builds the workbook and writes an audit event
+(`pta.volunteer_hours.report_exported`) before streaming the
+`.xlsx` as an attachment. Small-org synchronous streaming only in this
+stage — background generation for large orgs is VH-K.
+
+**Permission-gating decision** (made informally mid-stage, now
+recorded): Reports A-D use the general `pta:volunteer-reports:view`/
+`:export` permission (capability `"reports"`), since Report A is the
+primary operational report STAFF needs day-to-day. `pta:volunteer-
+financial-reports:view` is reserved specifically for Report E (VH-K),
+which the spec explicitly titles as the financial/transaction-detail
+report.
+
+**Admin UI**: `PtaVolunteerReportsCenter.tsx` (client component) — a
+report-type selector, per-report filter bar, summary-stat tiles, and a
+data table, all driven by `fetch`ing the same JSON route the export
+route reads from. New page at
+`/labs/pta/settings/volunteer-hours/periods/[periodId]/reports`,
+linked from the period-detail page's header actions when the caller
+holds `pta:volunteer-reports:view` and the org has the `reports`
+capability enabled.
+
+**Gotchas hit**:
+- `PtaVolunteerHourEntry`/`PtaVolunteerSignup` relation gaps (above) —
+  both needed manual batch joins instead of `include`, discovered via
+  `tsc`, not by reading the schema comments first.
+- exceljs's `numFmt` setter type is `string`, not `string | undefined`
+  — `NUMBER_FORMATS["text"]` is `undefined`, so every numFmt assignment
+  needed an `if (numFmt)` guard.
+- React Compiler's `react-hooks/set-state-in-effect` lint rule flags
+  *any* reactive data-fetching effect (non-empty deps calling
+  `setState`) — including the React-docs-sanctioned cancelled-flag
+  fetch pattern already used elsewhere in this codebase
+  (`PtaVolunteerRequirementCard.tsx`, deps `[]`). It only fires once
+  the effect's deps array is non-empty, which a reactive
+  report-filter refetch genuinely needs; suppressed with one targeted
+  `eslint-disable-next-line` and a comment explaining why, rather than
+  restructuring away from the correct pattern.
+- Running the full suite as this stage's gate surfaced a **real
+  pre-existing gap from VH-E**: `PtaVolunteerRequirementCard.tsx`
+  never called `router.refresh()` after any of its 5 mutating actions,
+  and its double-submit guard on the dispute button used
+  `disputePending` (capital P breaks the repo-wide
+  `refresh-consistency.test.ts` convention check's case-sensitive
+  regex). Fixed both — `router.refresh()` added after
+  election/dispute/checkout/quote/assessment-payment, and
+  `disputePending` renamed to `pendingDispute` — no behavior change,
+  but real staleness risk closed (e.g., a family's dashboard not
+  reflecting a saved election without a manual reload).
+- Duplicate `@types/node` copies in `node_modules` made
+  `Buffer.from(x) as unknown as Buffer` still fail typecheck in the
+  round-trip test (exceljs's own `.d.ts` resolves `Buffer` against a
+  different copy than this file's global). Fixed by casting to
+  `Parameters<typeof workbook.xlsx.load>[0]` instead of the ambient
+  `Buffer` name, which is immune to which copy is "the" global.
+- 5 lint errors surfaced by a repo-wide `npx eslint src` were
+  confirmed pre-existing and unrelated (files last touched by the
+  original SMS opt-in work, no working-tree diff, untouched this
+  session) — out of scope for this stage, not fixed.
+
+**Tests** (35 new, all in `reports/__tests__/`):
+`xlsx-builder.test.ts` (13) is the anti-divergence + exceljs-styling
+suite — builds a fixture `ReportData`, generates a real workbook,
+reloads it with exceljs, and asserts cell values match the exact
+hours/60, cents/100, and percent/100 transforms the on-screen JSON
+uses, plus header bold/fill, frozen panes, autofilter, the bold totals
+row, formula-injection sanitization, and summary-sheet values.
+`family-summary.test.ts` (7), `compliance.test.ts` (6),
+`detail-activity.test.ts` (5), `event-hours.test.ts` (4) each mock
+`@/lib/prisma` plus the relevant sibling modules
+(`../../assignments`, `../../ledger`, `../../periods`, `../../pricing`)
+and verify the report-specific branching (requirement-status
+derivation, compliance-filter matching, event/slot/signup
+attribution, manual-join correctness). Full suite: 3593 tests passing
+across 353 files (zero regressions). Typecheck clean. Lint clean on
+every file touched this stage. Production build compiles successfully,
+including the two new routes.

@@ -34,6 +34,7 @@ export default async function PtaVolunteerPeriodAssignmentsPage({ params }: { pa
   const buyoutAvailable = canViewPricing && (await checkVolunteerHoursAvailable(organizationId, "buyout"));
   const canRecordOfflinePayments = can("pta:volunteer-payments:record-offline") && buyoutAvailable;
   const canManageAssessments = can("pta:volunteer-assessments:preview-post") && (await checkVolunteerHoursAvailable(organizationId, "assessments"));
+  const reportsAvailable = can("pta:volunteer-reports:view") && (await checkVolunteerHoursAvailable(organizationId, "reports"));
 
   const [assignments, pricingWindows, disputes, assessmentBatches, reviewFlags] = await Promise.all([
     listPeriodAssignments(organizationId, periodId),
@@ -50,7 +51,14 @@ export default async function PtaVolunteerPeriodAssignmentsPage({ params }: { pa
       <PageHeader
         title={period.name}
         description={`Assignment rules and pricing for this requirement period — how the ${(period.requiredMinutesDefault / 60).toString()}-hour default is adjusted per family, and (once buyouts are turned on) what it costs to buy out hours.`}
-        actions={[{ href: "/labs/pta/settings", label: "Back to settings" }]}
+        actions={
+          reportsAvailable
+            ? [
+                { href: "/labs/pta/settings", label: "Back to settings" },
+                { href: `/labs/pta/settings/volunteer-hours/periods/${periodId}/reports`, label: "Reports" },
+              ]
+            : [{ href: "/labs/pta/settings", label: "Back to settings" }]
+        }
       />
       <SectionCard title="Assignment rules & preview" description="Custom hours, exemptions, reductions, and waivers, plus a full per-family preview.">
         <PtaVolunteerAssignmentsManager
