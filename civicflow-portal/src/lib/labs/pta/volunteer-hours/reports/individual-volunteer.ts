@@ -73,7 +73,10 @@ export async function buildIndividualVolunteerReportData(
   const rows = [...byAdult.values()]
     .map((r) => ({ ...r, categoriesServed: [...r.categories].sort().join(", ") }))
     .filter((r) => r.verifiedMinutes > 0 || r.pendingMinutes > 0)
-    .map(({ categories: _categories, ...rest }) => rest)
+    .map(({ categories, ...rest }) => {
+      void categories;
+      return rest;
+    })
     .sort((a, b) => b.verifiedMinutes - a.verifiedMinutes);
 
   const summary = emptySummaryTotals();

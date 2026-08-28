@@ -247,7 +247,6 @@ export function PtaVolunteerReportsCenter({
     let cancelled = false;
     // Reactive refetch on filter/report-type change, guarded by the
     // cancelled flag below — the React-docs data-fetching-effect shape.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     const url = `/api/labs/pta/volunteer-hours/periods/${periodId}/reports/${reportType}${queryString ? `?${queryString}` : ""}`;
     fetch(url)

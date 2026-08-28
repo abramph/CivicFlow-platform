@@ -69,7 +69,11 @@ export async function buildVolunteerCategoryReportData(
 
   const rows = [...byCategory.values()]
     .map((r) => ({ ...r, uniqueVolunteers: r.volunteers.size, uniqueFamilies: r.families.size }))
-    .map(({ volunteers: _volunteers, families: _families, ...rest }) => rest)
+    .map(({ volunteers, families, ...rest }) => {
+      void volunteers;
+      void families;
+      return rest;
+    })
     .sort((a, b) => b.verifiedMinutes - a.verifiedMinutes);
 
   const summary = emptySummaryTotals();

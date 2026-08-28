@@ -34,7 +34,10 @@ export async function GET(request: Request) {
     );
     if (!data) return Response.json({ ok: true, data: null });
 
-    const rows = data.rows.map(({ noteOrExceptionIndicator: _noteOrExceptionIndicator, ...rest }) => rest);
+    const rows = data.rows.map(({ noteOrExceptionIndicator, ...rest }) => {
+      void noteOrExceptionIndicator;
+      return rest;
+    });
     return Response.json({ ok: true, data: { ...data, rows } });
   });
 }
