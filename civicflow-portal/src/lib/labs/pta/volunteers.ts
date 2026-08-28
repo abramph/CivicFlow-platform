@@ -5,7 +5,12 @@ import { isPtaVolunteerHoursPlatformEnabled } from "@/lib/env";
 import { PtaError } from "./errors";
 import { getPtaProfile } from "./profile";
 import { resolveSchoolYearId } from "./school-years";
-import { mirrorHourEntryAdjustmentToLedger, mirrorHourEntryApprovalToLedger } from "./volunteer-hours/ledger";
+import {
+  mirrorHourEntryAdjustmentToLedger,
+  mirrorHourEntryApprovalToLedger,
+  mirrorHourEntryPendingToLedger,
+  mirrorHourEntryRejectionToLedger,
+} from "./volunteer-hours/ledger";
 
 /** Volunteer Hour Requirements & Buyout program (docs/pta-volunteer-hours.md):
  * the raw hour-entry lifecycle below stays completely unchanged for every
@@ -949,6 +954,7 @@ export async function setPtaVolunteerAttendanceStatus(
         source: "OFFICER_MANUAL",
       },
     });
+    await mirrorToLedgerIfEnabled(organizationId, () => mirrorHourEntryPendingToLedger(organizationId, hourEntry!));
   }
 
   await createAuditEvent({
@@ -1027,6 +1033,8 @@ export async function rejectPtaVolunteerHourEntry(organizationId: string, entryI
     where: { id: entryId },
     data: { status: "REJECTED", rejectedByUserId: actorUserId, rejectedAt: new Date(), notes: reason },
   });
+
+  await mirrorToLedgerIfEnabled(organizationId, () => mirrorHourEntryRejectionToLedger(organizationId, updated));
 
   await createAuditEvent({
     organizationId,

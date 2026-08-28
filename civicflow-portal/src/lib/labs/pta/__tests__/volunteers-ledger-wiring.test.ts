@@ -2,8 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const findFirstHourEntry = vi.fn();
 const updateHourEntry = vi.fn();
+const createHourEntry = vi.fn();
 const createHourAdjustment = vi.fn();
 const findFirstAdult = vi.fn();
+const findFirstSignup = vi.fn();
+const updateSignup = vi.fn();
+const upsertAttendance = vi.fn();
+const updateAttendance = vi.fn();
+const findUniqueOpportunity = vi.fn();
 const transactionMock = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
@@ -12,9 +18,19 @@ vi.mock("@/lib/prisma", () => ({
     ptaVolunteerHourEntry: {
       findFirst: (...a: unknown[]) => findFirstHourEntry(...a),
       update: (...a: unknown[]) => updateHourEntry(...a),
+      create: (...a: unknown[]) => createHourEntry(...a),
     },
     ptaVolunteerHourAdjustment: { create: (...a: unknown[]) => createHourAdjustment(...a) },
     ptaHouseholdAdult: { findFirst: (...a: unknown[]) => findFirstAdult(...a) },
+    ptaVolunteerSignup: {
+      findFirst: (...a: unknown[]) => findFirstSignup(...a),
+      update: (...a: unknown[]) => updateSignup(...a),
+    },
+    ptaVolunteerAttendance: {
+      upsert: (...a: unknown[]) => upsertAttendance(...a),
+      update: (...a: unknown[]) => updateAttendance(...a),
+    },
+    ptaVolunteerOpportunity: { findUnique: (...a: unknown[]) => findUniqueOpportunity(...a) },
   },
 }));
 vi.mock("@/lib/audit", () => ({ createAuditEvent: vi.fn().mockResolvedValue(undefined) }));
@@ -27,9 +43,13 @@ vi.mock("../profile", () => ({ getPtaProfile: (...a: unknown[]) => getPtaProfile
 
 const mirrorHourEntryApprovalToLedger = vi.fn().mockResolvedValue(null);
 const mirrorHourEntryAdjustmentToLedger = vi.fn().mockResolvedValue(null);
+const mirrorHourEntryPendingToLedger = vi.fn().mockResolvedValue(null);
+const mirrorHourEntryRejectionToLedger = vi.fn().mockResolvedValue(null);
 vi.mock("../volunteer-hours/ledger", () => ({
   mirrorHourEntryApprovalToLedger: (...a: unknown[]) => mirrorHourEntryApprovalToLedger(...a),
   mirrorHourEntryAdjustmentToLedger: (...a: unknown[]) => mirrorHourEntryAdjustmentToLedger(...a),
+  mirrorHourEntryPendingToLedger: (...a: unknown[]) => mirrorHourEntryPendingToLedger(...a),
+  mirrorHourEntryRejectionToLedger: (...a: unknown[]) => mirrorHourEntryRejectionToLedger(...a),
 }));
 
 beforeEach(() => {
@@ -123,5 +143,114 @@ describe("adjustPtaVolunteerHourEntry — ledger mirroring wiring", () => {
     await adjustPtaVolunteerHourEntry("org-1", "he-1", 30, "corrected shift length", "actor-1");
 
     expect(mirrorHourEntryAdjustmentToLedger).not.toHaveBeenCalled();
+  });
+});
+
+describe("setPtaVolunteerAttendanceStatus — pending ledger mirroring wiring (VH-L follow-up)", () => {
+  const signup = {
+    id: "signup-1",
+    householdAdultId: "adult-1",
+    householdId: "hh-1",
+    slotId: "slot-1",
+    slot: { startAt: null, endAt: null, defaultCreditedMinutes: 60, opportunityId: "opp-1" },
+  };
+  const attendance = { id: "att-1", checkInAt: null, checkOutAt: null, officerNotes: null };
+  const createdEntry = { id: "he-new", householdId: "hh-1", householdAdultId: "adult-1", creditedMinutes: 60, category: null, opportunityId: "opp-1" };
+
+  beforeEach(() => {
+    findFirstSignup.mockResolvedValue(signup);
+    upsertAttendance.mockResolvedValue(attendance);
+    updateAttendance.mockResolvedValue(attendance);
+    updateSignup.mockResolvedValue({ ...signup, status: "ATTENDED" });
+    findUniqueOpportunity.mockResolvedValue({ schoolYear: "2026-2027" });
+    createHourEntry.mockResolvedValue(createdEntry);
+  });
+
+  it("mirrors the freshly-created PENDING entry when enabled", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(true);
+    getPtaProfile.mockResolvedValue({ ptaVolunteerRequirementsEnabled: true });
+
+    const { setPtaVolunteerAttendanceStatus } = await import("../volunteers");
+    await setPtaVolunteerAttendanceStatus("org-1", "signup-1", "ATTENDED", "actor-1");
+
+    expect(mirrorHourEntryPendingToLedger).toHaveBeenCalledWith("org-1", createdEntry);
+  });
+
+  it("never mirrors when disabled", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(false);
+
+    const { setPtaVolunteerAttendanceStatus } = await import("../volunteers");
+    await setPtaVolunteerAttendanceStatus("org-1", "signup-1", "ATTENDED", "actor-1");
+
+    expect(mirrorHourEntryPendingToLedger).not.toHaveBeenCalled();
+  });
+
+  it("never mirrors for NO_SHOW/EXCUSED — no hour entry is ever created for those outcomes", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(true);
+    getPtaProfile.mockResolvedValue({ ptaVolunteerRequirementsEnabled: true });
+
+    const { setPtaVolunteerAttendanceStatus } = await import("../volunteers");
+    await setPtaVolunteerAttendanceStatus("org-1", "signup-1", "NO_SHOW", "actor-1");
+
+    expect(createHourEntry).not.toHaveBeenCalled();
+    expect(mirrorHourEntryPendingToLedger).not.toHaveBeenCalled();
+  });
+
+  it("the real attendance/hour-entry creation still succeeds even when pending mirroring throws", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(true);
+    getPtaProfile.mockResolvedValue({ ptaVolunteerRequirementsEnabled: true });
+    mirrorHourEntryPendingToLedger.mockRejectedValueOnce(new Error("ledger boom"));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { setPtaVolunteerAttendanceStatus } = await import("../volunteers");
+    const result = await setPtaVolunteerAttendanceStatus("org-1", "signup-1", "ATTENDED", "actor-1");
+
+    expect(result.hourEntry?.id).toBe("he-new");
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+});
+
+describe("rejectPtaVolunteerHourEntry — ledger mirroring wiring (VH-L follow-up)", () => {
+  const pendingEntry = { id: "he-1", status: "PENDING", householdId: "hh-1", householdAdultId: "adult-1", creditedMinutes: 60, category: null, opportunityId: "opp-1" };
+
+  it("mirrors the rejection when enabled", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(true);
+    getPtaProfile.mockResolvedValue({ ptaVolunteerRequirementsEnabled: true });
+    const rejected = { ...pendingEntry, status: "REJECTED", rejectedByUserId: "actor-1" };
+    findFirstHourEntry.mockResolvedValue(pendingEntry);
+    updateHourEntry.mockResolvedValue(rejected);
+
+    const { rejectPtaVolunteerHourEntry } = await import("../volunteers");
+    await rejectPtaVolunteerHourEntry("org-1", "he-1", "no longer eligible", "actor-1");
+
+    expect(mirrorHourEntryRejectionToLedger).toHaveBeenCalledWith("org-1", rejected);
+  });
+
+  it("never mirrors when disabled", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(false);
+    findFirstHourEntry.mockResolvedValue(pendingEntry);
+    updateHourEntry.mockResolvedValue({ ...pendingEntry, status: "REJECTED" });
+
+    const { rejectPtaVolunteerHourEntry } = await import("../volunteers");
+    await rejectPtaVolunteerHourEntry("org-1", "he-1", "no longer eligible", "actor-1");
+
+    expect(mirrorHourEntryRejectionToLedger).not.toHaveBeenCalled();
+  });
+
+  it("the real rejection still succeeds even when ledger mirroring throws", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(true);
+    getPtaProfile.mockResolvedValue({ ptaVolunteerRequirementsEnabled: true });
+    findFirstHourEntry.mockResolvedValue(pendingEntry);
+    updateHourEntry.mockResolvedValue({ ...pendingEntry, status: "REJECTED" });
+    mirrorHourEntryRejectionToLedger.mockRejectedValueOnce(new Error("ledger boom"));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { rejectPtaVolunteerHourEntry } = await import("../volunteers");
+    const result = await rejectPtaVolunteerHourEntry("org-1", "he-1", "no longer eligible", "actor-1");
+
+    expect(result.status).toBe("REJECTED");
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
   });
 });

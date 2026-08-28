@@ -217,11 +217,113 @@ async function findApplicablePeriod(organizationId: string, at: Date) {
   });
 }
 
+/**
+ * Hour entries are the only ledger source with a real state machine
+ * (PENDING -> APPROVED or PENDING -> REJECTED, optionally corrected after
+ * approval via a separate CORRECTED row) — one ledger row per hour entry
+ * that transitions in place, never a fresh insert per state change. A
+ * fresh insert per transition would either violate the
+ * (organizationId, sourceType, sourceId, entryType) uniqueness constraint,
+ * or — worse — silently no-op via postLedgerEntry's insert-then-return-
+ * existing idempotency and leave the row permanently stuck at whichever
+ * state it was first mirrored in. Every OTHER ledger entry type (purchase,
+ * assessment, waiver, refund, adjustment...) is a one-shot event and
+ * correctly uses postLedgerEntry directly, unchanged.
+ */
+async function upsertHourEntryLedgerRow(params: {
+  organizationId: string;
+  requirementPeriodId: string;
+  householdId: string;
+  householdAdultId: string;
+  hourEntryId: string;
+  minutes: number;
+  category: PtaVolunteerCategory;
+  approvalStatus: PtaVolunteerLedgerApprovalStatus;
+  approvedByUserId?: string | null;
+  createdByUserId?: string | null;
+}) {
+  const existing = await prisma.ptaVolunteerLedgerEntry.findFirst({
+    where: { organizationId: params.organizationId, sourceType: "hourEntry", sourceId: params.hourEntryId, entryType: "SERVICE_VERIFIED" },
+  });
+  if (existing) {
+    return prisma.ptaVolunteerLedgerEntry.update({
+      where: { id: existing.id },
+      data: {
+        minutes: params.minutes,
+        category: params.category,
+        approvalStatus: params.approvalStatus,
+        approvedByUserId: params.approvedByUserId ?? existing.approvedByUserId,
+      },
+    });
+  }
+  return postLedgerEntry({
+    organizationId: params.organizationId,
+    requirementPeriodId: params.requirementPeriodId,
+    householdId: params.householdId,
+    householdAdultId: params.householdAdultId,
+    entryType: "SERVICE_VERIFIED",
+    category: params.category,
+    minutes: params.minutes,
+    approvalStatus: params.approvalStatus,
+    sourceType: "hourEntry",
+    sourceId: params.hourEntryId,
+    createdByUserId: params.createdByUserId,
+    approvedByUserId: params.approvedByUserId,
+  });
+}
+
+async function resolveHourEntryLedgerCategory(
+  category: PtaVolunteerCategory | null,
+  opportunityId: string
+): Promise<PtaVolunteerCategory> {
+  if (category) return category;
+  const opportunity = await prisma.ptaVolunteerOpportunity.findUnique({ where: { id: opportunityId }, select: { eventId: true } });
+  return opportunity?.eventId ? "EVENT_SERVICE" : "OTHER_APPROVED_SERVICE";
+}
+
+/** Called from setPtaVolunteerAttendanceStatus (volunteers.ts) right after
+ * a fresh PENDING hour entry is created, so the unified ledger's
+ * pendingMinutes total (Report A, Report D's PENDING filter, and the
+ * family dashboard) reflects real pending hours instead of always reading
+ * zero. Best-effort/additive, same silent-no-op conditions as the approval
+ * mirror below. */
+export async function mirrorHourEntryPendingToLedger(
+  organizationId: string,
+  hourEntry: {
+    id: string;
+    householdId: string | null;
+    householdAdultId: string;
+    creditedMinutes: number;
+    category: PtaVolunteerCategory | null;
+    opportunityId: string;
+  }
+) {
+  if (!hourEntry.householdId) return null;
+
+  const period = await findApplicablePeriod(organizationId, new Date());
+  if (!period) return null;
+
+  const category = await resolveHourEntryLedgerCategory(hourEntry.category, hourEntry.opportunityId);
+
+  return upsertHourEntryLedgerRow({
+    organizationId,
+    requirementPeriodId: period.id,
+    householdId: hourEntry.householdId,
+    householdAdultId: hourEntry.householdAdultId,
+    hourEntryId: hourEntry.id,
+    minutes: hourEntry.creditedMinutes,
+    category,
+    approvalStatus: "PENDING",
+  });
+}
+
 /** Called from approvePtaVolunteerHourEntry (volunteers.ts) after the raw
  * entry is updated. Best-effort and additive: if the feature isn't enabled,
  * the household has no denormalized householdId (legacy rows), or no period
  * is currently active, this is a silent no-op — the raw hour-entry approval
- * itself has already fully succeeded regardless. */
+ * itself has already fully succeeded regardless. Upserts (see
+ * upsertHourEntryLedgerRow) so a PENDING mirror row created at submission
+ * time transitions to APPROVED in place rather than being orphaned. */
 export async function mirrorHourEntryApprovalToLedger(
   organizationId: string,
   hourEntry: {
@@ -239,25 +341,56 @@ export async function mirrorHourEntryApprovalToLedger(
   const period = await findApplicablePeriod(organizationId, new Date());
   if (!period) return null;
 
-  const opportunity = await prisma.ptaVolunteerOpportunity.findUnique({
-    where: { id: hourEntry.opportunityId },
-    select: { eventId: true },
-  });
-  const category: PtaVolunteerCategory = hourEntry.category ?? (opportunity?.eventId ? "EVENT_SERVICE" : "OTHER_APPROVED_SERVICE");
+  const category = await resolveHourEntryLedgerCategory(hourEntry.category, hourEntry.opportunityId);
 
-  return postLedgerEntry({
+  return upsertHourEntryLedgerRow({
     organizationId,
     requirementPeriodId: period.id,
     householdId: hourEntry.householdId,
     householdAdultId: hourEntry.householdAdultId,
-    entryType: "SERVICE_VERIFIED",
-    category,
+    hourEntryId: hourEntry.id,
     minutes: hourEntry.creditedMinutes,
+    category,
     approvalStatus: "APPROVED",
-    sourceType: "hourEntry",
-    sourceId: hourEntry.id,
     createdByUserId: hourEntry.approvedByUserId,
     approvedByUserId: hourEntry.approvedByUserId,
+  });
+}
+
+/** Called from rejectPtaVolunteerHourEntry (volunteers.ts) after the raw
+ * entry is updated. Same upsert/no-op discipline as the approval mirror —
+ * transitions an existing PENDING mirror row to REJECTED in place so
+ * rejectedMinutes (surfaced nowhere in the UI today, but computed and
+ * available for future reports) reflects reality rather than always zero. */
+export async function mirrorHourEntryRejectionToLedger(
+  organizationId: string,
+  hourEntry: {
+    id: string;
+    householdId: string | null;
+    householdAdultId: string;
+    creditedMinutes: number;
+    category: PtaVolunteerCategory | null;
+    opportunityId: string;
+    rejectedByUserId: string | null;
+  }
+) {
+  if (!hourEntry.householdId) return null;
+
+  const period = await findApplicablePeriod(organizationId, new Date());
+  if (!period) return null;
+
+  const category = await resolveHourEntryLedgerCategory(hourEntry.category, hourEntry.opportunityId);
+
+  return upsertHourEntryLedgerRow({
+    organizationId,
+    requirementPeriodId: period.id,
+    householdId: hourEntry.householdId,
+    householdAdultId: hourEntry.householdAdultId,
+    hourEntryId: hourEntry.id,
+    minutes: hourEntry.creditedMinutes,
+    category,
+    approvalStatus: "REJECTED",
+    approvedByUserId: hourEntry.rejectedByUserId,
   });
 }
 

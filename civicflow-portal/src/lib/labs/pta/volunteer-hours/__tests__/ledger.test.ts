@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const createEntry = vi.fn();
 const findFirstEntry = vi.fn();
+const updateEntry = vi.fn();
 const findManyEntries = vi.fn();
 const findFirstPeriod = vi.fn();
 const findUniqueOpportunity = vi.fn();
@@ -11,6 +12,7 @@ vi.mock("@/lib/prisma", () => ({
     ptaVolunteerLedgerEntry: {
       create: (...a: unknown[]) => createEntry(...a),
       findFirst: (...a: unknown[]) => findFirstEntry(...a),
+      update: (...a: unknown[]) => updateEntry(...a),
       findMany: (...a: unknown[]) => findManyEntries(...a),
     },
     ptaVolunteerRequirementPeriod: { findFirst: (...a: unknown[]) => findFirstPeriod(...a) },
@@ -21,7 +23,16 @@ vi.mock("@/lib/prisma", () => ({
 const createAuditEvent = vi.fn().mockResolvedValue(undefined);
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...a: unknown[]) => createAuditEvent(...a) }));
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  // upsertHourEntryLedgerRow's "does a mirror row already exist for this
+  // hour entry" lookup — default to "no" so every test not specifically
+  // exercising the upsert-existing branch gets the plain create path,
+  // matching this suite's pre-existing assumption. vi.clearAllMocks()
+  // clears call history but NOT a previously-configured mockResolvedValue,
+  // so this must be set explicitly every test, not just once at import time.
+  findFirstEntry.mockResolvedValue(undefined);
+});
 
 const baseInput = {
   organizationId: "org-1",
@@ -258,5 +269,128 @@ describe("mirrorHourEntryApprovalToLedger", () => {
       approvedByUserId: "u1",
     });
     expect(createEntry).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ category: "FUNDRAISING" }) }));
+  });
+});
+
+const hourEntryFixture = {
+  id: "he-1",
+  householdId: "hh-1",
+  householdAdultId: "adult-1",
+  creditedMinutes: 60,
+  category: "FUNDRAISING" as const,
+  opportunityId: "opp-1",
+};
+
+describe("mirrorHourEntryPendingToLedger (VH-L follow-up)", () => {
+  it("is a no-op when the raw entry has no denormalized householdId", async () => {
+    const { mirrorHourEntryPendingToLedger } = await import("../ledger");
+    const result = await mirrorHourEntryPendingToLedger("org-1", { ...hourEntryFixture, householdId: null });
+    expect(result).toBeNull();
+    expect(findFirstPeriod).not.toHaveBeenCalled();
+  });
+
+  it("is a no-op when no period is currently active", async () => {
+    findFirstPeriod.mockResolvedValue(null);
+    const { mirrorHourEntryPendingToLedger } = await import("../ledger");
+    const result = await mirrorHourEntryPendingToLedger("org-1", hourEntryFixture);
+    expect(result).toBeNull();
+    expect(createEntry).not.toHaveBeenCalled();
+  });
+
+  it("creates a fresh PENDING ledger row when none exists yet", async () => {
+    findFirstPeriod.mockResolvedValue({ id: "period-1" });
+    createEntry.mockResolvedValue({ id: "ledger-1" });
+    const { mirrorHourEntryPendingToLedger } = await import("../ledger");
+    await mirrorHourEntryPendingToLedger("org-1", hourEntryFixture);
+    expect(findFirstEntry).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ sourceType: "hourEntry", sourceId: "he-1", entryType: "SERVICE_VERIFIED" }) })
+    );
+    expect(createEntry).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ approvalStatus: "PENDING", minutes: 60, sourceId: "he-1" }) })
+    );
+    expect(updateEntry).not.toHaveBeenCalled();
+  });
+});
+
+describe("mirrorHourEntryApprovalToLedger — transitions an existing PENDING mirror row in place (VH-L follow-up)", () => {
+  it("UPDATEs the existing mirror row to APPROVED rather than creating a second row", async () => {
+    findFirstPeriod.mockResolvedValue({ id: "period-1" });
+    findFirstEntry.mockResolvedValue({ id: "ledger-1", approvalStatus: "PENDING", approvedByUserId: null });
+    updateEntry.mockResolvedValue({ id: "ledger-1", approvalStatus: "APPROVED" });
+
+    const { mirrorHourEntryApprovalToLedger } = await import("../ledger");
+    const result = await mirrorHourEntryApprovalToLedger("org-1", { ...hourEntryFixture, approvedByUserId: "officer-1" });
+
+    expect(updateEntry).toHaveBeenCalledWith({
+      where: { id: "ledger-1" },
+      data: expect.objectContaining({ approvalStatus: "APPROVED", minutes: 60, approvedByUserId: "officer-1" }),
+    });
+    expect(createEntry).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ approvalStatus: "APPROVED" });
+  });
+
+  it("still falls back to creating fresh when no PENDING mirror row exists (e.g. the feature was enabled after the entry was created)", async () => {
+    findFirstPeriod.mockResolvedValue({ id: "period-1" });
+    findFirstEntry.mockResolvedValue(undefined);
+    createEntry.mockResolvedValue({ id: "ledger-1", approvalStatus: "APPROVED" });
+
+    const { mirrorHourEntryApprovalToLedger } = await import("../ledger");
+    await mirrorHourEntryApprovalToLedger("org-1", { ...hourEntryFixture, approvedByUserId: "officer-1" });
+
+    expect(createEntry).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ approvalStatus: "APPROVED" }) }));
+    expect(updateEntry).not.toHaveBeenCalled();
+  });
+});
+
+describe("mirrorHourEntryRejectionToLedger (VH-L follow-up)", () => {
+  it("UPDATEs the existing PENDING mirror row to REJECTED rather than creating a second row", async () => {
+    findFirstPeriod.mockResolvedValue({ id: "period-1" });
+    findFirstEntry.mockResolvedValue({ id: "ledger-1", approvalStatus: "PENDING", approvedByUserId: null });
+    updateEntry.mockResolvedValue({ id: "ledger-1", approvalStatus: "REJECTED" });
+
+    const { mirrorHourEntryRejectionToLedger } = await import("../ledger");
+    const result = await mirrorHourEntryRejectionToLedger("org-1", { ...hourEntryFixture, rejectedByUserId: "officer-1" });
+
+    expect(updateEntry).toHaveBeenCalledWith({
+      where: { id: "ledger-1" },
+      data: expect.objectContaining({ approvalStatus: "REJECTED", approvedByUserId: "officer-1" }),
+    });
+    expect(createEntry).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ approvalStatus: "REJECTED" });
+  });
+
+  it("is a no-op when the raw entry has no denormalized householdId", async () => {
+    const { mirrorHourEntryRejectionToLedger } = await import("../ledger");
+    const result = await mirrorHourEntryRejectionToLedger("org-1", { ...hourEntryFixture, householdId: null, rejectedByUserId: "officer-1" });
+    expect(result).toBeNull();
+  });
+
+  it("falls back to creating fresh when no PENDING mirror row exists", async () => {
+    findFirstPeriod.mockResolvedValue({ id: "period-1" });
+    findFirstEntry.mockResolvedValue(undefined);
+    createEntry.mockResolvedValue({ id: "ledger-1", approvalStatus: "REJECTED" });
+
+    const { mirrorHourEntryRejectionToLedger } = await import("../ledger");
+    await mirrorHourEntryRejectionToLedger("org-1", { ...hourEntryFixture, rejectedByUserId: "officer-1" });
+
+    expect(createEntry).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ approvalStatus: "REJECTED" }) }));
+  });
+});
+
+describe("getHouseholdLedgerTotals — pending/rejected totals now reflect a real mirror row (VH-L follow-up acceptance check)", () => {
+  it("a PENDING mirror row created for a fresh hour entry surfaces as pendingMinutes, not zero", async () => {
+    findManyEntries.mockResolvedValue([entry({ entryType: "SERVICE_VERIFIED", minutes: 90, approvalStatus: "PENDING" })]);
+    const { getHouseholdLedgerTotals } = await import("../ledger");
+    const totals = await getHouseholdLedgerTotals("org-1", "period-1", "hh-1");
+    expect(totals.pendingMinutes).toBe(90);
+    expect(totals.verifiedMinutes).toBe(0);
+  });
+
+  it("after the same mirror row transitions to APPROVED, it counts as verified and no longer as pending", async () => {
+    findManyEntries.mockResolvedValue([entry({ entryType: "SERVICE_VERIFIED", minutes: 90, approvalStatus: "APPROVED" })]);
+    const { getHouseholdLedgerTotals } = await import("../ledger");
+    const totals = await getHouseholdLedgerTotals("org-1", "period-1", "hh-1");
+    expect(totals.pendingMinutes).toBe(0);
+    expect(totals.verifiedMinutes).toBe(90);
   });
 });

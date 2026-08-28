@@ -1063,3 +1063,59 @@ approved plan held for all 12 stages. See
 `pta-volunteer-hours-release-notes.md` for the shipped feature summary
 and `pta-volunteer-hours-rollout-runbook.md` for what happens next,
 none of which proceeds without explicit approval.
+
+## VH-L follow-up — pending/rejected ledger-mirroring fix (pre-merge)
+
+Found during merge-readiness verification: the unified ledger only ever
+mirrored **approved** or **adjusted** hour entries
+(`mirrorHourEntryApprovalToLedger`/`mirrorHourEntryAdjustmentToLedger`,
+called from `approvePtaVolunteerHourEntry`/`adjustPtaVolunteerHourEntry`
+in `volunteers.ts`). Neither `setPtaVolunteerAttendanceStatus` (which
+creates the initial PENDING entry) nor `rejectPtaVolunteerHourEntry`
+ever mirrored — so `getHouseholdLedgerTotals().pendingMinutes`/
+`.rejectedMinutes` always read zero, regardless of real pending/
+rejected hours. This affected three surfaces: the family dashboard's
+"Pending approval" stat, Report A's `totalPendingMinutes`, and Report
+D's `PENDING` compliance filter (which never matched anything).
+`remainingMinutes` — and therefore every buyout quote, assessment
+amount, and financial figure — was **never affected**: confirmed by
+grep that every computation of it (`assessments.ts`, `corrections.ts`,
+`elections.ts` ×2, `reports/shared.ts`) uses the identical formula
+`max(0, required − verified − purchased − credit − waived)`, which
+never references pending/rejected minutes at all.
+
+**Fix**: hour entries are the only ledger source with a real state
+machine (PENDING → APPROVED or PENDING → REJECTED). A fresh
+`postLedgerEntry` insert per transition would either violate the
+`(organizationId, sourceType, sourceId, entryType)` uniqueness
+constraint, or — worse — silently no-op via `postLedgerEntry`'s
+insert-then-return-existing idempotency and leave the mirror row
+permanently stuck at whichever state it was first mirrored in. Added
+`upsertHourEntryLedgerRow` (private helper in `ledger.ts`): finds the
+existing mirror row for an hour entry (by `sourceType`/`sourceId`/
+`entryType`) and `UPDATE`s it in place if found, else creates fresh.
+`mirrorHourEntryApprovalToLedger` now calls it instead of inserting
+blindly (so an existing PENDING mirror transitions to APPROVED rather
+than being orphaned). Two new functions, `mirrorHourEntryPendingToLedger`
+(wired into `setPtaVolunteerAttendanceStatus`) and
+`mirrorHourEntryRejectionToLedger` (wired into
+`rejectPtaVolunteerHourEntry`), use the same upsert. Every other ledger
+entry type (purchase, assessment, waiver, refund, adjustment) is a
+one-shot event and correctly keeps using `postLedgerEntry` directly,
+unchanged.
+
+**Tests**: 8 new in `volunteers-ledger-wiring.test.ts` (wiring —
+mirrors on/off per flag, never blocks the real action if mirroring
+throws, never fires for NO_SHOW/EXCUSED), 10 new in `ledger.test.ts`
+(upsert-vs-create branching, including the specific "transitions the
+SAME row, not a second one" assertion the fix exists for). Additionally
+verified end-to-end against a real (non-mocked) Postgres instance in a
+throwaway scratch script (not committed): a real PENDING entry mirrors
+with `pendingMinutes: 90`; a real approval by a different officer
+transitions the *same* ledger row id to APPROVED with
+`pendingMinutes: 0, verifiedMinutes: 90`; a real rejection transitions
+a different entry's row to REJECTED — never more than one ledger row
+per hour entry at any point. Full suite: 3703 tests passing across 360
+files (zero regressions from the pre-fix baseline of 3686/360).
+Typecheck clean. Lint clean (same 4 pre-existing unrelated files as
+every prior stage). Production build compiles successfully.
