@@ -266,6 +266,28 @@ export const PERMISSIONS = {
   PTA_ELECTIONS_VIEW:   "pta:elections:view",
   PTA_ELECTIONS_MANAGE: "pta:elections:manage",
 
+  // Volunteer Hour Requirements & Buyout program (docs/pta-volunteer-hours.md).
+  // Dark until PtaProfile.ptaVolunteer*Enabled + the platform env kill-switch
+  // are on (see labs/pta/volunteer-hours/guard.ts) — holding one of these is
+  // necessary but never sufficient. Split mirrors the existing "hours aren't
+  // a Treasurer's job" rule (see PTA_VOLUNTEERS_CHECKIN comment above):
+  // requirements/assessment authority sits with STAFF/board roles, while the
+  // money side (pricing, payments, refunds, financial reports) sits with
+  // FINANCE — the two overlap only through reports:view/export, which both
+  // hold. "View reports" is deliberately separate from "view FINANCIAL
+  // reports" so a coordinator can see hours without seeing dollars.
+  PTA_VOLUNTEER_REQUIREMENTS_VIEW:         "pta:volunteer-requirements:view",
+  PTA_VOLUNTEER_REQUIREMENTS_MANAGE:       "pta:volunteer-requirements:manage",
+  PTA_VOLUNTEER_REQUIREMENTS_ADJUST_FAMILY: "pta:volunteer-requirements:adjust-family",
+  PTA_VOLUNTEER_BUYOUT_PRICING_MANAGE:     "pta:volunteer-buyout-pricing:manage",
+  PTA_VOLUNTEER_REPORTS_VIEW:              "pta:volunteer-reports:view",
+  PTA_VOLUNTEER_REPORTS_EXPORT:            "pta:volunteer-reports:export",
+  PTA_VOLUNTEER_FINANCIAL_REPORTS_VIEW:    "pta:volunteer-financial-reports:view",
+  PTA_VOLUNTEER_ASSESSMENTS_PREVIEW_POST:  "pta:volunteer-assessments:preview-post",
+  PTA_VOLUNTEER_PAYMENTS_RECORD_OFFLINE:   "pta:volunteer-payments:record-offline",
+  PTA_VOLUNTEER_PAYMENTS_REFUND:           "pta:volunteer-payments:refund",
+  PTA_VOLUNTEER_AUDIT_VIEW:                "pta:volunteer-audit:view",
+
   // Unestra for HOA — Property/Resident foundation (PR #43, see
   // docs/hoa-domain-model.md and docs/hoa-navigation-proposal.md). Gated
   // additionally by requireHoaCapability()'s primaryVertical === "HOA"
@@ -482,6 +504,17 @@ const ORG_OWNER_PERMISSIONS: Permission[] = [
   PERMISSIONS.PTA_CONCERNS_EXPORT,
   PERMISSIONS.PTA_ELECTIONS_VIEW,
   PERMISSIONS.PTA_ELECTIONS_MANAGE,
+  PERMISSIONS.PTA_VOLUNTEER_REQUIREMENTS_VIEW,
+  PERMISSIONS.PTA_VOLUNTEER_REQUIREMENTS_MANAGE,
+  PERMISSIONS.PTA_VOLUNTEER_REQUIREMENTS_ADJUST_FAMILY,
+  PERMISSIONS.PTA_VOLUNTEER_BUYOUT_PRICING_MANAGE,
+  PERMISSIONS.PTA_VOLUNTEER_REPORTS_VIEW,
+  PERMISSIONS.PTA_VOLUNTEER_REPORTS_EXPORT,
+  PERMISSIONS.PTA_VOLUNTEER_FINANCIAL_REPORTS_VIEW,
+  PERMISSIONS.PTA_VOLUNTEER_ASSESSMENTS_PREVIEW_POST,
+  PERMISSIONS.PTA_VOLUNTEER_PAYMENTS_RECORD_OFFLINE,
+  PERMISSIONS.PTA_VOLUNTEER_PAYMENTS_REFUND,
+  PERMISSIONS.PTA_VOLUNTEER_AUDIT_VIEW,
   PERMISSIONS.DOCUMENTS_READ,
   PERMISSIONS.DOCUMENTS_WRITE,
   PERMISSIONS.GOVERNANCE_READ,
@@ -617,6 +650,17 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.PTA_CONCERNS_EXPORT,
     PERMISSIONS.PTA_ELECTIONS_VIEW,
     PERMISSIONS.PTA_ELECTIONS_MANAGE,
+    PERMISSIONS.PTA_VOLUNTEER_REQUIREMENTS_VIEW,
+    PERMISSIONS.PTA_VOLUNTEER_REQUIREMENTS_MANAGE,
+    PERMISSIONS.PTA_VOLUNTEER_REQUIREMENTS_ADJUST_FAMILY,
+    PERMISSIONS.PTA_VOLUNTEER_BUYOUT_PRICING_MANAGE,
+    PERMISSIONS.PTA_VOLUNTEER_REPORTS_VIEW,
+    PERMISSIONS.PTA_VOLUNTEER_REPORTS_EXPORT,
+    PERMISSIONS.PTA_VOLUNTEER_FINANCIAL_REPORTS_VIEW,
+    PERMISSIONS.PTA_VOLUNTEER_ASSESSMENTS_PREVIEW_POST,
+    PERMISSIONS.PTA_VOLUNTEER_PAYMENTS_RECORD_OFFLINE,
+    PERMISSIONS.PTA_VOLUNTEER_PAYMENTS_REFUND,
+    PERMISSIONS.PTA_VOLUNTEER_AUDIT_VIEW,
     PERMISSIONS.DOCUMENTS_READ,
     PERMISSIONS.DOCUMENTS_WRITE,
     PERMISSIONS.GOVERNANCE_READ,
@@ -709,6 +753,21 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     // Treasurer must see who the board is (and was) — managing it is not a
     // financial function.
     PERMISSIONS.PTA_BOARD_VIEW,
+    // Volunteer-hours money side only — same "hours aren't a Treasurer's
+    // job" reasoning as PTA_VOLUNTEERS_MANAGE being withheld above.
+    // Deliberately NO requirements:view/manage/adjust-family or
+    // assessments:preview-post — the Treasurer prices, collects, and
+    // refunds buyouts/assessments, but does not define or adjust the
+    // underlying hour requirement, and does not decide when an assessment
+    // batch posts (that's a board-level operational call, not a financial
+    // one, even though the resulting charge is financial).
+    PERMISSIONS.PTA_VOLUNTEER_BUYOUT_PRICING_MANAGE,
+    PERMISSIONS.PTA_VOLUNTEER_REPORTS_VIEW,
+    PERMISSIONS.PTA_VOLUNTEER_REPORTS_EXPORT,
+    PERMISSIONS.PTA_VOLUNTEER_FINANCIAL_REPORTS_VIEW,
+    PERMISSIONS.PTA_VOLUNTEER_PAYMENTS_RECORD_OFFLINE,
+    PERMISSIONS.PTA_VOLUNTEER_PAYMENTS_REFUND,
+    PERMISSIONS.PTA_VOLUNTEER_AUDIT_VIEW,
     PERMISSIONS.DOCUMENTS_READ,
     PERMISSIONS.DOCUMENTS_WRITE,
     PERMISSIONS.GOVERNANCE_READ,
@@ -773,6 +832,17 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     // and reshaping positions stays ORG_OWNER/ORG_ADMIN (board authority) —
     // same reasoning as MEETINGS_MINUTES_APPROVE being withheld above.
     PERMISSIONS.PTA_BOARD_VIEW,
+    // Volunteer-hours operational side — mirrors PTA_VOLUNTEER_HOURS_APPROVE
+    // being granted above. Deliberately NO buyout-pricing:manage,
+    // financial-reports:view, payments:record-offline/refund, or audit:view
+    // — the money/pricing side of this feature stays with FINANCE, same
+    // split as budget:read (STAFF) vs. budget:manage (FINANCE/ORG_ADMIN+).
+    PERMISSIONS.PTA_VOLUNTEER_REQUIREMENTS_VIEW,
+    PERMISSIONS.PTA_VOLUNTEER_REQUIREMENTS_MANAGE,
+    PERMISSIONS.PTA_VOLUNTEER_REQUIREMENTS_ADJUST_FAMILY,
+    PERMISSIONS.PTA_VOLUNTEER_REPORTS_VIEW,
+    PERMISSIONS.PTA_VOLUNTEER_REPORTS_EXPORT,
+    PERMISSIONS.PTA_VOLUNTEER_ASSESSMENTS_PREVIEW_POST,
     PERMISSIONS.DOCUMENTS_READ,
     PERMISSIONS.DOCUMENTS_WRITE,
     // Governance READ only — publishing/superseding bylaws is board authority.
@@ -847,6 +917,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.PTA_DIRECTORY_READ,
     PERMISSIONS.PTA_ANALYTICS_READ,
     PERMISSIONS.PTA_BOARD_VIEW,
+    PERMISSIONS.PTA_VOLUNTEER_REQUIREMENTS_VIEW,
+    PERMISSIONS.PTA_VOLUNTEER_REPORTS_VIEW,
     PERMISSIONS.DOCUMENTS_READ,
     PERMISSIONS.GOVERNANCE_READ,
     PERMISSIONS.HOA_PROPERTIES_READ,

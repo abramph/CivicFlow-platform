@@ -68,7 +68,7 @@ starts clean from the spec.
 
 ## Stage status
 
-- VH-A: 🔲 not started — flags + requirement periods
+- VH-A: ✅ built + tested locally (not merged/deployed) — flags + requirement periods
 - VH-B: 🔲 not started — assignment/scoping/exemptions
 - VH-C: 🔲 not started — pricing window engine
 - VH-D: 🔲 not started — unified ledger
@@ -82,3 +82,77 @@ starts clean from the spec.
 - VH-L: 🔲 not started — notifications, audit UI, compatibility tests, mobile spec doc, final verification
 
 Each stage's design is appended below as it lands.
+
+## VH-A — Foundation (flags + requirement periods)
+
+Migration `20260828021826_vh_a_flags_and_requirement_periods` — purely
+additive (2 new enums, 6 `NOT NULL DEFAULT false` booleans on `PtaProfile`,
+1 new table with an FK to `Organization`). No existing table altered
+destructively; every existing volunteer/dues/payment row is untouched.
+
+**Flags**: `PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED` (env, `src/lib/env.ts`,
+`isPtaVolunteerHoursPlatformEnabled()`) + six `PtaProfile` booleans
+(`ptaVolunteerRequirementsEnabled/BuyoutEnabled/AssessmentsEnabled/
+ReportsEnabled/NotificationsEnabled/NativeMobileEnabled`), all default
+false. Guard `requireVolunteerHoursFlag(organizationId, capability)` in
+`src/lib/labs/pta/volunteer-hours/guard.ts` checks the platform switch
+first, then `ptaVolunteerRequirementsEnabled` (master — every downstream
+capability needs it), then the specific capability's own flag. Composed
+guards `requireVolunteerHoursAccess(permission, capability)` (RBAC + PTA
+vertical + flags) and `requireVolunteerHoursHouseholdAccess(capability)`
+(household-linkage + flags, for the family dashboard in VH-E). 9 new
+`PtaError` codes in `src/lib/labs/pta/errors.ts`.
+
+**Requirement periods**: `PtaVolunteerRequirementPeriod`
+(`src/lib/labs/pta/volunteer-hours/periods.ts`) — name, type (school
+year/term/calendar year/membership year/contract period/custom), dates,
+timezone (snapshotted from `OrgSettings.timezone` at creation, not a live
+join), required-hours default, deadlines, buyout/assessment windows,
+status (Draft/Active/Closed/Archived), admin notes, family policy text,
+and a free-text `scopeLabel` for running concurrent ACTIVE periods across
+separate programs/campuses/membership types (this codebase has no formal
+campus/program entity to key off instead — documented as a deliberate
+simplification). Conflict validation (`assertNoConflictingActivePeriod`)
+only fires between ACTIVE periods sharing a scope with overlapping date
+ranges; DRAFT/CLOSED/ARCHIVED periods never conflict. Legacy
+`PtaVolunteerRequirement` (org+schoolYear+requiredMinutes) is completely
+untouched and stays authoritative for every org that never enables the
+new flags.
+
+**Permissions**: added all 11 `pta:volunteer-*` permissions to
+`src/lib/rbac.ts` now (not deferred to VH-I) since the full role-split
+design was already finalized in the approved plan — VH-I becomes a
+permission-matrix audit/test pass rather than permission definition.
+Split mirrors the existing "hours aren't a Treasurer's job" rule:
+requirements/assessments authority → STAFF; pricing/payments/financial
+reports → FINANCE; ORG_OWNER/ORG_ADMIN get everything; READ_ONLY gets
+requirements:view + reports:view only; MEMBER gets none.
+
+**API**: `/api/labs/pta/volunteer-hours/periods` (GET list, POST create)
+and `/api/labs/pta/volunteer-hours/periods/[periodId]` (GET, PATCH).
+`/api/labs/pta/profile` PUT extended with the six flag fields, each
+gated by its own most-relevant manage permission (not one catch-all) so
+a Treasurer holding buyout-pricing:manage can turn buyout on without
+touching the requirements/assessments switches.
+
+**UI**: new "Volunteer Requirements & Buyout" section on
+`/labs/pta/settings` — `PtaVolunteerHoursSettings` (flag toggles, shown
+whenever the signed-in officer holds ANY relevant manage permission,
+independent of current flag state so there's no chicken-and-egg
+bootstrap problem) and `PtaVolunteerPeriodsManager` (period CRUD, shown
+only once `ptaVolunteerRequirementsEnabled` is actually on). No nav
+changes — same "settings-page-only, no placeholder nav" discipline as
+PTA-A.
+
+**Tests**: 33 new (env flag helper, guard flag-independence matrix incl.
+explicit "buyout-on doesn't imply assessments-on" / "reports-on doesn't
+imply buyout-on" cases, period date validation, conflict detection,
+timezone snapshot, audit events, not-found/cross-org isolation). Full
+existing suite green (329 PTA tests, 29 rbac/role-permission tests, no
+regressions). Typecheck + lint clean on every touched/new file.
+
+**Not yet built** (later stages): assignment/scoping/exemptions (VH-B),
+pricing windows (VH-C), the unified ledger (VH-D), and everything
+downstream. The settings page currently lets an admin define a period's
+default required hours only — no buyout, no payment, no report queries
+consult these tables yet.
