@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { createAuditEvent } from "@/lib/audit";
+import { isPtaVolunteerHoursPlatformEnabled } from "@/lib/env";
 import { sendEmail } from "@/lib/mail";
 import { resolveOrganizationAccess } from "@/lib/subscription-gate";
 import { PtaError } from "../errors";
@@ -337,6 +338,15 @@ export async function sendVolunteerHoursRateChangeNotices(
  * batch posts (see assessments.ts), since "a batch just posted" is an event,
  * not a recurring condition to poll for. */
 export async function sendVolunteerHoursNotificationsAllOrganizations(): Promise<{ organizationsProcessed: number; totalSent: number }> {
+  // Platform kill-switch checked here too, not just inside the per-org send
+  // functions below — this sweep must fail closed BEFORE it queries or
+  // iterates any organization, not just before it sends. Uses the same
+  // centralized isPtaVolunteerHoursPlatformEnabled() every HTTP route
+  // checks; never re-parses PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED itself.
+  if (!isPtaVolunteerHoursPlatformEnabled()) {
+    return { organizationsProcessed: 0, totalSent: 0 };
+  }
+
   const profiles = await prisma.ptaProfile.findMany({
     where: { ptaVolunteerNotificationsEnabled: true, ptaVolunteerRequirementsEnabled: true },
     select: { organizationId: true },

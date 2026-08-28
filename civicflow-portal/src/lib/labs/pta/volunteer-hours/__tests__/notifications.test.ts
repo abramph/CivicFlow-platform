@@ -229,22 +229,122 @@ describe("previewVolunteerHoursNotification", () => {
 });
 
 describe("sendVolunteerHoursNotificationsAllOrganizations", () => {
-  it("sweeps only organizations with notifications AND requirements enabled, across every ACTIVE period", async () => {
+  const ORIGINAL_ENV = { ...process.env };
+
+  // These tests exercise the REAL isPtaVolunteerHoursPlatformEnabled() (from
+  // @/lib/env, not mocked in this file) against every raw env-var value the
+  // parser must handle, so resetModules + a fresh dynamic import is required
+  // per test — getServerEnv() caches its parsed result at module scope, so
+  // without resetting the module registry a later process.env mutation
+  // would silently be ignored (see env-pta-volunteer-hours-flag.test.ts for
+  // the same pattern used to test the parser directly).
+  beforeEach(() => {
+    vi.resetModules();
+    process.env = { ...ORIGINAL_ENV };
+  });
+
+  afterEach(() => {
+    process.env = { ...ORIGINAL_ENV };
+  });
+
+  async function runSweep() {
+    const { sendVolunteerHoursNotificationsAllOrganizations } = await import("../notifications");
+    return sendVolunteerHoursNotificationsAllOrganizations();
+  }
+
+  it.each([
+    ["missing", undefined],
+    ["empty string", ""],
+    ["'false'", "false"],
+    ["'0'", "0"],
+    ["unexpected value", "yes"],
+  ])("platform variable %s: returns immediately without querying any organization", async (_label, value) => {
+    if (value === undefined) delete process.env.PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED;
+    else process.env.PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED = value;
+
+    const result = await runSweep();
+
+    expect(findManyProfiles).not.toHaveBeenCalled();
+    expect(listVolunteerRequirementPeriods).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(result).toEqual({ organizationsProcessed: 0, totalSent: 0 });
+  });
+
+  it.each([["'true'", "true"], ["'1'", "1"]])(
+    "platform variable %s: still requires each organization's own notifications+requirements flags",
+    async (_label, value) => {
+      process.env.PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED = value;
+      findManyProfiles.mockResolvedValue([{ organizationId: "org-1" }]);
+      listVolunteerRequirementPeriods.mockResolvedValue([
+        { id: "period-1", status: "ACTIVE", volunteerDeadline: new Date("2027-01-10T00:00:00Z") },
+        { id: "period-2", status: "CLOSED", volunteerDeadline: null },
+      ]);
+      getVolunteerRequirementPeriod.mockResolvedValue({
+        id: "period-1",
+        name: "2026-2027",
+        status: "ACTIVE",
+        volunteerDeadline: new Date("2027-01-10T00:00:00Z"),
+      });
+      listPricingWindows.mockResolvedValue([]);
+      buildHouseholdReportContexts.mockResolvedValue([]);
+
+      const result = await runSweep();
+
+      expect(findManyProfiles).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { ptaVolunteerNotificationsEnabled: true, ptaVolunteerRequirementsEnabled: true } })
+      );
+      expect(result.organizationsProcessed).toBe(1);
+    }
+  );
+
+  it("platform enabled but no organization matches the notifications+requirements flag combination: no notifications", async () => {
+    process.env.PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED = "true";
+    findManyProfiles.mockResolvedValue([]); // simulates zero rows matching ptaVolunteerNotificationsEnabled: true
+
+    const result = await runSweep();
+
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(result).toEqual({ organizationsProcessed: 0, totalSent: 0 });
+  });
+
+  it("platform enabled but the org's requirements flag is off: no notifications", async () => {
+    process.env.PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED = "true";
+    findManyProfiles.mockResolvedValue([]); // requirements:false is part of the same where-filter, so it's excluded the same way
+
+    const result = await runSweep();
+
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(result.totalSent).toBe(0);
+  });
+
+  it("repeated sweep does not send a duplicate notification for the same household/period", async () => {
+    process.env.PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED = "1";
     findManyProfiles.mockResolvedValue([{ organizationId: "org-1" }]);
     listVolunteerRequirementPeriods.mockResolvedValue([
       { id: "period-1", status: "ACTIVE", volunteerDeadline: new Date("2027-01-10T00:00:00Z") },
-      { id: "period-2", status: "CLOSED", volunteerDeadline: null },
     ]);
-    getVolunteerRequirementPeriod.mockResolvedValue({ id: "period-1", name: "2026-2027", status: "ACTIVE", volunteerDeadline: new Date("2027-01-10T00:00:00Z") });
+    getVolunteerRequirementPeriod.mockResolvedValue({
+      id: "period-1",
+      name: "2026-2027",
+      status: "ACTIVE",
+      volunteerDeadline: new Date("2027-01-10T00:00:00Z"),
+    });
     listPricingWindows.mockResolvedValue([]);
-    buildHouseholdReportContexts.mockResolvedValue([]);
+    buildHouseholdReportContexts.mockResolvedValue([NOT_MET_CONTEXT]);
+    findManyHouseholds.mockResolvedValue([HOUSEHOLD]);
 
-    const { sendVolunteerHoursNotificationsAllOrganizations } = await import("../notifications");
-    const result = await sendVolunteerHoursNotificationsAllOrganizations();
+    // First sweep: nothing logged yet, so it sends and logs.
+    findManyNotificationLogs.mockResolvedValueOnce([]);
+    const first = await runSweep();
+    expect(first.totalSent).toBe(1);
+    expect(sendEmail).toHaveBeenCalledTimes(1);
 
-    expect(findManyProfiles).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { ptaVolunteerNotificationsEnabled: true, ptaVolunteerRequirementsEnabled: true } })
-    );
-    expect(result.organizationsProcessed).toBe(1);
+    // Second sweep (module cache reset again, same as a real repeated cron
+    // invocation): the dedup row from the first send now exists.
+    vi.resetModules();
+    findManyNotificationLogs.mockResolvedValue([{ householdId: "hh-1" }]);
+    const second = await runSweep();
+    expect(second.totalSent).toBe(0);
+    expect(sendEmail).toHaveBeenCalledTimes(1); // still just the one call from the first sweep
   });
 });

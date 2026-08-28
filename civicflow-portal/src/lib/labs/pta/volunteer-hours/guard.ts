@@ -104,3 +104,33 @@ export async function checkVolunteerHoursAvailable(organizationId: string, capab
     return false;
   }
 }
+
+/**
+ * Settings-page visibility for the "Volunteer Requirements & Buyout" toggle
+ * panel itself (used by src/app/labs/pta/settings/page.tsx). Pure function,
+ * not a guard — the panel is where an org first turns the feature on, so it
+ * can't be gated on requireVolunteerHoursFlag (which requires requirements
+ * already being on). Gated on the platform switch AND at least one
+ * capability-manage permission, so that while the platform is dark, no org
+ * — reviewer orgs included, no org ID is ever special-cased here — can see
+ * or pre-stage these flags, regardless of any RBAC role including
+ * SUPER_ADMIN (whose org-scoped permissions equal ORG_OWNER's, not a
+ * separate always-visible bypass).
+ */
+export function canViewVolunteerHoursSettingsPanel(
+  platformEnabled: boolean,
+  permissions: {
+    canManageRequirements: boolean;
+    canManageBuyoutPricing: boolean;
+    canManageAssessments: boolean;
+    canManageReportsExport: boolean;
+  }
+): boolean {
+  return (
+    platformEnabled &&
+    (permissions.canManageRequirements ||
+      permissions.canManageBuyoutPricing ||
+      permissions.canManageAssessments ||
+      permissions.canManageReportsExport)
+  );
+}

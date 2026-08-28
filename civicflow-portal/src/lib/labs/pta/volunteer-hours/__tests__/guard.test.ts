@@ -160,4 +160,49 @@ describe("checkVolunteerHoursAvailable", () => {
     const { checkVolunteerHoursAvailable } = await import("../guard");
     await expect(checkVolunteerHoursAvailable("org-1", "requirements")).resolves.toBe(true);
   });
+
+  it("behaves identically for an ordinary org and an Apple/Google reviewer demo org — no organization-specific bypass", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(false);
+    const { checkVolunteerHoursAvailable } = await import("../guard");
+    const ordinary = await checkVolunteerHoursAvailable("org-ordinary", "requirements");
+    const reviewer = await checkVolunteerHoursAvailable("org-apple-reviewer-demo", "requirements");
+    expect(ordinary).toBe(false);
+    expect(reviewer).toBe(false);
+  });
+});
+
+describe("canViewVolunteerHoursSettingsPanel", () => {
+  const NO_PERMISSIONS = {
+    canManageRequirements: false,
+    canManageBuyoutPricing: false,
+    canManageAssessments: false,
+    canManageReportsExport: false,
+  };
+  const HAS_ONE_PERMISSION = { ...NO_PERMISSIONS, canManageRequirements: true };
+
+  it("is hidden when the platform switch is off, even for a role holding every manage permission", async () => {
+    const { canViewVolunteerHoursSettingsPanel } = await import("../guard");
+    const allPermissions = {
+      canManageRequirements: true,
+      canManageBuyoutPricing: true,
+      canManageAssessments: true,
+      canManageReportsExport: true,
+    };
+    expect(canViewVolunteerHoursSettingsPanel(false, allPermissions)).toBe(false);
+  });
+
+  it("is visible when the platform switch is on and the role holds at least one manage permission", async () => {
+    const { canViewVolunteerHoursSettingsPanel } = await import("../guard");
+    expect(canViewVolunteerHoursSettingsPanel(true, HAS_ONE_PERMISSION)).toBe(true);
+  });
+
+  it("is hidden from an unauthorized role even when the platform switch is on", async () => {
+    const { canViewVolunteerHoursSettingsPanel } = await import("../guard");
+    expect(canViewVolunteerHoursSettingsPanel(true, NO_PERMISSIONS)).toBe(false);
+  });
+
+  it("stays hidden when the platform switch is off regardless of which single permission is held", async () => {
+    const { canViewVolunteerHoursSettingsPanel } = await import("../guard");
+    expect(canViewVolunteerHoursSettingsPanel(false, HAS_ONE_PERMISSION)).toBe(false);
+  });
 });

@@ -1,7 +1,18 @@
 import { withApiErrorHandling } from "@/lib/api-route";
+import { isPtaVolunteerHoursPlatformEnabled } from "@/lib/env";
+import { PtaError } from "@/lib/labs/pta/errors";
 import { requirePtaAccess } from "@/lib/labs/pta/guard";
 import { getPtaProfile, upsertPtaProfile } from "@/lib/labs/pta/profile";
 import { parseJsonBody, z } from "@/lib/validation";
+
+const VOLUNTEER_HOURS_FLAG_FIELDS = [
+  "ptaVolunteerRequirementsEnabled",
+  "ptaVolunteerBuyoutEnabled",
+  "ptaVolunteerAssessmentsEnabled",
+  "ptaVolunteerReportsEnabled",
+  "ptaVolunteerNotificationsEnabled",
+  "ptaVolunteerNativeMobileEnabled",
+] as const;
 
 export async function GET() {
   return withApiErrorHandling(async () => {
@@ -37,6 +48,19 @@ export async function PUT(request: Request) {
   return withApiErrorHandling(async () => {
     const { organizationId, session } = await requirePtaAccess("pta:households:manage");
     const input = await parseJsonBody(request, bodySchema);
+    // Volunteer Hour Requirements & Buyout program: reject any attempt to
+    // change one of the six org-level flags while the platform kill-switch
+    // is off — fails closed even for a direct API call, so an org can never
+    // pre-stage itself to activate the instant the platform switch later
+    // turns on. Checked before any RBAC-scoped sub-check below, since this
+    // is a platform-wide gate, not a per-capability permission question.
+    const touchesVolunteerHoursFlags = VOLUNTEER_HOURS_FLAG_FIELDS.some((field) => input[field] !== undefined);
+    if (touchesVolunteerHoursFlags && !isPtaVolunteerHoursPlatformEnabled()) {
+      throw new PtaError(
+        "PTA_VOLUNTEER_HOURS_PLATFORM_DISABLED",
+        "Volunteer hour requirements are not available on this platform."
+      );
+    }
     // PTA-E: the concerns feature switch/label is governance surface — held
     // to pta:concerns:manage (ORG_ADMIN+), not general profile editing.
     if (input.concernsEnabled !== undefined || input.concernsLabel !== undefined) {
