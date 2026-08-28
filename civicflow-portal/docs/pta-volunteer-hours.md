@@ -71,7 +71,7 @@ starts clean from the spec.
 - VH-A: ✅ built + tested locally (not merged/deployed) — flags + requirement periods
 - VH-B: ✅ built + tested locally (not merged/deployed) — assignment/scoping/exemptions
 - VH-C: ✅ built + tested locally (not merged/deployed) — pricing window engine
-- VH-D: 🔲 not started — unified ledger
+- VH-D: ✅ built + tested locally (not merged/deployed) — unified ledger
 - VH-E: 🔲 not started — family dashboard + buyout election + dispute reporting
 - VH-F: 🔲 not started — checkout & payment
 - VH-G: 🔲 not started — assessment batch & posting
@@ -151,11 +151,10 @@ timezone snapshot, audit events, not-found/cross-org isolation). Full
 existing suite green (329 PTA tests, 29 rbac/role-permission tests, no
 regressions). Typecheck + lint clean on every touched/new file.
 
-**Not yet built** (later stages): the unified ledger (VH-D) and
-everything downstream. The settings pages currently let an admin define
-a period's default required hours, per-family assignment rules, and
-buyout pricing — but no purchase, payment, or report query consults
-these tables yet (nothing can actually be bought).
+**Not yet built** (later stages): the family-facing election/purchase
+flow (VH-E), checkout/payment (VH-F), assessment posting (VH-G), and
+everything downstream. Hours ARE now mirrored into the ledger when the
+feature is on, but nothing can yet be bought, paid for, or assessed.
 
 ## VH-B — Assignment, scoping & exemptions
 
@@ -283,3 +282,69 @@ matrix incl. adjacent-non-overlapping and different-rateType and
 inactive-window cases, edit-excludes-self, rate resolution incl.
 no-match-returns-null). Full existing suite green (364 PTA tests).
 Typecheck + lint clean.
+
+## VH-D — Unified volunteer ledger
+
+Migration `20260828024516_vh_d_unified_ledger` — purely additive (3
+enums, 1 new table with FKs to `Organization`,
+`PtaVolunteerRequirementPeriod`, `PtaHousehold`, and nullable
+`PtaHouseholdAdult`; 1 nullable `category` column added to the existing
+`PtaVolunteerHourEntry`; 1 new `donatedGoodsAsHoursEnabled` boolean on
+`PtaProfile`).
+
+**Model**: `PtaVolunteerLedgerEntry`
+(`src/lib/labs/pta/volunteer-hours/ledger.ts`) — deliberately
+COMPLEMENTS, never replaces, the existing `PtaVolunteerHourEntry`/
+`PtaVolunteerHourAdjustment` pair, which stays the authoritative raw
+per-shift record (PTA-G's existing reports keep reading those
+unmodified). 12 `entryType` values covering both hours
+(SERVICE_VERIFIED/CORRECTED, mirrored from the raw tables;
+PURCHASE/PURCHASE_REFUND/ADMIN_CREDIT/WAIVER) and money
+(ASSESSMENT_CHARGE/PAYMENT_ELECTRONIC/PAYMENT_OFFLINE/REFUND/
+WRITE_OFF), plus REQUIREMENT_CHANGE as an audit-trail-only marker.
+`PtaVolunteerCategory` (9 values incl. DONATED_GOODS, gated by the new
+`donatedGoodsAsHoursEnabled` policy toggle) classifies hour-type
+entries — "event" vs "non-event" hours are just EVENT_SERVICE vs
+everything else.
+
+**Two independent adjustment tools, on purpose**: VH-B's
+`PtaVolunteerRequirementAssignment` WAIVER changes what's REQUIRED (the
+denominator) for a whole scope/household for the period; a ledger
+WAIVER/ADMIN_CREDIT entry is a lightweight one-off credit toward what's
+SATISFIED (the numerator) without restructuring the period. Both
+require a reason and produce an audit trail; they compose rather than
+conflict.
+
+**Idempotent posting**: `postLedgerEntry` — insert-then-catch-P2002 on
+`(organizationId, sourceType, sourceId, entryType)`, identical
+discipline to `StripeWebhookEvent.stripeEventId`. Manual entries (no
+natural source record) have a null `sourceId`, which Postgres never
+treats as colliding with another null — they're exempt from the guard
+by design, not accidentally unprotected.
+
+**Totals**: `getHouseholdLedgerTotals` — pending/rejected entries are
+never folded into `verifiedMinutes` (spec §10/§14, explicit regression
+tests), purchased/waived/credit minutes stay in their own columns
+(never reported as "volunteered"), `PURCHASE_REFUND` nets against
+`PURCHASE` floored at zero, and the financial rollup
+(`outstandingBalanceCents`) nets charges against payments/refunds/
+write-offs, also floored at zero.
+
+**Wiring**: `approvePtaVolunteerHourEntry`/`adjustPtaVolunteerHourEntry`
+(`src/lib/labs/pta/volunteers.ts`) now call a best-effort mirror after
+their existing write completes — checked platform-flag-first (so a
+disabled platform touches zero PtaProfile rows, confirmed by a
+dedicated test), then org-flag, then wrapped in try/catch so a ledger
+bug can never fail an approval that already succeeded in the raw table.
+The applicable period is resolved generically by "which ACTIVE period's
+date range contains right now" (`findApplicablePeriod`) — period-type-
+agnostic, and a deliberate no-op (not a guess) when zero periods are
+active, e.g. an org that hasn't set up VH-A yet.
+
+**Tests**: 21 in `ledger.test.ts` (idempotency incl. P2002-without-a-
+sourceId re-throwing, the full acceptance-scenario-1 numbers, approval-
+status exclusion, financial rollup, category-inference mirroring) + 6
+in a new `volunteers-ledger-wiring.test.ts` (platform-flag-first
+short-circuit, org-flag gating, mirror failure never blocking the
+primary approval). Full existing suite green (391 PTA tests). Typecheck
++ lint clean.

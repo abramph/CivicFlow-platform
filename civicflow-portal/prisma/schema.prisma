@@ -797,6 +797,7 @@ model Organization {
   ptaVolunteerRequirementPeriods     PtaVolunteerRequirementPeriod[]
   ptaVolunteerRequirementAssignments PtaVolunteerRequirementAssignment[]
   ptaVolunteerPricingWindows         PtaVolunteerPricingWindow[]
+  ptaVolunteerLedgerEntries          PtaVolunteerLedgerEntry[]
 
   hoaProperties             Property[]
   hoaPropertyResidents      PropertyResident[]
@@ -4610,6 +4611,11 @@ model PtaProfile {
   /// code in the initial backend/web program — civicflow-mobile source is
   /// untouched while the current iOS build is under Apple review.
   ptaVolunteerNativeMobileEnabled  Boolean            @default(false)
+  /// VH-D: whether DONATED_GOODS ledger entries are permitted at all — a
+  /// narrower policy toggle than the six capability flags above (governs one
+  /// category, not a whole surface), default false per spec §10 ("if enabled
+  /// by the organization").
+  donatedGoodsAsHoursEnabled       Boolean            @default(false)
   createdAt                        DateTime           @default(now())
   updatedAt                        DateTime           @updatedAt
 
@@ -4657,6 +4663,7 @@ model PtaHousehold {
   eventRsvps                      PtaEventRsvp[]
   meetingRsvps                    PtaMeetingRsvp[]
   volunteerRequirementAssignments PtaVolunteerRequirementAssignment[]
+  volunteerLedgerEntries          PtaVolunteerLedgerEntry[]
 
   @@unique([organizationId, displayName, schoolYear])
   @@index([organizationId])
@@ -4699,20 +4706,21 @@ model PtaHouseholdAdult {
   createdAt             DateTime                 @default(now())
   updatedAt             DateTime                 @updatedAt
 
-  organization         Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  household            PtaHousehold              @relation("PtaHouseholdAdults", fields: [householdId], references: [id], onDelete: Cascade)
-  user                 User?                     @relation(fields: [userId], references: [id], onDelete: SetNull)
-  primaryContactFor    PtaHousehold[]            @relation("PtaHouseholdPrimaryContact")
-  secondaryContactFor  PtaHousehold[]            @relation("PtaHouseholdSecondaryContact")
-  volunteerSignups     PtaVolunteerSignup[]
-  chairOfCommittees    PtaCommittee[]            @relation("PtaCommitteeChair")
-  coChairOfCommittees  PtaCommittee[]            @relation("PtaCommitteeCoChair")
-  liaisonOfCommittees  PtaCommittee[]            @relation("PtaCommitteeBoardLiaison")
-  committeeMemberships PtaCommitteeMember[]
-  invites              PtaHouseholdAdultInvite[]
-  officerAssignments   PtaOfficerAssignment[]
-  electionCandidacies  PtaElectionCandidate[]
-  electionVoterRows    PtaElectionVoter[]
+  organization           Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  household              PtaHousehold              @relation("PtaHouseholdAdults", fields: [householdId], references: [id], onDelete: Cascade)
+  user                   User?                     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  primaryContactFor      PtaHousehold[]            @relation("PtaHouseholdPrimaryContact")
+  secondaryContactFor    PtaHousehold[]            @relation("PtaHouseholdSecondaryContact")
+  volunteerSignups       PtaVolunteerSignup[]
+  chairOfCommittees      PtaCommittee[]            @relation("PtaCommitteeChair")
+  coChairOfCommittees    PtaCommittee[]            @relation("PtaCommitteeCoChair")
+  liaisonOfCommittees    PtaCommittee[]            @relation("PtaCommitteeBoardLiaison")
+  committeeMemberships   PtaCommitteeMember[]
+  invites                PtaHouseholdAdultInvite[]
+  officerAssignments     PtaOfficerAssignment[]
+  electionCandidacies    PtaElectionCandidate[]
+  electionVoterRows      PtaElectionVoter[]
+  volunteerLedgerEntries PtaVolunteerLedgerEntry[]
 
   @@unique([organizationId, userId])
   @@index([organizationId])
@@ -5077,6 +5085,12 @@ model PtaVolunteerHourEntry {
   opportunityId    String
   slotId           String
   creditedMinutes  Int
+  /// VH-D (docs/pta-volunteer-hours.md): nullable/additive — existing rows
+  /// and every pre-VH-D read path are untouched. Null means "uncategorized";
+  /// the ledger falls back to inferring EVENT_SERVICE (opportunity.eventId
+  /// set) vs OTHER_APPROVED_SERVICE at mirroring time rather than forcing a
+  /// guess onto the stored raw entry itself.
+  category         PtaVolunteerCategory?
   status           PtaVolunteerHourEntryStatus @default(PENDING)
   source           PtaVolunteerEntrySource     @default(OFFICER_MANUAL)
   approvedByUserId String?
@@ -5200,6 +5214,7 @@ model PtaVolunteerRequirementPeriod {
   organization   Organization                        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   assignments    PtaVolunteerRequirementAssignment[]
   pricingWindows PtaVolunteerPricingWindow[]
+  ledgerEntries  PtaVolunteerLedgerEntry[]
 
   @@index([organizationId, status])
   @@index([organizationId, startsOn, endsOn])
@@ -5336,6 +5351,122 @@ model PtaVolunteerPricingWindow {
 
   @@index([organizationId, periodId])
   @@index([periodId, rateType, active])
+}
+
+/// Volunteer Hour Requirements & Buyout program, VH-D (docs/pta-volunteer-hours.md).
+/// Reused by both the raw PtaVolunteerHourEntry (added nullable/additive
+/// below) and the ledger's SERVICE_VERIFIED entries. "Total event volunteer
+/// hours" = verified hours categorized EVENT_SERVICE; every other category
+/// is "non-event."
+enum PtaVolunteerCategory {
+  EVENT_SERVICE
+  COMMITTEE_SERVICE
+  CLASSROOM_SERVICE
+  SCHOOL_ACTIVITY
+  FUNDRAISING
+  ADMINISTRATIVE_SUPPORT
+  AT_HOME_SERVICE
+  /// Only ever created when PtaProfile.donatedGoodsAsHoursEnabled is true.
+  DONATED_GOODS
+  OTHER_APPROVED_SERVICE
+}
+
+/// SERVICE_VERIFIED/CORRECTED mirror the existing PtaVolunteerHourEntry/
+/// Adjustment lifecycle into the ledger (never replace those tables —
+/// see the model doc below). PURCHASE/PURCHASE_REFUND, ASSESSMENT_CHARGE,
+/// PAYMENT_ELECTRONIC/OFFLINE, REFUND, and WRITE_OFF are posted by VH-F/
+/// VH-G/VH-H. ADMIN_CREDIT and WAIVER are lightweight ad-hoc ledger
+/// adjustments an officer can post directly (reason+audit required, same
+/// as any non-STANDARD VH-B assignment) WITHOUT restructuring the whole
+/// period's requirement the way a VH-B assignment does — two independent
+/// tools for two different situations. REQUIREMENT_CHANGE is an audit
+/// trail entry only (no minutes/amount of its own) recording that a
+/// family's resolved requirement changed, e.g. after a VH-B assignment
+/// edit — VH-H's correction workflow posts these.
+enum PtaVolunteerLedgerEntryType {
+  SERVICE_VERIFIED
+  CORRECTED
+  PURCHASE
+  PURCHASE_REFUND
+  ADMIN_CREDIT
+  WAIVER
+  REQUIREMENT_CHANGE
+  ASSESSMENT_CHARGE
+  PAYMENT_ELECTRONIC
+  PAYMENT_OFFLINE
+  REFUND
+  WRITE_OFF
+}
+
+enum PtaVolunteerLedgerApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  VOIDED
+}
+
+/// The unified family-level obligation ledger (spec §9) — hours AND money,
+/// one queryable timeline. Deliberately COMPLEMENTS, does not replace,
+/// PtaVolunteerHourEntry/PtaVolunteerHourAdjustment, which stay the
+/// authoritative raw per-shift PENDING/APPROVED/REJECTED record (PTA-G's
+/// existing reports keep reading those unmodified). One mirrored
+/// SERVICE_VERIFIED row is posted per approved hour entry via
+/// postLedgerEntry's idempotent insert-then-catch-P2002 pattern (same
+/// discipline as StripeWebhookEvent.stripeEventId) — duplicate
+/// approval-webhook/job runs can never double-count hours or money.
+model PtaVolunteerLedgerEntry {
+  id                  String                           @id @default(cuid())
+  organizationId      String
+  requirementPeriodId String
+  householdId         String
+  /// Null for household-level entries (a purchase, an assessment charge) —
+  /// set only when the entry is attributable to one specific adult (a
+  /// verified hour entry, an individual credit).
+  householdAdultId    String?
+  entryType           PtaVolunteerLedgerEntryType
+  /// Null for entry types that aren't volunteer-activity hours (PURCHASE,
+  /// PAYMENT_*, ASSESSMENT_CHARGE, REFUND, WRITE_OFF, REQUIREMENT_CHANGE).
+  category            PtaVolunteerCategory?
+  /// Signed (+/-) minutes this entry contributes — 0 for pure-financial
+  /// entry types with no hour component of their own.
+  minutes             Int                              @default(0)
+  /// Cents — null for pure-hour entry types (SERVICE_VERIFIED, CORRECTED)
+  /// that carry no financial component.
+  amountCents         Int?
+  effectiveDate       DateTime
+  approvalStatus      PtaVolunteerLedgerApprovalStatus @default(APPROVED)
+  /// Polymorphic pointer to the record that produced this entry (e.g.
+  /// "hourEntry"/PtaVolunteerHourEntry.id, "purchase"/PtaVolunteerBuyoutPurchase.id
+  /// once VH-F ships) — null for manual ADMIN_CREDIT/WAIVER entries, which
+  /// have no natural source record and don't need idempotency protection.
+  sourceType          String?
+  sourceId            String?
+  description         String?
+  /// Required (validated in code) for ADMIN_CREDIT, WAIVER, WRITE_OFF, and
+  /// any CORRECTED entry — mirrors VH-B's non-STANDARD-assignment-needs-a-reason rule.
+  reason              String?
+  createdByUserId     String?
+  approvedByUserId    String?
+  /// Set when this entry reverses an earlier one (VH-H) — the original
+  /// entry is never mutated or deleted, only ever offset by a new row.
+  reversalOfId        String?
+  createdAt           DateTime                         @default(now())
+  updatedAt           DateTime                         @updatedAt
+
+  organization   Organization                  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  period         PtaVolunteerRequirementPeriod @relation(fields: [requirementPeriodId], references: [id], onDelete: Cascade)
+  household      PtaHousehold                  @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  householdAdult PtaHouseholdAdult?            @relation(fields: [householdAdultId], references: [id], onDelete: SetNull)
+  reversalOf     PtaVolunteerLedgerEntry?      @relation("PtaVolunteerLedgerEntryReversal", fields: [reversalOfId], references: [id], onDelete: SetNull)
+  reversals      PtaVolunteerLedgerEntry[]     @relation("PtaVolunteerLedgerEntryReversal")
+
+  // NULL sourceType/sourceId never collide with each other (Postgres unique
+  // constraints treat NULL as distinct) — manual entries are exempt from
+  // this idempotency guard by design; only source-backed entries need it.
+  @@unique([organizationId, sourceType, sourceId, entryType], name: "ledgerEntry_source_idempotency")
+  @@index([organizationId, requirementPeriodId, householdId])
+  @@index([organizationId, householdId])
+  @@index([entryType])
 }
 
 /// PTA Vertical 2.0, PR PTA-B — lifecycle status. A committee is never hard

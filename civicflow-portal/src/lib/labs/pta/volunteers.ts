@@ -1,9 +1,28 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { createAuditEvent } from "@/lib/audit";
+import { isPtaVolunteerHoursPlatformEnabled } from "@/lib/env";
 import { PtaError } from "./errors";
 import { getPtaProfile } from "./profile";
 import { resolveSchoolYearId } from "./school-years";
+import { mirrorHourEntryAdjustmentToLedger, mirrorHourEntryApprovalToLedger } from "./volunteer-hours/ledger";
+
+/** Volunteer Hour Requirements & Buyout program (docs/pta-volunteer-hours.md):
+ * the raw hour-entry lifecycle below stays completely unchanged for every
+ * org — this only ADDS a best-effort mirror into the new unified ledger
+ * when the org has actually enabled the feature. A ledger-mirroring failure
+ * is logged, never allowed to fail the underlying approval/adjustment that
+ * already succeeded. */
+async function mirrorToLedgerIfEnabled(organizationId: string, mirror: () => Promise<unknown>) {
+  if (!isPtaVolunteerHoursPlatformEnabled()) return;
+  const profile = await getPtaProfile(organizationId);
+  if (!profile?.ptaVolunteerRequirementsEnabled) return;
+  try {
+    await mirror();
+  } catch (error) {
+    console.error("pta.volunteer_hours.ledger_mirror_failed", { organizationId, error });
+  }
+}
 
 /**
  * Volunteer opportunities, shifts ("slots"), assignments ("signups"),
@@ -993,6 +1012,8 @@ export async function approvePtaVolunteerHourEntry(organizationId: string, entry
     metadata: { creditedMinutes: updated.creditedMinutes, adjustedAtApproval: options.adjustedMinutes != null },
   });
 
+  await mirrorToLedgerIfEnabled(organizationId, () => mirrorHourEntryApprovalToLedger(organizationId, updated));
+
   return updated;
 }
 
@@ -1030,7 +1051,7 @@ export async function adjustPtaVolunteerHourEntry(organizationId: string, entryI
 
   const newTotal = Math.min(Math.max(0, entry.creditedMinutes + minuteAdjustment), MAX_CREDITED_MINUTES);
 
-  const [updatedEntry] = await prisma.$transaction([
+  const [updatedEntry, createdAdjustment] = await prisma.$transaction([
     prisma.ptaVolunteerHourEntry.update({ where: { id: entryId }, data: { creditedMinutes: newTotal } }),
     prisma.ptaVolunteerHourAdjustment.create({ data: { organizationId, hourEntryId: entryId, minuteAdjustment, reason, actorUserId } }),
   ]);
@@ -1044,6 +1065,10 @@ export async function adjustPtaVolunteerHourEntry(organizationId: string, entryI
     entityId: entryId,
     metadata: { minuteAdjustment, newTotal, reason },
   });
+
+  await mirrorToLedgerIfEnabled(organizationId, () =>
+    mirrorHourEntryAdjustmentToLedger(organizationId, createdAdjustment, updatedEntry)
+  );
 
   return updatedEntry;
 }
