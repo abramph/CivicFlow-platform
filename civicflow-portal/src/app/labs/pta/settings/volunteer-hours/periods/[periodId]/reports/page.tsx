@@ -27,8 +27,15 @@ export default async function PtaVolunteerReportsPage({ params }: { params: Prom
         description="On-screen reports and formatted .xlsx exports. Every report shown here calls the same server-side calculation as the family dashboard and the assessment batch — totals can never diverge between what you see and what you download."
         actions={[{ href: `/labs/pta/settings/volunteer-hours/periods/${periodId}`, label: "Back to period" }]}
       />
-      <SectionCard title="Volunteer Hours Reports" description="Family Summary, Detailed Activity, Event Hours, and Compliance reports.">
-        <PtaVolunteerReportsCenter periodId={periodId} canExport={can("pta:volunteer-reports:export")} />
+      <SectionCard
+        title="Volunteer Hours Reports"
+        description="Family Summary, Detailed Activity, Event Hours, Compliance, Purchased-Hours & Financial, Individual Volunteer, and Volunteer Category reports."
+      >
+        <PtaVolunteerReportsCenter
+          periodId={periodId}
+          canExport={can("pta:volunteer-reports:export")}
+          canViewFinancial={can("pta:volunteer-financial-reports:view")}
+        />
       </SectionCard>
     </main>
   );

@@ -76,10 +76,10 @@ export async function requireVolunteerHoursFlag(organizationId: string, capabili
 /** Officer/admin-facing composed guard: RBAC permission + PTA vertical +
  * platform/org flags for the requested capability. Mirrors requirePtaAccess. */
 export async function requireVolunteerHoursAccess(permission: Permission, capability: VolunteerHoursCapability) {
-  const { organizationId, session, role } = await requirePermission(permission, "throw");
+  const { organizationId, session, role, can } = await requirePermission(permission, "throw");
   await requirePtaVertical(organizationId);
   await requireVolunteerHoursFlag(organizationId, capability);
-  return { organizationId, session, role };
+  return { organizationId, session, role, can };
 }
 
 /** Family/household self-service composed guard: linkage-based access (no

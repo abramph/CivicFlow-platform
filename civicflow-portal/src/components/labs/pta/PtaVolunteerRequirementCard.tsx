@@ -39,7 +39,7 @@ function money(cents: number) {
  * responsive: single column on phones, side-by-side stat groups from `sm`
  * up, per spec §6's phone/tablet/desktop requirement.
  */
-export function PtaVolunteerRequirementCard({ buyoutAvailable }: { buyoutAvailable: boolean }) {
+export function PtaVolunteerRequirementCard({ buyoutAvailable, reportsAvailable }: { buyoutAvailable: boolean; reportsAvailable: boolean }) {
   const router = useRouter();
   const [summary, setSummary] = useState<SummaryLike | null>(null);
   const [loading, setLoading] = useState(true);
@@ -380,6 +380,19 @@ export function PtaVolunteerRequirementCard({ buyoutAvailable }: { buyoutAvailab
               ) : null}
             </div>
           ) : null}
+        </div>
+      ) : null}
+
+      {reportsAvailable ? (
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
+          <h4 className="text-sm font-semibold text-slate-900">Your volunteer report</h4>
+          <p className="mt-1 text-sm text-slate-600">Download a summary of your family&apos;s volunteer hours, purchases, and assessments for this period.</p>
+          <a
+            href="/api/labs/pta/volunteer-hours/my-household/report/export"
+            className="mt-2 inline-block rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50"
+          >
+            Download my volunteer report
+          </a>
         </div>
       ) : null}
 

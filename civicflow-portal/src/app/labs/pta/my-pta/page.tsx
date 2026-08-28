@@ -45,9 +45,10 @@ export default async function PtaMyPtaPage() {
 
   const now = new Date();
   const in90Days = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
-  const [volunteerRequirementsAvailable, volunteerBuyoutAvailable] = await Promise.all([
+  const [volunteerRequirementsAvailable, volunteerBuyoutAvailable, volunteerReportsAvailable] = await Promise.all([
     checkVolunteerHoursAvailable(organizationId, "requirements"),
     checkVolunteerHoursAvailable(organizationId, "buyout"),
+    checkVolunteerHoursAvailable(organizationId, "reports"),
   ]);
   const [profile, documents, governance, roster, meetings, myHandoff] = await Promise.all([
     prisma.ptaProfile.findUnique({ where: { organizationId }, select: { schoolOrPtaName: true, contactEmail: true, currentSchoolYear: true } }),
@@ -115,7 +116,7 @@ export default async function PtaMyPtaPage() {
       ) : null}
       {volunteerRequirementsAvailable ? (
         <SectionCard title="Volunteer Requirement" description="Your family's volunteer-hour requirement, progress, and options.">
-          <PtaVolunteerRequirementCard buyoutAvailable={volunteerBuyoutAvailable} />
+          <PtaVolunteerRequirementCard buyoutAvailable={volunteerBuyoutAvailable} reportsAvailable={volunteerReportsAvailable} />
         </SectionCard>
       ) : null}
       <SectionCard title="Your PTA at a glance" description="Everything here is shared with members deliberately by your officers.">

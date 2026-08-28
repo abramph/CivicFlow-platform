@@ -5,6 +5,7 @@ import type { ReportColumn } from "./xlsx-builder";
 import type { ReportData, VolunteerReportFilters } from "./types";
 
 export interface DetailActivityRow {
+  householdAdultId: string;
   householdDisplayName: string;
   volunteerName: string;
   relationship: string | null;
@@ -82,6 +83,7 @@ export async function buildDetailActivityReportData(
 
     const adult = adultById.get(entry.householdAdultId);
     rows.push({
+      householdAdultId: entry.householdAdultId,
       householdDisplayName: entry.householdId ? (householdById.get(entry.householdId)?.displayName ?? "") : "",
       volunteerName: adult?.name ?? "Unknown",
       relationship: adult?.relationshipLabel ?? null,

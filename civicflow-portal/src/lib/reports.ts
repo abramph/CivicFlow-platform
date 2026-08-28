@@ -1,5 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { createAuditEvent } from "@/lib/audit";
+import { buildVolunteerReportExportFile, isVolunteerReportType } from "@/lib/labs/pta/volunteer-hours/reports/dispatch";
+import { resolveGeneratedByName, volunteerReportFiltersFromJson } from "@/lib/labs/pta/volunteer-hours/reports/shared";
 import { buildSafeObjectKey, uploadBufferToSpaces } from "@/lib/storage";
 
 type SupportedReportType =
@@ -87,6 +89,54 @@ async function buildReportCsv(organizationId: string, reportType: SupportedRepor
 export async function processQueuedReportExport(exportId: string) {
   const exportJob = await prisma.reportExport.findFirst({ where: { id: exportId } });
   if (!exportJob) throw new Error("Report export not found");
+
+  // Volunteer Hour Requirements & Buyout program, VH-K (docs/pta-volunteer-hours.md):
+  // background generation for Reports A-G, reusing this exact worker/queue
+  // rather than a second polling loop. Real .xlsx (not CSV), so it's kept as
+  // its own branch ahead of the generic CSV path below rather than folded
+  // into buildReportCsv.
+  if (isVolunteerReportType(exportJob.reportType)) {
+    await prisma.reportExport.update({ where: { id: exportId }, data: { status: "PROCESSING" } });
+    try {
+      const filters = volunteerReportFiltersFromJson(exportJob.filters);
+      const generatedByName = await resolveGeneratedByName(exportJob.createdByUserId ?? "");
+      const { buffer, filename } = await buildVolunteerReportExportFile(exportJob.organizationId, exportJob.reportType, filters, generatedByName);
+      const fileKey = buildSafeObjectKey(`pta-volunteer-reports/${exportJob.organizationId}`, filename);
+
+      await uploadBufferToSpaces({
+        key: fileKey,
+        buffer,
+        contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        metadata: { reportExportId: exportJob.id, organizationId: exportJob.organizationId },
+      });
+
+      await prisma.reportExport.update({
+        where: { id: exportId },
+        data: { status: "COMPLETED", fileUrl: fileKey, completedAt: new Date() },
+      });
+
+      await createAuditEvent({
+        organizationId: exportJob.organizationId,
+        actorUserId: exportJob.createdByUserId,
+        action: "export",
+        entityType: "pta_volunteer_report_export",
+        entityId: exportJob.id,
+        metadata: { status: "COMPLETED", reportType: exportJob.reportType, fileKey },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Report export failed";
+      await prisma.reportExport.update({ where: { id: exportId }, data: { status: "FAILED", errorMessage: message } });
+      await createAuditEvent({
+        organizationId: exportJob.organizationId,
+        actorUserId: exportJob.createdByUserId,
+        action: "export",
+        entityType: "pta_volunteer_report_export",
+        entityId: exportJob.id,
+        metadata: { status: "FAILED", error: message },
+      });
+    }
+    return;
+  }
 
   if (!SUPPORTED_REPORT_TYPES.has(exportJob.reportType as SupportedReportType)) {
     await prisma.reportExport.update({

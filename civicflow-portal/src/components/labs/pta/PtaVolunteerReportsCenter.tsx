@@ -1,14 +1,35 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
-type ReportType = "family-summary" | "detail-activity" | "event-hours" | "compliance";
+type ReportType =
+  | "family-summary"
+  | "detail-activity"
+  | "event-hours"
+  | "compliance"
+  | "financial"
+  | "individual-volunteer"
+  | "volunteer-category";
 
 const REPORT_LABELS: Record<ReportType, string> = {
   "family-summary": "A — Family Volunteer Summary",
   "detail-activity": "B — Detailed Family Volunteer Activity",
   "event-hours": "C — Event Volunteer-Hours",
   compliance: "D — Volunteer Requirement Compliance",
+  financial: "E — Purchased-Hours & Financial",
+  "individual-volunteer": "F — Individual Volunteer",
+  "volunteer-category": "G — Volunteer Category",
+};
+
+const REPORT_TYPE_TO_EXPORT_TYPE: Record<ReportType, string> = {
+  "family-summary": "PTA_VOLUNTEER_FAMILY_SUMMARY",
+  "detail-activity": "PTA_VOLUNTEER_DETAIL_ACTIVITY",
+  "event-hours": "PTA_VOLUNTEER_EVENT_HOURS",
+  compliance: "PTA_VOLUNTEER_COMPLIANCE",
+  financial: "PTA_VOLUNTEER_FINANCIAL",
+  "individual-volunteer": "PTA_VOLUNTEER_INDIVIDUAL",
+  "volunteer-category": "PTA_VOLUNTEER_CATEGORY",
 };
 
 const VOLUNTEER_CATEGORIES = [
@@ -126,6 +147,37 @@ const COLUMNS: Record<ReportType, DisplayColumn[]> = {
     { key: "daysRemainingOrOverdue", header: "Days left/over", kind: "integer" },
     { key: "estimatedFinalAssessmentCents", header: "Est. assessment", kind: "currency" },
   ],
+  financial: [
+    { key: "householdDisplayName", header: "Family", kind: "text" },
+    { key: "transactionType", header: "Type", kind: "text" },
+    { key: "transactionDate", header: "Date", kind: "date" },
+    { key: "description", header: "Description", kind: "text" },
+    { key: "hoursMinutes", header: "Hours", kind: "hours" },
+    { key: "totalAmountCents", header: "Total", kind: "currency" },
+    { key: "amountPaidCents", header: "Paid", kind: "currency" },
+    { key: "refundedCents", header: "Refunded", kind: "currency" },
+    { key: "outstandingCents", header: "Outstanding", kind: "currency" },
+    { key: "paymentMethod", header: "Payment method", kind: "text" },
+    { key: "status", header: "Status", kind: "text" },
+  ],
+  "individual-volunteer": [
+    { key: "volunteerName", header: "Volunteer", kind: "text" },
+    { key: "householdDisplayName", header: "Family", kind: "text" },
+    { key: "verifiedMinutes", header: "Verified (h)", kind: "hours" },
+    { key: "eventMinutes", header: "Event (h)", kind: "hours" },
+    { key: "nonEventMinutes", header: "Non-event (h)", kind: "hours" },
+    { key: "entryCount", header: "Entries", kind: "integer" },
+    { key: "categoriesServed", header: "Categories", kind: "text" },
+    { key: "lastServiceDate", header: "Last service date", kind: "date" },
+  ],
+  "volunteer-category": [
+    { key: "category", header: "Category", kind: "text" },
+    { key: "verifiedMinutes", header: "Verified (h)", kind: "hours" },
+    { key: "pendingMinutes", header: "Pending (h)", kind: "hours" },
+    { key: "entryCount", header: "Entries", kind: "integer" },
+    { key: "uniqueVolunteers", header: "Volunteers", kind: "integer" },
+    { key: "uniqueFamilies", header: "Families", kind: "integer" },
+  ],
 };
 
 function formatCell(kind: ColumnKind, value: unknown): string {
@@ -153,7 +205,16 @@ function formatCell(kind: ColumnKind, value: unknown): string {
 /** VH-J Volunteer Hours Reporting Center — Reports A-D. On-screen tables call
  * the exact same report-data API the .xlsx export route calls, so the numbers
  * shown here can never diverge from the downloaded workbook (spec §14). */
-export function PtaVolunteerReportsCenter({ periodId, canExport }: { periodId: string; canExport: boolean }) {
+export function PtaVolunteerReportsCenter({
+  periodId,
+  canExport,
+  canViewFinancial,
+}: {
+  periodId: string;
+  canExport: boolean;
+  canViewFinancial: boolean;
+}) {
+  const router = useRouter();
   const [reportType, setReportType] = useState<ReportType>("family-summary");
   const [dateRangeStart, setDateRangeStart] = useState("");
   const [dateRangeEnd, setDateRangeEnd] = useState("");
@@ -166,6 +227,8 @@ export function PtaVolunteerReportsCenter({ periodId, canExport }: { periodId: s
   const [data, setData] = useState<ReportDataShape | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingQueueExport, setPendingQueueExport] = useState(false);
+  const [exportsRefreshToken, setExportsRefreshToken] = useState(0);
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams();
@@ -209,6 +272,39 @@ export function PtaVolunteerReportsCenter({ periodId, canExport }: { periodId: s
   const columns = COLUMNS[reportType];
   const exportHref = `/api/labs/pta/volunteer-hours/periods/${periodId}/reports/${reportType}/export${queryString ? `?${queryString}` : ""}`;
 
+  async function queueBackgroundExport() {
+    setPendingQueueExport(true);
+    setError(null);
+    try {
+      const body: Record<string, string> = { reportType: REPORT_TYPE_TO_EXPORT_TYPE[reportType] };
+      if (dateRangeStart) body.dateRangeStart = new Date(dateRangeStart).toISOString();
+      if (dateRangeEnd) body.dateRangeEnd = new Date(dateRangeEnd).toISOString();
+      if (householdId) body.householdId = householdId;
+      if (eventId) body.eventId = eventId;
+      if (volunteerCategory) body.volunteerCategory = volunteerCategory;
+      if (approvalStatus) body.approvalStatus = approvalStatus;
+      if (requirementStatus) body.requirementStatus = requirementStatus;
+      if (complianceFilter) body.complianceFilter = complianceFilter;
+
+      const res = await fetch(`/api/labs/pta/volunteer-hours/periods/${periodId}/reports/exports`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const responseBody = await res.json().catch(() => null);
+      if (!res.ok || !responseBody?.ok) {
+        setError(responseBody?.error || "Unable to queue this export.");
+        return;
+      }
+      setExportsRefreshToken((t) => t + 1);
+      router.refresh();
+    } catch {
+      setError("Unable to connect. Please try again.");
+    } finally {
+      setPendingQueueExport(false);
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3">
@@ -219,11 +315,13 @@ export function PtaVolunteerReportsCenter({ periodId, canExport }: { periodId: s
             onChange={(e) => setReportType(e.target.value as ReportType)}
             className="mt-1 rounded border border-slate-300 px-2 py-1.5 text-sm"
           >
-            {(Object.keys(REPORT_LABELS) as ReportType[]).map((key) => (
-              <option key={key} value={key}>
-                {REPORT_LABELS[key]}
-              </option>
-            ))}
+            {(Object.keys(REPORT_LABELS) as ReportType[])
+              .filter((key) => key !== "financial" || canViewFinancial)
+              .map((key) => (
+                <option key={key} value={key}>
+                  {REPORT_LABELS[key]}
+                </option>
+              ))}
           </select>
         </label>
 
@@ -260,15 +358,43 @@ export function PtaVolunteerReportsCenter({ periodId, canExport }: { periodId: s
 
         {reportType === "compliance" ? <FilterSelect label="Compliance" value={complianceFilter} onChange={setComplianceFilter} options={COMPLIANCE_FILTERS} /> : null}
 
+        {reportType === "financial" ? (
+          <>
+            <FilterInput label="From" type="date" value={dateRangeStart} onChange={setDateRangeStart} />
+            <FilterInput label="To" type="date" value={dateRangeEnd} onChange={setDateRangeEnd} />
+            <FilterInput label="Family ID" value={householdId} onChange={setHouseholdId} />
+          </>
+        ) : null}
+
+        {reportType === "individual-volunteer" || reportType === "volunteer-category" ? (
+          <>
+            <FilterInput label="From" type="date" value={dateRangeStart} onChange={setDateRangeStart} />
+            <FilterInput label="To" type="date" value={dateRangeEnd} onChange={setDateRangeEnd} />
+            <FilterSelect label="Category" value={volunteerCategory} onChange={setVolunteerCategory} options={VOLUNTEER_CATEGORIES} />
+          </>
+        ) : null}
+
         {canExport ? (
           <a
             href={exportHref}
-            className="ml-auto rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800"
+            className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800"
           >
             Export to Excel
           </a>
         ) : null}
+        {canExport ? (
+          <button
+            type="button"
+            disabled={pendingQueueExport}
+            onClick={queueBackgroundExport}
+            className="ml-auto rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-50"
+          >
+            {pendingQueueExport ? "Queuing..." : "Generate in background"}
+          </button>
+        ) : null}
       </div>
+
+      {canExport ? <BackgroundExportsPanel periodId={periodId} refreshToken={exportsRefreshToken} /> : null}
 
       {error ? (
         <p role="alert" className="text-sm font-medium text-red-700">
@@ -372,6 +498,72 @@ function SummaryStat({ label, value }: { label: string; value: string }) {
     <div className="rounded-lg border border-slate-200 bg-white p-3">
       <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</div>
       <div className="mt-1 text-lg font-semibold text-slate-900">{value}</div>
+    </div>
+  );
+}
+
+const EXPORT_TYPE_LABELS: Record<string, string> = Object.fromEntries(
+  (Object.keys(REPORT_TYPE_TO_EXPORT_TYPE) as ReportType[]).map((key) => [REPORT_TYPE_TO_EXPORT_TYPE[key], REPORT_LABELS[key]])
+);
+
+interface BackgroundExportRow {
+  id: string;
+  reportType: string;
+  status: "QUEUED" | "PROCESSING" | "COMPLETED" | "FAILED";
+  errorMessage: string | null;
+  createdAt: string;
+}
+
+/** Lists this period's queued/processing/completed/failed background report
+ * exports (spec: "background generation for large orgs"), polling once on
+ * mount and again whenever a new export is queued. Reuses the same
+ * ReportExport-backed worker every other export in this platform uses. */
+function BackgroundExportsPanel({ periodId, refreshToken }: { periodId: string; refreshToken: number }) {
+  const [rows, setRows] = useState<BackgroundExportRow[]>([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    // Reactive refetch when a new export is queued — same sanctioned
+    // data-fetching-effect shape as the report-data effect above.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoaded(false);
+    fetch(`/api/labs/pta/volunteer-hours/periods/${periodId}/reports/exports`)
+      .then((res) => res.json())
+      .then((body) => {
+        if (cancelled) return;
+        if (body?.ok) setRows(body.data ?? []);
+      })
+      .catch(() => {})
+      .finally(() => !cancelled && setLoaded(true));
+    return () => {
+      cancelled = true;
+    };
+  }, [periodId, refreshToken]);
+
+  if (!loaded || rows.length === 0) return null;
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+      <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Background exports</h4>
+      <ul className="mt-2 space-y-1 text-sm">
+        {rows.map((row) => (
+          <li key={row.id} className="flex items-center justify-between gap-3">
+            <span>
+              {EXPORT_TYPE_LABELS[row.reportType] ?? row.reportType} — {row.status.toLowerCase()}
+              {row.status === "FAILED" && row.errorMessage ? `: ${row.errorMessage}` : ""}
+            </span>
+            {row.status === "COMPLETED" ? (
+              <a
+                href={`/api/labs/pta/volunteer-hours/periods/${periodId}/reports/exports/${row.id}/download`}
+                className="font-semibold text-emerald-700 hover:underline"
+              >
+                Download
+              </a>
+            ) : null}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

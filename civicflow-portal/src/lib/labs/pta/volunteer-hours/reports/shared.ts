@@ -156,6 +156,51 @@ export function parseVolunteerReportFilters(url: URL, requirementPeriodId: strin
   };
 }
 
+/** Serializes VolunteerReportFilters (which carries Date objects) into a
+ * plain JSON-safe shape for storage on ReportExport.filters, and back. Used
+ * by the background-export queue so a queued job can re-derive the exact
+ * same filters the caller applied on-screen, without re-parsing a URL. */
+export function volunteerReportFiltersToJson(
+  filters: VolunteerReportFilters & { complianceFilter?: string }
+): Record<string, string | null> {
+  return {
+    requirementPeriodId: filters.requirementPeriodId,
+    dateRangeStart: filters.dateRangeStart ? filters.dateRangeStart.toISOString() : null,
+    dateRangeEnd: filters.dateRangeEnd ? filters.dateRangeEnd.toISOString() : null,
+    householdId: filters.householdId ?? null,
+    householdAdultId: filters.householdAdultId ?? null,
+    gradeId: filters.gradeId ?? null,
+    classroomId: filters.classroomId ?? null,
+    eventId: filters.eventId ?? null,
+    volunteerCategory: filters.volunteerCategory ?? null,
+    approvalStatus: filters.approvalStatus ?? null,
+    requirementStatus: filters.requirementStatus ?? null,
+    paymentStatus: filters.paymentStatus ?? null,
+    complianceFilter: filters.complianceFilter ?? null,
+  };
+}
+
+export function volunteerReportFiltersFromJson(json: unknown): VolunteerReportFilters & { complianceFilter?: string } {
+  const j = (json && typeof json === "object" ? (json as Record<string, unknown>) : {}) as Record<string, unknown>;
+  const str = (v: unknown): string | undefined => (typeof v === "string" && v.length > 0 ? v : undefined);
+  const date = (v: unknown): Date | undefined => (typeof v === "string" && v.length > 0 ? new Date(v) : undefined);
+  return {
+    requirementPeriodId: str(j.requirementPeriodId) ?? "",
+    dateRangeStart: date(j.dateRangeStart),
+    dateRangeEnd: date(j.dateRangeEnd),
+    householdId: str(j.householdId),
+    householdAdultId: str(j.householdAdultId),
+    gradeId: str(j.gradeId),
+    classroomId: str(j.classroomId),
+    eventId: str(j.eventId),
+    volunteerCategory: str(j.volunteerCategory),
+    approvalStatus: str(j.approvalStatus) as VolunteerReportFilters["approvalStatus"],
+    requirementStatus: str(j.requirementStatus),
+    paymentStatus: str(j.paymentStatus),
+    complianceFilter: str(j.complianceFilter),
+  };
+}
+
 export function emptySummaryTotals(): ReportSummaryTotals {
   return {
     totalFamilies: 0,
