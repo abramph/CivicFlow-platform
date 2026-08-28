@@ -25,6 +25,12 @@ const bodySchema = z.object({
   concernsEnabled: z.boolean().optional(),
   concernsLabel: z.string().max(80).nullable().optional(),
   electionsEnabled: z.boolean().optional(),
+  ptaVolunteerRequirementsEnabled: z.boolean().optional(),
+  ptaVolunteerBuyoutEnabled: z.boolean().optional(),
+  ptaVolunteerAssessmentsEnabled: z.boolean().optional(),
+  ptaVolunteerReportsEnabled: z.boolean().optional(),
+  ptaVolunteerNotificationsEnabled: z.boolean().optional(),
+  ptaVolunteerNativeMobileEnabled: z.boolean().optional(),
 });
 
 export async function PUT(request: Request) {
@@ -39,6 +45,29 @@ export async function PUT(request: Request) {
     // PTA-L: the elections switch is election-management authority.
     if (input.electionsEnabled !== undefined) {
       await requirePtaAccess("pta:elections:manage");
+    }
+    // Volunteer Hour Requirements & Buyout program (docs/pta-volunteer-hours.md):
+    // each of the six flags is gated by the permission that most directly
+    // owns that capability, not a single catch-all — so a Treasurer who
+    // holds buyout-pricing:manage can turn buyout on without also being
+    // able to turn on the requirements/assessments machinery, and vice
+    // versa. Native-mobile is reserved/inert this phase but still gated for
+    // consistency with the others.
+    if (
+      input.ptaVolunteerRequirementsEnabled !== undefined ||
+      input.ptaVolunteerNotificationsEnabled !== undefined ||
+      input.ptaVolunteerNativeMobileEnabled !== undefined
+    ) {
+      await requirePtaAccess("pta:volunteer-requirements:manage");
+    }
+    if (input.ptaVolunteerBuyoutEnabled !== undefined) {
+      await requirePtaAccess("pta:volunteer-buyout-pricing:manage");
+    }
+    if (input.ptaVolunteerAssessmentsEnabled !== undefined) {
+      await requirePtaAccess("pta:volunteer-assessments:preview-post");
+    }
+    if (input.ptaVolunteerReportsEnabled !== undefined) {
+      await requirePtaAccess("pta:volunteer-reports:export");
     }
     const profile = await upsertPtaProfile({ organizationId, actorUserId: session.userId, actorEmail: session.userEmail, ...input });
     return Response.json({ ok: true, data: profile });

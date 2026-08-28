@@ -88,6 +88,11 @@ const serverEnvSchema = z.object({
   RATE_LIMIT_REDIS_TOKEN: z.string().optional(),
   ENABLE_EMAIL_SEND: z.string().optional(),
   CRON_SECRET: z.string().optional(),
+  // Platform-wide kill-switch for the PTA/PTO Volunteer Requirements & Buyout
+  // feature (docs/pta-volunteer-hours.md). Checked before any per-org
+  // PtaProfile flag — unset/false means the feature is fully dark regardless
+  // of org configuration. Mirrors ENABLE_EMAIL_SEND's string-flag pattern.
+  PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED: z.string().optional(),
   // Base64-encoded 32-byte AES-256-GCM key for encrypting Twilio credentials
   // stored in PlatformSmsSettings (see lib/crypto-secrets.ts). Optional at
   // boot like the other SMS_* vars — only required once a super admin
@@ -161,6 +166,7 @@ export function getServerEnv(): ServerEnv {
     RATE_LIMIT_REDIS_TOKEN: process.env.RATE_LIMIT_REDIS_TOKEN,
     ENABLE_EMAIL_SEND: process.env.ENABLE_EMAIL_SEND,
     SMS_CREDENTIAL_ENCRYPTION_KEY: process.env.SMS_CREDENTIAL_ENCRYPTION_KEY,
+    PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED: process.env.PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED,
   };
 
   if (raw.NODE_ENV === "production") {
@@ -230,6 +236,7 @@ export function getServerEnv(): ServerEnv {
     ENABLE_EMAIL_SEND: parsed.ENABLE_EMAIL_SEND,
     CRON_SECRET: parsed.CRON_SECRET,
     SMS_CREDENTIAL_ENCRYPTION_KEY: parsed.SMS_CREDENTIAL_ENCRYPTION_KEY,
+    PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED: parsed.PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED,
   };
 
   return cached;
@@ -238,6 +245,20 @@ export function getServerEnv(): ServerEnv {
 export function isEmailSendEnabled() {
   const env = getServerEnv();
   return env.ENABLE_EMAIL_SEND === "1" || env.ENABLE_EMAIL_SEND === "true";
+}
+
+/**
+ * Platform-wide kill-switch for the PTA/PTO Volunteer Requirements & Buyout
+ * feature (docs/pta-volunteer-hours.md). Every guard checks this FIRST,
+ * before any per-org PtaProfile flag — unset/false means the feature is
+ * fully dark platform-wide regardless of how an individual org is configured.
+ */
+export function isPtaVolunteerHoursPlatformEnabled() {
+  const env = getServerEnv();
+  return (
+    env.PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED === "1" ||
+    env.PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED === "true"
+  );
 }
 
 /** Base URL for member-facing universal links / web fallback pages. */

@@ -26,6 +26,16 @@ export interface UpsertPtaProfileInput {
   concernsLabel?: string | null;
   /** PTA-L: elections stay dark until deliberately enabled (default false). */
   electionsEnabled?: boolean;
+  /** Volunteer Hour Requirements & Buyout program (docs/pta-volunteer-hours.md).
+   * Six independent flags, all dark until deliberately enabled — none imply
+   * any of the others. Also gated by the platform-wide env kill-switch
+   * (isPtaVolunteerHoursPlatformEnabled), checked separately by guards. */
+  ptaVolunteerRequirementsEnabled?: boolean;
+  ptaVolunteerBuyoutEnabled?: boolean;
+  ptaVolunteerAssessmentsEnabled?: boolean;
+  ptaVolunteerReportsEnabled?: boolean;
+  ptaVolunteerNotificationsEnabled?: boolean;
+  ptaVolunteerNativeMobileEnabled?: boolean;
   actorUserId: string;
   actorEmail?: string | null;
 }
@@ -49,6 +59,20 @@ export async function upsertPtaProfile(input: UpsertPtaProfileInput) {
     ...(input.concernsEnabled !== undefined ? { concernsEnabled: input.concernsEnabled } : {}),
     ...(input.concernsLabel !== undefined ? { concernsLabel: input.concernsLabel?.trim() || null } : {}),
     ...(input.electionsEnabled !== undefined ? { electionsEnabled: input.electionsEnabled } : {}),
+    ...(input.ptaVolunteerRequirementsEnabled !== undefined
+      ? { ptaVolunteerRequirementsEnabled: input.ptaVolunteerRequirementsEnabled }
+      : {}),
+    ...(input.ptaVolunteerBuyoutEnabled !== undefined ? { ptaVolunteerBuyoutEnabled: input.ptaVolunteerBuyoutEnabled } : {}),
+    ...(input.ptaVolunteerAssessmentsEnabled !== undefined
+      ? { ptaVolunteerAssessmentsEnabled: input.ptaVolunteerAssessmentsEnabled }
+      : {}),
+    ...(input.ptaVolunteerReportsEnabled !== undefined ? { ptaVolunteerReportsEnabled: input.ptaVolunteerReportsEnabled } : {}),
+    ...(input.ptaVolunteerNotificationsEnabled !== undefined
+      ? { ptaVolunteerNotificationsEnabled: input.ptaVolunteerNotificationsEnabled }
+      : {}),
+    ...(input.ptaVolunteerNativeMobileEnabled !== undefined
+      ? { ptaVolunteerNativeMobileEnabled: input.ptaVolunteerNativeMobileEnabled }
+      : {}),
   } as const;
 
   const existing = await prisma.ptaProfile.findUnique({ where: { organizationId: input.organizationId } });
@@ -57,6 +81,35 @@ export async function upsertPtaProfile(input: UpsertPtaProfileInput) {
     create: { organizationId: input.organizationId, ...data },
     update: data,
   });
+
+  // Volunteer-hours flags gate money and communications, not just visibility
+  // — always give the audit trail an explicit before/after for these six,
+  // regardless of whether anything else on the profile changed.
+  const volunteerFlagKeys = [
+    "ptaVolunteerRequirementsEnabled",
+    "ptaVolunteerBuyoutEnabled",
+    "ptaVolunteerAssessmentsEnabled",
+    "ptaVolunteerReportsEnabled",
+    "ptaVolunteerNotificationsEnabled",
+    "ptaVolunteerNativeMobileEnabled",
+  ] as const;
+  const flagChanges: Record<string, { before: boolean; after: boolean }> = {};
+  for (const key of volunteerFlagKeys) {
+    if (input[key] !== undefined && existing && existing[key] !== profile[key]) {
+      flagChanges[key] = { before: existing[key], after: profile[key] };
+    }
+  }
+  if (Object.keys(flagChanges).length > 0) {
+    await createAuditEvent({
+      organizationId: input.organizationId,
+      actorUserId: input.actorUserId,
+      actorEmail: input.actorEmail ?? null,
+      action: "pta.volunteer_hours.flags_changed",
+      entityType: "pta_profile",
+      entityId: profile.id,
+      metadata: flagChanges,
+    });
+  }
 
   // PTA-A school-year normalization: the profile label and the PtaSchoolYear
   // entity must never disagree about which year is current. Whichever side is

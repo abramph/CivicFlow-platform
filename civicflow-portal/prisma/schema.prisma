@@ -742,58 +742,70 @@ model Organization {
   meetingIntelligenceFeedback MeetingIntelligenceFeedback[]
   meetingMinutes              MeetingMinutes[]
 
-  ptaProfile                     PtaProfile?
-  ptaHouseholds                  PtaHousehold[]
-  ptaStudents                    PtaStudent[]
-  ptaGrades                      PtaGrade[]
-  ptaClassrooms                  PtaClassroom[]
-  ptaTeachers                    PtaTeacher[]
-  ptaStudentEnrollments          PtaStudentEnrollment[]
-  ptaVolunteerOpportunities      PtaVolunteerOpportunity[]
-  ptaVolunteerSlots              PtaVolunteerSlot[]
-  ptaVolunteerSignups            PtaVolunteerSignup[]
-  ptaVolunteerAttendance         PtaVolunteerAttendance[]
-  ptaVolunteerHourEntries        PtaVolunteerHourEntry[]
-  ptaVolunteerHourAdjustments    PtaVolunteerHourAdjustment[]
-  ptaVolunteerRequirements       PtaVolunteerRequirement[]
-  ptaCommittees                  PtaCommittee[]
-  ptaCommitteeMembers            PtaCommitteeMember[]
-  ptaEventRsvps                  PtaEventRsvp[]
-  ptaHouseholdAdults             PtaHouseholdAdult[]
-  ptaSchoolYears                 PtaSchoolYear[]
-  ptaBoardPositions              PtaBoardPosition[]
-  ptaOfficerAssignments          PtaOfficerAssignment[]
-  meetingAgendaItems             MeetingAgendaItem[]
-  meetingMotions                 MeetingMotion[]
-  meetingActionItems             MeetingActionItem[]
-  governanceDocuments            GovernanceDocument[]
-  ptaConcerns                    PtaConcern[]
-  ptaConcernAssignees            PtaConcernAssignee[]
-  ptaConcernNotes                PtaConcernNote[]
-  ptaBoardTransitions            PtaBoardTransition[]
-  ptaOfficerHandoffs             PtaOfficerHandoff[]
-  ptaHandoffChecklistItems       PtaHandoffChecklistItem[]
-  budgetLines                    BudgetLine[]
-  reimbursementRequests          ReimbursementRequest[]
-  ptaComplianceRequirements      PtaComplianceRequirement[]
-  organizationContacts           OrganizationContact[]
-  funds                          Fund[]
-  contributionPrograms           ContributionProgram[]
-  givingCustomers                GivingCustomer[]
-  recurringContributionSchedules RecurringContributionSchedule[]
-  pledges                        Pledge[]
-  contributionStatements         ContributionStatement[]
-  households                     Household[]
-  orgGroups                      OrgGroup[]
-  contributionAdjustments        ContributionAdjustment[]
-  contributionRefundEvents       ContributionRefundEvent[]
-  stripeAccount                  OrganizationStripeAccount?
-  memberStripeCustomers          OrganizationMemberStripeCustomer[]
-  ptaElections                   PtaElection[]
-  ptaElectionContests            PtaElectionContest[]
-  ptaElectionCandidates          PtaElectionCandidate[]
-  ptaElectionVoters              PtaElectionVoter[]
-  ptaBallotChoices               PtaBallotChoice[]
+  ptaProfile                         PtaProfile?
+  ptaHouseholds                      PtaHousehold[]
+  ptaStudents                        PtaStudent[]
+  ptaGrades                          PtaGrade[]
+  ptaClassrooms                      PtaClassroom[]
+  ptaTeachers                        PtaTeacher[]
+  ptaStudentEnrollments              PtaStudentEnrollment[]
+  ptaVolunteerOpportunities          PtaVolunteerOpportunity[]
+  ptaVolunteerSlots                  PtaVolunteerSlot[]
+  ptaVolunteerSignups                PtaVolunteerSignup[]
+  ptaVolunteerAttendance             PtaVolunteerAttendance[]
+  ptaVolunteerHourEntries            PtaVolunteerHourEntry[]
+  ptaVolunteerHourAdjustments        PtaVolunteerHourAdjustment[]
+  ptaVolunteerRequirements           PtaVolunteerRequirement[]
+  ptaCommittees                      PtaCommittee[]
+  ptaCommitteeMembers                PtaCommitteeMember[]
+  ptaEventRsvps                      PtaEventRsvp[]
+  ptaHouseholdAdults                 PtaHouseholdAdult[]
+  ptaSchoolYears                     PtaSchoolYear[]
+  ptaBoardPositions                  PtaBoardPosition[]
+  ptaOfficerAssignments              PtaOfficerAssignment[]
+  meetingAgendaItems                 MeetingAgendaItem[]
+  meetingMotions                     MeetingMotion[]
+  meetingActionItems                 MeetingActionItem[]
+  governanceDocuments                GovernanceDocument[]
+  ptaConcerns                        PtaConcern[]
+  ptaConcernAssignees                PtaConcernAssignee[]
+  ptaConcernNotes                    PtaConcernNote[]
+  ptaBoardTransitions                PtaBoardTransition[]
+  ptaOfficerHandoffs                 PtaOfficerHandoff[]
+  ptaHandoffChecklistItems           PtaHandoffChecklistItem[]
+  budgetLines                        BudgetLine[]
+  reimbursementRequests              ReimbursementRequest[]
+  ptaComplianceRequirements          PtaComplianceRequirement[]
+  organizationContacts               OrganizationContact[]
+  funds                              Fund[]
+  contributionPrograms               ContributionProgram[]
+  givingCustomers                    GivingCustomer[]
+  recurringContributionSchedules     RecurringContributionSchedule[]
+  pledges                            Pledge[]
+  contributionStatements             ContributionStatement[]
+  households                         Household[]
+  orgGroups                          OrgGroup[]
+  contributionAdjustments            ContributionAdjustment[]
+  contributionRefundEvents           ContributionRefundEvent[]
+  stripeAccount                      OrganizationStripeAccount?
+  memberStripeCustomers              OrganizationMemberStripeCustomer[]
+  ptaElections                       PtaElection[]
+  ptaElectionContests                PtaElectionContest[]
+  ptaElectionCandidates              PtaElectionCandidate[]
+  ptaElectionVoters                  PtaElectionVoter[]
+  ptaBallotChoices                   PtaBallotChoice[]
+  ptaVolunteerRequirementPeriods     PtaVolunteerRequirementPeriod[]
+  ptaVolunteerRequirementAssignments PtaVolunteerRequirementAssignment[]
+  ptaVolunteerPricingWindows         PtaVolunteerPricingWindow[]
+  ptaVolunteerLedgerEntries          PtaVolunteerLedgerEntry[]
+  ptaVolunteerBuyoutElections        PtaVolunteerBuyoutElection[]
+  ptaVolunteerHourDisputes           PtaVolunteerHourDispute[]
+  ptaVolunteerBuyoutPurchases        PtaVolunteerBuyoutPurchase[]
+  ptaVolunteerAssessmentBatches      PtaVolunteerAssessmentBatch[]
+  ptaVolunteerAssessmentLines        PtaVolunteerAssessmentLine[]
+  ptaVolunteerAssessmentCharges      PtaVolunteerAssessmentCharge[]
+  ptaVolunteerReviewFlags            PtaVolunteerReviewFlag[]
+  ptaVolunteerNotificationLogs       PtaVolunteerNotificationLog[]
 
   hoaProperties             Property[]
   hoaPropertyResidents      PropertyResident[]
@@ -1789,42 +1801,42 @@ model ImportRow {
 
 /// Organization-level settings (one-to-one with Organization).
 model OrgSettings {
-  id                               String                        @id @default(cuid())
-  organizationId                   String                        @unique
-  timezone                         String                        @default("America/New_York")
-  currency                         String                        @default("USD")
-  fiscalYearStart                  Int                           @default(1) // month number 1–12
+  id                               String                           @id @default(cuid())
+  organizationId                   String                           @unique
+  timezone                         String                           @default("America/New_York")
+  currency                         String                           @default("USD")
+  fiscalYearStart                  Int                              @default(1) // month number 1–12
   logoUrl                          String?
   emailFrom                        String?
   customDomain                     String?
-  financialEditWindowHours         Int                           @default(24)
-  requireReasonForFinancialEdits   Boolean                       @default(true)
-  allowFinanceCorrections          Boolean                       @default(true)
-  lockReceiptsAfterIssue           Boolean                       @default(true)
-  duesStartRule                    DuesStartRule                 @default(JOIN_DATE)
+  financialEditWindowHours         Int                              @default(24)
+  requireReasonForFinancialEdits   Boolean                          @default(true)
+  allowFinanceCorrections          Boolean                          @default(true)
+  lockReceiptsAfterIssue           Boolean                          @default(true)
+  duesStartRule                    DuesStartRule                    @default(JOIN_DATE)
   // Hard floor: dues accrual never generates a charge dated before this,
   // regardless of duesStartRule or a caller-supplied start date. Set
   // automatically on desktop→cloud migration (which has no per-member dues
   // charge history to import) so "Generate Dues" can't retroactively bill
   // members for periods already paid on desktop.
   duesAccrualNotBeforeDate         DateTime?
-  delinquentAfterMonths            Int                           @default(3)
+  delinquentAfterMonths            Int                              @default(3)
   delinquentAfterDays              Int?
-  autoMarkDelinquent               Boolean                       @default(true)
-  gracePeriodDays                  Int                           @default(0)
+  autoMarkDelinquent               Boolean                          @default(true)
+  gracePeriodDays                  Int                              @default(0)
   autoSuspendAfterMonths           Int?
   autoDeactivateAfterMonths        Int?
   reminderFrequencyDays            Int?
-  openingBalanceCents              Int                           @default(0)
+  openingBalanceCents              Int                              @default(0)
   openingBalanceDate               DateTime?
   /// PTA-H Finance Lite: reimbursement requests ABOVE this amount start in
   /// UNDER_REVIEW (flagged for extra scrutiny) instead of SUBMITTED. Null =
   /// no auto-flagging. Approval itself is always required and always by a
   /// different person than the submitter, regardless of amount.
-  reimbursementApprovalThreshold   Decimal?                      @db.Decimal(12, 2)
+  reimbursementApprovalThreshold   Decimal?                         @db.Decimal(12, 2)
   /// CORE-GIVE-A: the Contributions & Giving module master switch. Default
   /// OFF — no organization gets giving surfaces until deliberately enabled.
-  contributionsEnabled             Boolean                       @default(false)
+  contributionsEnabled             Boolean                          @default(false)
   /// Display label for the module ("Giving", "Contributions", "Support").
   /// Null = "Contributions". UI terminology only — backend names are stable.
   contributionTerminology          String?
@@ -1838,34 +1850,34 @@ model OrgSettings {
   givingStripeProductId            String?
   /// CORE-GIVE-H (§28/§29): structured households for giving, default OFF,
   /// with member-to-member visibility governed by the privacy mode.
-  householdGivingEnabled           Boolean                       @default(false)
-  householdGivingPrivacyMode       HouseholdGivingPrivacyMode    @default(INDIVIDUAL_PRIVATE)
+  householdGivingEnabled           Boolean                          @default(false)
+  householdGivingPrivacyMode       HouseholdGivingPrivacyMode       @default(INDIVIDUAL_PRIVATE)
   /// CORE-GIVE-J (§55): the public /give/[slug] page. Default OFF; unknown
   /// slug and disabled page 404 identically (no tenant enumeration).
-  publicGivingEnabled              Boolean                       @default(false)
+  publicGivingEnabled              Boolean                          @default(false)
   publicGivingMessage              String?
   /// CONNECT-F (§28-47): optional processing-cost coverage on giving only
   /// (one-time, public, recurring — not dues/payment links, see the
   /// architecture doc §5/§13). Default OFF. STRIPE_SURCHARGE is reserved for
   /// a future compliance-gated program and has no implementation yet.
-  processingCostCoverageMode       ProcessingCostCoverageMode    @default(OFF)
+  processingCostCoverageMode       ProcessingCostCoverageMode       @default(OFF)
   /// Basis points (1/100 of a percent) used in the gross-up formula. No
   /// hardcoded default rate — an org must configure this themselves before
   /// the mode can be turned on (§30: never assume Stripe's real rate).
-  processingCostCoveragePercentBps Int                           @default(0)
-  processingCostCoverageFixedCents Int                           @default(0)
+  processingCostCoveragePercentBps Int                              @default(0)
+  processingCostCoverageFixedCents Int                              @default(0)
   /// COST-POLICY v2 (docs/payment-cost-policy-v2.md): obligation-aware
   /// payment-cost policy. Inert until paymentCostPolicyV2Enabled is on —
   /// and defaults are chosen so flipping that flag alone leaves voluntary
   /// flows byte-identical (§15 safe migration); only fixed-obligation
   /// checkouts change (optional checkbox → policy-resolved behavior).
-  paymentCostPolicyV2Enabled       Boolean                       @default(false)
-  fixedObligationCoveragePolicy    FixedObligationCoveragePolicy @default(ORGANIZATION_ABSORBS)
-  voluntaryCoveragePolicy          VoluntaryCoveragePolicy       @default(OPTIONAL)
-  ineligiblePaymentMethodFallback  IneligibleMethodFallback      @default(ORGANIZATION_ABSORBS)
+  paymentCostPolicyV2Enabled       Boolean                          @default(false)
+  fixedObligationCoveragePolicy    FixedObligationCoveragePolicy    @default(ORGANIZATION_ABSORBS)
+  voluntaryCoveragePolicy          VoluntaryCoveragePolicy          @default(OPTIONAL)
+  ineligiblePaymentMethodFallback  IneligibleMethodFallback         @default(ORGANIZATION_ABSORBS)
   /// LAUNCH-SAFE §1: fixed-obligation online payment preference (see enum).
   fixedObligationPaymentPreference FixedObligationPaymentPreference @default(CARD_AND_ABSORB)
-  achEnabled                       Boolean                       @default(false)
+  achEnabled                       Boolean                          @default(false)
   /// §6 administrator acknowledgment — REQUIRED_WHERE_PERMITTED cannot be
   /// selected until an authorized admin has accepted the policy terms.
   policyAcceptedAt                 DateTime?
@@ -1878,7 +1890,7 @@ model OrgSettings {
   /// Unestra entirely (most commonly PAYROLL_DEDUCTION for unions). Null
   /// means unconfigured; the UI must not guess a value on the org's behalf.
   duesCollectionMethod             DuesCollectionMethod?
-  updatedAt                        DateTime                      @updatedAt
+  updatedAt                        DateTime                         @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 }
@@ -4564,27 +4576,56 @@ enum PtaMembershipModel {
 /// configuration. Never created automatically; an officer configures it
 /// explicitly.
 model PtaProfile {
-  id                     String             @id @default(cuid())
-  organizationId         String             @unique
-  schoolOrPtaName        String
-  designation            PtaDesignation     @default(PTA)
-  currentSchoolYear      String // e.g. "2026-2027" — free-text label, not a DB enum, so a new year never needs a migration
-  schoolAddress          String?
-  schoolWebsite          String?
-  principalName          String?
-  contactEmail           String?
-  membershipModel        PtaMembershipModel @default(HOUSEHOLD)
-  defaultDuesAmountCents Int?
-  gradesServed           String[]           @default([])
+  id                               String             @id @default(cuid())
+  organizationId                   String             @unique
+  schoolOrPtaName                  String
+  designation                      PtaDesignation     @default(PTA)
+  currentSchoolYear                String // e.g. "2026-2027" — free-text label, not a DB enum, so a new year never needs a migration
+  schoolAddress                    String?
+  schoolWebsite                    String?
+  principalName                    String?
+  contactEmail                     String?
+  membershipModel                  PtaMembershipModel @default(HOUSEHOLD)
+  defaultDuesAmountCents           Int?
+  gradesServed                     String[]           @default([])
   /// PTA-E: the Concerns & Grievances feature is org-disableable and
   /// renameable ("Concerns", "Member Issues", ...). Label null = default.
-  concernsEnabled        Boolean            @default(true)
-  concernsLabel          String?
+  concernsEnabled                  Boolean            @default(true)
+  concernsLabel                    String?
   /// PTA-L: elections stay DARK until an admin deliberately enables them —
   /// the §21 feature gate. Default false, unlike concerns.
-  electionsEnabled       Boolean            @default(false)
-  createdAt              DateTime           @default(now())
-  updatedAt              DateTime           @updatedAt
+  electionsEnabled                 Boolean            @default(false)
+  /// Volunteer Hour Requirements & Buyout program (docs/pta-volunteer-hours.md).
+  /// Six independent flags, all DARK by default — none of these imply any of
+  /// the others. A platform-wide env kill-switch
+  /// (isPtaVolunteerHoursPlatformEnabled) is also checked first in every
+  /// guard, ahead of these org-level flags.
+  /// Master toggle: requirement periods, assignments, family dashboard visibility.
+  ptaVolunteerRequirementsEnabled  Boolean            @default(false)
+  /// Pricing windows + buyout election/checkout. Requires requirementsEnabled
+  /// too — buyout without a requirement makes no sense.
+  ptaVolunteerBuyoutEnabled        Boolean            @default(false)
+  /// Remaining-hours assessment preview/posting. Independent of buyout —
+  /// enabling buyout configuration must never imply assessment-posting authority.
+  ptaVolunteerAssessmentsEnabled   Boolean            @default(false)
+  /// Volunteer Reporting Center + Excel/CSV export. Independent of
+  /// buyout/assessments — reports must work with hours-only data too.
+  ptaVolunteerReportsEnabled       Boolean            @default(false)
+  /// Automated notification sends only (deadline/rate/assessment reminders).
+  /// Admin preview/test-send to explicitly approved test recipients bypasses
+  /// this flag and is always available regardless of its value.
+  ptaVolunteerNotificationsEnabled Boolean            @default(false)
+  /// Reserved for the later native-mobile phase (Phase 3). Not read by any
+  /// code in the initial backend/web program — civicflow-mobile source is
+  /// untouched while the current iOS build is under Apple review.
+  ptaVolunteerNativeMobileEnabled  Boolean            @default(false)
+  /// VH-D: whether DONATED_GOODS ledger entries are permitted at all — a
+  /// narrower policy toggle than the six capability flags above (governs one
+  /// category, not a whole surface), default false per spec §10 ("if enabled
+  /// by the organization").
+  donatedGoodsAsHoursEnabled       Boolean            @default(false)
+  createdAt                        DateTime           @default(now())
+  updatedAt                        DateTime           @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 }
@@ -4620,15 +4661,24 @@ model PtaHousehold {
   createdAt               DateTime           @default(now())
   updatedAt               DateTime           @updatedAt
 
-  organization     Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  schoolYearRef    PtaSchoolYear?      @relation(fields: [schoolYearId], references: [id], onDelete: SetNull)
-  orgMember        OrgMember?          @relation(fields: [orgMemberId], references: [id], onDelete: SetNull)
-  primaryContact   PtaHouseholdAdult?  @relation("PtaHouseholdPrimaryContact", fields: [primaryContactAdultId], references: [id], onDelete: SetNull)
-  secondaryContact PtaHouseholdAdult?  @relation("PtaHouseholdSecondaryContact", fields: [secondaryContactAdultId], references: [id], onDelete: SetNull)
-  adults           PtaHouseholdAdult[] @relation("PtaHouseholdAdults")
-  students         PtaStudent[]
-  eventRsvps       PtaEventRsvp[]
-  meetingRsvps     PtaMeetingRsvp[]
+  organization                    Organization                        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  schoolYearRef                   PtaSchoolYear?                      @relation(fields: [schoolYearId], references: [id], onDelete: SetNull)
+  orgMember                       OrgMember?                          @relation(fields: [orgMemberId], references: [id], onDelete: SetNull)
+  primaryContact                  PtaHouseholdAdult?                  @relation("PtaHouseholdPrimaryContact", fields: [primaryContactAdultId], references: [id], onDelete: SetNull)
+  secondaryContact                PtaHouseholdAdult?                  @relation("PtaHouseholdSecondaryContact", fields: [secondaryContactAdultId], references: [id], onDelete: SetNull)
+  adults                          PtaHouseholdAdult[]                 @relation("PtaHouseholdAdults")
+  students                        PtaStudent[]
+  eventRsvps                      PtaEventRsvp[]
+  meetingRsvps                    PtaMeetingRsvp[]
+  volunteerRequirementAssignments PtaVolunteerRequirementAssignment[]
+  volunteerLedgerEntries          PtaVolunteerLedgerEntry[]
+  volunteerBuyoutElections        PtaVolunteerBuyoutElection[]
+  volunteerHourDisputes           PtaVolunteerHourDispute[]
+  volunteerBuyoutPurchases        PtaVolunteerBuyoutPurchase[]
+  volunteerAssessmentLines        PtaVolunteerAssessmentLine[]
+  volunteerAssessmentCharges      PtaVolunteerAssessmentCharge[]
+  volunteerReviewFlags            PtaVolunteerReviewFlag[]
+  volunteerNotificationLogs       PtaVolunteerNotificationLog[]
 
   @@unique([organizationId, displayName, schoolYear])
   @@index([organizationId])
@@ -4671,20 +4721,21 @@ model PtaHouseholdAdult {
   createdAt             DateTime                 @default(now())
   updatedAt             DateTime                 @updatedAt
 
-  organization         Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  household            PtaHousehold              @relation("PtaHouseholdAdults", fields: [householdId], references: [id], onDelete: Cascade)
-  user                 User?                     @relation(fields: [userId], references: [id], onDelete: SetNull)
-  primaryContactFor    PtaHousehold[]            @relation("PtaHouseholdPrimaryContact")
-  secondaryContactFor  PtaHousehold[]            @relation("PtaHouseholdSecondaryContact")
-  volunteerSignups     PtaVolunteerSignup[]
-  chairOfCommittees    PtaCommittee[]            @relation("PtaCommitteeChair")
-  coChairOfCommittees  PtaCommittee[]            @relation("PtaCommitteeCoChair")
-  liaisonOfCommittees  PtaCommittee[]            @relation("PtaCommitteeBoardLiaison")
-  committeeMemberships PtaCommitteeMember[]
-  invites              PtaHouseholdAdultInvite[]
-  officerAssignments   PtaOfficerAssignment[]
-  electionCandidacies  PtaElectionCandidate[]
-  electionVoterRows    PtaElectionVoter[]
+  organization           Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  household              PtaHousehold              @relation("PtaHouseholdAdults", fields: [householdId], references: [id], onDelete: Cascade)
+  user                   User?                     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  primaryContactFor      PtaHousehold[]            @relation("PtaHouseholdPrimaryContact")
+  secondaryContactFor    PtaHousehold[]            @relation("PtaHouseholdSecondaryContact")
+  volunteerSignups       PtaVolunteerSignup[]
+  chairOfCommittees      PtaCommittee[]            @relation("PtaCommitteeChair")
+  coChairOfCommittees    PtaCommittee[]            @relation("PtaCommitteeCoChair")
+  liaisonOfCommittees    PtaCommittee[]            @relation("PtaCommitteeBoardLiaison")
+  committeeMemberships   PtaCommitteeMember[]
+  invites                PtaHouseholdAdultInvite[]
+  officerAssignments     PtaOfficerAssignment[]
+  electionCandidacies    PtaElectionCandidate[]
+  electionVoterRows      PtaElectionVoter[]
+  volunteerLedgerEntries PtaVolunteerLedgerEntry[]
 
   @@unique([organizationId, userId])
   @@index([organizationId])
@@ -5049,6 +5100,12 @@ model PtaVolunteerHourEntry {
   opportunityId    String
   slotId           String
   creditedMinutes  Int
+  /// VH-D (docs/pta-volunteer-hours.md): nullable/additive — existing rows
+  /// and every pre-VH-D read path are untouched. Null means "uncategorized";
+  /// the ledger falls back to inferring EVENT_SERVICE (opportunity.eventId
+  /// set) vs OTHER_APPROVED_SERVICE at mirroring time rather than forcing a
+  /// guess onto the stored raw entry itself.
+  category         PtaVolunteerCategory?
   status           PtaVolunteerHourEntryStatus @default(PENDING)
   source           PtaVolunteerEntrySource     @default(OFFICER_MANUAL)
   approvedByUserId String?
@@ -5108,6 +5165,735 @@ model PtaVolunteerRequirement {
 
   @@unique([organizationId, schoolYear])
   @@index([organizationId])
+}
+
+/// Volunteer Hour Requirements & Buyout program (docs/pta-volunteer-hours.md,
+/// VH-A). Distinct from — and does not replace — PtaVolunteerRequirement
+/// above, which stays authoritative for every org that never enables
+/// ptaVolunteerRequirementsEnabled. A period is the configurable container
+/// for a school year/term/contract/custom window that the new richer
+/// requirement, assignment (VH-B), pricing (VH-C), and ledger (VH-D)
+/// machinery attaches to.
+enum PtaVolunteerPeriodType {
+  SCHOOL_YEAR
+  TERM
+  CALENDAR_YEAR
+  MEMBERSHIP_YEAR
+  CONTRACT_PERIOD
+  CUSTOM
+}
+
+enum PtaVolunteerPeriodStatus {
+  DRAFT
+  ACTIVE
+  CLOSED
+  ARCHIVED
+}
+
+model PtaVolunteerRequirementPeriod {
+  id                       String                   @id @default(cuid())
+  organizationId           String
+  name                     String
+  periodType               PtaVolunteerPeriodType
+  startsOn                 DateTime
+  endsOn                   DateTime
+  /// Snapshotted from OrgSettings.timezone at creation time, following this
+  /// codebase's snapshot-on-transaction discipline — a later org timezone
+  /// change must never silently reinterpret an already-configured period's
+  /// dates. Admin-editable if a genuine correction is needed.
+  timezone                 String
+  /// Org-wide default hours per family for this period. VH-B assignment
+  /// overrides (per-child/per-adult/custom/reduced/exempt/waiver) layer on
+  /// top of this — never multiplied implicitly.
+  requiredMinutesDefault   Int
+  volunteerDeadline        DateTime?
+  buyoutWindowStart        DateTime?
+  buyoutWindowEnd          DateTime?
+  assessmentDate           DateTime?
+  assessmentPaymentDueDate DateTime?
+  status                   PtaVolunteerPeriodStatus @default(DRAFT)
+  adminNotes               String?
+  familyPolicyText         String?
+  /// Free-text admin-defined grouping (e.g. "Elementary Campus", "Program X").
+  /// Two ACTIVE periods with overlapping date ranges are only a conflict when
+  /// they share the same scopeLabel (or both leave it null) — this is how an
+  /// org intentionally runs separate concurrent periods for separate
+  /// programs/campuses/membership types per the spec, given this codebase's
+  /// existing single-school-per-org assumption (no formal campus/program
+  /// entity exists to key off instead). Validated in periods.ts, not the DB,
+  /// since date-range overlap isn't expressible as a Prisma unique index.
+  scopeLabel               String?
+  /// VH-E buyout POLICY LIMITS — deliberately separate from VH-C's pricing
+  /// windows, which capture RATES (how much) not limits (how much is
+  /// allowed). All nullable/default-permissive so existing periods (created
+  /// before these fields existed) behave exactly as before.
+  /// Whether a family may buy out the entire requirement in one flat
+  /// purchase. Forced to false at the application layer whenever
+  /// buyoutMinServiceMinutes > 0 (a mandatory-service floor and a "full"
+  /// buyout are contradictory) regardless of this stored value.
+  buyoutFullAllowed        Boolean                  @default(true)
+  /// Minimum hours a family must purchase if choosing a partial per-hour
+  /// buyout at all. Null = no minimum beyond one increment.
+  buyoutMinPurchaseMinutes Int?
+  /// Maximum hours purchasable via the per-hour path. Null = up to the full
+  /// requirement (subject to buyoutMinServiceMinutes below).
+  buyoutMaxPurchaseMinutes Int?
+  /// Hours that must come from actual service no matter how much is bought
+  /// out — caps every buyout path at (requiredMinutes - this value). Null
+  /// or 0 = no mandatory-service floor.
+  buyoutMinServiceMinutes  Int?
+  /// Purchase increment: 60 = whole hours, 30 = half hours, 15 = quarter
+  /// hours. Every buyout request must be an exact multiple of this.
+  buyoutIncrementMinutes   Int                      @default(60)
+  createdAt                DateTime                 @default(now())
+  updatedAt                DateTime                 @updatedAt
+
+  organization      Organization                        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assignments       PtaVolunteerRequirementAssignment[]
+  pricingWindows    PtaVolunteerPricingWindow[]
+  ledgerEntries     PtaVolunteerLedgerEntry[]
+  buyoutElections   PtaVolunteerBuyoutElection[]
+  hourDisputes      PtaVolunteerHourDispute[]
+  buyoutPurchases   PtaVolunteerBuyoutPurchase[]
+  assessmentBatches PtaVolunteerAssessmentBatch[]
+  assessmentLines   PtaVolunteerAssessmentLine[]
+  assessmentCharges PtaVolunteerAssessmentCharge[]
+  reviewFlags       PtaVolunteerReviewFlag[]
+  notificationLogs  PtaVolunteerNotificationLog[]
+
+  @@index([organizationId, status])
+  @@index([organizationId, startsOn, endsOn])
+}
+
+/// Volunteer Hour Requirements & Buyout program, VH-B (docs/pta-volunteer-hours.md).
+/// How a period's required hours reach a specific family. CLASSROOM/GRADE
+/// resolve against the household's CURRENT school year enrollment;
+/// MEMBERSHIP_PLAN resolves against the household's billing OrgMember's
+/// active DuesAccount.categoryId (the closest existing "plan" concept — this
+/// codebase has no dedicated membership-plan entity). PROGRAM has no
+/// backing entity either (no PtaProgram model exists) and is deliberately
+/// NOT auto-resolved from anything — it is only ever populated by explicit
+/// HOUSEHOLD-scoped rows sharing the same free-text scopeRefId label, i.e.
+/// an admin-curated named group, functionally identical to "individually
+/// selected families" with a shared tag for preview/reporting.
+enum PtaVolunteerScopeType {
+  ALL
+  MEMBERSHIP_PLAN
+  GRADE
+  CLASSROOM
+  PROGRAM
+  HOUSEHOLD
+}
+
+/// STANDARD = period default applies unchanged (the implicit case when no
+/// assignment row exists at all — never requires a reason). Every other
+/// value requires a non-blank `reason` and produces an audit entry.
+enum PtaVolunteerAssignmentType {
+  STANDARD
+  PER_CHILD
+  PER_ADULT
+  CUSTOM
+  REDUCED
+  EXEMPT_FULL
+  EXEMPT_TEMPORARY
+  WAIVER
+}
+
+model PtaVolunteerRequirementAssignment {
+  id                      String                     @id @default(cuid())
+  organizationId          String
+  periodId                String
+  scopeType               PtaVolunteerScopeType
+  /// Grade/Classroom id or DuesAccount Category id for those scope types;
+  /// the admin-defined program label for PROGRAM; null for ALL and HOUSEHOLD.
+  scopeRefId              String?
+  /// Set only when scopeType = HOUSEHOLD (a single-family override) or
+  /// PROGRAM (one row per household in the named group) — the individual
+  /// override that always wins resolution regardless of any scope match.
+  householdId             String?
+  assignmentType          PtaVolunteerAssignmentType @default(STANDARD)
+  /// Required for CUSTOM/REDUCED (the explicit family/scope hour figure);
+  /// ignored for PER_CHILD/PER_ADULT (computed from live headcount) and
+  /// EXEMPT_FULL/EXEMPT_TEMPORARY (always 0 hours).
+  requiredMinutesOverride Int?
+  /// Required (validated in code, not the DB) whenever assignmentType !=
+  /// STANDARD — every custom assignment, exemption, reduction, or waiver
+  /// must explain why.
+  reason                  String?
+  /// EXEMPT_TEMPORARY only: the exemption reverts to normal resolution once
+  /// this date passes. Null on every other assignmentType.
+  exemptUntil             DateTime?
+  createdByUserId         String?
+  createdAt               DateTime                   @default(now())
+  updatedAt               DateTime                   @updatedAt
+
+  organization Organization                  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  period       PtaVolunteerRequirementPeriod @relation(fields: [periodId], references: [id], onDelete: Cascade)
+  household    PtaHousehold?                 @relation(fields: [householdId], references: [id], onDelete: Cascade)
+
+  // One HOUSEHOLD-scoped row per household per period keeps individual
+  // overrides unambiguous; a household may still appear in multiple PROGRAM
+  // groups (rows), so this constraint only applies to the true HOUSEHOLD
+  // scope.
+  @@unique([periodId, householdId, scopeType], name: "periodId_householdId_scopeType_unique")
+  @@index([organizationId, periodId])
+  @@index([organizationId, householdId])
+  @@index([periodId, scopeType, scopeRefId])
+}
+
+/// Volunteer Hour Requirements & Buyout program, VH-C (docs/pta-volunteer-hours.md).
+/// FULL_BUYOUT and PER_HOUR are the family's own voluntary advance-purchase
+/// rates; FINAL_ASSESSMENT is the rate applied to unmet hours at period end
+/// (VH-G). These are deliberately separate values an org can set
+/// independently — e.g. a cheap early per-hour rate but a steep final
+/// assessment rate, or vice versa. "Early/standard/late" from the spec's
+/// example table are just window names/date ranges, not a fourth enum
+/// dimension — the same effect is achieved with three FULL_BUYOUT windows
+/// (or three PER_HOUR windows) covering consecutive date ranges.
+enum PtaVolunteerRateType {
+  FULL_BUYOUT
+  PER_HOUR
+  FINAL_ASSESSMENT
+}
+
+/// CHECKOUT_START freezes the rate the instant a purchase/checkout record is
+/// created; PAYMENT_SUCCESS re-resolves at webhook-confirmation time and
+/// fails the checkout if no window is active then. See VH-F.
+enum PtaVolunteerRateLockTiming {
+  CHECKOUT_START
+  PAYMENT_SUCCESS
+}
+
+model PtaVolunteerPricingWindow {
+  id                  String                     @id @default(cuid())
+  organizationId      String
+  periodId            String
+  name                String
+  startAt             DateTime
+  endAt               DateTime
+  /// Snapshotted from the period's timezone at creation — same
+  /// snapshot-on-transaction discipline as PtaVolunteerRequirementPeriod.timezone.
+  timezone            String
+  rateType            PtaVolunteerRateType
+  /// Flat total for FULL_BUYOUT; per-hour rate for PER_HOUR/FINAL_ASSESSMENT.
+  /// Integer cents — this is pure configuration, not a settled transaction,
+  /// so it does not need DuesPayment's dollars+cents split (that split
+  /// exists to separate an authoritative principal from Stripe-derived
+  /// reconciliation data, which doesn't apply here).
+  amountCents         Int
+  /// If true, this rate is only offered during a family's first election
+  /// (VH-E) — not for later ad-hoc top-up purchases. Enforcement lives in
+  /// VH-E/VH-F; this column is pure configuration.
+  contractSigningOnly Boolean                    @default(false)
+  active              Boolean                    @default(true)
+  lockTiming          PtaVolunteerRateLockTiming @default(PAYMENT_SUCCESS)
+  createdByUserId     String?
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
+
+  organization Organization                  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  period       PtaVolunteerRequirementPeriod @relation(fields: [periodId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, periodId])
+  @@index([periodId, rateType, active])
+}
+
+/// Volunteer Hour Requirements & Buyout program, VH-D (docs/pta-volunteer-hours.md).
+/// Reused by both the raw PtaVolunteerHourEntry (added nullable/additive
+/// below) and the ledger's SERVICE_VERIFIED entries. "Total event volunteer
+/// hours" = verified hours categorized EVENT_SERVICE; every other category
+/// is "non-event."
+enum PtaVolunteerCategory {
+  EVENT_SERVICE
+  COMMITTEE_SERVICE
+  CLASSROOM_SERVICE
+  SCHOOL_ACTIVITY
+  FUNDRAISING
+  ADMINISTRATIVE_SUPPORT
+  AT_HOME_SERVICE
+  /// Only ever created when PtaProfile.donatedGoodsAsHoursEnabled is true.
+  DONATED_GOODS
+  OTHER_APPROVED_SERVICE
+}
+
+/// SERVICE_VERIFIED/CORRECTED mirror the existing PtaVolunteerHourEntry/
+/// Adjustment lifecycle into the ledger (never replace those tables —
+/// see the model doc below). PURCHASE/PURCHASE_REFUND, ASSESSMENT_CHARGE,
+/// PAYMENT_ELECTRONIC/OFFLINE, REFUND, and WRITE_OFF are posted by VH-F/
+/// VH-G/VH-H. ADMIN_CREDIT and WAIVER are lightweight ad-hoc ledger
+/// adjustments an officer can post directly (reason+audit required, same
+/// as any non-STANDARD VH-B assignment) WITHOUT restructuring the whole
+/// period's requirement the way a VH-B assignment does — two independent
+/// tools for two different situations. REQUIREMENT_CHANGE is an audit
+/// trail entry only (no minutes/amount of its own) recording that a
+/// family's resolved requirement changed, e.g. after a VH-B assignment
+/// edit — VH-H's correction workflow posts these.
+enum PtaVolunteerLedgerEntryType {
+  SERVICE_VERIFIED
+  CORRECTED
+  PURCHASE
+  PURCHASE_REFUND
+  ADMIN_CREDIT
+  WAIVER
+  REQUIREMENT_CHANGE
+  ASSESSMENT_CHARGE
+  PAYMENT_ELECTRONIC
+  PAYMENT_OFFLINE
+  REFUND
+  WRITE_OFF
+}
+
+enum PtaVolunteerLedgerApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  VOIDED
+}
+
+/// The unified family-level obligation ledger (spec §9) — hours AND money,
+/// one queryable timeline. Deliberately COMPLEMENTS, does not replace,
+/// PtaVolunteerHourEntry/PtaVolunteerHourAdjustment, which stay the
+/// authoritative raw per-shift PENDING/APPROVED/REJECTED record (PTA-G's
+/// existing reports keep reading those unmodified). One mirrored
+/// SERVICE_VERIFIED row is posted per approved hour entry via
+/// postLedgerEntry's idempotent insert-then-catch-P2002 pattern (same
+/// discipline as StripeWebhookEvent.stripeEventId) — duplicate
+/// approval-webhook/job runs can never double-count hours or money.
+model PtaVolunteerLedgerEntry {
+  id                  String                           @id @default(cuid())
+  organizationId      String
+  requirementPeriodId String
+  householdId         String
+  /// Null for household-level entries (a purchase, an assessment charge) —
+  /// set only when the entry is attributable to one specific adult (a
+  /// verified hour entry, an individual credit).
+  householdAdultId    String?
+  entryType           PtaVolunteerLedgerEntryType
+  /// Null for entry types that aren't volunteer-activity hours (PURCHASE,
+  /// PAYMENT_*, ASSESSMENT_CHARGE, REFUND, WRITE_OFF, REQUIREMENT_CHANGE).
+  category            PtaVolunteerCategory?
+  /// Signed (+/-) minutes this entry contributes — 0 for pure-financial
+  /// entry types with no hour component of their own.
+  minutes             Int                              @default(0)
+  /// Cents — null for pure-hour entry types (SERVICE_VERIFIED, CORRECTED)
+  /// that carry no financial component.
+  amountCents         Int?
+  effectiveDate       DateTime
+  approvalStatus      PtaVolunteerLedgerApprovalStatus @default(APPROVED)
+  /// Polymorphic pointer to the record that produced this entry (e.g.
+  /// "hourEntry"/PtaVolunteerHourEntry.id, "purchase"/PtaVolunteerBuyoutPurchase.id
+  /// once VH-F ships) — null for manual ADMIN_CREDIT/WAIVER entries, which
+  /// have no natural source record and don't need idempotency protection.
+  sourceType          String?
+  sourceId            String?
+  description         String?
+  /// Required (validated in code) for ADMIN_CREDIT, WAIVER, WRITE_OFF, and
+  /// any CORRECTED entry — mirrors VH-B's non-STANDARD-assignment-needs-a-reason rule.
+  reason              String?
+  createdByUserId     String?
+  approvedByUserId    String?
+  /// Set when this entry reverses an earlier one (VH-H) — the original
+  /// entry is never mutated or deleted, only ever offset by a new row.
+  reversalOfId        String?
+  createdAt           DateTime                         @default(now())
+  updatedAt           DateTime                         @updatedAt
+
+  organization   Organization                  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  period         PtaVolunteerRequirementPeriod @relation(fields: [requirementPeriodId], references: [id], onDelete: Cascade)
+  household      PtaHousehold                  @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  householdAdult PtaHouseholdAdult?            @relation(fields: [householdAdultId], references: [id], onDelete: SetNull)
+  reversalOf     PtaVolunteerLedgerEntry?      @relation("PtaVolunteerLedgerEntryReversal", fields: [reversalOfId], references: [id], onDelete: SetNull)
+  reversals      PtaVolunteerLedgerEntry[]     @relation("PtaVolunteerLedgerEntryReversal")
+
+  // NULL sourceType/sourceId never collide with each other (Postgres unique
+  // constraints treat NULL as distinct) — manual entries are exempt from
+  // this idempotency guard by design; only source-backed entries need it.
+  @@unique([organizationId, sourceType, sourceId, entryType], name: "ledgerEntry_source_idempotency")
+  @@index([organizationId, requirementPeriodId, householdId])
+  @@index([organizationId, householdId])
+  @@index([entryType])
+}
+
+/// Volunteer Hour Requirements & Buyout program, VH-E (docs/pta-volunteer-hours.md).
+enum PtaVolunteerElectionType {
+  VOLUNTEER
+  FULL_BUYOUT
+  PARTIAL_BUYOUT
+}
+
+/// A family's stated choice — election ≠ payment (spec §7). Creating this
+/// row never posts a PURCHASE ledger entry or credits any hours; only
+/// confirmed payment (VH-F) does that. Append-only history (a family may
+/// re-elect; the latest row for a period is authoritative) rather than an
+/// editable single row, so the original disclosure a family agreed to is
+/// never silently rewritten. Versioned/IP-stamped acknowledgment mirrors
+/// the existing SMS-consent pattern (sms-consent.ts's recordSmsOptIn).
+model PtaVolunteerBuyoutElection {
+  id                   String                   @id @default(cuid())
+  organizationId       String
+  requirementPeriodId  String
+  householdId          String
+  electionType         PtaVolunteerElectionType
+  /// 0 for VOLUNTEER; the full requirement for FULL_BUYOUT; the chosen
+  /// amount for PARTIAL_BUYOUT.
+  hoursElectedMinutes  Int
+  /// Snapshot of the resolved per-unit rate and total cost AT ELECTION TIME
+  /// — a later pricing-window edit must never reinterpret this historical
+  /// election, same snapshot-on-transaction discipline as everywhere else
+  /// in this program. Both 0 for VOLUNTEER.
+  quotedRateCents      Int
+  quotedTotalCents     Int
+  /// Which window produced the quote, for traceability — null for VOLUNTEER.
+  pricingWindowId      String?
+  acknowledgedAt       DateTime
+  acknowledgedByUserId String
+  /// Versioned disclosure text the family agreed to (required hours,
+  /// deadlines, refund policy, etc.) — mirrors SMS_CONSENT_VERSION so a
+  /// later policy-text change never retroactively reinterprets an
+  /// already-made election.
+  ackVersion           String
+  ipAddress            String?
+  createdAt            DateTime                 @default(now())
+
+  organization Organization                  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  period       PtaVolunteerRequirementPeriod @relation(fields: [requirementPeriodId], references: [id], onDelete: Cascade)
+  household    PtaHousehold                  @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  purchases    PtaVolunteerBuyoutPurchase[]
+
+  @@index([organizationId, requirementPeriodId, householdId])
+  @@index([organizationId, householdId])
+}
+
+enum PtaVolunteerHourDisputeStatus {
+  OPEN
+  RESOLVED
+  DISMISSED
+}
+
+/// spec §8 "report a missing or incorrect volunteer record" — a lightweight
+/// household-submitted flag, distinct from (and never itself altering) the
+/// authoritative PtaVolunteerHourEntry records; an officer investigates and
+/// makes any correction through the normal approve/reject/adjust tools.
+model PtaVolunteerHourDispute {
+  id                  String                        @id @default(cuid())
+  organizationId      String
+  requirementPeriodId String
+  householdId         String
+  submittedByUserId   String
+  description         String
+  status              PtaVolunteerHourDisputeStatus @default(OPEN)
+  adminNotes          String?
+  resolvedByUserId    String?
+  resolvedAt          DateTime?
+  createdAt           DateTime                      @default(now())
+  updatedAt           DateTime                      @updatedAt
+
+  organization Organization                  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  period       PtaVolunteerRequirementPeriod @relation(fields: [requirementPeriodId], references: [id], onDelete: Cascade)
+  household    PtaHousehold                  @relation(fields: [householdId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, requirementPeriodId, status])
+  @@index([organizationId, householdId])
+}
+
+/// Volunteer Hour Requirements & Buyout program, VH-F (docs/pta-volunteer-hours.md).
+enum PtaVolunteerPurchaseStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum PtaVolunteerPurchasePaymentMethod {
+  STRIPE
+  CASH
+  CHECK
+  ZELLE
+  CASH_APP
+  OTHER
+}
+
+/// A confirmed (or in-flight) buyout purchase. Every pricing/hours field is
+/// a permanent snapshot taken at checkout-creation time — mirrors the
+/// program-wide snapshot-on-transaction discipline; a later pricing-window
+/// edit must never reinterpret this row. Reuses the generic PendingPayment/
+/// Stripe-Connect checkout infrastructure (pendingPaymentId) rather than
+/// inventing parallel payment plumbing — see PendingPayment.paymentPurpose
+/// = "pta-volunteer-buyout".
+model PtaVolunteerBuyoutPurchase {
+  id                       String                            @id @default(cuid())
+  organizationId           String
+  /// The election this purchase fulfills, when the family went through the
+  /// VH-E election flow first. Nullable — an admin can record an offline
+  /// payment for a family that verbally agreed without a formal election.
+  electionId               String?
+  requirementPeriodId      String
+  householdId              String
+  /// FULL_BUYOUT or PARTIAL_BUYOUT only — a purchase can't exist for a
+  /// VOLUNTEER election.
+  electionType             PtaVolunteerElectionType
+  hoursElectedMinutes      Int
+  rateType                 PtaVolunteerRateType
+  rateCents                Int
+  baseAmountCents          Int
+  /// Voluntary processing-cost coverage the family opted into, mirroring
+  /// Contribution/DuesPayment's coverage split — the ledger's PURCHASE
+  /// entry always credits baseAmountCents worth of hours, never inflated
+  /// by coverage.
+  coverageAmountCents      Int                               @default(0)
+  totalCents               Int
+  pricingWindowId          String?
+  status                   PtaVolunteerPurchaseStatus        @default(PENDING)
+  paymentMethod            PtaVolunteerPurchasePaymentMethod
+  stripeConnectedAccountId String?
+  /// Links to the generic COST-POLICY v2 pending-payment record this
+  /// purchase settles through (Stripe path only).
+  pendingPaymentId         String?
+  providerPaymentIntentId  String?
+  providerSessionId        String?                           @unique
+  offlineReference         String?
+  offlineNotes             String?
+  /// Set only for admin-recorded offline payments — null for a
+  /// family-initiated Stripe purchase.
+  recordedByUserId         String?
+  refundedAmountCents      Int                               @default(0)
+  /// VH-H: cumulative minutes reversed via refundPurchasedHours — tracked
+  /// separately from refundedAmountCents since a partial refund's hour
+  /// count isn't always a simple proportional derivation (e.g. a
+  /// goodwill/admin-adjusted refund amount).
+  refundedMinutes          Int                               @default(0)
+  completedAt              DateTime?
+  createdAt                DateTime                          @default(now())
+  updatedAt                DateTime                          @updatedAt
+
+  organization Organization                  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  election     PtaVolunteerBuyoutElection?   @relation(fields: [electionId], references: [id], onDelete: SetNull)
+  period       PtaVolunteerRequirementPeriod @relation(fields: [requirementPeriodId], references: [id], onDelete: Cascade)
+  household    PtaHousehold                  @relation(fields: [householdId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, requirementPeriodId, householdId])
+  @@index([organizationId, status])
+}
+
+/// Volunteer Hour Requirements & Buyout program, VH-G (docs/pta-volunteer-hours.md).
+/// The remaining-hours assessment workflow (spec §18): preview (no
+/// obligations), admin review/exclude, then post (one charge per included
+/// family, atomically, duplicate-post-proof).
+enum PtaVolunteerAssessmentBatchStatus {
+  DRAFT
+  POSTED
+  CANCELLED
+}
+
+enum PtaVolunteerAssessmentLineStatus {
+  INCLUDED
+  EXCLUDED
+  POSTED
+}
+
+enum PtaVolunteerAssessmentChargeStatus {
+  PENDING
+  PARTIAL
+  PAID
+  VOID
+}
+
+model PtaVolunteerAssessmentBatch {
+  id                  String                            @id @default(cuid())
+  organizationId      String
+  requirementPeriodId String
+  status              PtaVolunteerAssessmentBatchStatus @default(DRAFT)
+  /// A supplemental/correction batch references the batch it supplements —
+  /// the original's posted lines/charges are never mutated (spec §18
+  /// "explicit correction workflow for supplemental assessments").
+  supersedesBatchId   String?
+  /// Snapshot of the FINAL_ASSESSMENT rate resolved at preview time — every
+  /// line's assessmentCents derives from THIS value, not a live re-resolve,
+  /// so editing the rate after preview never silently changes what's about
+  /// to post.
+  rateCents           Int
+  pricingWindowId     String?
+  previewedAt         DateTime                          @default(now())
+  previewedByUserId   String?
+  postedAt            DateTime?
+  postedByUserId      String?
+  cancelledAt         DateTime?
+  notes               String?
+  createdAt           DateTime                          @default(now())
+  updatedAt           DateTime                          @updatedAt
+
+  organization Organization                   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  period       PtaVolunteerRequirementPeriod  @relation(fields: [requirementPeriodId], references: [id], onDelete: Cascade)
+  supersedes   PtaVolunteerAssessmentBatch?   @relation("PtaVolunteerAssessmentBatchSupersedes", fields: [supersedesBatchId], references: [id], onDelete: SetNull)
+  supersededBy PtaVolunteerAssessmentBatch[]  @relation("PtaVolunteerAssessmentBatchSupersedes")
+  lines        PtaVolunteerAssessmentLine[]
+  charges      PtaVolunteerAssessmentCharge[]
+
+  @@index([organizationId, requirementPeriodId])
+  @@index([organizationId, status])
+}
+
+/// One row per household considered for assessment — every figure is a
+/// snapshot taken at preview time (spec §18's assessment-preview
+/// breakdown), so the number an admin reviews is EXACTLY the number that
+/// posts, never silently recomputed in between.
+model PtaVolunteerAssessmentLine {
+  id                      String                           @id @default(cuid())
+  organizationId          String
+  batchId                 String
+  householdId             String
+  adjustedRequiredMinutes Int
+  verifiedMinutes         Int
+  purchasedMinutes        Int
+  creditMinutes           Int
+  waivedMinutes           Int
+  remainingMinutes        Int
+  assessmentCents         Int
+  status                  PtaVolunteerAssessmentLineStatus @default(INCLUDED)
+  /// Required (validated in code) whenever status is set to EXCLUDED —
+  /// mirrors VH-B's non-STANDARD-assignment-needs-a-reason rule.
+  excludeReason           String?
+  createdAt               DateTime                         @default(now())
+  updatedAt               DateTime                         @updatedAt
+
+  organization                    Organization                   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  batch                           PtaVolunteerAssessmentBatch    @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  household                       PtaHousehold                   @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  charge                          PtaVolunteerAssessmentCharge?
+  ptaVolunteerRequirementPeriod   PtaVolunteerRequirementPeriod? @relation(fields: [ptaVolunteerRequirementPeriodId], references: [id])
+  ptaVolunteerRequirementPeriodId String?
+
+  @@unique([batchId, householdId])
+  @@index([organizationId, batchId])
+}
+
+/// The posted obligation — deliberately its own lightweight model rather
+/// than reusing DuesCharge/DuesAccount: DuesCharge requires a DuesAccount
+/// FK and feeds the existing membership-dues balance/reports a parent
+/// already sees, and mixing a volunteer assessment into that view would
+/// contradict spec §17's "classify these payments separately." Payment
+/// state lives directly on the charge (amountPaidCents/status) rather than
+/// a separate payment-attempt model — V1 assumes one successful payment per
+/// charge, matching PendingPayment's own settle-once model; the columns
+/// here already support adding multi-attempt tracking later without a
+/// migration if partial/installment payment is ever needed.
+model PtaVolunteerAssessmentCharge {
+  id                       String                             @id @default(cuid())
+  organizationId           String
+  requirementPeriodId      String
+  householdId              String
+  batchId                  String
+  lineId                   String                             @unique
+  amountCents              Int
+  amountPaidCents          Int                                @default(0)
+  refundedCents            Int                                @default(0)
+  status                   PtaVolunteerAssessmentChargeStatus @default(PENDING)
+  dueDate                  DateTime?
+  paymentMethod            PtaVolunteerPurchasePaymentMethod?
+  stripeConnectedAccountId String?
+  pendingPaymentId         String?
+  providerPaymentIntentId  String?
+  providerSessionId        String?                            @unique
+  offlineReference         String?
+  offlineNotes             String?
+  recordedByUserId         String?
+  paidAt                   DateTime?
+  createdAt                DateTime                           @default(now())
+  updatedAt                DateTime                           @updatedAt
+
+  organization Organization                  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  period       PtaVolunteerRequirementPeriod @relation(fields: [requirementPeriodId], references: [id], onDelete: Cascade)
+  household    PtaHousehold                  @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  batch        PtaVolunteerAssessmentBatch   @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  line         PtaVolunteerAssessmentLine    @relation(fields: [lineId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, requirementPeriodId, householdId])
+  @@index([organizationId, status])
+}
+
+/// Volunteer Hour Requirements & Buyout program, VH-H (docs/pta-volunteer-hours.md).
+/// spec §21: corrections never auto-charge or auto-refund — they surface a
+/// flag for a human to review instead.
+enum PtaVolunteerReviewFlagType {
+  /// A verified-hour entry was corrected/reversed after an assessment batch
+  /// already posted for this household+period.
+  CORRECTION_AFTER_ASSESSMENT_POSTED
+  /// A household's resolved requirement was reduced (VH-B assignment edit)
+  /// after they already purchased/verified more than the new requirement.
+  POTENTIAL_OVERPAYMENT_AFTER_REQUIREMENT_REDUCED
+  /// Refunding purchased hours would leave the household below their
+  /// requirement with insufficient time to make it up.
+  REFUND_CREATES_DEFICIT
+}
+
+enum PtaVolunteerReviewFlagStatus {
+  OPEN
+  RESOLVED
+}
+
+model PtaVolunteerReviewFlag {
+  id                  String                       @id @default(cuid())
+  organizationId      String
+  requirementPeriodId String
+  householdId         String
+  flagType            PtaVolunteerReviewFlagType
+  description         String
+  sourceType          String?
+  sourceId            String?
+  status              PtaVolunteerReviewFlagStatus @default(OPEN)
+  resolvedByUserId    String?
+  resolvedAt          DateTime?
+  resolutionNotes     String?
+  createdAt           DateTime                     @default(now())
+  updatedAt           DateTime                     @updatedAt
+
+  organization Organization                  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  period       PtaVolunteerRequirementPeriod @relation(fields: [requirementPeriodId], references: [id], onDelete: Cascade)
+  household    PtaHousehold                  @relation(fields: [householdId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, requirementPeriodId, status])
+  @@index([organizationId, householdId])
+}
+
+/// Volunteer Hour Requirements & Buyout program, VH-L (docs/pta-volunteer-hours.md).
+/// Every automated notification this feature sends. Off by default
+/// (ptaVolunteerNotificationsEnabled) — this table is also the dedup gate,
+/// mirroring PtaVolunteerSignup.reminderSentAt's nullable-timestamp pattern
+/// but generalized into a log since these notifications aren't each tied to
+/// one single existing row the way a shift reminder is tied to one signup.
+enum PtaVolunteerNotificationType {
+  /// One heads-up per household per period as the volunteerDeadline
+  /// approaches, sent at most once regardless of how many sweeps run before
+  /// the deadline passes.
+  DEADLINE_REMINDER
+  /// Sent once per household per assessment charge, right after
+  /// PostAssessmentBatch posts it.
+  ASSESSMENT_POSTED
+  /// Sent once per household per pricing window, when that window's startAt
+  /// is approaching — lets a family still short on hours know the buyout
+  /// rate is about to change.
+  RATE_CHANGE_UPCOMING
+}
+
+model PtaVolunteerNotificationLog {
+  id                  String                       @id @default(cuid())
+  organizationId      String
+  requirementPeriodId String
+  householdId         String
+  notificationType    PtaVolunteerNotificationType
+  /// periodId for DEADLINE_REMINDER/RATE_CHANGE_UPCOMING (the latter also
+  /// disambiguated by pricingWindowId below); chargeId for ASSESSMENT_POSTED.
+  sourceId            String
+  pricingWindowId     String?
+  recipientEmail      String
+  sentAt              DateTime                     @default(now())
+
+  organization Organization                  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  period       PtaVolunteerRequirementPeriod @relation(fields: [requirementPeriodId], references: [id], onDelete: Cascade)
+  household    PtaHousehold                  @relation(fields: [householdId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, notificationType, householdId, sourceId])
+  @@index([organizationId, requirementPeriodId])
 }
 
 /// PTA Vertical 2.0, PR PTA-B — lifecycle status. A committee is never hard

@@ -57,6 +57,25 @@ export const PTA_ERROR_CODES = [
   "PTA_ELECTION_NOT_FOUND",
   "PTA_NOT_ELIGIBLE_VOTER",
   "PTA_ALREADY_VOTED",
+  // Volunteer Hour Requirements & Buyout program (docs/pta-volunteer-hours.md).
+  /** Platform-wide env kill-switch is off — checked before any org flag. */
+  "PTA_VOLUNTEER_HOURS_PLATFORM_DISABLED",
+  /** PtaProfile.ptaVolunteerRequirementsEnabled is false for this org. */
+  "PTA_VOLUNTEER_REQUIREMENTS_DISABLED",
+  /** PtaProfile.ptaVolunteerBuyoutEnabled is false for this org. */
+  "PTA_VOLUNTEER_BUYOUT_DISABLED",
+  /** PtaProfile.ptaVolunteerAssessmentsEnabled is false for this org. */
+  "PTA_VOLUNTEER_ASSESSMENTS_DISABLED",
+  /** PtaProfile.ptaVolunteerReportsEnabled is false for this org. */
+  "PTA_VOLUNTEER_REPORTS_DISABLED",
+  /** PtaProfile.ptaVolunteerNotificationsEnabled is false for this org
+   * (automated sends only — admin preview/test-send bypasses this code). */
+  "PTA_VOLUNTEER_NOTIFICATIONS_DISABLED",
+  "PTA_VOLUNTEER_PERIOD_NOT_FOUND",
+  /** A new/edited period would create an ambiguous overlap with another
+   * ACTIVE period sharing the same scopeLabel (or both null). */
+  "PTA_VOLUNTEER_PERIOD_CONFLICT",
+  "PTA_VOLUNTEER_PERIOD_INVALID_DATES",
 ] as const;
 
 export type PtaErrorCode = (typeof PTA_ERROR_CODES)[number];
@@ -103,6 +122,15 @@ const STATUS_FOR_CODE: Record<PtaErrorCode, number> = {
   PTA_ELECTION_NOT_FOUND: 404,
   PTA_NOT_ELIGIBLE_VOTER: 403,
   PTA_ALREADY_VOTED: 409,
+  PTA_VOLUNTEER_HOURS_PLATFORM_DISABLED: 403,
+  PTA_VOLUNTEER_REQUIREMENTS_DISABLED: 403,
+  PTA_VOLUNTEER_BUYOUT_DISABLED: 403,
+  PTA_VOLUNTEER_ASSESSMENTS_DISABLED: 403,
+  PTA_VOLUNTEER_REPORTS_DISABLED: 403,
+  PTA_VOLUNTEER_NOTIFICATIONS_DISABLED: 403,
+  PTA_VOLUNTEER_PERIOD_NOT_FOUND: 404,
+  PTA_VOLUNTEER_PERIOD_CONFLICT: 409,
+  PTA_VOLUNTEER_PERIOD_INVALID_DATES: 400,
 };
 
 export class PtaError extends Error {

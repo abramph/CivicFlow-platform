@@ -24,7 +24,16 @@ export type PaymentPurpose =
   | "payment-link-dues"
   | "payment-link-general"
   | "member-dues"
-  | "offline-entry";
+  | "offline-entry"
+  /// Volunteer Hour Requirements & Buyout program, VH-F (docs/pta-volunteer-hours.md).
+  /// A family's own choice — not owed unless they elect it, same voluntary
+  /// shape as "giving," never a donation/tax-deductible contribution
+  /// (spec §17). The remaining-hours assessment (VH-G) is the fixed-
+  /// obligation counterpart once posted.
+  | "pta-volunteer-buyout"
+  /// VH-G: a posted remaining-hours assessment charge — the family owes
+  /// this once the batch posts, same fixed shape as member-dues.
+  | "pta-volunteer-assessment";
 
 /**
  * §2 — derive the payment nature from what the payment actually IS.
@@ -57,6 +66,10 @@ export function derivePaymentNature(input: {
         return "FIXED_OBLIGATION";
       }
       return "VOLUNTARY";
+    case "pta-volunteer-buyout":
+      return "VOLUNTARY";
+    case "pta-volunteer-assessment":
+      return "FIXED_OBLIGATION";
   }
 }
 
