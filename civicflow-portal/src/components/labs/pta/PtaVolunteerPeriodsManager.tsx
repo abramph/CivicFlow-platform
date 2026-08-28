@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 export interface VolunteerRequirementPeriodLike {
@@ -379,16 +380,24 @@ export function PtaVolunteerPeriodsManager({ periods }: { periods: VolunteerRequ
                     {(period.requiredMinutesDefault / 60).toString()} required hours
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditingId(period.id);
-                    setEditForm(periodToForm(period));
-                  }}
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 hover:bg-slate-50"
-                >
-                  Edit
-                </button>
+                <div className="flex gap-2">
+                  <Link
+                    href={`/labs/pta/settings/volunteer-hours/periods/${period.id}`}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 hover:bg-slate-50"
+                  >
+                    Assignment rules
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingId(period.id);
+                      setEditForm(periodToForm(period));
+                    }}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 hover:bg-slate-50"
+                  >
+                    Edit
+                  </button>
+                </div>
               </li>
             )
           )}

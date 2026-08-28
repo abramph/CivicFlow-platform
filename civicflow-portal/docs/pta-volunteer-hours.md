@@ -69,7 +69,7 @@ starts clean from the spec.
 ## Stage status
 
 - VH-A: ✅ built + tested locally (not merged/deployed) — flags + requirement periods
-- VH-B: 🔲 not started — assignment/scoping/exemptions
+- VH-B: ✅ built + tested locally (not merged/deployed) — assignment/scoping/exemptions
 - VH-C: 🔲 not started — pricing window engine
 - VH-D: 🔲 not started — unified ledger
 - VH-E: 🔲 not started — family dashboard + buyout election + dispute reporting
@@ -151,8 +151,74 @@ timezone snapshot, audit events, not-found/cross-org isolation). Full
 existing suite green (329 PTA tests, 29 rbac/role-permission tests, no
 regressions). Typecheck + lint clean on every touched/new file.
 
-**Not yet built** (later stages): assignment/scoping/exemptions (VH-B),
-pricing windows (VH-C), the unified ledger (VH-D), and everything
-downstream. The settings page currently lets an admin define a period's
-default required hours only — no buyout, no payment, no report queries
+**Not yet built** (later stages): pricing windows (VH-C), the unified
+ledger (VH-D), and everything downstream. The settings page currently
+lets an admin define a period's default required hours and per-family
+assignment rules only — no buyout, no payment, no report queries
 consult these tables yet.
+
+## VH-B — Assignment, scoping & exemptions
+
+Migration `20260828023144_vh_b_requirement_assignments` — purely
+additive (2 enums, 1 new table with FKs to `Organization`,
+`PtaVolunteerRequirementPeriod`, and nullable `PtaHousehold`).
+
+**Model**: `PtaVolunteerRequirementAssignment`
+(`src/lib/labs/pta/volunteer-hours/assignments.ts`) — `scopeType`
+(ALL/MEMBERSHIP_PLAN/GRADE/CLASSROOM/PROGRAM/HOUSEHOLD) ×
+`assignmentType` (STANDARD/PER_CHILD/PER_ADULT/CUSTOM/REDUCED/
+EXEMPT_FULL/EXEMPT_TEMPORARY/WAIVER). GRADE/CLASSROOM resolve against
+the household's CURRENT-school-year enrollment; MEMBERSHIP_PLAN
+resolves against the household's billing OrgMember's active
+`DuesAccount.categoryId` (type=MEMBERSHIP) — the closest existing "plan"
+concept, since no dedicated membership-plan entity exists. PROGRAM has
+no backing entity at all (no `PtaProgram` model anywhere in the schema)
+and is deliberately NOT auto-resolved — it's only ever populated by
+explicit household-tagged rows sharing a free-text label, i.e. an
+admin-curated named group functionally identical to "individually
+selected families" with a shared tag. Documented as a deliberate
+simplification, same posture as the period-level `scopeLabel` gap noted
+in VH-A.
+
+**Resolution** (`computeHouseholdRequirement`, pure function + a
+DB-fetching wrapper `resolveHouseholdRequirement`): precedence is
+HOUSEHOLD override → PROGRAM group → CLASSROOM → GRADE →
+MEMBERSHIP_PLAN → org-wide ALL row → implicit period default (no row at
+all). PER_CHILD/PER_ADULT multiply the period default by live headcount
+— confirmed NEVER happens implicitly (dedicated regression test). An
+EXEMPT_TEMPORARY row whose `exemptUntil` has passed is treated as if it
+doesn't exist (falls through to the next precedence tier), not as a
+zero result — "reverts to normal resolution" per spec. WAIVER without
+an override amount is a full waiver (zero, exempt); with an amount, a
+partial waiver. Every non-STANDARD assignment requires a `reason`
+(validated in code) and produces an audit event on both create and
+delete.
+
+**Preview**: `previewPeriodAssignments` batch-fetches every ACTIVE
+household + its scope context once (no N+1), then reuses the same pure
+`computeHouseholdRequirement` function per household — spec §4's
+"show administrators a preview... before activation."
+
+**Permissions**: scope-wide rules (ALL/GRADE/CLASSROOM/MEMBERSHIP_PLAN)
+need `pta:volunteer-requirements:manage`; family-specific rules
+(HOUSEHOLD/PROGRAM) need the dedicated `pta:volunteer-requirements:adjust-family`
+— checked per-request against the actual `scopeType` in the payload,
+not assumed from the route.
+
+**API**: `/api/labs/pta/volunteer-hours/periods/[periodId]/assignments`
+(GET, POST), `.../assignments/[assignmentId]` (DELETE),
+`.../preview` (GET).
+
+**UI**: new page `/labs/pta/settings/volunteer-hours/periods/[periodId]`
+(linked from each period row) — assignment-rule list/create/delete +
+the live preview table. Scope references (grade/classroom/category/
+household ids) are entered as raw ids for now; a searchable picker is a
+noted follow-up UX improvement, not a correctness gap (the server
+validates every id against the org).
+
+**Tests**: 23 new (full precedence-order matrix incl. every pairwise
+scope-priority comparison, PER_CHILD/PER_ADULT multiplication +
+explicit no-implicit-multiplication regression test, WAIVER
+full-vs-partial, EXEMPT_TEMPORARY expiry fallthrough, cross-household
+isolation, validation rules, audit events). Full existing suite green
+(352 PTA tests). Typecheck + lint clean.

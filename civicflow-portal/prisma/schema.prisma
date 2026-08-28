@@ -742,59 +742,60 @@ model Organization {
   meetingIntelligenceFeedback MeetingIntelligenceFeedback[]
   meetingMinutes              MeetingMinutes[]
 
-  ptaProfile                     PtaProfile?
-  ptaHouseholds                  PtaHousehold[]
-  ptaStudents                    PtaStudent[]
-  ptaGrades                      PtaGrade[]
-  ptaClassrooms                  PtaClassroom[]
-  ptaTeachers                    PtaTeacher[]
-  ptaStudentEnrollments          PtaStudentEnrollment[]
-  ptaVolunteerOpportunities      PtaVolunteerOpportunity[]
-  ptaVolunteerSlots              PtaVolunteerSlot[]
-  ptaVolunteerSignups            PtaVolunteerSignup[]
-  ptaVolunteerAttendance         PtaVolunteerAttendance[]
-  ptaVolunteerHourEntries        PtaVolunteerHourEntry[]
-  ptaVolunteerHourAdjustments    PtaVolunteerHourAdjustment[]
-  ptaVolunteerRequirements       PtaVolunteerRequirement[]
-  ptaCommittees                  PtaCommittee[]
-  ptaCommitteeMembers            PtaCommitteeMember[]
-  ptaEventRsvps                  PtaEventRsvp[]
-  ptaHouseholdAdults             PtaHouseholdAdult[]
-  ptaSchoolYears                 PtaSchoolYear[]
-  ptaBoardPositions              PtaBoardPosition[]
-  ptaOfficerAssignments          PtaOfficerAssignment[]
-  meetingAgendaItems             MeetingAgendaItem[]
-  meetingMotions                 MeetingMotion[]
-  meetingActionItems             MeetingActionItem[]
-  governanceDocuments            GovernanceDocument[]
-  ptaConcerns                    PtaConcern[]
-  ptaConcernAssignees            PtaConcernAssignee[]
-  ptaConcernNotes                PtaConcernNote[]
-  ptaBoardTransitions            PtaBoardTransition[]
-  ptaOfficerHandoffs             PtaOfficerHandoff[]
-  ptaHandoffChecklistItems       PtaHandoffChecklistItem[]
-  budgetLines                    BudgetLine[]
-  reimbursementRequests          ReimbursementRequest[]
-  ptaComplianceRequirements      PtaComplianceRequirement[]
-  organizationContacts           OrganizationContact[]
-  funds                          Fund[]
-  contributionPrograms           ContributionProgram[]
-  givingCustomers                GivingCustomer[]
-  recurringContributionSchedules RecurringContributionSchedule[]
-  pledges                        Pledge[]
-  contributionStatements         ContributionStatement[]
-  households                     Household[]
-  orgGroups                      OrgGroup[]
-  contributionAdjustments        ContributionAdjustment[]
-  contributionRefundEvents       ContributionRefundEvent[]
-  stripeAccount                  OrganizationStripeAccount?
-  memberStripeCustomers          OrganizationMemberStripeCustomer[]
-  ptaElections                   PtaElection[]
-  ptaElectionContests            PtaElectionContest[]
-  ptaElectionCandidates          PtaElectionCandidate[]
-  ptaElectionVoters              PtaElectionVoter[]
-  ptaBallotChoices               PtaBallotChoice[]
-  ptaVolunteerRequirementPeriods PtaVolunteerRequirementPeriod[]
+  ptaProfile                         PtaProfile?
+  ptaHouseholds                      PtaHousehold[]
+  ptaStudents                        PtaStudent[]
+  ptaGrades                          PtaGrade[]
+  ptaClassrooms                      PtaClassroom[]
+  ptaTeachers                        PtaTeacher[]
+  ptaStudentEnrollments              PtaStudentEnrollment[]
+  ptaVolunteerOpportunities          PtaVolunteerOpportunity[]
+  ptaVolunteerSlots                  PtaVolunteerSlot[]
+  ptaVolunteerSignups                PtaVolunteerSignup[]
+  ptaVolunteerAttendance             PtaVolunteerAttendance[]
+  ptaVolunteerHourEntries            PtaVolunteerHourEntry[]
+  ptaVolunteerHourAdjustments        PtaVolunteerHourAdjustment[]
+  ptaVolunteerRequirements           PtaVolunteerRequirement[]
+  ptaCommittees                      PtaCommittee[]
+  ptaCommitteeMembers                PtaCommitteeMember[]
+  ptaEventRsvps                      PtaEventRsvp[]
+  ptaHouseholdAdults                 PtaHouseholdAdult[]
+  ptaSchoolYears                     PtaSchoolYear[]
+  ptaBoardPositions                  PtaBoardPosition[]
+  ptaOfficerAssignments              PtaOfficerAssignment[]
+  meetingAgendaItems                 MeetingAgendaItem[]
+  meetingMotions                     MeetingMotion[]
+  meetingActionItems                 MeetingActionItem[]
+  governanceDocuments                GovernanceDocument[]
+  ptaConcerns                        PtaConcern[]
+  ptaConcernAssignees                PtaConcernAssignee[]
+  ptaConcernNotes                    PtaConcernNote[]
+  ptaBoardTransitions                PtaBoardTransition[]
+  ptaOfficerHandoffs                 PtaOfficerHandoff[]
+  ptaHandoffChecklistItems           PtaHandoffChecklistItem[]
+  budgetLines                        BudgetLine[]
+  reimbursementRequests              ReimbursementRequest[]
+  ptaComplianceRequirements          PtaComplianceRequirement[]
+  organizationContacts               OrganizationContact[]
+  funds                              Fund[]
+  contributionPrograms               ContributionProgram[]
+  givingCustomers                    GivingCustomer[]
+  recurringContributionSchedules     RecurringContributionSchedule[]
+  pledges                            Pledge[]
+  contributionStatements             ContributionStatement[]
+  households                         Household[]
+  orgGroups                          OrgGroup[]
+  contributionAdjustments            ContributionAdjustment[]
+  contributionRefundEvents           ContributionRefundEvent[]
+  stripeAccount                      OrganizationStripeAccount?
+  memberStripeCustomers              OrganizationMemberStripeCustomer[]
+  ptaElections                       PtaElection[]
+  ptaElectionContests                PtaElectionContest[]
+  ptaElectionCandidates              PtaElectionCandidate[]
+  ptaElectionVoters                  PtaElectionVoter[]
+  ptaBallotChoices                   PtaBallotChoice[]
+  ptaVolunteerRequirementPeriods     PtaVolunteerRequirementPeriod[]
+  ptaVolunteerRequirementAssignments PtaVolunteerRequirementAssignment[]
 
   hoaProperties             Property[]
   hoaPropertyResidents      PropertyResident[]
@@ -4645,15 +4646,16 @@ model PtaHousehold {
   createdAt               DateTime           @default(now())
   updatedAt               DateTime           @updatedAt
 
-  organization     Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  schoolYearRef    PtaSchoolYear?      @relation(fields: [schoolYearId], references: [id], onDelete: SetNull)
-  orgMember        OrgMember?          @relation(fields: [orgMemberId], references: [id], onDelete: SetNull)
-  primaryContact   PtaHouseholdAdult?  @relation("PtaHouseholdPrimaryContact", fields: [primaryContactAdultId], references: [id], onDelete: SetNull)
-  secondaryContact PtaHouseholdAdult?  @relation("PtaHouseholdSecondaryContact", fields: [secondaryContactAdultId], references: [id], onDelete: SetNull)
-  adults           PtaHouseholdAdult[] @relation("PtaHouseholdAdults")
-  students         PtaStudent[]
-  eventRsvps       PtaEventRsvp[]
-  meetingRsvps     PtaMeetingRsvp[]
+  organization                    Organization                        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  schoolYearRef                   PtaSchoolYear?                      @relation(fields: [schoolYearId], references: [id], onDelete: SetNull)
+  orgMember                       OrgMember?                          @relation(fields: [orgMemberId], references: [id], onDelete: SetNull)
+  primaryContact                  PtaHouseholdAdult?                  @relation("PtaHouseholdPrimaryContact", fields: [primaryContactAdultId], references: [id], onDelete: SetNull)
+  secondaryContact                PtaHouseholdAdult?                  @relation("PtaHouseholdSecondaryContact", fields: [secondaryContactAdultId], references: [id], onDelete: SetNull)
+  adults                          PtaHouseholdAdult[]                 @relation("PtaHouseholdAdults")
+  students                        PtaStudent[]
+  eventRsvps                      PtaEventRsvp[]
+  meetingRsvps                    PtaMeetingRsvp[]
+  volunteerRequirementAssignments PtaVolunteerRequirementAssignment[]
 
   @@unique([organizationId, displayName, schoolYear])
   @@index([organizationId])
@@ -5194,10 +5196,87 @@ model PtaVolunteerRequirementPeriod {
   createdAt                DateTime                 @default(now())
   updatedAt                DateTime                 @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization Organization                        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assignments  PtaVolunteerRequirementAssignment[]
 
   @@index([organizationId, status])
   @@index([organizationId, startsOn, endsOn])
+}
+
+/// Volunteer Hour Requirements & Buyout program, VH-B (docs/pta-volunteer-hours.md).
+/// How a period's required hours reach a specific family. CLASSROOM/GRADE
+/// resolve against the household's CURRENT school year enrollment;
+/// MEMBERSHIP_PLAN resolves against the household's billing OrgMember's
+/// active DuesAccount.categoryId (the closest existing "plan" concept — this
+/// codebase has no dedicated membership-plan entity). PROGRAM has no
+/// backing entity either (no PtaProgram model exists) and is deliberately
+/// NOT auto-resolved from anything — it is only ever populated by explicit
+/// HOUSEHOLD-scoped rows sharing the same free-text scopeRefId label, i.e.
+/// an admin-curated named group, functionally identical to "individually
+/// selected families" with a shared tag for preview/reporting.
+enum PtaVolunteerScopeType {
+  ALL
+  MEMBERSHIP_PLAN
+  GRADE
+  CLASSROOM
+  PROGRAM
+  HOUSEHOLD
+}
+
+/// STANDARD = period default applies unchanged (the implicit case when no
+/// assignment row exists at all — never requires a reason). Every other
+/// value requires a non-blank `reason` and produces an audit entry.
+enum PtaVolunteerAssignmentType {
+  STANDARD
+  PER_CHILD
+  PER_ADULT
+  CUSTOM
+  REDUCED
+  EXEMPT_FULL
+  EXEMPT_TEMPORARY
+  WAIVER
+}
+
+model PtaVolunteerRequirementAssignment {
+  id                      String                     @id @default(cuid())
+  organizationId          String
+  periodId                String
+  scopeType               PtaVolunteerScopeType
+  /// Grade/Classroom id or DuesAccount Category id for those scope types;
+  /// the admin-defined program label for PROGRAM; null for ALL and HOUSEHOLD.
+  scopeRefId              String?
+  /// Set only when scopeType = HOUSEHOLD (a single-family override) or
+  /// PROGRAM (one row per household in the named group) — the individual
+  /// override that always wins resolution regardless of any scope match.
+  householdId             String?
+  assignmentType          PtaVolunteerAssignmentType @default(STANDARD)
+  /// Required for CUSTOM/REDUCED (the explicit family/scope hour figure);
+  /// ignored for PER_CHILD/PER_ADULT (computed from live headcount) and
+  /// EXEMPT_FULL/EXEMPT_TEMPORARY (always 0 hours).
+  requiredMinutesOverride Int?
+  /// Required (validated in code, not the DB) whenever assignmentType !=
+  /// STANDARD — every custom assignment, exemption, reduction, or waiver
+  /// must explain why.
+  reason                  String?
+  /// EXEMPT_TEMPORARY only: the exemption reverts to normal resolution once
+  /// this date passes. Null on every other assignmentType.
+  exemptUntil             DateTime?
+  createdByUserId         String?
+  createdAt               DateTime                   @default(now())
+  updatedAt               DateTime                   @updatedAt
+
+  organization Organization                  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  period       PtaVolunteerRequirementPeriod @relation(fields: [periodId], references: [id], onDelete: Cascade)
+  household    PtaHousehold?                 @relation(fields: [householdId], references: [id], onDelete: Cascade)
+
+  // One HOUSEHOLD-scoped row per household per period keeps individual
+  // overrides unambiguous; a household may still appear in multiple PROGRAM
+  // groups (rows), so this constraint only applies to the true HOUSEHOLD
+  // scope.
+  @@unique([periodId, householdId, scopeType], name: "periodId_householdId_scopeType_unique")
+  @@index([organizationId, periodId])
+  @@index([organizationId, householdId])
+  @@index([periodId, scopeType, scopeRefId])
 }
 
 /// PTA Vertical 2.0, PR PTA-B — lifecycle status. A committee is never hard
