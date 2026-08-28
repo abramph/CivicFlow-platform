@@ -805,6 +805,7 @@ model Organization {
   ptaVolunteerAssessmentLines        PtaVolunteerAssessmentLine[]
   ptaVolunteerAssessmentCharges      PtaVolunteerAssessmentCharge[]
   ptaVolunteerReviewFlags            PtaVolunteerReviewFlag[]
+  ptaVolunteerNotificationLogs       PtaVolunteerNotificationLog[]
 
   hoaProperties             Property[]
   hoaPropertyResidents      PropertyResident[]
@@ -4677,6 +4678,7 @@ model PtaHousehold {
   volunteerAssessmentLines        PtaVolunteerAssessmentLine[]
   volunteerAssessmentCharges      PtaVolunteerAssessmentCharge[]
   volunteerReviewFlags            PtaVolunteerReviewFlag[]
+  volunteerNotificationLogs       PtaVolunteerNotificationLog[]
 
   @@unique([organizationId, displayName, schoolYear])
   @@index([organizationId])
@@ -5257,6 +5259,7 @@ model PtaVolunteerRequirementPeriod {
   assessmentLines   PtaVolunteerAssessmentLine[]
   assessmentCharges PtaVolunteerAssessmentCharge[]
   reviewFlags       PtaVolunteerReviewFlag[]
+  notificationLogs  PtaVolunteerNotificationLog[]
 
   @@index([organizationId, status])
   @@index([organizationId, startsOn, endsOn])
@@ -5850,6 +5853,47 @@ model PtaVolunteerReviewFlag {
 
   @@index([organizationId, requirementPeriodId, status])
   @@index([organizationId, householdId])
+}
+
+/// Volunteer Hour Requirements & Buyout program, VH-L (docs/pta-volunteer-hours.md).
+/// Every automated notification this feature sends. Off by default
+/// (ptaVolunteerNotificationsEnabled) — this table is also the dedup gate,
+/// mirroring PtaVolunteerSignup.reminderSentAt's nullable-timestamp pattern
+/// but generalized into a log since these notifications aren't each tied to
+/// one single existing row the way a shift reminder is tied to one signup.
+enum PtaVolunteerNotificationType {
+  /// One heads-up per household per period as the volunteerDeadline
+  /// approaches, sent at most once regardless of how many sweeps run before
+  /// the deadline passes.
+  DEADLINE_REMINDER
+  /// Sent once per household per assessment charge, right after
+  /// PostAssessmentBatch posts it.
+  ASSESSMENT_POSTED
+  /// Sent once per household per pricing window, when that window's startAt
+  /// is approaching — lets a family still short on hours know the buyout
+  /// rate is about to change.
+  RATE_CHANGE_UPCOMING
+}
+
+model PtaVolunteerNotificationLog {
+  id                  String                       @id @default(cuid())
+  organizationId      String
+  requirementPeriodId String
+  householdId         String
+  notificationType    PtaVolunteerNotificationType
+  /// periodId for DEADLINE_REMINDER/RATE_CHANGE_UPCOMING (the latter also
+  /// disambiguated by pricingWindowId below); chargeId for ASSESSMENT_POSTED.
+  sourceId            String
+  pricingWindowId     String?
+  recipientEmail      String
+  sentAt              DateTime                     @default(now())
+
+  organization Organization                  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  period       PtaVolunteerRequirementPeriod @relation(fields: [requirementPeriodId], references: [id], onDelete: Cascade)
+  household    PtaHousehold                  @relation(fields: [householdId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, notificationType, householdId, sourceId])
+  @@index([organizationId, requirementPeriodId])
 }
 
 /// PTA Vertical 2.0, PR PTA-B — lifecycle status. A committee is never hard

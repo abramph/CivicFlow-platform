@@ -75,6 +75,13 @@ export default async function PtaSettingsPage() {
           />
         </SectionCard>
       ) : null}
+      {volunteerHoursAvailable && can("pta:volunteer-audit:view") ? (
+        <p className="text-sm">
+          <a href="/labs/pta/settings/volunteer-hours/audit" className="font-semibold text-emerald-700 hover:underline">
+            View volunteer-hours audit history →
+          </a>
+        </p>
+      ) : null}
       {volunteerHoursAvailable ? (
         <SectionCard
           title="Volunteer requirement periods"

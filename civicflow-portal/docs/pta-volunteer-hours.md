@@ -959,3 +959,107 @@ every file touched this stage (confirmed against a fresh `--no-cache`
 full-repo run — the same 5 pre-existing, unrelated errors from VH-J
 are still the only errors in the repo). Production build compiles
 successfully.
+
+## VH-L — Notifications, audit UI, compatibility tests, mobile spec, final verification
+
+**Schema**: `PtaVolunteerNotificationType` enum + `PtaVolunteerNotificationLog`
+model (`organizationId, requirementPeriodId, householdId, notificationType,
+sourceId, pricingWindowId?, recipientEmail, sentAt`), unique on
+`(organizationId, notificationType, householdId, sourceId)`. One
+generalized dedup log rather than a per-model timestamp column (the
+existing `reminderSentAt` pattern from `volunteer-reminders.ts`), since
+these notifications aren't each tied to one single existing row the way a
+shift reminder is tied to one signup. Migration
+`20260828043658_vh_l_volunteer_notification_log`, purely additive.
+
+**Notifications** (`notifications.ts`), three sweep functions plus a
+preview/test-send path, all mirroring `sendVolunteerRemindersForOrganization`'s
+established shape (billing-access check once, dedup query, send, log,
+audit event summarizing counts):
+
+- `sendVolunteerHoursDeadlineReminders` — once per household per period,
+  as `volunteerDeadline` enters a lookahead window (default 14 days),
+  for households not exempt and not yet fulfilled.
+- `sendVolunteerHoursAssessmentPostedNotices` — once per posted charge,
+  wired as a best-effort (`.catch(() => {})`, never blocks or rolls back
+  the posting transaction) follow-up call at the end of
+  `postAssessmentBatch` in `assessments.ts`.
+- `sendVolunteerHoursRateChangeNotices` — once per household per
+  upcoming pricing window (requires the `buyout` capability, not just
+  `notifications`).
+- `sendVolunteerHoursNotificationsAllOrganizations` — the cron sweep,
+  filtered to `ptaVolunteerNotificationsEnabled && ptaVolunteerRequirementsEnabled`
+  orgs, run against every `ACTIVE` period. Assessment-posted notices are
+  deliberately NOT part of this sweep — "a batch just posted" is an
+  event to react to inline, not a recurring condition to poll for.
+- `previewVolunteerHoursNotification` — the admin test-send. Deliberately
+  bypasses `ptaVolunteerNotificationsEnabled` (an admin must be able to
+  preview templates before ever turning automated sending on) but never
+  looks up a real household's email — the recipient is always supplied
+  directly by the caller, and every message is prefixed `[TEST]`.
+
+New cron route `POST /api/cron/volunteer-hours-notifications` (same
+`CRON_SECRET` bearer pattern as `/api/cron/volunteer-reminders`) — not
+registered with any external scheduler as part of this program; that's
+an ops step for Phase 2.
+
+**Admin UI**: `PtaVolunteerNotificationsManager.tsx` on the period-detail
+page (preview form always visible; "send now" buttons only once
+`ptaVolunteerNotificationsEnabled` is actually on) and
+`PtaVolunteerAuditHistory.tsx` at a new page,
+`/labs/pta/settings/volunteer-hours/audit`, linked from the main PTA
+settings page. The audit page doesn't maintain a second log — it
+surfaces the existing `AuditEvent` trail (every stage since VH-A has
+been writing dotted `pta.volunteer_hours.*` actions) via a new route,
+`GET /api/labs/pta/volunteer-hours/audit`, gated on
+`pta:volunteer-audit:view` — the permission VH-A/VH-I defined for
+exactly this purpose but left unwired until now.
+
+**Mobile-compatibility contract tests**
+(`mobile-compatibility.test.ts`, 50 tests): rather than a literal
+before/after response diff (no snapshot exists from before VH-A), a
+static-source guard scanning every `route.ts` under
+`src/app/api/mobile/pta/**` and asserting none of them import anything
+from the volunteer-hours module tree or reference any of the six new
+`PtaProfile` flags — the actual failure mode this guarantee protects
+against. A second small check confirms all six flags default `false`
+in the schema itself, not just by convention.
+
+**Chained end-to-end acceptance tests**
+(`e2e-acceptance-scenarios.test.ts`, 5 tests): the plan's 4 acceptance
+scenarios (family totals, event report, buyout math, assessment math),
+built from one shared, consistent fixture (10h required, 3h verified
+via one event, 2h bought out at $25/hr = $50, 5h remaining assessed at
+$20/hr = $100) rather than four independent ones. Calls Reports A, C,
+D, and E's real build functions against that one fixture and asserts
+they all agree with each other and with hand-computed expected values
+— proving the whole system's math is internally consistent end-to-end,
+not just correct in isolation (which every prior stage's unit tests
+already covered separately).
+
+**Documentation set** (new, alongside this file):
+`pta-volunteer-hours-admin-guide.md`,
+`pta-volunteer-hours-family-guide.md`,
+`pta-volunteer-hours-api-reference.md`,
+`pta-volunteer-hours-mobile-phase3-spec.md` (the required Phase 3
+mobile spec — document only, zero `civicflow-mobile` changes),
+`pta-volunteer-hours-rollout-runbook.md` (dark-launch + rollback,
+finalizing the plan file's sketch into an actionable ops checklist),
+`pta-volunteer-hours-release-notes.md`.
+
+**Tests**: 15 in `notifications.test.ts`, 50 in
+`mobile-compatibility.test.ts`, 5 in `e2e-acceptance-scenarios.test.ts`
+— 70 new tests this stage. Full suite: 3686 tests passing across 360
+files (zero regressions). Typecheck clean. Lint clean (same 4
+pre-existing, unrelated files as every prior stage's `--no-cache`
+full-repo check — untouched this session). Production build compiles
+successfully.
+
+**Program status: Phase 1 (VH-A through VH-L) complete.** Branch
+`feature/pta-volunteer-hours`, not merged to `main`, not deployed, not
+enabled for any organization, zero mobile source changes, zero mobile
+build/submission action taken — every constraint from the program's
+approved plan held for all 12 stages. See
+`pta-volunteer-hours-release-notes.md` for the shipped feature summary
+and `pta-volunteer-hours-rollout-runbook.md` for what happens next,
+none of which proceeds without explicit approval.

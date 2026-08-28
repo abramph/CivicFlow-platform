@@ -11,6 +11,7 @@ import { PageHeader, SectionCard } from "@/components/app/PageChrome";
 import { PtaVolunteerAssessmentManager } from "@/components/labs/pta/PtaVolunteerAssessmentManager";
 import { PtaVolunteerAssignmentsManager } from "@/components/labs/pta/PtaVolunteerAssignmentsManager";
 import { PtaVolunteerDisputesManager } from "@/components/labs/pta/PtaVolunteerDisputesManager";
+import { PtaVolunteerNotificationsManager } from "@/components/labs/pta/PtaVolunteerNotificationsManager";
 import { PtaVolunteerOfflinePaymentForm } from "@/components/labs/pta/PtaVolunteerOfflinePaymentForm";
 import { PtaVolunteerPricingWindowsManager } from "@/components/labs/pta/PtaVolunteerPricingWindowsManager";
 import { PtaVolunteerReviewFlagsManager } from "@/components/labs/pta/PtaVolunteerReviewFlagsManager";
@@ -35,6 +36,8 @@ export default async function PtaVolunteerPeriodAssignmentsPage({ params }: { pa
   const canRecordOfflinePayments = can("pta:volunteer-payments:record-offline") && buyoutAvailable;
   const canManageAssessments = can("pta:volunteer-assessments:preview-post") && (await checkVolunteerHoursAvailable(organizationId, "assessments"));
   const reportsAvailable = can("pta:volunteer-reports:view") && (await checkVolunteerHoursAvailable(organizationId, "reports"));
+  const canManageNotifications = can("pta:volunteer-requirements:manage");
+  const notificationSendingAvailable = canManageNotifications && (await checkVolunteerHoursAvailable(organizationId, "notifications"));
 
   const [assignments, pricingWindows, disputes, assessmentBatches, reviewFlags] = await Promise.all([
     listPeriodAssignments(organizationId, periodId),
@@ -119,6 +122,14 @@ export default async function PtaVolunteerPeriodAssignmentsPage({ params }: { pa
       >
         <PtaVolunteerReviewFlagsManager periodId={periodId} flags={reviewFlags.map((f) => ({ ...f, createdAt: f.createdAt.toISOString() }))} />
       </SectionCard>
+      {canManageNotifications ? (
+        <SectionCard
+          title="Notifications"
+          description="Deadline reminders, remaining-hours assessment notices, and buyout rate-change alerts. Off by default for real families — preview/test-send is always available."
+        >
+          <PtaVolunteerNotificationsManager periodId={periodId} notificationsAvailable={notificationSendingAvailable} />
+        </SectionCard>
+      ) : null}
     </main>
   );
 }

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { resolveHouseholdRequirement } from "./assignments";
 import { PtaError } from "../errors";
 import { getHouseholdLedgerTotals, postLedgerEntry } from "./ledger";
+import { sendVolunteerHoursAssessmentPostedNotices } from "./notifications";
 import { getVolunteerRequirementPeriod } from "./periods";
 import { resolveVolunteerBuyoutRate } from "./pricing";
 
@@ -233,6 +234,12 @@ export async function postAssessmentBatch(organizationId: string, batchId: strin
     entityId: batchId,
     metadata: { chargeCount: charges.length, totalCents: charges.reduce((sum, c) => sum + c.amountCents, 0) },
   });
+
+  // Best-effort: the assessment is already real and correctly obligated
+  // regardless of whether this email goes out, so a notification failure
+  // (or the org simply having notifications off) never surfaces to the
+  // caller or blocks the response.
+  await sendVolunteerHoursAssessmentPostedNotices(organizationId, batchId, { actorUserId: actor.userId, actorEmail: actor.userEmail }).catch(() => {});
 
   return charges;
 }
