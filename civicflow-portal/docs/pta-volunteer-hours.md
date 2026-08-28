@@ -72,7 +72,7 @@ starts clean from the spec.
 - VH-B: ✅ built + tested locally (not merged/deployed) — assignment/scoping/exemptions
 - VH-C: ✅ built + tested locally (not merged/deployed) — pricing window engine
 - VH-D: ✅ built + tested locally (not merged/deployed) — unified ledger
-- VH-E: 🔲 not started — family dashboard + buyout election + dispute reporting
+- VH-E: ✅ built + tested locally (not merged/deployed) — family dashboard + buyout election + dispute reporting
 - VH-F: 🔲 not started — checkout & payment
 - VH-G: 🔲 not started — assessment batch & posting
 - VH-H: 🔲 not started — corrections/reversals/refunds
@@ -151,10 +151,10 @@ timezone snapshot, audit events, not-found/cross-org isolation). Full
 existing suite green (329 PTA tests, 29 rbac/role-permission tests, no
 regressions). Typecheck + lint clean on every touched/new file.
 
-**Not yet built** (later stages): the family-facing election/purchase
-flow (VH-E), checkout/payment (VH-F), assessment posting (VH-G), and
-everything downstream. Hours ARE now mirrored into the ledger when the
-feature is on, but nothing can yet be bought, paid for, or assessed.
+**Not yet built** (later stages): checkout/payment (VH-F), assessment
+posting (VH-G), and everything downstream. Families can now see their
+requirement and RECORD a buyout election, but nothing is charged or
+credited yet — election is deliberately not payment.
 
 ## VH-B — Assignment, scoping & exemptions
 
@@ -348,3 +348,69 @@ in a new `volunteers-ledger-wiring.test.ts` (platform-flag-first
 short-circuit, org-flag gating, mirror failure never blocking the
 primary approval). Full existing suite green (391 PTA tests). Typecheck
 + lint clean.
+
+## VH-E — Family dashboard + buyout election + dispute reporting
+
+Migration `20260828025237_vh_e_buyout_policy_election_disputes` —
+purely additive (6 nullable/defaulted buyout-policy columns on the
+existing `PtaVolunteerRequirementPeriod`; 2 new tables + 2 enums).
+
+**Closed a real gap found during implementation**: VH-C's pricing
+windows capture RATES (how much) but the spec also needs LIMITS (how
+much is allowed) — minimum/maximum purchasable hours, whether a full
+buyout is offered at all, a mandatory-minimum-actual-service floor, and
+purchase increments (whole/half/quarter hour). Added as 6 columns
+directly on the period (`buyoutFullAllowed`, `buyoutMinPurchaseMinutes`,
+`buyoutMaxPurchaseMinutes`, `buyoutMinServiceMinutes`,
+`buyoutIncrementMinutes`) rather than a new table, since they're
+period-wide singletons, not time-windowed like rates.
+
+**Quote engine** (`src/lib/labs/pta/volunteer-hours/elections.ts`):
+`buildBuyoutQuote` is the sole price/eligibility authority — composes
+VH-B's `resolveHouseholdRequirement` + VH-D's `getHouseholdLedgerTotals`
++ VH-C's `resolveVolunteerBuyoutRate`, then validates the requested
+hours against the period's policy limits before quoting. FULL_BUYOUT
+always quotes the family's entire required minutes (matching the
+spec's example exactly: required 20h + $250 flat → 20h purchased,
+$250), and is rejected outright when a mandatory-service floor exists
+(`buyoutMinServiceMinutes > 0`), regardless of the stored
+`buyoutFullAllowed` value — a full buyout and a mandatory-service floor
+are contradictory. PARTIAL_BUYOUT validates increment/min/max/floor-cap
+before pricing.
+
+**Election ≠ payment**: `recordElection` creates a
+`PtaVolunteerBuyoutElection` row — the family's stated choice, with the
+quote's rate/total permanently snapshotted (a later pricing-window edit
+never reinterprets a past election) and a versioned/IP-stamped
+acknowledgment (`VOLUNTEER_HOURS_ACK_VERSION`, mirroring
+`sms-consent.ts`'s pattern). It posts NOTHING to the ledger — no hours
+credited, no charge — confirmed by a dedicated test. Append-only: a
+family re-electing creates a new row, never edits the old one.
+
+**Disputes** (`disputes.ts`): spec §8/§15's "report a missing or
+incorrect volunteer record" — a lightweight OPEN/RESOLVED/DISMISSED
+flag that never itself alters any hour entry; an officer investigates
+and corrects through the existing approve/reject/adjust tools.
+
+**API**: household self-service under
+`/api/labs/pta/volunteer-hours/my-household/{summary,quote,election,disputes}`
+(all resolve the caller's own household from
+`requireVolunteerHoursHouseholdAccess`, never a client-supplied
+householdId) + admin dispute list/resolve under
+`/api/labs/pta/volunteer-hours/periods/[periodId]/disputes{,/[disputeId]}`.
+
+**UI**: `PtaVolunteerRequirementCard` added to the existing "My PTA"
+page (`/labs/pta/my-pta`) — required/verified/event/non-event/pending/
+purchased/waived hours, remaining, the election flow with a live quote
+and required acknowledgment, and the dispute-report form. Responsive
+grid (`grid-cols-2` on phones, up to 4 columns on desktop) per spec §6.
+Admin-side `PtaVolunteerDisputesManager` added to the period detail
+page.
+
+**Tests**: 15 in `elections.test.ts` (VOLUNTEER always-free, FULL_BUYOUT
+matching the spec's exact example numbers + the mandatory-service-floor
+rejection, PARTIAL_BUYOUT increment/min/max/floor-cap validation
+matching the spec's exact buyout acceptance scenario — 8h @ $15/hr =
+$120 — snapshot-on-record, never-touches-the-ledger) + 4 in
+`disputes.test.ts`. Full existing suite green (410 PTA tests).
+Typecheck + lint clean.

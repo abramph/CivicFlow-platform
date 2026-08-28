@@ -90,6 +90,16 @@ export async function getVolunteerRequirementPeriod(organizationId: string, peri
   return period;
 }
 
+/** The ACTIVE period whose date range contains right now — the default a
+ * family dashboard resolves to when no periodId is specified. Null when
+ * nothing is currently active (between periods, or none configured yet). */
+export async function getCurrentActivePeriod(organizationId: string, at: Date = new Date()) {
+  return prisma.ptaVolunteerRequirementPeriod.findFirst({
+    where: { organizationId, status: "ACTIVE", startsOn: { lte: at }, endsOn: { gt: at } },
+    orderBy: { startsOn: "desc" },
+  });
+}
+
 export async function createVolunteerRequirementPeriod(
   organizationId: string,
   input: VolunteerRequirementPeriodInput,

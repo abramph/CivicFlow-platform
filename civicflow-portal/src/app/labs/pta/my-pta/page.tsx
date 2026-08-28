@@ -3,11 +3,13 @@ import { requirePtaVertical, getPtaOrganizationAccessContext } from "@/lib/labs/
 import { getBoardRoster } from "@/lib/labs/pta/board";
 import { getMyIncomingHandoff } from "@/lib/labs/pta/transitions";
 import { getElectionResults, getMyElections } from "@/lib/labs/pta/elections";
+import { checkVolunteerHoursAvailable } from "@/lib/labs/pta/volunteer-hours/guard";
 import { PtaMyElections } from "@/components/labs/pta/PtaMyElections";
 import { prisma } from "@/lib/prisma";
 import { PageHeader, SectionCard } from "@/components/app/PageChrome";
 import { PtaLabsBadge } from "@/components/labs/pta/PtaLabsBadge";
 import { PtaMyPta } from "@/components/labs/pta/PtaMyPta";
+import { PtaVolunteerRequirementCard } from "@/components/labs/pta/PtaVolunteerRequirementCard";
 
 /**
  * PTA Vertical 2.0, PR PTA-J — "My PTA" (§19): the member's view of their
@@ -43,6 +45,10 @@ export default async function PtaMyPtaPage() {
 
   const now = new Date();
   const in90Days = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
+  const [volunteerRequirementsAvailable, volunteerBuyoutAvailable] = await Promise.all([
+    checkVolunteerHoursAvailable(organizationId, "requirements"),
+    checkVolunteerHoursAvailable(organizationId, "buyout"),
+  ]);
   const [profile, documents, governance, roster, meetings, myHandoff] = await Promise.all([
     prisma.ptaProfile.findUnique({ where: { organizationId }, select: { schoolOrPtaName: true, contactEmail: true, currentSchoolYear: true } }),
     prisma.attachment.findMany({
@@ -105,6 +111,11 @@ export default async function PtaMyPtaPage() {
             }))}
             certified={certifiedResults}
           />
+        </SectionCard>
+      ) : null}
+      {volunteerRequirementsAvailable ? (
+        <SectionCard title="Volunteer Requirement" description="Your family's volunteer-hour requirement, progress, and options.">
+          <PtaVolunteerRequirementCard buyoutAvailable={volunteerBuyoutAvailable} />
         </SectionCard>
       ) : null}
       <SectionCard title="Your PTA at a glance" description="Everything here is shared with members deliberately by your officers.">

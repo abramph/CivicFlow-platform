@@ -1,11 +1,13 @@
 import { notFound } from "next/navigation";
 import { getPtaPageGate } from "@/lib/labs/pta/guard";
 import { listPeriodAssignments } from "@/lib/labs/pta/volunteer-hours/assignments";
+import { listPeriodDisputes } from "@/lib/labs/pta/volunteer-hours/disputes";
 import { checkVolunteerHoursAvailable } from "@/lib/labs/pta/volunteer-hours/guard";
 import { getVolunteerRequirementPeriod } from "@/lib/labs/pta/volunteer-hours/periods";
 import { listPricingWindows } from "@/lib/labs/pta/volunteer-hours/pricing";
 import { PageHeader, SectionCard } from "@/components/app/PageChrome";
 import { PtaVolunteerAssignmentsManager } from "@/components/labs/pta/PtaVolunteerAssignmentsManager";
+import { PtaVolunteerDisputesManager } from "@/components/labs/pta/PtaVolunteerDisputesManager";
 import { PtaVolunteerPricingWindowsManager } from "@/components/labs/pta/PtaVolunteerPricingWindowsManager";
 
 export default async function PtaVolunteerPeriodAssignmentsPage({ params }: { params: Promise<{ periodId: string }> }) {
@@ -26,9 +28,10 @@ export default async function PtaVolunteerPeriodAssignmentsPage({ params }: { pa
   const canViewPricing = can("pta:volunteer-buyout-pricing:manage");
   const buyoutAvailable = canViewPricing && (await checkVolunteerHoursAvailable(organizationId, "buyout"));
 
-  const [assignments, pricingWindows] = await Promise.all([
+  const [assignments, pricingWindows, disputes] = await Promise.all([
     listPeriodAssignments(organizationId, periodId),
     buyoutAvailable ? listPricingWindows(organizationId, periodId) : Promise.resolve([]),
+    listPeriodDisputes(organizationId, periodId),
   ]);
 
   return (
@@ -58,6 +61,12 @@ export default async function PtaVolunteerPeriodAssignmentsPage({ params }: { pa
           />
         </SectionCard>
       ) : null}
+      <SectionCard title="Family-reported issues" description="Missing or incorrect volunteer records reported by families for this period.">
+        <PtaVolunteerDisputesManager
+          periodId={periodId}
+          disputes={disputes.map((d) => ({ ...d, createdAt: d.createdAt.toISOString() }))}
+        />
+      </SectionCard>
     </main>
   );
 }

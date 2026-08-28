@@ -798,6 +798,8 @@ model Organization {
   ptaVolunteerRequirementAssignments PtaVolunteerRequirementAssignment[]
   ptaVolunteerPricingWindows         PtaVolunteerPricingWindow[]
   ptaVolunteerLedgerEntries          PtaVolunteerLedgerEntry[]
+  ptaVolunteerBuyoutElections        PtaVolunteerBuyoutElection[]
+  ptaVolunteerHourDisputes           PtaVolunteerHourDispute[]
 
   hoaProperties             Property[]
   hoaPropertyResidents      PropertyResident[]
@@ -4664,6 +4666,8 @@ model PtaHousehold {
   meetingRsvps                    PtaMeetingRsvp[]
   volunteerRequirementAssignments PtaVolunteerRequirementAssignment[]
   volunteerLedgerEntries          PtaVolunteerLedgerEntry[]
+  volunteerBuyoutElections        PtaVolunteerBuyoutElection[]
+  volunteerHourDisputes           PtaVolunteerHourDispute[]
 
   @@unique([organizationId, displayName, schoolYear])
   @@index([organizationId])
@@ -5208,13 +5212,37 @@ model PtaVolunteerRequirementPeriod {
   /// entity exists to key off instead). Validated in periods.ts, not the DB,
   /// since date-range overlap isn't expressible as a Prisma unique index.
   scopeLabel               String?
+  /// VH-E buyout POLICY LIMITS — deliberately separate from VH-C's pricing
+  /// windows, which capture RATES (how much) not limits (how much is
+  /// allowed). All nullable/default-permissive so existing periods (created
+  /// before these fields existed) behave exactly as before.
+  /// Whether a family may buy out the entire requirement in one flat
+  /// purchase. Forced to false at the application layer whenever
+  /// buyoutMinServiceMinutes > 0 (a mandatory-service floor and a "full"
+  /// buyout are contradictory) regardless of this stored value.
+  buyoutFullAllowed        Boolean                  @default(true)
+  /// Minimum hours a family must purchase if choosing a partial per-hour
+  /// buyout at all. Null = no minimum beyond one increment.
+  buyoutMinPurchaseMinutes Int?
+  /// Maximum hours purchasable via the per-hour path. Null = up to the full
+  /// requirement (subject to buyoutMinServiceMinutes below).
+  buyoutMaxPurchaseMinutes Int?
+  /// Hours that must come from actual service no matter how much is bought
+  /// out — caps every buyout path at (requiredMinutes - this value). Null
+  /// or 0 = no mandatory-service floor.
+  buyoutMinServiceMinutes  Int?
+  /// Purchase increment: 60 = whole hours, 30 = half hours, 15 = quarter
+  /// hours. Every buyout request must be an exact multiple of this.
+  buyoutIncrementMinutes   Int                      @default(60)
   createdAt                DateTime                 @default(now())
   updatedAt                DateTime                 @updatedAt
 
-  organization   Organization                        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  assignments    PtaVolunteerRequirementAssignment[]
-  pricingWindows PtaVolunteerPricingWindow[]
-  ledgerEntries  PtaVolunteerLedgerEntry[]
+  organization    Organization                        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assignments     PtaVolunteerRequirementAssignment[]
+  pricingWindows  PtaVolunteerPricingWindow[]
+  ledgerEntries   PtaVolunteerLedgerEntry[]
+  buyoutElections PtaVolunteerBuyoutElection[]
+  hourDisputes    PtaVolunteerHourDispute[]
 
   @@index([organizationId, status])
   @@index([organizationId, startsOn, endsOn])
@@ -5467,6 +5495,87 @@ model PtaVolunteerLedgerEntry {
   @@index([organizationId, requirementPeriodId, householdId])
   @@index([organizationId, householdId])
   @@index([entryType])
+}
+
+/// Volunteer Hour Requirements & Buyout program, VH-E (docs/pta-volunteer-hours.md).
+enum PtaVolunteerElectionType {
+  VOLUNTEER
+  FULL_BUYOUT
+  PARTIAL_BUYOUT
+}
+
+/// A family's stated choice — election ≠ payment (spec §7). Creating this
+/// row never posts a PURCHASE ledger entry or credits any hours; only
+/// confirmed payment (VH-F) does that. Append-only history (a family may
+/// re-elect; the latest row for a period is authoritative) rather than an
+/// editable single row, so the original disclosure a family agreed to is
+/// never silently rewritten. Versioned/IP-stamped acknowledgment mirrors
+/// the existing SMS-consent pattern (sms-consent.ts's recordSmsOptIn).
+model PtaVolunteerBuyoutElection {
+  id                   String                   @id @default(cuid())
+  organizationId       String
+  requirementPeriodId  String
+  householdId          String
+  electionType         PtaVolunteerElectionType
+  /// 0 for VOLUNTEER; the full requirement for FULL_BUYOUT; the chosen
+  /// amount for PARTIAL_BUYOUT.
+  hoursElectedMinutes  Int
+  /// Snapshot of the resolved per-unit rate and total cost AT ELECTION TIME
+  /// — a later pricing-window edit must never reinterpret this historical
+  /// election, same snapshot-on-transaction discipline as everywhere else
+  /// in this program. Both 0 for VOLUNTEER.
+  quotedRateCents      Int
+  quotedTotalCents     Int
+  /// Which window produced the quote, for traceability — null for VOLUNTEER.
+  pricingWindowId      String?
+  acknowledgedAt       DateTime
+  acknowledgedByUserId String
+  /// Versioned disclosure text the family agreed to (required hours,
+  /// deadlines, refund policy, etc.) — mirrors SMS_CONSENT_VERSION so a
+  /// later policy-text change never retroactively reinterprets an
+  /// already-made election.
+  ackVersion           String
+  ipAddress            String?
+  createdAt            DateTime                 @default(now())
+
+  organization Organization                  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  period       PtaVolunteerRequirementPeriod @relation(fields: [requirementPeriodId], references: [id], onDelete: Cascade)
+  household    PtaHousehold                  @relation(fields: [householdId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, requirementPeriodId, householdId])
+  @@index([organizationId, householdId])
+}
+
+enum PtaVolunteerHourDisputeStatus {
+  OPEN
+  RESOLVED
+  DISMISSED
+}
+
+/// spec §8 "report a missing or incorrect volunteer record" — a lightweight
+/// household-submitted flag, distinct from (and never itself altering) the
+/// authoritative PtaVolunteerHourEntry records; an officer investigates and
+/// makes any correction through the normal approve/reject/adjust tools.
+model PtaVolunteerHourDispute {
+  id                  String                        @id @default(cuid())
+  organizationId      String
+  requirementPeriodId String
+  householdId         String
+  submittedByUserId   String
+  description         String
+  status              PtaVolunteerHourDisputeStatus @default(OPEN)
+  adminNotes          String?
+  resolvedByUserId    String?
+  resolvedAt          DateTime?
+  createdAt           DateTime                      @default(now())
+  updatedAt           DateTime                      @updatedAt
+
+  organization Organization                  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  period       PtaVolunteerRequirementPeriod @relation(fields: [requirementPeriodId], references: [id], onDelete: Cascade)
+  household    PtaHousehold                  @relation(fields: [householdId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, requirementPeriodId, status])
+  @@index([organizationId, householdId])
 }
 
 /// PTA Vertical 2.0, PR PTA-B — lifecycle status. A committee is never hard
