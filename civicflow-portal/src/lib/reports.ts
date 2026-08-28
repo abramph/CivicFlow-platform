@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { createAuditEvent } from "@/lib/audit";
+import { requireVolunteerHoursFlag } from "@/lib/labs/pta/volunteer-hours/guard";
 import { buildVolunteerReportExportFile, isVolunteerReportType } from "@/lib/labs/pta/volunteer-hours/reports/dispatch";
 import { resolveGeneratedByName, volunteerReportFiltersFromJson } from "@/lib/labs/pta/volunteer-hours/reports/shared";
 import { buildSafeObjectKey, uploadBufferToSpaces } from "@/lib/storage";
@@ -98,6 +99,12 @@ export async function processQueuedReportExport(exportId: string) {
   if (isVolunteerReportType(exportJob.reportType)) {
     await prisma.reportExport.update({ where: { id: exportId }, data: { status: "PROCESSING" } });
     try {
+      // Re-checked here, not just at enqueue time: platform switch, pilot
+      // allowlist, and the reports capability flag must all still hold at
+      // the moment a queued job actually runs, not only when it was
+      // originally requested — a flag or allowlist change between enqueue
+      // and processing must not let a stale job slip through.
+      await requireVolunteerHoursFlag(exportJob.organizationId, "reports");
       const filters = volunteerReportFiltersFromJson(exportJob.filters);
       const generatedByName = await resolveGeneratedByName(exportJob.createdByUserId ?? "");
       const { buffer, filename } = await buildVolunteerReportExportFile(exportJob.organizationId, exportJob.reportType, filters, generatedByName);

@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { createAuditEvent } from "@/lib/audit";
-import { isPtaVolunteerHoursPlatformEnabled } from "@/lib/env";
+import { isPtaVolunteerHoursOrgAllowed, isPtaVolunteerHoursPlatformEnabled } from "@/lib/env";
 import { sendEmail } from "@/lib/mail";
 import { resolveOrganizationAccess } from "@/lib/subscription-gate";
 import { PtaError } from "../errors";
@@ -352,8 +352,17 @@ export async function sendVolunteerHoursNotificationsAllOrganizations(): Promise
     select: { organizationId: true },
   });
 
+  // Pilot allowlist applied here, before any organization's data is
+  // touched — not just relied upon inside sendVolunteerHoursFlag further
+  // down (that check still runs too, defense-in-depth). An org whose stored
+  // ptaVolunteerNotificationsEnabled/ptaVolunteerRequirementsEnabled flags
+  // are still true from before it was removed from the allowlist (or that
+  // never should have had them true) is filtered out here, before its
+  // periods are even queried, not merely before a send.
+  const allowlistedProfiles = profiles.filter((profile) => isPtaVolunteerHoursOrgAllowed(profile.organizationId));
+
   let totalSent = 0;
-  for (const profile of profiles) {
+  for (const profile of allowlistedProfiles) {
     const periods = await listVolunteerRequirementPeriods(profile.organizationId);
     const activePeriods = periods.filter((p) => p.status === "ACTIVE");
     for (const period of activePeriods) {
@@ -362,7 +371,7 @@ export async function sendVolunteerHoursNotificationsAllOrganizations(): Promise
       totalSent += deadlineResult.sent + rateChangeResult.sent;
     }
   }
-  return { organizationsProcessed: profiles.length, totalSent };
+  return { organizationsProcessed: allowlistedProfiles.length, totalSent };
 }
 
 /**

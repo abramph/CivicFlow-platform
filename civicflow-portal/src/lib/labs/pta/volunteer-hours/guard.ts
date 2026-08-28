@@ -1,5 +1,5 @@
 import { requirePermission } from "@/lib/auth-guards";
-import { isPtaVolunteerHoursPlatformEnabled } from "@/lib/env";
+import { isPtaVolunteerHoursOrgAllowed, isPtaVolunteerHoursPlatformEnabled } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
 import type { Permission } from "@/lib/rbac";
 import { PtaError } from "../errors";
@@ -36,14 +36,29 @@ const DISABLED_ERROR_CODE = {
 } as const;
 
 /**
- * Throws unless the platform kill-switch is on AND (for capabilities other
- * than "requirements") both ptaVolunteerRequirementsEnabled and the specific
- * capability's own flag are true for this org. Never infers one flag's state
- * from another — every check reads the actual column.
+ * Throws unless the platform kill-switch is on AND this organization is on
+ * the pilot allowlist AND (for capabilities other than "requirements") both
+ * ptaVolunteerRequirementsEnabled and the specific capability's own flag are
+ * true for this org. Never infers one flag's state from another — every
+ * check reads the actual column, and the allowlist check happens before any
+ * database read so a non-allowlisted org's PtaProfile row (even with every
+ * flag already true — e.g. a stale/pre-staged value) is never consulted.
+ * This is the single chokepoint every capability funnels through
+ * (requireVolunteerHoursAccess, requireVolunteerHoursHouseholdAccess,
+ * checkVolunteerHoursAvailable all call this) — adding the allowlist check
+ * here, once, is what makes it apply to every route automatically rather
+ * than depending on each route remembering a separate check.
  */
 export async function requireVolunteerHoursFlag(organizationId: string, capability: VolunteerHoursCapability) {
   if (!isPtaVolunteerHoursPlatformEnabled()) {
     throw new PtaError("PTA_VOLUNTEER_HOURS_PLATFORM_DISABLED", "Volunteer hour requirements are not available on this platform.");
+  }
+
+  if (!isPtaVolunteerHoursOrgAllowed(organizationId)) {
+    // Same code + message as the platform-off case, deliberately — a caller
+    // must not be able to distinguish "the platform is off" from "the
+    // platform is on but this organization isn't allowlisted."
+    throw new PtaError("PTA_VOLUNTEER_HOURS_ORG_NOT_ALLOWLISTED", "Volunteer hour requirements are not available on this platform.");
   }
 
   const profile = await prisma.ptaProfile.findUnique({
@@ -110,15 +125,20 @@ export async function checkVolunteerHoursAvailable(organizationId: string, capab
  * panel itself (used by src/app/labs/pta/settings/page.tsx). Pure function,
  * not a guard — the panel is where an org first turns the feature on, so it
  * can't be gated on requireVolunteerHoursFlag (which requires requirements
- * already being on). Gated on the platform switch AND at least one
- * capability-manage permission, so that while the platform is dark, no org
- * — reviewer orgs included, no org ID is ever special-cased here — can see
- * or pre-stage these flags, regardless of any RBAC role including
- * SUPER_ADMIN (whose org-scoped permissions equal ORG_OWNER's, not a
- * separate always-visible bypass).
+ * already being on). Gated on the platform switch AND the pilot allowlist
+ * AND at least one capability-manage permission, so that while the platform
+ * is dark, OR the org simply isn't on the allowlist, no org — reviewer orgs
+ * included, no org ID is ever special-cased here — can see or pre-stage
+ * these flags, regardless of any RBAC role including SUPER_ADMIN (whose
+ * org-scoped permissions equal ORG_OWNER's, not a separate always-visible
+ * bypass). A non-allowlisted org sees exactly the same "hidden" outcome as a
+ * platform-off org — this function's boolean return can't be used to infer
+ * which of the two is true, satisfying "don't reveal whether another
+ * organization is allowlisted."
  */
 export function canViewVolunteerHoursSettingsPanel(
   platformEnabled: boolean,
+  orgAllowed: boolean,
   permissions: {
     canManageRequirements: boolean;
     canManageBuyoutPricing: boolean;
@@ -128,6 +148,7 @@ export function canViewVolunteerHoursSettingsPanel(
 ): boolean {
   return (
     platformEnabled &&
+    orgAllowed &&
     (permissions.canManageRequirements ||
       permissions.canManageBuyoutPricing ||
       permissions.canManageAssessments ||

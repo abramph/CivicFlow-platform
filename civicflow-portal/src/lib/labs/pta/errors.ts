@@ -60,6 +60,13 @@ export const PTA_ERROR_CODES = [
   // Volunteer Hour Requirements & Buyout program (docs/pta-volunteer-hours.md).
   /** Platform-wide env kill-switch is off — checked before any org flag. */
   "PTA_VOLUNTEER_HOURS_PLATFORM_DISABLED",
+  /** Platform switch is on, but this organization isn't on the pilot
+   * allowlist (PTA_VOLUNTEER_HOURS_ALLOWED_ORG_IDS) — checked before any org
+   * flag, same as the platform switch itself. Deliberately the same message
+   * shape as PTA_VOLUNTEER_HOURS_PLATFORM_DISABLED so a caller can't
+   * distinguish "platform off" from "not allowlisted" from the response
+   * alone. */
+  "PTA_VOLUNTEER_HOURS_ORG_NOT_ALLOWLISTED",
   /** PtaProfile.ptaVolunteerRequirementsEnabled is false for this org. */
   "PTA_VOLUNTEER_REQUIREMENTS_DISABLED",
   /** PtaProfile.ptaVolunteerBuyoutEnabled is false for this org. */
@@ -123,6 +130,7 @@ const STATUS_FOR_CODE: Record<PtaErrorCode, number> = {
   PTA_NOT_ELIGIBLE_VOTER: 403,
   PTA_ALREADY_VOTED: 409,
   PTA_VOLUNTEER_HOURS_PLATFORM_DISABLED: 403,
+  PTA_VOLUNTEER_HOURS_ORG_NOT_ALLOWLISTED: 403,
   PTA_VOLUNTEER_REQUIREMENTS_DISABLED: 403,
   PTA_VOLUNTEER_BUYOUT_DISABLED: 403,
   PTA_VOLUNTEER_ASSESSMENTS_DISABLED: 403,

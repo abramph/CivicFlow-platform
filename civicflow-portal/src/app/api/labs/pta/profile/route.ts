@@ -1,5 +1,5 @@
 import { withApiErrorHandling } from "@/lib/api-route";
-import { isPtaVolunteerHoursPlatformEnabled } from "@/lib/env";
+import { isPtaVolunteerHoursOrgAllowed, isPtaVolunteerHoursPlatformEnabled } from "@/lib/env";
 import { PtaError } from "@/lib/labs/pta/errors";
 import { requirePtaAccess } from "@/lib/labs/pta/guard";
 import { getPtaProfile, upsertPtaProfile } from "@/lib/labs/pta/profile";
@@ -50,14 +50,24 @@ export async function PUT(request: Request) {
     const input = await parseJsonBody(request, bodySchema);
     // Volunteer Hour Requirements & Buyout program: reject any attempt to
     // change one of the six org-level flags while the platform kill-switch
-    // is off — fails closed even for a direct API call, so an org can never
-    // pre-stage itself to activate the instant the platform switch later
-    // turns on. Checked before any RBAC-scoped sub-check below, since this
-    // is a platform-wide gate, not a per-capability permission question.
+    // is off, OR while this organization isn't on the pilot allowlist —
+    // fails closed even for a direct API call, so a non-pilot org can never
+    // pre-stage itself to activate the instant the platform switch or
+    // allowlist later change. Checked before any RBAC-scoped sub-check
+    // below, since this is a platform-wide gate, not a per-capability
+    // permission question. Both cases throw the identical error — a caller
+    // must not be able to tell "platform is off" from "not allowlisted"
+    // from the response alone.
     const touchesVolunteerHoursFlags = VOLUNTEER_HOURS_FLAG_FIELDS.some((field) => input[field] !== undefined);
     if (touchesVolunteerHoursFlags && !isPtaVolunteerHoursPlatformEnabled()) {
       throw new PtaError(
         "PTA_VOLUNTEER_HOURS_PLATFORM_DISABLED",
+        "Volunteer hour requirements are not available on this platform."
+      );
+    }
+    if (touchesVolunteerHoursFlags && !isPtaVolunteerHoursOrgAllowed(organizationId)) {
+      throw new PtaError(
+        "PTA_VOLUNTEER_HOURS_ORG_NOT_ALLOWLISTED",
         "Volunteer hour requirements are not available on this platform."
       );
     }

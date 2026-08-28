@@ -8,8 +8,10 @@ vi.mock("@/lib/auth-guards", () => ({
 }));
 
 const isPtaVolunteerHoursPlatformEnabled = vi.fn();
+const isPtaVolunteerHoursOrgAllowed = vi.fn();
 vi.mock("@/lib/env", () => ({
   isPtaVolunteerHoursPlatformEnabled: () => isPtaVolunteerHoursPlatformEnabled(),
+  isPtaVolunteerHoursOrgAllowed: (...a: unknown[]) => isPtaVolunteerHoursOrgAllowed(...a),
 }));
 
 const findUniqueOrganization = vi.fn();
@@ -26,7 +28,18 @@ vi.mock("@/lib/prisma", () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   findUniqueOrganization.mockResolvedValue({ primaryVertical: "PTA", status: "active" });
+  // Default to allowed so every pre-existing test in this file (written
+  // before the pilot allowlist existed) keeps exercising exactly the same
+  // platform/capability-flag behavior it always did. Allowlist-specific
+  // tests below override this per-case.
+  isPtaVolunteerHoursOrgAllowed.mockReturnValue(true);
 });
+
+// Fictional org IDs only — never a real production organization ID.
+const FICTIONAL_ORG = "org-fictional-pilot-org";
+const FICTIONAL_OTHER_ORG = "org-fictional-other-org";
+const FICTIONAL_APPLE_REVIEWER_ORG = "org-fictional-apple-reviewer";
+const FICTIONAL_GOOGLE_REVIEWER_ORG = "org-fictional-google-reviewer";
 
 const ALL_FLAGS_ON = {
   ptaVolunteerRequirementsEnabled: true,
@@ -44,6 +57,69 @@ describe("requireVolunteerHoursFlag", () => {
       code: "PTA_VOLUNTEER_HOURS_PLATFORM_DISABLED",
     });
     expect(findUniqueProfile).not.toHaveBeenCalled();
+  });
+
+  it("throws PTA_VOLUNTEER_HOURS_ORG_NOT_ALLOWLISTED before ever reading PtaProfile, when the platform is on but the org isn't allowlisted", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(true);
+    isPtaVolunteerHoursOrgAllowed.mockReturnValue(false);
+    const { requireVolunteerHoursFlag } = await import("../guard");
+    await expect(requireVolunteerHoursFlag(FICTIONAL_OTHER_ORG, "requirements")).rejects.toMatchObject({
+      code: "PTA_VOLUNTEER_HOURS_ORG_NOT_ALLOWLISTED",
+    });
+    expect(findUniqueProfile).not.toHaveBeenCalled();
+  });
+
+  it("the platform-disabled and not-allowlisted errors carry the identical message — a caller can't distinguish the two cases", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(false);
+    const { requireVolunteerHoursFlag: flagCheck1 } = await import("../guard");
+    let platformOffMessage = "";
+    try {
+      await flagCheck1(FICTIONAL_OTHER_ORG, "requirements");
+    } catch (e) {
+      platformOffMessage = (e as Error).message;
+    }
+
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(true);
+    isPtaVolunteerHoursOrgAllowed.mockReturnValue(false);
+    const { requireVolunteerHoursFlag: flagCheck2 } = await import("../guard");
+    let notAllowlistedMessage = "";
+    try {
+      await flagCheck2(FICTIONAL_OTHER_ORG, "requirements");
+    } catch (e) {
+      notAllowlistedMessage = (e as Error).message;
+    }
+
+    expect(platformOffMessage).toBe(notAllowlistedMessage);
+    expect(platformOffMessage.length).toBeGreaterThan(0);
+  });
+
+  it("stored capability flags already true for a non-allowlisted org grant nothing — the allowlist check runs before the flag is ever read", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(true);
+    isPtaVolunteerHoursOrgAllowed.mockReturnValue(false);
+    findUniqueProfile.mockResolvedValue(ALL_FLAGS_ON); // even if this were read, every flag is true
+    const { requireVolunteerHoursFlag } = await import("../guard");
+    await expect(requireVolunteerHoursFlag(FICTIONAL_OTHER_ORG, "buyout")).rejects.toMatchObject({
+      code: "PTA_VOLUNTEER_HOURS_ORG_NOT_ALLOWLISTED",
+    });
+    expect(findUniqueProfile).not.toHaveBeenCalled();
+  });
+
+  it("platform on, org allowlisted, capability flag also on: resolves", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(true);
+    isPtaVolunteerHoursOrgAllowed.mockReturnValue(true);
+    findUniqueProfile.mockResolvedValue(ALL_FLAGS_ON);
+    const { requireVolunteerHoursFlag } = await import("../guard");
+    await expect(requireVolunteerHoursFlag(FICTIONAL_ORG, "requirements")).resolves.toBeTruthy();
+  });
+
+  it("platform on, org allowlisted, capability flag off: denied by the capability check, not the allowlist", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(true);
+    isPtaVolunteerHoursOrgAllowed.mockReturnValue(true);
+    findUniqueProfile.mockResolvedValue({ ...ALL_FLAGS_ON, ptaVolunteerBuyoutEnabled: false });
+    const { requireVolunteerHoursFlag } = await import("../guard");
+    await expect(requireVolunteerHoursFlag(FICTIONAL_ORG, "buyout")).rejects.toMatchObject({
+      code: "PTA_VOLUNTEER_BUYOUT_DISABLED",
+    });
   });
 
   it("throws PTA_VOLUNTEER_REQUIREMENTS_DISABLED when the org's master flag is off, even for capability=requirements", async () => {
@@ -179,30 +255,147 @@ describe("canViewVolunteerHoursSettingsPanel", () => {
     canManageReportsExport: false,
   };
   const HAS_ONE_PERMISSION = { ...NO_PERMISSIONS, canManageRequirements: true };
+  const ALL_PERMISSIONS = {
+    canManageRequirements: true,
+    canManageBuyoutPricing: true,
+    canManageAssessments: true,
+    canManageReportsExport: true,
+  };
 
-  it("is hidden when the platform switch is off, even for a role holding every manage permission", async () => {
+  it("is hidden when the platform switch is off, even for a role holding every manage permission and an allowlisted org", async () => {
     const { canViewVolunteerHoursSettingsPanel } = await import("../guard");
-    const allPermissions = {
-      canManageRequirements: true,
-      canManageBuyoutPricing: true,
-      canManageAssessments: true,
-      canManageReportsExport: true,
-    };
-    expect(canViewVolunteerHoursSettingsPanel(false, allPermissions)).toBe(false);
+    expect(canViewVolunteerHoursSettingsPanel(false, true, ALL_PERMISSIONS)).toBe(false);
   });
 
-  it("is visible when the platform switch is on and the role holds at least one manage permission", async () => {
+  it("is hidden when the org is not allowlisted, even with the platform on and every manage permission held", async () => {
     const { canViewVolunteerHoursSettingsPanel } = await import("../guard");
-    expect(canViewVolunteerHoursSettingsPanel(true, HAS_ONE_PERMISSION)).toBe(true);
+    expect(canViewVolunteerHoursSettingsPanel(true, false, ALL_PERMISSIONS)).toBe(false);
   });
 
-  it("is hidden from an unauthorized role even when the platform switch is on", async () => {
+  it("is visible when the platform switch is on, the org is allowlisted, and the role holds at least one manage permission", async () => {
     const { canViewVolunteerHoursSettingsPanel } = await import("../guard");
-    expect(canViewVolunteerHoursSettingsPanel(true, NO_PERMISSIONS)).toBe(false);
+    expect(canViewVolunteerHoursSettingsPanel(true, true, HAS_ONE_PERMISSION)).toBe(true);
   });
 
-  it("stays hidden when the platform switch is off regardless of which single permission is held", async () => {
+  it("is hidden from an unauthorized role even when the platform switch is on and the org is allowlisted", async () => {
     const { canViewVolunteerHoursSettingsPanel } = await import("../guard");
-    expect(canViewVolunteerHoursSettingsPanel(false, HAS_ONE_PERMISSION)).toBe(false);
+    expect(canViewVolunteerHoursSettingsPanel(true, true, NO_PERMISSIONS)).toBe(false);
+  });
+
+  it("stays hidden when the platform switch is off regardless of allowlist status or which single permission is held", async () => {
+    const { canViewVolunteerHoursSettingsPanel } = await import("../guard");
+    expect(canViewVolunteerHoursSettingsPanel(false, true, HAS_ONE_PERMISSION)).toBe(false);
+    expect(canViewVolunteerHoursSettingsPanel(false, false, HAS_ONE_PERMISSION)).toBe(false);
+  });
+
+  it("platform-off and not-allowlisted produce the identical boolean outcome — the return value alone can't reveal which case applies", async () => {
+    const { canViewVolunteerHoursSettingsPanel } = await import("../guard");
+    const platformOff = canViewVolunteerHoursSettingsPanel(false, true, ALL_PERMISSIONS);
+    const notAllowlisted = canViewVolunteerHoursSettingsPanel(true, false, ALL_PERMISSIONS);
+    expect(platformOff).toBe(notAllowlisted);
+  });
+});
+
+describe("pilot allowlist — tenant isolation", () => {
+  it("an allowlisted organization cannot resolve access for a different, non-allowlisted organization's ID", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(true);
+    isPtaVolunteerHoursOrgAllowed.mockImplementation((orgId: string) => orgId === FICTIONAL_ORG);
+    findUniqueProfile.mockResolvedValue(ALL_FLAGS_ON);
+    const { requireVolunteerHoursFlag } = await import("../guard");
+
+    await expect(requireVolunteerHoursFlag(FICTIONAL_ORG, "requirements")).resolves.toBeTruthy();
+    await expect(requireVolunteerHoursFlag(FICTIONAL_OTHER_ORG, "requirements")).rejects.toMatchObject({
+      code: "PTA_VOLUNTEER_HOURS_ORG_NOT_ALLOWLISTED",
+    });
+  });
+
+  it("a non-allowlisted organization's own database flags being true never leaks access to the allowlisted organization's data — each call is checked independently by its own organizationId argument", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(true);
+    isPtaVolunteerHoursOrgAllowed.mockImplementation((orgId: string) => orgId === FICTIONAL_ORG);
+    findUniqueProfile.mockResolvedValue(ALL_FLAGS_ON);
+    const { requireVolunteerHoursFlag } = await import("../guard");
+
+    await expect(requireVolunteerHoursFlag(FICTIONAL_OTHER_ORG, "reports")).rejects.toMatchObject({
+      code: "PTA_VOLUNTEER_HOURS_ORG_NOT_ALLOWLISTED",
+    });
+    // The allowlisted org is unaffected by the other org's denied call.
+    await expect(requireVolunteerHoursFlag(FICTIONAL_ORG, "reports")).resolves.toBeTruthy();
+  });
+});
+
+describe("pilot allowlist — reviewer protection (fictional IDs only, never real production IDs)", () => {
+  it("an Apple-reviewer-shaped organization with every capability flag accidentally true is still denied when not allowlisted", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(true);
+    isPtaVolunteerHoursOrgAllowed.mockImplementation((orgId: string) => orgId === FICTIONAL_ORG);
+    findUniqueProfile.mockResolvedValue(ALL_FLAGS_ON); // flags accidentally all true
+    const { requireVolunteerHoursFlag } = await import("../guard");
+
+    await expect(requireVolunteerHoursFlag(FICTIONAL_APPLE_REVIEWER_ORG, "requirements")).rejects.toMatchObject({
+      code: "PTA_VOLUNTEER_HOURS_ORG_NOT_ALLOWLISTED",
+    });
+    expect(findUniqueProfile).not.toHaveBeenCalled();
+  });
+
+  it("a Google-reviewer-shaped organization with every capability flag accidentally true is still denied when not allowlisted", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(true);
+    isPtaVolunteerHoursOrgAllowed.mockImplementation((orgId: string) => orgId === FICTIONAL_ORG);
+    findUniqueProfile.mockResolvedValue(ALL_FLAGS_ON);
+    const { requireVolunteerHoursFlag } = await import("../guard");
+
+    await expect(requireVolunteerHoursFlag(FICTIONAL_GOOGLE_REVIEWER_ORG, "requirements")).rejects.toMatchObject({
+      code: "PTA_VOLUNTEER_HOURS_ORG_NOT_ALLOWLISTED",
+    });
+    expect(findUniqueProfile).not.toHaveBeenCalled();
+  });
+
+  it("billing-exempt status is irrelevant to the allowlist check — the guard never reads or considers it", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(true);
+    isPtaVolunteerHoursOrgAllowed.mockImplementation((orgId: string) => orgId === FICTIONAL_ORG);
+    const { requireVolunteerHoursFlag } = await import("../guard");
+    // A billing-exempt-shaped org is still just an ordinary organizationId
+    // to this guard — no billingExempt field is ever read or passed in.
+    await expect(requireVolunteerHoursFlag("org-fictional-billing-exempt", "requirements")).rejects.toMatchObject({
+      code: "PTA_VOLUNTEER_HOURS_ORG_NOT_ALLOWLISTED",
+    });
+  });
+
+  it("an organization named 'Demo' receives no special treatment — only the allowlisted organizationId matters, never a name", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(true);
+    isPtaVolunteerHoursOrgAllowed.mockImplementation((orgId: string) => orgId === FICTIONAL_ORG);
+    const { requireVolunteerHoursFlag } = await import("../guard");
+    // requireVolunteerHoursFlag never takes or looks up an org name — it
+    // only ever sees organizationId, so a "Demo"-named org gets exactly the
+    // same treatment as any other non-allowlisted ID.
+    await expect(requireVolunteerHoursFlag("org-fictional-demo-named", "requirements")).rejects.toMatchObject({
+      code: "PTA_VOLUNTEER_HOURS_ORG_NOT_ALLOWLISTED",
+    });
+  });
+
+  it("Pine-Grove-shaped organization: no access when the platform switch is OFF, even if allowlisted", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(false);
+    isPtaVolunteerHoursOrgAllowed.mockReturnValue(true);
+    const { requireVolunteerHoursFlag } = await import("../guard");
+    await expect(requireVolunteerHoursFlag(FICTIONAL_ORG, "requirements")).rejects.toMatchObject({
+      code: "PTA_VOLUNTEER_HOURS_PLATFORM_DISABLED",
+    });
+  });
+
+  it("Pine-Grove-shaped organization: no access when absent from the allowlist, even with the platform switch ON", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(true);
+    isPtaVolunteerHoursOrgAllowed.mockReturnValue(false);
+    const { requireVolunteerHoursFlag } = await import("../guard");
+    await expect(requireVolunteerHoursFlag(FICTIONAL_ORG, "requirements")).rejects.toMatchObject({
+      code: "PTA_VOLUNTEER_HOURS_ORG_NOT_ALLOWLISTED",
+    });
+  });
+
+  it("Pine-Grove-shaped organization: no capability access until its own requirements flag is also enabled, even once platform-on and allowlisted", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(true);
+    isPtaVolunteerHoursOrgAllowed.mockReturnValue(true);
+    findUniqueProfile.mockResolvedValue({ ...ALL_FLAGS_ON, ptaVolunteerRequirementsEnabled: false });
+    const { requireVolunteerHoursFlag } = await import("../guard");
+    await expect(requireVolunteerHoursFlag(FICTIONAL_ORG, "requirements")).rejects.toMatchObject({
+      code: "PTA_VOLUNTEER_REQUIREMENTS_DISABLED",
+    });
   });
 });
