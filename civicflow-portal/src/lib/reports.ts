@@ -4,6 +4,25 @@ import { requireVolunteerHoursFlag } from "@/lib/labs/pta/volunteer-hours/guard"
 import { buildVolunteerReportExportFile, isVolunteerReportType } from "@/lib/labs/pta/volunteer-hours/reports/dispatch";
 import { resolveGeneratedByName, volunteerReportFiltersFromJson } from "@/lib/labs/pta/volunteer-hours/reports/shared";
 import { buildSafeObjectKey, uploadBufferToSpaces } from "@/lib/storage";
+import {
+  attemptClaimReportExport,
+  bestEffortCleanupFailedVolunteerReportUpload,
+  buildDeterministicVolunteerReportObjectKey,
+  claimReportExportBatch,
+  completeReportExport,
+  markReportExportArtifactCleanupPending,
+  renewReportExportLease,
+  resolveReportExportFailure,
+  runFailedArtifactCleanup,
+  runReportExportCleanup,
+} from "@/lib/report-export-queue";
+
+/** "Record only a sanitized operational result" for the lost-ownership
+ * path — never an AuditEvent (which would misattribute an outcome this
+ * invocation didn't actually cause), never raw error/object data. */
+function logOwnershipLost(exportId: string, boundary: string) {
+  console.warn(`[report-export-queue] ownership lost for export ${exportId} at boundary "${boundary}" — stopping without mutating state`);
+}
 
 type SupportedReportType =
   | "MEMBERS"
@@ -87,9 +106,37 @@ async function buildReportCsv(organizationId: string, reportType: SupportedRepor
   }
 }
 
+/**
+ * fix/report-export-queue-hardening: safe to call two ways —
+ * (a) after claimReportExportBatch already atomically claimed this row
+ *     (status is already PROCESSING, owned by this invocation), or
+ * (b) directly on a still-QUEUED id (e.g. a test, or any future direct
+ *     caller) — in which case this function claims it itself first via the
+ *     exact same atomic conditional update claimReportExportBatch uses.
+ * Either way, if the claim doesn't succeed (already claimed elsewhere,
+ * already terminal, or genuinely doesn't exist), this returns quietly
+ * rather than reprocessing or erroring — never a double-run.
+ *
+ * Every subsequent state transition (lease renewal, completion, failure) is
+ * conditioned on the claimId this invocation established here — if the
+ * lease expires and another invocation reclaims the row mid-processing,
+ * every one of THIS invocation's later conditional updates matches zero
+ * rows, and this function stops immediately without completing, failing,
+ * retry-scheduling, or deleting anything (see renewReportExportLease's
+ * doc comment for why that's safe).
+ */
 export async function processQueuedReportExport(exportId: string) {
   const exportJob = await prisma.reportExport.findFirst({ where: { id: exportId } });
   if (!exportJob) throw new Error("Report export not found");
+
+  let attemptCount = exportJob.attemptCount;
+  let claimId = exportJob.claimId ?? "";
+  if (exportJob.status !== "PROCESSING") {
+    const claim = await attemptClaimReportExport(exportId);
+    if (!claim.claimed) return; // lost the race, already terminal, or not yet due for retry — not an error
+    attemptCount += 1;
+    claimId = claim.claimId;
+  }
 
   // Volunteer Hour Requirements & Buyout program, VH-K (docs/pta-volunteer-hours.md):
   // background generation for Reports A-G, reusing this exact worker/queue
@@ -97,30 +144,61 @@ export async function processQueuedReportExport(exportId: string) {
   // its own branch ahead of the generic CSV path below rather than folded
   // into buildReportCsv.
   if (isVolunteerReportType(exportJob.reportType)) {
-    await prisma.reportExport.update({ where: { id: exportId }, data: { status: "PROCESSING" } });
     try {
       // Re-checked here, not just at enqueue time: platform switch, pilot
       // allowlist, and the reports capability flag must all still hold at
       // the moment a queued job actually runs, not only when it was
       // originally requested — a flag or allowlist change between enqueue
-      // and processing must not let a stale job slip through.
+      // and processing must not let a stale job slip through. This is also
+      // what guarantees a disabled organization's queued export cannot
+      // complete: this throws a permanent PtaError, which resolveReportExportFailure
+      // below sends straight to FAILED without ever uploading a file.
       await requireVolunteerHoursFlag(exportJob.organizationId, "reports");
       const filters = volunteerReportFiltersFromJson(exportJob.filters);
       const generatedByName = await resolveGeneratedByName(exportJob.createdByUserId ?? "");
+      // The bulk of this call's work (exceljs's workbook.xlsx.writeBuffer)
+      // is synchronous CPU-bound XML/zip construction — no heartbeat can
+      // reliably fire mid-call. REPORT_EXPORT_LEASE_MS is sized to
+      // comfortably exceed the platform's 100s hard HTTP-request ceiling
+      // specifically so this gap can never legitimately outlive the lease
+      // (see report-export-queue.ts's documented reasoning). The renewal
+      // immediately after is the real async boundary this code DOES have.
       const { buffer, filename } = await buildVolunteerReportExportFile(exportJob.organizationId, exportJob.reportType, filters, generatedByName);
-      const fileKey = buildSafeObjectKey(`pta-volunteer-reports/${exportJob.organizationId}`, filename);
+
+      if (!(await renewReportExportLease(exportId, claimId))) {
+        logOwnershipLost(exportId, "before-upload");
+        return;
+      }
+
+      // Deterministic (organizationId + exportId), not the random-suffixed
+      // buildSafeObjectKey — a retry re-PUTs to the identical key, which
+      // Spaces treats as a plain overwrite rather than a new orphaned object.
+      // The human-readable name still reaches the downloader via
+      // Content-Disposition, set separately below.
+      const fileKey = buildDeterministicVolunteerReportObjectKey(exportJob.organizationId, exportJob.id);
 
       await uploadBufferToSpaces({
         key: fileKey,
         buffer,
         contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         metadata: { reportExportId: exportJob.id, organizationId: exportJob.organizationId },
+        downloadFilename: filename,
       });
 
-      await prisma.reportExport.update({
-        where: { id: exportId },
-        data: { status: "COMPLETED", fileUrl: fileKey, completedAt: new Date() },
-      });
+      if (!(await renewReportExportLease(exportId, claimId))) {
+        // Ownership moved on between finishing the upload and this check.
+        // Never delete fileKey here — the current owner may have uploaded
+        // (or be about to upload) the exact same deterministic key as its
+        // own valid, current attempt.
+        logOwnershipLost(exportId, "after-upload-before-completion");
+        return;
+      }
+
+      const completed = await completeReportExport(exportJob.id, claimId, fileKey);
+      if (!completed) {
+        logOwnershipLost(exportId, "completion");
+        return;
+      }
 
       await createAuditEvent({
         organizationId: exportJob.organizationId,
@@ -131,32 +209,53 @@ export async function processQueuedReportExport(exportId: string) {
         metadata: { status: "COMPLETED", reportType: exportJob.reportType, fileKey },
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Report export failed";
-      await prisma.reportExport.update({ where: { id: exportId }, data: { status: "FAILED", errorMessage: message } });
+      const { ownershipRetained, terminal, sanitizedMessage } = await resolveReportExportFailure(exportJob.id, claimId, attemptCount, error);
+      if (!ownershipRetained) {
+        logOwnershipLost(exportId, "failure-resolution");
+        return;
+      }
+      if (terminal) {
+        // Best-effort: an earlier attempt in this same job's history might
+        // have uploaded before a later step failed. Safe unconditionally —
+        // deleting a key that was never written is a normal no-op. If the
+        // delete itself fails, persist a durable, retryable cleanup record
+        // rather than silently losing track of a possible orphan.
+        const deleted = await bestEffortCleanupFailedVolunteerReportUpload(exportJob.organizationId, exportJob.id);
+        if (!deleted) {
+          await markReportExportArtifactCleanupPending(exportJob.id, new Error("initial best-effort artifact delete failed"));
+        }
+      }
       await createAuditEvent({
         organizationId: exportJob.organizationId,
         actorUserId: exportJob.createdByUserId,
         action: "export",
         entityType: "pta_volunteer_report_export",
         entityId: exportJob.id,
-        metadata: { status: "FAILED", error: message },
+        metadata: { status: terminal ? "FAILED" : "RETRY_SCHEDULED", error: sanitizedMessage, attemptCount },
       });
     }
     return;
   }
 
   if (!SUPPORTED_REPORT_TYPES.has(exportJob.reportType as SupportedReportType)) {
-    await prisma.reportExport.update({
-      where: { id: exportId },
-      data: { status: "FAILED", errorMessage: `Unsupported report type: ${exportJob.reportType}` },
+    // Permanent by construction — no retry could ever make an unknown
+    // report type become known, so this bypasses the generic retry
+    // machinery and goes straight to FAILED, same as before this change.
+    // Claim-ID-conditioned like every other terminal write, even though a
+    // lost race here is extremely unlikely given how fast this check runs.
+    await prisma.reportExport.updateMany({
+      where: { id: exportId, status: "PROCESSING", claimId },
+      data: { status: "FAILED", errorMessage: `Unsupported report type: ${exportJob.reportType}`, leaseExpiresAt: null },
     });
     return;
   }
 
-  await prisma.reportExport.update({ where: { id: exportId }, data: { status: "PROCESSING" } });
-
   try {
     const csv = await buildReportCsv(exportJob.organizationId, exportJob.reportType as SupportedReportType);
+    // Unchanged from before this branch: random-suffixed key, Attachment
+    // row created, no expiration/retention window applied — this program's
+    // scope is the PTA volunteer export path's queue safety, not a
+    // retention-policy change for every other vertical's CSV exports.
     const fileKey = buildSafeObjectKey(`reports/${exportJob.organizationId}`, `${exportJob.reportType}.csv`);
 
     await uploadBufferToSpaces({
@@ -169,14 +268,25 @@ export async function processQueuedReportExport(exportId: string) {
       },
     });
 
-    await prisma.reportExport.update({
-      where: { id: exportId },
+    if (!(await renewReportExportLease(exportId, claimId))) {
+      logOwnershipLost(exportId, "csv-after-upload-before-completion");
+      return;
+    }
+
+    const completeResult = await prisma.reportExport.updateMany({
+      where: { id: exportId, status: "PROCESSING", claimId },
       data: {
         status: "COMPLETED",
         fileUrl: fileKey,
         completedAt: new Date(),
+        leaseExpiresAt: null,
+        errorMessage: null,
       },
     });
+    if (completeResult.count !== 1) {
+      logOwnershipLost(exportId, "csv-completion");
+      return;
+    }
 
     await prisma.attachment.create({
       data: {
@@ -206,12 +316,16 @@ export async function processQueuedReportExport(exportId: string) {
       },
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Report export failed";
-    await prisma.reportExport.update({
-      where: { id: exportId },
-      data: { status: "FAILED", errorMessage: message },
-    });
-
+    // Same bounded-retry treatment as the PTA branch: no PtaError ever
+    // comes out of buildReportCsv, so isPermanentReportExportError never
+    // classifies a CSV failure as permanent — every CSV failure gets up to
+    // REPORT_EXPORT_MAX_ATTEMPTS tries (strictly more resilient than the
+    // previous immediate-FAILED behavior) before landing on FAILED.
+    const { ownershipRetained, terminal, sanitizedMessage } = await resolveReportExportFailure(exportJob.id, claimId, attemptCount, error);
+    if (!ownershipRetained) {
+      logOwnershipLost(exportId, "csv-failure-resolution");
+      return;
+    }
     await createAuditEvent({
       organizationId: exportJob.organizationId,
       actorUserId: exportJob.createdByUserId,
@@ -219,23 +333,45 @@ export async function processQueuedReportExport(exportId: string) {
       entityType: "report_export",
       entityId: exportJob.id,
       metadata: {
-        status: "FAILED",
-        error: message,
+        status: terminal ? "FAILED" : "RETRY_SCHEDULED",
+        error: sanitizedMessage,
       },
     });
   }
 }
 
-export async function processQueuedReportExports(limit = 25) {
-  const queued = await prisma.reportExport.findMany({
-    where: { status: "QUEUED" },
-    orderBy: { createdAt: "asc" },
-    take: limit,
-  });
+/**
+ * Claims and processes a bounded batch, then runs two bounded cleanup
+ * sweeps: expired-COMPLETED-export objects, and durable retries for
+ * permanently-FAILED exports whose initial best-effort artifact delete
+ * failed. Each claimed job is independent — one job's failure never stops
+ * the others (processQueuedReportExport already catches its own errors
+ * internally and always resolves).
+ */
+export async function processQueuedReportExports(limit = 25, cleanupLimit = 25) {
+  const claimed = await claimReportExportBatch(limit);
 
-  for (const item of queued) {
-    await processQueuedReportExport(item.id);
+  for (const item of claimed) {
+    try {
+      await processQueuedReportExport(item.id);
+    } catch {
+      // processQueuedReportExport already catches and resolves every error
+      // it knows how to handle (transient -> retry, permanent -> FAILED).
+      // This outer catch exists only so a genuinely unexpected exception in
+      // one claimed job (e.g. the row vanishing between claim and this
+      // call) can't abort the rest of an otherwise-healthy batch.
+      continue;
+    }
   }
 
-  return { processed: queued.length };
+  const cleanup = await runReportExportCleanup(cleanupLimit);
+  const artifactCleanup = await runFailedArtifactCleanup(cleanupLimit);
+
+  return {
+    processed: claimed.length,
+    cleanupChecked: cleanup.checked,
+    cleanupDeleted: cleanup.deleted,
+    artifactCleanupChecked: artifactCleanup.checked,
+    artifactCleanupCleaned: artifactCleanup.cleaned,
+  };
 }

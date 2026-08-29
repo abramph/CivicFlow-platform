@@ -28,7 +28,25 @@ export async function GET(_request: Request, { params }: { params: Promise<{ per
     if (organizationId !== exportJob.organizationId) {
       return NextResponse.json({ ok: false, error: "Export not found." }, { status: 404 });
     }
-    if (exportJob.status !== "COMPLETED" || !exportJob.fileUrl) {
+    if (exportJob.status !== "COMPLETED") {
+      return NextResponse.json({ ok: false, error: "This export is not ready yet." }, { status: 409 });
+    }
+    // fix/report-export-queue-hardening: logical expiration — checked BEFORE
+    // the fileUrl-null check below, deliberately. Once the cleanup sweep has
+    // physically removed the object, fileUrl is cleared to null on an
+    // otherwise still-COMPLETED, still-expired row — if the fileUrl check
+    // ran first, that row would incorrectly report 409 "not ready yet"
+    // (implying it might become available later) instead of 410 "expired"
+    // (which is the true, permanent state). Fail-closed for the pilot: an
+    // expired export is never downloadable, no grace window, and the
+    // expired-vs-not-ready distinction is reported accurately either way.
+    if (exportJob.expiresAt && exportJob.expiresAt < new Date()) {
+      return NextResponse.json({ ok: false, error: "This export has expired." }, { status: 410 });
+    }
+    if (!exportJob.fileUrl) {
+      // Defensive: a COMPLETED, unexpired row should always have a fileUrl —
+      // this would only happen for data corrupted outside the normal
+      // lifecycle. Treated as "not ready" rather than crashing.
       return NextResponse.json({ ok: false, error: "This export is not ready yet." }, { status: 409 });
     }
 

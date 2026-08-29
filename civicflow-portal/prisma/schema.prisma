@@ -3175,12 +3175,77 @@ model ReportExport {
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
 
+  /// fix/report-export-queue-hardening: queue-safety fields, all nullable/
+  /// defaulted so every existing row (and every future generic-CSV row that
+  /// never touches this machinery) is unaffected. `updatedAt` is NOT reused
+  /// for lease/claim tracking — it flips on ANY row update, so it can't
+  /// distinguish "actively being processed" from "just got its error
+  /// message rewritten." These fields exist so that distinction is explicit.
+  /// claimedAt: when the current PROCESSING attempt atomically claimed this row.
+  claimedAt      DateTime?
+  /// leaseExpiresAt: claimedAt + the configured lease duration. A PROCESSING
+  /// row whose lease has expired is reclaimable by the next sweep — this is
+  /// what makes a crashed worker's job recoverable instead of stuck forever.
+  leaseExpiresAt DateTime?
+  /// claimId: opaque per-attempt token identifying the current owner.
+  /// fix/report-export-queue-hardening follow-up: now load-bearing, not just
+  /// observability — every state transition (renew/complete/fail) is
+  /// conditioned on `status='PROCESSING' AND claimId=<this value>`, so a
+  /// worker whose lease was reclaimed by someone else can never complete,
+  /// fail, or otherwise mutate the row out from under the new owner: its own
+  /// conditional update simply matches zero rows once claimId has moved on.
+  claimId        String?
+  /// attemptCount: incremented atomically on every claim (initial + every
+  /// stale-lease reclaim). Bounds retries — see REPORT_EXPORT_MAX_ATTEMPTS.
+  attemptCount   Int       @default(0)
+  /// nextAttemptAt: null until a transient failure returns this row to
+  /// QUEUED for retry. The claim query only considers QUEUED rows where this
+  /// is null or already in the past — this is the backoff mechanism.
+  nextAttemptAt  DateTime?
+  /// expiresAt: set at COMPLETED time (completedAt + retention window). The
+  /// download route denies access once past this instant even if the
+  /// Spaces object hasn't been physically removed yet by the cleanup sweep.
+  expiresAt      DateTime?
+
+  /// fix/report-export-queue-hardening follow-up: durable failed-artifact
+  /// cleanup. The immediate best-effort delete on a terminal FAILED PTA
+  /// volunteer export remains the first attempt; if THAT throws, these
+  /// fields persist a durable, retryable record so the bounded cleanup sweep
+  /// keeps trying rather than the object being silently forgotten.
+  /// artifactCleanupPending: set true only when the immediate delete attempt
+  /// itself failed (not when it succeeded or there was nothing to delete).
+  artifactCleanupPending       Boolean   @default(false)
+  /// artifactCleanupAttempts: incremented on every retry the sweep makes.
+  artifactCleanupAttempts      Int       @default(0)
+  /// artifactCleanupNextAttemptAt: bounded backoff between sweep retries —
+  /// null means "eligible now."
+  artifactCleanupNextAttemptAt DateTime?
+  /// artifactCleanupCompletedAt: set once the sweep confirms the object is
+  /// gone. Distinguishes "never had an object" (both fields null, pending
+  /// false) from "confirmed cleaned up" from "still pending."
+  artifactCleanupCompletedAt   DateTime?
+  /// artifactCleanupError: sanitized (same redaction as errorMessage) —
+  /// operational visibility for cleanup that keeps failing, without ever
+  /// storing raw provider responses or credentials.
+  artifactCleanupError         String?
+
   organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   createdByUser User?        @relation("ReportExportCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
 
   @@index([organizationId])
   @@index([status])
   @@index([createdAt])
+  /// Supports the claim query's WHERE ((status='QUEUED' AND (nextAttemptAt IS
+  /// NULL OR nextAttemptAt <= now())) OR (status='PROCESSING' AND
+  /// leaseExpiresAt < now())) ORDER BY createdAt.
+  @@index([status, nextAttemptAt])
+  @@index([status, leaseExpiresAt])
+  /// Supports the cleanup sweep's WHERE status='COMPLETED' AND expiresAt < now().
+  @@index([status, expiresAt])
+  /// Supports the durable-cleanup sweep's WHERE artifactCleanupPending=true
+  /// AND artifactCleanupCompletedAt IS NULL AND (artifactCleanupNextAttemptAt
+  /// IS NULL OR artifactCleanupNextAttemptAt <= now()).
+  @@index([artifactCleanupPending, artifactCleanupNextAttemptAt])
 }
 
 model EmailReminderLog {
