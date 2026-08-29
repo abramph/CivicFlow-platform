@@ -22,6 +22,33 @@ function createS3Client() {
   });
 }
 
+/**
+ * fix/report-export-queue-hardening follow-up: defense-in-depth for the
+ * Content-Disposition header. Callers (e.g. buildReportFilename ->
+ * sanitizeFilenameSegment) already produce a safe name, but this function
+ * doesn't trust that unconditionally — it strips CRLF and other C0 control
+ * characters (HTTP header/response-splitting risk if a raw \r\n ever
+ * reached here) and quote characters (would otherwise break out of the
+ * quoted filename="..." value) directly at the point the header is built,
+ * so the safety guarantee lives here rather than depending entirely on
+ * every current and future caller having sanitized correctly upstream.
+ * Also bounds length defensively, independent of any caller-side limit.
+ */
+export function sanitizeContentDispositionFilename(name: string): string {
+  return (
+    name
+      .replace(/[\x00-\x1f\x7f"]/g, "")
+      // Path separators: not a server-side traversal risk here (this value
+      // only ever reaches a browser's advisory Content-Disposition save
+      // dialog, never a filesystem path this app constructs), but stripped
+      // anyway as defense in depth against a suggested filename that looks
+      // like a directory path.
+      .replace(/[/\\]/g, "-")
+      .slice(0, 150)
+      .trim() || "download"
+  );
+}
+
 export function buildSafeObjectKey(prefix: string, fileName: string): string {
   const sanitizedPrefix = prefix.replace(/[^a-zA-Z0-9/_-]/g, "-").replace(/\/+$/g, "");
   const sanitizedName = fileName
@@ -57,7 +84,9 @@ export async function uploadBufferToSpaces(params: {
       ContentType: params.contentType,
       ACL: "private",
       Metadata: params.metadata,
-      ContentDisposition: params.downloadFilename ? `attachment; filename="${params.downloadFilename}"` : undefined,
+      ContentDisposition: params.downloadFilename
+        ? `attachment; filename="${sanitizeContentDispositionFilename(params.downloadFilename)}"`
+        : undefined,
     })
   );
 

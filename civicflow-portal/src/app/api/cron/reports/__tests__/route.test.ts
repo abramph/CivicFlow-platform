@@ -18,7 +18,13 @@ function request(auth: string | null) {
 beforeEach(() => {
   vi.clearAllMocks();
   requireRateLimit.mockResolvedValue(null);
-  processQueuedReportExports.mockResolvedValue({ processed: 3, cleanupChecked: 5, cleanupDeleted: 2 });
+  processQueuedReportExports.mockResolvedValue({
+    processed: 3,
+    cleanupChecked: 5,
+    cleanupDeleted: 2,
+    artifactCleanupChecked: 4,
+    artifactCleanupCleaned: 1,
+  });
 });
 
 describe("/api/cron/reports (fix/report-export-queue-hardening)", () => {
@@ -42,12 +48,25 @@ describe("/api/cron/reports (fix/report-export-queue-hardening)", () => {
     const { POST } = await import("../route");
     const res = await POST(request("Bearer x"));
     const body = await res.json();
-    expect(body).toEqual({ ok: true, processed: 3, cleanupChecked: 5, cleanupDeleted: 2 });
+    expect(body).toEqual({
+      ok: true,
+      processed: 3,
+      cleanupChecked: 5,
+      cleanupDeleted: 2,
+      artifactCleanupChecked: 4,
+      artifactCleanupCleaned: 1,
+    });
   });
 
   it("is safe when called with zero eligible jobs", async () => {
     validateReportExportCronSecret.mockReturnValue(true);
-    processQueuedReportExports.mockResolvedValue({ processed: 0, cleanupChecked: 0, cleanupDeleted: 0 });
+    processQueuedReportExports.mockResolvedValue({
+      processed: 0,
+      cleanupChecked: 0,
+      cleanupDeleted: 0,
+      artifactCleanupChecked: 0,
+      artifactCleanupCleaned: 0,
+    });
     const { POST } = await import("../route");
     const res = await POST(request("Bearer x"));
     expect(res.status).toBe(200);
@@ -73,5 +92,42 @@ describe("/api/cron/reports (fix/report-export-queue-hardening)", () => {
     const res = await POST(request("Bearer x"));
     expect(res.status).toBe(429);
     expect(validateReportExportCronSecret).not.toHaveBeenCalled();
+  });
+
+  it("uses a scope dedicated to this route, not the shared 'api:cron' scope every other cron endpoint uses (follow-up review finding: cross-route quota exhaustion)", async () => {
+    validateReportExportCronSecret.mockReturnValue(true);
+    const { POST } = await import("../route");
+    await POST(request("Bearer x"));
+    const scopeUsed = requireRateLimit.mock.calls[0][0].scope;
+    expect(scopeUsed).not.toBe("api:cron");
+    expect(scopeUsed).toContain("reports");
+  });
+
+  it("the rate limit is generous relative to any realistic scheduler cadence — cannot lock out a legitimate 5-minute-interval caller", async () => {
+    validateReportExportCronSecret.mockReturnValue(true);
+    const { POST } = await import("../route");
+    await POST(request("Bearer x"));
+    const { limit, windowMs } = requireRateLimit.mock.calls[0][0];
+    // A caller needing 1 request per 300s window must never be starved by
+    // its own normal traffic — the configured limit is well above that.
+    expect(limit).toBeGreaterThan(5);
+    expect(windowMs).toBeLessThanOrEqual(120_000);
+  });
+
+  it("repeated invalid (unauthenticated) requests against this dedicated scope do not consume a quota shared with any other route", async () => {
+    // The isolation guarantee itself: since the scope string is unique to
+    // this route (proven above), rate-limit state keyed by `rl:${scope}:${ip}`
+    // (see rate-limit.ts) can never be shared with another route's calls,
+    // regardless of how many invalid requests hit this or any other
+    // endpoint from the same apparent IP.
+    validateReportExportCronSecret.mockReturnValue(false);
+    const { POST } = await import("../route");
+    for (let i = 0; i < 5; i++) {
+      await POST(request(null));
+    }
+    expect(requireRateLimit).toHaveBeenCalledTimes(5);
+    for (const call of requireRateLimit.mock.calls) {
+      expect(call[0].scope).not.toBe("api:cron");
+    }
   });
 });

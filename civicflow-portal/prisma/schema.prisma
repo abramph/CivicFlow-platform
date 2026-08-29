@@ -3187,8 +3187,13 @@ model ReportExport {
   /// row whose lease has expired is reclaimable by the next sweep — this is
   /// what makes a crashed worker's job recoverable instead of stuck forever.
   leaseExpiresAt DateTime?
-  /// claimId: opaque per-attempt token, purely for tracing/observability —
-  /// not load-bearing for correctness (the atomic conditional claim is).
+  /// claimId: opaque per-attempt token identifying the current owner.
+  /// fix/report-export-queue-hardening follow-up: now load-bearing, not just
+  /// observability — every state transition (renew/complete/fail) is
+  /// conditioned on `status='PROCESSING' AND claimId=<this value>`, so a
+  /// worker whose lease was reclaimed by someone else can never complete,
+  /// fail, or otherwise mutate the row out from under the new owner: its own
+  /// conditional update simply matches zero rows once claimId has moved on.
   claimId        String?
   /// attemptCount: incremented atomically on every claim (initial + every
   /// stale-lease reclaim). Bounds retries — see REPORT_EXPORT_MAX_ATTEMPTS.
@@ -3201,6 +3206,28 @@ model ReportExport {
   /// download route denies access once past this instant even if the
   /// Spaces object hasn't been physically removed yet by the cleanup sweep.
   expiresAt      DateTime?
+
+  /// fix/report-export-queue-hardening follow-up: durable failed-artifact
+  /// cleanup. The immediate best-effort delete on a terminal FAILED PTA
+  /// volunteer export remains the first attempt; if THAT throws, these
+  /// fields persist a durable, retryable record so the bounded cleanup sweep
+  /// keeps trying rather than the object being silently forgotten.
+  /// artifactCleanupPending: set true only when the immediate delete attempt
+  /// itself failed (not when it succeeded or there was nothing to delete).
+  artifactCleanupPending       Boolean   @default(false)
+  /// artifactCleanupAttempts: incremented on every retry the sweep makes.
+  artifactCleanupAttempts      Int       @default(0)
+  /// artifactCleanupNextAttemptAt: bounded backoff between sweep retries —
+  /// null means "eligible now."
+  artifactCleanupNextAttemptAt DateTime?
+  /// artifactCleanupCompletedAt: set once the sweep confirms the object is
+  /// gone. Distinguishes "never had an object" (both fields null, pending
+  /// false) from "confirmed cleaned up" from "still pending."
+  artifactCleanupCompletedAt   DateTime?
+  /// artifactCleanupError: sanitized (same redaction as errorMessage) —
+  /// operational visibility for cleanup that keeps failing, without ever
+  /// storing raw provider responses or credentials.
+  artifactCleanupError         String?
 
   organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   createdByUser User?        @relation("ReportExportCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
@@ -3215,6 +3242,10 @@ model ReportExport {
   @@index([status, leaseExpiresAt])
   /// Supports the cleanup sweep's WHERE status='COMPLETED' AND expiresAt < now().
   @@index([status, expiresAt])
+  /// Supports the durable-cleanup sweep's WHERE artifactCleanupPending=true
+  /// AND artifactCleanupCompletedAt IS NULL AND (artifactCleanupNextAttemptAt
+  /// IS NULL OR artifactCleanupNextAttemptAt <= now()).
+  @@index([artifactCleanupPending, artifactCleanupNextAttemptAt])
 }
 
 model EmailReminderLog {

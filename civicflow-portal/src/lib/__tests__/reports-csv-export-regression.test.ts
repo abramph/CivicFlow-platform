@@ -84,7 +84,7 @@ describe("processQueuedReportExport — generic CSV branch regression", () => {
 
     expect(uploadBufferToSpaces).toHaveBeenCalled();
     expect(createAttachment).toHaveBeenCalled();
-    const completionCall = updateExport.mock.calls.find((c) => c[0]?.data?.status === "COMPLETED");
+    const completionCall = updateManyExport.mock.calls.find((c) => c[0]?.data?.status === "COMPLETED");
     expect(completionCall).toBeDefined();
     expect(completionCall![0].data.expiresAt).toBeUndefined(); // never set for CSV — retention is unbounded, matching pre-hardening behavior
   });
@@ -94,7 +94,7 @@ describe("processQueuedReportExport — generic CSV branch regression", () => {
     const { processQueuedReportExport } = await import("../reports");
     await processQueuedReportExport("export-1");
 
-    expect(updateExport).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "QUEUED", nextAttemptAt: expect.any(Date) }) }));
+    expect(updateManyExport).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "QUEUED", nextAttemptAt: expect.any(Date) }) }));
     expect(createAttachment).not.toHaveBeenCalled();
   });
 
@@ -107,13 +107,14 @@ describe("processQueuedReportExport — generic CSV branch regression", () => {
       createdByUserId: "user-1",
       status: "PROCESSING",
       attemptCount: 3,
+      claimId: "claim-existing",
     });
     uploadBufferToSpaces.mockRejectedValue(new Error("permanent disk full: postgresql://user:pw@host/db"));
 
     const { processQueuedReportExport } = await import("../reports");
     await processQueuedReportExport("export-1");
 
-    const failCall = updateExport.mock.calls.find((c) => c[0]?.data?.status === "FAILED");
+    const failCall = updateManyExport.mock.calls.find((c) => c[0]?.data?.status === "FAILED");
     expect(failCall).toBeDefined();
     expect(failCall![0].data.errorMessage).not.toContain("pw@host");
   });
@@ -127,13 +128,14 @@ describe("processQueuedReportExport — generic CSV branch regression", () => {
       createdByUserId: "user-1",
       status: "PROCESSING",
       attemptCount: 1,
+      claimId: "claim-existing",
     });
 
     const { processQueuedReportExport } = await import("../reports");
     await processQueuedReportExport("export-1");
 
-    expect(updateExport).toHaveBeenCalledTimes(1);
-    expect(updateExport).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "FAILED" }) }));
+    expect(updateManyExport).toHaveBeenCalledTimes(1);
+    expect(updateManyExport).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "FAILED" }) }));
     expect(uploadBufferToSpaces).not.toHaveBeenCalled();
   });
 });
@@ -143,13 +145,20 @@ describe("processQueuedReportExports — batch behavior", () => {
     findManyExports.mockResolvedValue([]); // no candidates to claim, nothing to clean up
     const { processQueuedReportExports } = await import("../reports");
     const result = await processQueuedReportExports(10, 10);
-    expect(result).toEqual({ processed: 0, cleanupChecked: 0, cleanupDeleted: 0 });
+    expect(result).toEqual({
+      processed: 0,
+      cleanupChecked: 0,
+      cleanupDeleted: 0,
+      artifactCleanupChecked: 0,
+      artifactCleanupCleaned: 0,
+    });
   });
 
   it("one claimed job's internal failure does not prevent the others in the same batch from being processed", async () => {
     findManyExports
       .mockResolvedValueOnce([{ id: "export-1" }, { id: "export-2" }]) // claim candidates
-      .mockResolvedValueOnce([]); // cleanup sweep sees nothing
+      .mockResolvedValueOnce([]) // expired-COMPLETED cleanup sweep sees nothing
+      .mockResolvedValueOnce([]); // failed-artifact cleanup sweep sees nothing
     findUniqueExport.mockImplementation(async (args: { where: { id: string } }) => ({
       id: args.where.id,
       organizationId: "org-1",

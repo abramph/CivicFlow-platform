@@ -107,6 +107,21 @@ describe("download route (fix/report-export-queue-hardening: expiration)", () =>
     expect(res.status).toBe(404);
   });
 
+  it("an expired COMPLETED export whose object was ALREADY cleaned up (fileUrl null) still returns 410, not a misleading 409 'not ready yet'", async () => {
+    findFirstExport.mockResolvedValue({
+      id: "export-1",
+      organizationId: "org-1",
+      reportType: "PTA_VOLUNTEER_FAMILY_SUMMARY",
+      status: "COMPLETED",
+      fileUrl: null, // cleanup sweep already ran and cleared this
+      expiresAt: new Date(Date.now() - 60_000),
+    });
+    const { GET } = await import("../route");
+    const res = await GET(new Request("https://x.test"), { params });
+    expect(res.status).toBe(410);
+    expect(getSignedObjectUrl).not.toHaveBeenCalled();
+  });
+
   it("disabling the organization's reports capability blocks downloading an already-completed export (fail-closed) — requireVolunteerHoursAccess itself throws before status/expiry are ever checked", async () => {
     findFirstExport.mockResolvedValue({
       id: "export-1",

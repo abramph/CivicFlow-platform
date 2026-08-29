@@ -2,7 +2,66 @@
 
 `fix/report-export-queue-hardening` — fixes real gaps found while preparing the Pine Grove PTA volunteer-hours reporting pilot: no atomic claim, no crash recovery, no cleanup lifecycle. See the Stage B / scheduler-review conversation history for the original findings.
 
-## What changed
+## Follow-up commit: ownership renewal, claim-ID-conditioned transitions, durable cleanup, rate-limit isolation
+
+A design review of the initial commit found two remaining real gaps, addressed in a second commit on this same branch (not an amend — `86bdd59` is preserved as-is):
+
+1. **The 5-minute lease could expire while a legitimate export was still processing**, letting a second worker reclaim and process the same export concurrently.
+2. **A failed object deletion for a permanently-FAILED export was never retried**, risking a permanent orphan in Spaces.
+
+### Lease-ownership solution
+
+Researched DigitalOcean App Platform's actual HTTP request timeout rather than assuming: **100 seconds, hard and non-configurable**, for `web` services (this app's current deployment type) — confirmed via multiple independent DigitalOcean community support threads; the current published Limits page documents the related 600s file-upload timeout without separately restating this one, so this is disclosed as well-corroborated-but-not-explicitly-published rather than presented as unambiguous official documentation.
+
+Workbook generation (`exceljs`'s `workbook.xlsx.writeBuffer()`) is CPU-bound XML/zip construction that does the bulk of its work synchronously on the event loop, even though it returns a Promise — a `setInterval`-based heartbeat cannot reliably fire mid-generation. This ruled out "renewable lease as the sole defense" (the design review's preferred model requires reliable mid-work heartbeats) in favor of a **hybrid**:
+
+- `REPORT_EXPORT_LEASE_MS = 3 × PLATFORM_HTTP_REQUEST_TIMEOUT_MS` (5 minutes) — sized so a legitimately-still-processing invocation's entire HTTP request is *guaranteed* to have already been killed by the platform before any other invocation could treat its claim as stale. This is the structural, primary safety property for the current web-service-request architecture.
+- **`renewReportExportLease(exportId, claimId)`** — a claim-ID-conditioned lease extension, called at every real async boundary this code has: immediately after workbook generation completes (the only point after the un-renewable synchronous phase), after upload, and before the CSV branch's completion write. Defense in depth now, and the mechanism a **future dedicated long-running worker** (no 100s ceiling at all) would rely on as its *primary* defense instead.
+
+### Claim-ID-conditioned transitions
+
+Every state-changing function in `report-export-queue.ts` now requires the caller's `claimId` and conditions its `updateMany` on `status='PROCESSING' AND claimId=<value>`:
+
+- `renewReportExportLease` — returns `boolean`, never throws.
+- `resolveReportExportFailure` — returns `{ ownershipRetained, terminal, sanitizedMessage }`.
+- `completeReportExport` — returns `boolean`.
+- The generic CSV branch's own completion write (kept inline in `reports.ts` since it doesn't use `completeReportExport`) is conditioned the same way.
+
+`processQueuedReportExport` checks the result of every one of these calls. The instant any of them reports lost ownership, it **stops immediately**: no completion, no failure/retry write, no artifact deletion (the object at the deterministic key may be exactly what the current owner's own upload produced), and no audit event misattributing an outcome this invocation didn't actually cause — only a sanitized `console.warn` naming the boundary where ownership was lost, via `logOwnershipLost()`.
+
+**Proof**: `report-export-queue.concurrency.test.ts` grew from 9 to 20 real-Postgres tests, adding: renewal by the true owner extends the lease; renewal by the wrong `claimId` is rejected and leaves the real lease untouched; renewal after `COMPLETED` is rejected (can never revive a terminal row); a second worker is denied during a freshly-renewed lease; reclaim after genuine expiration succeeds and the original stale worker's `completeReportExport` call then fails harmlessly; the same for `resolveReportExportFailure` (can't mark FAILED) and retry/backoff state (can't alter `nextAttemptAt`); a simulated long-running export that renews mid-flight keeps its claim past what the original lease alone would have covered.
+
+### Durable failed-artifact cleanup
+
+New `ReportExport` columns (additive migration `20260829120609_report_export_queue_hardening_ownership_and_cleanup`): `artifactCleanupPending`, `artifactCleanupAttempts`, `artifactCleanupNextAttemptAt`, `artifactCleanupCompletedAt`, `artifactCleanupError`.
+
+The immediate best-effort delete on a terminal `FAILED` PTA volunteer export remains the first attempt (`bestEffortCleanupFailedVolunteerReportUpload`, unchanged). If *that* throws, `markReportExportArtifactCleanupPending` persists a durable record, and the new `runFailedArtifactCleanup` sweep (called every cron invocation alongside the existing expired-`COMPLETED` sweep) retries at a fixed 10-minute backoff — **indefinitely, not bounded to a fixed attempt count**, since "a permanently failed export cannot be forgotten merely because its initial deletion failed." Operational visibility is `artifactCleanupAttempts` + `artifactCleanupError` (sanitized), not a give-up ceiling. Same exact-key-only, idempotent-if-absent, never-touches-another-export's-object guarantees as the existing expiration sweep, reusing the identical deterministic-key derivation.
+
+### Download-route fix
+
+Reordered the download route's checks: expiration is now checked **before** the `fileUrl`-null check. Previously, an expired `COMPLETED` row whose object the cleanup sweep had already removed (`fileUrl` cleared to `null`) would incorrectly return 409 "not ready yet" (implying it might become available later) instead of 410 "expired" (the true, permanent state) — because the old `fileUrl`-null check ran first and short-circuited before the expiry check was ever reached.
+
+### Deterministic-key and Content-Disposition safety
+
+The storage object **key** (`pta-volunteer-reports/{organizationId}/{exportId}.xlsx`) is built only from server-generated opaque cuids — there is no filename/title input to it at all, so path-traversal/CRLF/unicode/long-filename concerns don't apply to the key by construction (proven by test, not just asserted).
+
+The actual user-influenceable surface is the **`Content-Disposition` download filename** (already passed through the existing `sanitizeFilenameSegment`/`buildReportFilename`, which strips everything outside `\w`/hyphen/space). Added a second, defense-in-depth sanitizer directly in `storage.ts` — `sanitizeContentDispositionFilename` — so the safety guarantee doesn't depend entirely on every current and future caller having sanitized correctly upstream. Testing it directly caught a real gap: the initial version didn't strip `/`/`\`, allowing a value like `../../../etc/passwd` through unchanged (harmless in practice, since this is only ever a browser's advisory save-dialog suggestion, never a server-side filesystem path — but fixed anyway as defense in depth once the test surfaced it). Now also strips path separators, replacing them with `-`.
+
+### Rate-limit review and fix
+
+Found: **all 12 `/api/cron/*` routes shared the literal scope string `"api:cron"`**, and the rate-limiter keys state as `rl:${scope}:${clientIp}` — meaning traffic to *any* of the other 11 endpoints from the same apparent client IP shared one 10-request/60-second bucket with `/api/cron/reports`. An attacker (or even unrelated legitimate traffic) hitting a different cron route could exhaust the shared bucket and 429 the real scheduler's call to `/api/cron/reports`.
+
+Fixed: `/api/cron/reports` now uses its own dedicated scope (`api:cron:reports`), with a more generous limit (30/60s — a 5-minute-cadence scheduler needs 1). Order unchanged (cheap IP-based check, then the real secret-based gate, per the preferred design) — the fix was the scope string and limit value, not the ordering, which was already correct. Proven with the real (unmocked) rate-limit module: exhausting the shared `"api:cron"` scope from an IP has zero effect on the dedicated scope from the same IP.
+
+### Follow-up test summary
+
+- `report-export-queue.test.ts`: 28 → 39 (renewal, claim-ID-conditioned failure/completion, durable-cleanup functions).
+- `report-export-queue.concurrency.test.ts` (real Postgres, opt-in only): 9 → 20.
+- `storage-report-export-safety.test.ts`: new, 14 tests (deterministic-key namespacing + Content-Disposition sanitization).
+- `rate-limit-cron-isolation.test.ts`: new, 3 tests (real, unmocked rate-limit module).
+- `reports-volunteer-hours-allowlist.test.ts`, `reports-csv-export-regression.test.ts`, `route.test.ts` (cron): updated for the `updateMany`/claim-ID call shape, plus new tests for claim-ID threading and lost-ownership behavior.
+
+## What changed (original commit)
 
 - **New shared module**: `src/lib/report-export-queue.ts` — atomic claim, lease/stale recovery, bounded retry with permanent-error classification, deterministic object keys (PTA volunteer branch only), sanitized error storage, and a bounded cleanup sweep. Used by `processQueuedReportExport`/`processQueuedReportExports` in `src/lib/reports.ts`, for **both** report-export branches (PTA volunteer `.xlsx` and generic CSV) — the race condition is type-agnostic, so claim/lease/retry mechanics apply uniformly.
 - **Schema**: `ReportExport` gains six nullable/defaulted columns (`claimedAt`, `leaseExpiresAt`, `claimId`, `attemptCount`, `nextAttemptAt`, `expiresAt`) and three supporting indexes. Purely additive — see `prisma/migrations/20260829114251_report_export_queue_hardening/migration.sql`.

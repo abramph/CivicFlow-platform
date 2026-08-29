@@ -159,47 +159,103 @@ describe("getReportExportRetentionDays", () => {
   });
 });
 
-describe("resolveReportExportFailure", () => {
-  it("a permanent PtaError goes straight to FAILED on the first attempt", async () => {
+describe("resolveReportExportFailure (claim-ID-conditioned)", () => {
+  it("a permanent PtaError goes straight to FAILED on the first attempt, conditioned on status+claimId", async () => {
     const { resolveReportExportFailure } = await import("../report-export-queue");
     const { PtaError } = await import("../labs/pta/errors");
-    const { terminal } = await resolveReportExportFailure("export-1", 1, new PtaError("PTA_VOLUNTEER_REPORTS_DISABLED", "disabled"));
+    const { terminal, ownershipRetained } = await resolveReportExportFailure(
+      "export-1",
+      "claim-abc",
+      1,
+      new PtaError("PTA_VOLUNTEER_REPORTS_DISABLED", "disabled")
+    );
     expect(terminal).toBe(true);
-    expect(updateExport).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "FAILED" }) }));
+    expect(ownershipRetained).toBe(true);
+    expect(updateManyExport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "export-1", status: "PROCESSING", claimId: "claim-abc" },
+        data: expect.objectContaining({ status: "FAILED" }),
+      })
+    );
   });
 
   it("a transient error with attempts remaining returns to QUEUED with nextAttemptAt set", async () => {
     const { resolveReportExportFailure } = await import("../report-export-queue");
-    const { terminal } = await resolveReportExportFailure("export-1", 1, new Error("ETIMEDOUT"));
+    const { terminal } = await resolveReportExportFailure("export-1", "claim-abc", 1, new Error("ETIMEDOUT"));
     expect(terminal).toBe(false);
-    expect(updateExport).toHaveBeenCalledWith(
+    expect(updateManyExport).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: "QUEUED", nextAttemptAt: expect.any(Date) }) })
     );
   });
 
   it("a transient error at the max attempt count goes to FAILED, not another retry", async () => {
     const { resolveReportExportFailure, REPORT_EXPORT_MAX_ATTEMPTS } = await import("../report-export-queue");
-    const { terminal } = await resolveReportExportFailure("export-1", REPORT_EXPORT_MAX_ATTEMPTS, new Error("ETIMEDOUT"));
+    const { terminal } = await resolveReportExportFailure("export-1", "claim-abc", REPORT_EXPORT_MAX_ATTEMPTS, new Error("ETIMEDOUT"));
     expect(terminal).toBe(true);
-    expect(updateExport).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "FAILED" }) }));
+    expect(updateManyExport).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "FAILED" }) }));
   });
 
   it("stores the sanitized message, never the raw one, when the raw one contains sensitive content", async () => {
     const { resolveReportExportFailure } = await import("../report-export-queue");
-    await resolveReportExportFailure("export-1", 1, new Error("failed: postgresql://user:secretpw@host/db"));
-    const call = updateExport.mock.calls[0][0];
+    await resolveReportExportFailure("export-1", "claim-abc", 1, new Error("failed: postgresql://user:secretpw@host/db"));
+    const call = updateManyExport.mock.calls[0][0];
     expect(call.data.errorMessage).not.toContain("secretpw");
+  });
+
+  it("ownershipRetained is false when the conditional update matches zero rows (lease already reclaimed by someone else)", async () => {
+    updateManyExport.mockResolvedValue({ count: 0 });
+    const { resolveReportExportFailure } = await import("../report-export-queue");
+    const { ownershipRetained } = await resolveReportExportFailure("export-1", "stale-claim", 1, new Error("ETIMEDOUT"));
+    expect(ownershipRetained).toBe(false);
   });
 });
 
-describe("completeReportExport", () => {
-  it("sets COMPLETED, fileUrl, completedAt, and an expiresAt in the future", async () => {
+describe("completeReportExport (claim-ID-conditioned)", () => {
+  it("sets COMPLETED, fileUrl, completedAt, and an expiresAt in the future, conditioned on status+claimId, returns true", async () => {
     const { completeReportExport } = await import("../report-export-queue");
-    await completeReportExport("export-1", "pta-volunteer-reports/org-1/export-1.xlsx");
-    const call = updateExport.mock.calls[0][0];
+    const result = await completeReportExport("export-1", "claim-abc", "pta-volunteer-reports/org-1/export-1.xlsx");
+    expect(result).toBe(true);
+    const call = updateManyExport.mock.calls[0][0];
+    expect(call.where).toEqual({ id: "export-1", status: "PROCESSING", claimId: "claim-abc" });
     expect(call.data.status).toBe("COMPLETED");
     expect(call.data.fileUrl).toBe("pta-volunteer-reports/org-1/export-1.xlsx");
     expect(call.data.expiresAt.getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it("returns false without throwing when ownership was lost before completion could be recorded", async () => {
+    updateManyExport.mockResolvedValue({ count: 0 });
+    const { completeReportExport } = await import("../report-export-queue");
+    const result = await completeReportExport("export-1", "stale-claim", "pta-volunteer-reports/org-1/export-1.xlsx");
+    expect(result).toBe(false);
+  });
+});
+
+describe("renewReportExportLease (claim-ID-conditioned)", () => {
+  it("renews and returns true when the caller still owns the row", async () => {
+    updateManyExport.mockResolvedValue({ count: 1 });
+    const { renewReportExportLease } = await import("../report-export-queue");
+    const result = await renewReportExportLease("export-1", "claim-abc");
+    expect(result).toBe(true);
+    expect(updateManyExport).toHaveBeenCalledWith({
+      where: { id: "export-1", status: "PROCESSING", claimId: "claim-abc" },
+      data: { leaseExpiresAt: expect.any(Date) },
+    });
+  });
+
+  it("returns false, never throws, when the claimId no longer matches (already reclaimed)", async () => {
+    updateManyExport.mockResolvedValue({ count: 0 });
+    const { renewReportExportLease } = await import("../report-export-queue");
+    const result = await renewReportExportLease("export-1", "stale-claim");
+    expect(result).toBe(false);
+  });
+
+  it("returns false for a claim that has already reached a terminal state (COMPLETED/FAILED), never reviving it", async () => {
+    // Simulated by the same count:0 outcome — status='PROCESSING' in the
+    // WHERE clause can never match a COMPLETED or FAILED row regardless of
+    // claimId, which is exactly what makes this safe.
+    updateManyExport.mockResolvedValue({ count: 0 });
+    const { renewReportExportLease } = await import("../report-export-queue");
+    expect(await renewReportExportLease("export-1", "claim-abc")).toBe(false);
   });
 });
 
@@ -247,10 +303,80 @@ describe("runReportExportCleanup", () => {
 });
 
 describe("bestEffortCleanupFailedVolunteerReportUpload", () => {
-  it("deletes exactly the deterministic key for that exportId, and never throws even if delete fails", async () => {
+  it("deletes exactly the deterministic key for that exportId and returns true on success", async () => {
+    const { bestEffortCleanupFailedVolunteerReportUpload } = await import("../report-export-queue");
+    const result = await bestEffortCleanupFailedVolunteerReportUpload("org-1", "export-1");
+    expect(result).toBe(true);
+    expect(deleteObjectFromSpaces).toHaveBeenCalledWith("pta-volunteer-reports/org-1/export-1.xlsx");
+  });
+
+  it("never throws even if delete fails, and returns false so the caller can persist a durable cleanup record", async () => {
     const { bestEffortCleanupFailedVolunteerReportUpload } = await import("../report-export-queue");
     deleteObjectFromSpaces.mockRejectedValueOnce(new Error("NoSuchKey"));
-    await expect(bestEffortCleanupFailedVolunteerReportUpload("org-1", "export-1")).resolves.toBeUndefined();
+    await expect(bestEffortCleanupFailedVolunteerReportUpload("org-1", "export-1")).resolves.toBe(false);
+  });
+});
+
+describe("markReportExportArtifactCleanupPending", () => {
+  it("sets artifactCleanupPending and a sanitized error, scoped to FAILED rows only", async () => {
+    const { markReportExportArtifactCleanupPending } = await import("../report-export-queue");
+    await markReportExportArtifactCleanupPending("export-1", new Error("delete failed: postgresql://user:secretpw@host/db"));
+    const call = updateManyExport.mock.calls[0][0];
+    expect(call.where).toEqual({ id: "export-1", status: "FAILED" });
+    expect(call.data.artifactCleanupPending).toBe(true);
+    expect(call.data.artifactCleanupError).not.toContain("secretpw");
+  });
+});
+
+describe("runFailedArtifactCleanup", () => {
+  it("retries the exact deterministic key for each pending row and marks it completed on success", async () => {
+    findManyExports.mockResolvedValue([{ id: "export-1", organizationId: "org-1", artifactCleanupAttempts: 1 }]);
+    const { runFailedArtifactCleanup } = await import("../report-export-queue");
+    const result = await runFailedArtifactCleanup(25);
+
+    expect(result).toEqual({ checked: 1, cleaned: 1 });
     expect(deleteObjectFromSpaces).toHaveBeenCalledWith("pta-volunteer-reports/org-1/export-1.xlsx");
+    expect(updateManyExport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "export-1" },
+        data: expect.objectContaining({ artifactCleanupPending: false, artifactCleanupCompletedAt: expect.any(Date) }),
+      })
+    );
+  });
+
+  it("increments attemptCount and sets a future retry time on continued failure — never gives up after a fixed number of attempts", async () => {
+    findManyExports.mockResolvedValue([{ id: "export-1", organizationId: "org-1", artifactCleanupAttempts: 4 }]);
+    deleteObjectFromSpaces.mockRejectedValueOnce(new Error("still failing"));
+    const { runFailedArtifactCleanup } = await import("../report-export-queue");
+    const result = await runFailedArtifactCleanup(25);
+
+    expect(result).toEqual({ checked: 1, cleaned: 0 });
+    expect(updateManyExport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "export-1" },
+        data: expect.objectContaining({ artifactCleanupAttempts: 5, artifactCleanupNextAttemptAt: expect.any(Date) }),
+      })
+    );
+  });
+
+  it("only queries pending, not-yet-completed rows due now — the exact eligibility contract", async () => {
+    findManyExports.mockResolvedValue([]);
+    const { runFailedArtifactCleanup } = await import("../report-export-queue");
+    await runFailedArtifactCleanup(25);
+    const call = findManyExports.mock.calls[0][0];
+    expect(call.where.artifactCleanupPending).toBe(true);
+    expect(call.where.artifactCleanupCompletedAt).toBeNull();
+  });
+
+  it("never touches another export's object — each delete call is scoped to its own row's deterministic key", async () => {
+    findManyExports.mockResolvedValue([
+      { id: "export-1", organizationId: "org-1", artifactCleanupAttempts: 0 },
+      { id: "export-2", organizationId: "org-2", artifactCleanupAttempts: 0 },
+    ]);
+    const { runFailedArtifactCleanup } = await import("../report-export-queue");
+    await runFailedArtifactCleanup(25);
+    expect(deleteObjectFromSpaces).toHaveBeenCalledWith("pta-volunteer-reports/org-1/export-1.xlsx");
+    expect(deleteObjectFromSpaces).toHaveBeenCalledWith("pta-volunteer-reports/org-2/export-2.xlsx");
+    expect(deleteObjectFromSpaces).toHaveBeenCalledTimes(2);
   });
 });

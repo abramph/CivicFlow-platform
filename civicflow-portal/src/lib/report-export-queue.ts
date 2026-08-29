@@ -3,7 +3,9 @@ import { deleteObjectFromSpaces } from "@/lib/storage";
 import { PtaError } from "@/lib/labs/pta/errors";
 
 /**
- * fix/report-export-queue-hardening.
+ * fix/report-export-queue-hardening (+ follow-up: claim-ID-conditioned
+ * ownership on every transition, lease duration grounded in the platform's
+ * documented HTTP timeout, and durable failed-artifact cleanup).
  *
  * Shared queue-safety primitives for ReportExport, used by BOTH the PTA
  * volunteer-hours async export branch and the generic CSV branch in
@@ -22,23 +24,55 @@ import { PtaError } from "@/lib/labs/pta/errors";
  * `updateMany` (WHERE status = expected AND ...) whose `count` tells the
  * caller whether THIS invocation won the claim. Two concurrent callers
  * racing the same row: Postgres serializes the two UPDATE statements, so
- * exactly one sees count===1 and the other count===0. This is provably
- * atomic without needing SELECT ... FOR UPDATE SKIP LOCKED, and stays
- * consistent with the one atomic-claim pattern this codebase already uses
- * and already has can already reason about.
+ * exactly one sees count===1 and the other count===0.
+ *
+ * EVERY state transition past the initial claim (renew, complete, fail) is
+ * additionally conditioned on `claimId` matching the row's current value —
+ * not just `status='PROCESSING'`. This is what makes ownership loss safe: a
+ * worker whose lease was reclaimed by someone else still holds its OLD
+ * claimId, so every one of its subsequent conditional updates matches zero
+ * rows once the new owner's claim has taken effect, regardless of what that
+ * worker still believes its own status to be.
  */
 
-/** How long a claimed row may sit in PROCESSING before another invocation
- * may treat it as abandoned (crashed worker) and reclaim it. Generous
- * relative to a real .xlsx build+upload, matching the CLAIM_STALE_AFTER_MS
- * precedent's own reasoning (imports.ts) — long enough that a merely-slow
- * export is never preempted mid-flight, short enough that a genuine crash
- * doesn't strand a job for hours. Centralized constant, not a per-row
- * value — env-configurable only if a real operational need for tuning
- * arises; hardcoding here means every deploy gets the same, reviewed value
- * rather than a misconfigured env var silently changing queue behavior.
+/**
+ * DigitalOcean App Platform enforces a hard, non-configurable 100-second
+ * HTTP request timeout for `web` services (this app's current deployment
+ * type) — confirmed via DigitalOcean's own community support threads
+ * (multiple independent, consistent reports; the current published Limits
+ * page documents the related-but-distinct 600s file-upload timeout without
+ * separately restating this one). Not an assumption: this is the documented
+ * ceiling on how long ANY single invocation of `/api/cron/reports` —
+ * and therefore any single claimed job's actual processing window within
+ * that invocation — can possibly run before the platform itself terminates
+ * the connection, regardless of what the application code does.
  */
-export const REPORT_EXPORT_LEASE_MS = 5 * 60_000;
+export const PLATFORM_HTTP_REQUEST_TIMEOUT_MS = 100_000;
+
+/**
+ * Workbook generation (buildVolunteerReportExportFile -> exceljs's
+ * workbook.xlsx.writeBuffer()) is CPU-bound XML/zip construction that, while
+ * it returns a Promise, does the bulk of its work synchronously on the
+ * event loop — it does not yield in a way a setInterval-based heartbeat
+ * could reliably fire during. This means the lease CANNOT depend on a timer
+ * firing mid-generation; it must instead be sized so that a full worst-case
+ * generation-plus-upload comfortably fits within one platform-enforced
+ * request lifetime, with room to spare. Renewal (renewReportExportLease) is
+ * still used at the real async boundaries this code does have — immediately
+ * after claim, before upload, and after upload before completion — as
+ * defense in depth and because it's the mechanism a FUTURE long-running
+ * dedicated worker (which won't have this 100s ceiling at all) would rely
+ * on more heavily. For the CURRENT web-service-request architecture, the
+ * dominant safety property is structural: the lease is set to comfortably
+ * exceed PLATFORM_HTTP_REQUEST_TIMEOUT_MS, so the platform is *guaranteed*
+ * to have already killed a legitimately-still-processing invocation's HTTP
+ * request before any other invocation could treat its claim as stale. This
+ * is the "Alternative model" the design review asked for, chosen because
+ * the "renewable lease as primary defense" model requires reliable
+ * mid-generation heartbeats that synchronous exceljs work cannot provide —
+ * implemented ALONGSIDE renewal-at-boundaries, not instead of it.
+ */
+export const REPORT_EXPORT_LEASE_MS = 3 * PLATFORM_HTTP_REQUEST_TIMEOUT_MS; // 300,000ms / 5 minutes — unchanged from the original value, now with documented justification rather than an undocumented "generous" guess
 
 /** Bounded retries — a transient failure (network blip, a momentary Spaces
  * 5xx) gets up to this many total attempts before the job is marked
@@ -51,6 +85,14 @@ export const REPORT_EXPORT_MAX_ATTEMPTS = 3;
  * separate sweeps without the added complexity of tracking a growing
  * interval for a job type that retries at most twice. */
 export const REPORT_EXPORT_RETRY_BACKOFF_MS = 2 * 60_000;
+
+/** Backoff between durable failed-artifact cleanup retries. Deliberately
+ * NOT bounded to a fixed number of total attempts — "a permanently failed
+ * export cannot be forgotten merely because its initial deletion failed" —
+ * so this retries indefinitely at this fixed cadence. Operational
+ * visibility into a persistently-failing cleanup is via
+ * artifactCleanupAttempts + artifactCleanupError, not via giving up. */
+export const REPORT_EXPORT_CLEANUP_RETRY_BACKOFF_MS = 10 * 60_000;
 
 /** Default retention window for a completed export's downloadable file,
  * matching this phase's recommended default. Bounded to a safe range by
@@ -162,6 +204,27 @@ export async function claimReportExportBatch(limit: number): Promise<ClaimedRepo
   return claimed;
 }
 
+/**
+ * Extends the lease for the CURRENT owner only — conditioned on status
+ * PROCESSING and the exact claimId matching. Returns false (never throws)
+ * if ownership has already moved on (reclaimed by someone else) or the
+ * export reached a terminal state — the caller (processQueuedReportExport)
+ * must treat `false` as "stop immediately, I am no longer the owner," per
+ * the design's explicit requirement: never complete, never fail, never
+ * delete an object, never touch retry state once ownership is lost. Never
+ * revives a completed/failed/differently-claimed export, since the WHERE
+ * clause requires status='PROCESSING' AND claimId=<caller's own value>,
+ * which a COMPLETED/FAILED row or a row now owned by a different claimId
+ * can never satisfy.
+ */
+export async function renewReportExportLease(exportId: string, claimId: string): Promise<boolean> {
+  const result = await prisma.reportExport.updateMany({
+    where: { id: exportId, status: "PROCESSING", claimId },
+    data: { leaseExpiresAt: new Date(Date.now() + REPORT_EXPORT_LEASE_MS) },
+  });
+  return result.count === 1;
+}
+
 const PERMANENT_ERROR_CODES = new Set([
   "PTA_VOLUNTEER_HOURS_PLATFORM_DISABLED",
   "PTA_VOLUNTEER_HOURS_ORG_NOT_ALLOWLISTED",
@@ -204,47 +267,55 @@ export function sanitizeReportExportErrorMessage(error: unknown): string {
 }
 
 /**
- * Terminal-or-retry decision for a failed processing attempt. Permanent
- * errors and attempt-exhaustion both go straight to FAILED; anything else
- * returns to QUEUED with nextAttemptAt set (bounded fixed backoff) so a
- * later sweep retries it — never re-claimable before that instant, and
- * never claimable by the SAME invocation again this tick since status is
- * QUEUED, not PROCESSING-with-expired-lease, until nextAttemptAt passes.
+ * Terminal-or-retry decision for a failed processing attempt — conditioned
+ * on the caller's claimId still owning the row. Permanent errors and
+ * attempt-exhaustion both go straight to FAILED; anything else returns to
+ * QUEUED with nextAttemptAt set (bounded fixed backoff) so a later sweep
+ * retries it. `ownershipRetained: false` means the caller lost its claim
+ * before this ran (or the export was already terminal) — the caller must
+ * NOT treat this as if it successfully failed/retried the job (no audit
+ * event, no best-effort artifact cleanup, since the object at the
+ * deterministic key may now belong to whoever DOES currently own the row).
  */
 export async function resolveReportExportFailure(
   exportId: string,
+  claimId: string,
   attemptCount: number,
   error: unknown
-): Promise<{ terminal: boolean; sanitizedMessage: string }> {
+): Promise<{ ownershipRetained: boolean; terminal: boolean; sanitizedMessage: string }> {
   const sanitizedMessage = sanitizeReportExportErrorMessage(error);
   const permanent = isPermanentReportExportError(error);
   const exhausted = attemptCount >= REPORT_EXPORT_MAX_ATTEMPTS;
+  const terminal = permanent || exhausted;
 
-  if (permanent || exhausted) {
-    await prisma.reportExport.update({
-      where: { id: exportId },
-      data: { status: "FAILED", errorMessage: sanitizedMessage, leaseExpiresAt: null },
-    });
-    return { terminal: true, sanitizedMessage };
-  }
-
-  await prisma.reportExport.update({
-    where: { id: exportId },
-    data: {
-      status: "QUEUED",
-      errorMessage: sanitizedMessage,
-      nextAttemptAt: new Date(Date.now() + REPORT_EXPORT_RETRY_BACKOFF_MS),
-      leaseExpiresAt: null,
-    },
+  const result = await prisma.reportExport.updateMany({
+    where: { id: exportId, status: "PROCESSING", claimId },
+    data: terminal
+      ? { status: "FAILED", errorMessage: sanitizedMessage, leaseExpiresAt: null }
+      : {
+          status: "QUEUED",
+          errorMessage: sanitizedMessage,
+          nextAttemptAt: new Date(Date.now() + REPORT_EXPORT_RETRY_BACKOFF_MS),
+          leaseExpiresAt: null,
+        },
   });
-  return { terminal: false, sanitizedMessage };
+
+  return { ownershipRetained: result.count === 1, terminal, sanitizedMessage };
 }
 
-export async function completeReportExport(exportId: string, objectKey: string): Promise<void> {
+/**
+ * Marks completion — conditioned on the caller's claimId still owning the
+ * row. Returns false (never throws) if ownership was lost before this ran;
+ * the caller must not treat that as a normal success (no "COMPLETED" audit
+ * event) — the file this call just uploaded may be exactly what the actual
+ * current owner's own upload also produced (same deterministic key), so
+ * nothing needs to be undone, but this invocation didn't finalize anything.
+ */
+export async function completeReportExport(exportId: string, claimId: string, objectKey: string): Promise<boolean> {
   const retentionDays = getReportExportRetentionDays();
   const now = new Date();
-  await prisma.reportExport.update({
-    where: { id: exportId },
+  const result = await prisma.reportExport.updateMany({
+    where: { id: exportId, status: "PROCESSING", claimId },
     data: {
       status: "COMPLETED",
       fileUrl: objectKey,
@@ -254,6 +325,7 @@ export async function completeReportExport(exportId: string, objectKey: string):
       errorMessage: null,
     },
   });
+  return result.count === 1;
 }
 
 /**
@@ -284,20 +356,35 @@ export function buildDeterministicVolunteerReportObjectKey(organizationId: strin
  * normal no-op under S3-compatible semantics, not an error — so this never
  * needs to first check whether the object exists. Never touches any other
  * export's object, since the key is namespaced by this exact exportId.
+ * Returns whether the delete itself succeeded — the caller uses this to
+ * decide whether a durable, retryable cleanup record is needed (see
+ * markReportExportArtifactCleanupPending).
  */
-export async function bestEffortCleanupFailedVolunteerReportUpload(organizationId: string, exportId: string): Promise<void> {
+export async function bestEffortCleanupFailedVolunteerReportUpload(organizationId: string, exportId: string): Promise<boolean> {
   const key = buildDeterministicVolunteerReportObjectKey(organizationId, exportId);
   try {
     await deleteObjectFromSpaces(key);
+    return true;
   } catch {
-    // Deliberately swallowed: this is best-effort tidy-up on a path that's
-    // already terminal-FAILED. A delete failure here must never mask or
-    // replace the real failure reason already recorded on the row. FAILED
-    // rows have no expiresAt, so the cleanup sweep's own retry-on-next-pass
-    // logic doesn't cover this path — a stray object from a failed delete
-    // here is a known, narrow residual gap, documented rather than silently
-    // claimed as fully handled (see docs/report-export-queue-hardening.md).
+    return false;
   }
+}
+
+/**
+ * Persists a durable, retryable cleanup record for a permanently-FAILED PTA
+ * volunteer export whose immediate best-effort delete (above) failed. Not
+ * conditioned on claimId — by the time this runs the export is already
+ * terminal (FAILED), so there's no active ownership left to protect; this
+ * only ever marks a FAILED row, never a PROCESSING or COMPLETED one.
+ */
+export async function markReportExportArtifactCleanupPending(exportId: string, error: unknown): Promise<void> {
+  await prisma.reportExport.updateMany({
+    where: { id: exportId, status: "FAILED" },
+    data: {
+      artifactCleanupPending: true,
+      artifactCleanupError: sanitizeReportExportErrorMessage(error),
+    },
+  });
 }
 
 /**
@@ -313,6 +400,14 @@ export async function bestEffortCleanupFailedVolunteerReportUpload(organizationI
  * DeleteObject, and DeleteObject on an already-missing key is itself a safe
  * no-op under S3-compatible semantics, so a row whose object was already
  * removed by an earlier/concurrent sweep is silently, correctly skipped.
+ *
+ * If the sweep is interrupted after the DeleteObject succeeds but before
+ * the fileUrl-clearing update runs (process killed mid-sweep), the row is
+ * simply picked up again by the NEXT sweep: expiresAt is still in the past,
+ * fileUrl is still (stale-)non-null, so DeleteObject runs again — against
+ * an already-missing key, which is a safe no-op — and the update completes
+ * that time. Self-healing across sweep interruptions without any special
+ * casing.
  */
 export async function runReportExportCleanup(limit: number): Promise<{ checked: number; deleted: number }> {
   const now = new Date();
@@ -335,4 +430,56 @@ export async function runReportExportCleanup(limit: number): Promise<{ checked: 
     deleted += 1;
   }
   return { checked: expired.length, deleted };
+}
+
+/**
+ * Durable retry sweep for permanently-FAILED PTA volunteer exports whose
+ * immediate best-effort artifact delete failed (artifactCleanupPending).
+ * Retries indefinitely at REPORT_EXPORT_CLEANUP_RETRY_BACKOFF_MS — "a
+ * permanently failed export cannot be forgotten merely because its initial
+ * deletion failed" — with attempt count + sanitized error persisted for
+ * operational visibility rather than a hard give-up ceiling. Same
+ * exact-key-only, idempotent-if-absent, never-touches-another-export's-
+ * object guarantees as runReportExportCleanup, reusing the identical
+ * deterministic-key derivation so it can never target the wrong object.
+ */
+export async function runFailedArtifactCleanup(limit: number): Promise<{ checked: number; cleaned: number }> {
+  const now = new Date();
+  const pending = await prisma.reportExport.findMany({
+    where: {
+      artifactCleanupPending: true,
+      artifactCleanupCompletedAt: null,
+      OR: [{ artifactCleanupNextAttemptAt: null }, { artifactCleanupNextAttemptAt: { lte: now } }],
+    },
+    orderBy: { createdAt: "asc" },
+    take: limit,
+    select: { id: true, organizationId: true, artifactCleanupAttempts: true },
+  });
+
+  let cleaned = 0;
+  for (const row of pending) {
+    const key = buildDeterministicVolunteerReportObjectKey(row.organizationId, row.id);
+    try {
+      await deleteObjectFromSpaces(key);
+      await prisma.reportExport.updateMany({
+        where: { id: row.id },
+        data: {
+          artifactCleanupPending: false,
+          artifactCleanupCompletedAt: new Date(),
+          artifactCleanupError: null,
+        },
+      });
+      cleaned += 1;
+    } catch (error) {
+      await prisma.reportExport.updateMany({
+        where: { id: row.id },
+        data: {
+          artifactCleanupAttempts: row.artifactCleanupAttempts + 1,
+          artifactCleanupNextAttemptAt: new Date(Date.now() + REPORT_EXPORT_CLEANUP_RETRY_BACKOFF_MS),
+          artifactCleanupError: sanitizeReportExportErrorMessage(error),
+        },
+      });
+    }
+  }
+  return { checked: pending.length, cleaned };
 }

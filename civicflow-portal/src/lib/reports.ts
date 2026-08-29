@@ -10,9 +10,19 @@ import {
   buildDeterministicVolunteerReportObjectKey,
   claimReportExportBatch,
   completeReportExport,
+  markReportExportArtifactCleanupPending,
+  renewReportExportLease,
   resolveReportExportFailure,
+  runFailedArtifactCleanup,
   runReportExportCleanup,
 } from "@/lib/report-export-queue";
+
+/** "Record only a sanitized operational result" for the lost-ownership
+ * path — never an AuditEvent (which would misattribute an outcome this
+ * invocation didn't actually cause), never raw error/object data. */
+function logOwnershipLost(exportId: string, boundary: string) {
+  console.warn(`[report-export-queue] ownership lost for export ${exportId} at boundary "${boundary}" — stopping without mutating state`);
+}
 
 type SupportedReportType =
   | "MEMBERS"
@@ -106,16 +116,26 @@ async function buildReportCsv(organizationId: string, reportType: SupportedRepor
  * Either way, if the claim doesn't succeed (already claimed elsewhere,
  * already terminal, or genuinely doesn't exist), this returns quietly
  * rather than reprocessing or erroring — never a double-run.
+ *
+ * Every subsequent state transition (lease renewal, completion, failure) is
+ * conditioned on the claimId this invocation established here — if the
+ * lease expires and another invocation reclaims the row mid-processing,
+ * every one of THIS invocation's later conditional updates matches zero
+ * rows, and this function stops immediately without completing, failing,
+ * retry-scheduling, or deleting anything (see renewReportExportLease's
+ * doc comment for why that's safe).
  */
 export async function processQueuedReportExport(exportId: string) {
   const exportJob = await prisma.reportExport.findFirst({ where: { id: exportId } });
   if (!exportJob) throw new Error("Report export not found");
 
   let attemptCount = exportJob.attemptCount;
+  let claimId = exportJob.claimId ?? "";
   if (exportJob.status !== "PROCESSING") {
-    const { claimed } = await attemptClaimReportExport(exportId);
-    if (!claimed) return; // lost the race, already terminal, or not yet due for retry — not an error
+    const claim = await attemptClaimReportExport(exportId);
+    if (!claim.claimed) return; // lost the race, already terminal, or not yet due for retry — not an error
     attemptCount += 1;
+    claimId = claim.claimId;
   }
 
   // Volunteer Hour Requirements & Buyout program, VH-K (docs/pta-volunteer-hours.md):
@@ -136,7 +156,20 @@ export async function processQueuedReportExport(exportId: string) {
       await requireVolunteerHoursFlag(exportJob.organizationId, "reports");
       const filters = volunteerReportFiltersFromJson(exportJob.filters);
       const generatedByName = await resolveGeneratedByName(exportJob.createdByUserId ?? "");
+      // The bulk of this call's work (exceljs's workbook.xlsx.writeBuffer)
+      // is synchronous CPU-bound XML/zip construction — no heartbeat can
+      // reliably fire mid-call. REPORT_EXPORT_LEASE_MS is sized to
+      // comfortably exceed the platform's 100s hard HTTP-request ceiling
+      // specifically so this gap can never legitimately outlive the lease
+      // (see report-export-queue.ts's documented reasoning). The renewal
+      // immediately after is the real async boundary this code DOES have.
       const { buffer, filename } = await buildVolunteerReportExportFile(exportJob.organizationId, exportJob.reportType, filters, generatedByName);
+
+      if (!(await renewReportExportLease(exportId, claimId))) {
+        logOwnershipLost(exportId, "before-upload");
+        return;
+      }
+
       // Deterministic (organizationId + exportId), not the random-suffixed
       // buildSafeObjectKey — a retry re-PUTs to the identical key, which
       // Spaces treats as a plain overwrite rather than a new orphaned object.
@@ -152,7 +185,20 @@ export async function processQueuedReportExport(exportId: string) {
         downloadFilename: filename,
       });
 
-      await completeReportExport(exportJob.id, fileKey);
+      if (!(await renewReportExportLease(exportId, claimId))) {
+        // Ownership moved on between finishing the upload and this check.
+        // Never delete fileKey here — the current owner may have uploaded
+        // (or be about to upload) the exact same deterministic key as its
+        // own valid, current attempt.
+        logOwnershipLost(exportId, "after-upload-before-completion");
+        return;
+      }
+
+      const completed = await completeReportExport(exportJob.id, claimId, fileKey);
+      if (!completed) {
+        logOwnershipLost(exportId, "completion");
+        return;
+      }
 
       await createAuditEvent({
         organizationId: exportJob.organizationId,
@@ -163,12 +209,21 @@ export async function processQueuedReportExport(exportId: string) {
         metadata: { status: "COMPLETED", reportType: exportJob.reportType, fileKey },
       });
     } catch (error) {
-      const { terminal, sanitizedMessage } = await resolveReportExportFailure(exportJob.id, attemptCount, error);
+      const { ownershipRetained, terminal, sanitizedMessage } = await resolveReportExportFailure(exportJob.id, claimId, attemptCount, error);
+      if (!ownershipRetained) {
+        logOwnershipLost(exportId, "failure-resolution");
+        return;
+      }
       if (terminal) {
         // Best-effort: an earlier attempt in this same job's history might
         // have uploaded before a later step failed. Safe unconditionally —
-        // deleting a key that was never written is a normal no-op.
-        await bestEffortCleanupFailedVolunteerReportUpload(exportJob.organizationId, exportJob.id);
+        // deleting a key that was never written is a normal no-op. If the
+        // delete itself fails, persist a durable, retryable cleanup record
+        // rather than silently losing track of a possible orphan.
+        const deleted = await bestEffortCleanupFailedVolunteerReportUpload(exportJob.organizationId, exportJob.id);
+        if (!deleted) {
+          await markReportExportArtifactCleanupPending(exportJob.id, new Error("initial best-effort artifact delete failed"));
+        }
       }
       await createAuditEvent({
         organizationId: exportJob.organizationId,
@@ -186,8 +241,10 @@ export async function processQueuedReportExport(exportId: string) {
     // Permanent by construction — no retry could ever make an unknown
     // report type become known, so this bypasses the generic retry
     // machinery and goes straight to FAILED, same as before this change.
-    await prisma.reportExport.update({
-      where: { id: exportId },
+    // Claim-ID-conditioned like every other terminal write, even though a
+    // lost race here is extremely unlikely given how fast this check runs.
+    await prisma.reportExport.updateMany({
+      where: { id: exportId, status: "PROCESSING", claimId },
       data: { status: "FAILED", errorMessage: `Unsupported report type: ${exportJob.reportType}`, leaseExpiresAt: null },
     });
     return;
@@ -211,8 +268,13 @@ export async function processQueuedReportExport(exportId: string) {
       },
     });
 
-    await prisma.reportExport.update({
-      where: { id: exportId },
+    if (!(await renewReportExportLease(exportId, claimId))) {
+      logOwnershipLost(exportId, "csv-after-upload-before-completion");
+      return;
+    }
+
+    const completeResult = await prisma.reportExport.updateMany({
+      where: { id: exportId, status: "PROCESSING", claimId },
       data: {
         status: "COMPLETED",
         fileUrl: fileKey,
@@ -221,6 +283,10 @@ export async function processQueuedReportExport(exportId: string) {
         errorMessage: null,
       },
     });
+    if (completeResult.count !== 1) {
+      logOwnershipLost(exportId, "csv-completion");
+      return;
+    }
 
     await prisma.attachment.create({
       data: {
@@ -255,7 +321,11 @@ export async function processQueuedReportExport(exportId: string) {
     // classifies a CSV failure as permanent — every CSV failure gets up to
     // REPORT_EXPORT_MAX_ATTEMPTS tries (strictly more resilient than the
     // previous immediate-FAILED behavior) before landing on FAILED.
-    const { terminal, sanitizedMessage } = await resolveReportExportFailure(exportJob.id, attemptCount, error);
+    const { ownershipRetained, terminal, sanitizedMessage } = await resolveReportExportFailure(exportJob.id, claimId, attemptCount, error);
+    if (!ownershipRetained) {
+      logOwnershipLost(exportId, "csv-failure-resolution");
+      return;
+    }
     await createAuditEvent({
       organizationId: exportJob.organizationId,
       actorUserId: exportJob.createdByUserId,
@@ -271,10 +341,12 @@ export async function processQueuedReportExport(exportId: string) {
 }
 
 /**
- * Claims and processes a bounded batch, then runs a bounded cleanup sweep
- * for expired PTA-volunteer exports. Each claimed job is independent —
- * one job's failure never stops the others (processQueuedReportExport
- * already catches its own errors internally and always resolves).
+ * Claims and processes a bounded batch, then runs two bounded cleanup
+ * sweeps: expired-COMPLETED-export objects, and durable retries for
+ * permanently-FAILED exports whose initial best-effort artifact delete
+ * failed. Each claimed job is independent — one job's failure never stops
+ * the others (processQueuedReportExport already catches its own errors
+ * internally and always resolves).
  */
 export async function processQueuedReportExports(limit = 25, cleanupLimit = 25) {
   const claimed = await claimReportExportBatch(limit);
@@ -293,6 +365,13 @@ export async function processQueuedReportExports(limit = 25, cleanupLimit = 25) 
   }
 
   const cleanup = await runReportExportCleanup(cleanupLimit);
+  const artifactCleanup = await runFailedArtifactCleanup(cleanupLimit);
 
-  return { processed: claimed.length, cleanupChecked: cleanup.checked, cleanupDeleted: cleanup.deleted };
+  return {
+    processed: claimed.length,
+    cleanupChecked: cleanup.checked,
+    cleanupDeleted: cleanup.deleted,
+    artifactCleanupChecked: artifactCleanup.checked,
+    artifactCleanupCleaned: artifactCleanup.cleaned,
+  };
 }
