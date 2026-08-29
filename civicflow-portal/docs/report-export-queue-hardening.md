@@ -61,6 +61,26 @@ Fixed: `/api/cron/reports` now uses its own dedicated scope (`api:cron:reports`)
 - `rate-limit-cron-isolation.test.ts`: new, 3 tests (real, unmocked rate-limit module).
 - `reports-volunteer-hours-allowlist.test.ts`, `reports-csv-export-regression.test.ts`, `route.test.ts` (cron): updated for the `updateMany`/claim-ID call shape, plus new tests for claim-ID threading and lost-ownership behavior.
 
+## Pre-merge verification fixes (third commit, on the same branch, `86bdd59`/follow-up both preserved unamended)
+
+Final merge-readiness review found two further real gaps before the branch was considered ready:
+
+### 1. Unbounded Spaces upload/request timeout
+
+`createS3Client()` never configured `requestHandler` — the AWS SDK v3 `NodeHttpHandler` default is `requestTimeout: 0` (disabled), and even a configured timeout only *warns* rather than throws unless `throwOnRequestTimeout` is set. A stuck `PutObject` could hang indefinitely: it would never reach the post-upload `renewReportExportLease` call, so the row's lease would keep counting toward reclaim with no way to distinguish "merely stuck" from "crashed."
+
+Fixed: `SPACES_REQUEST_TIMEOUT_MS = 120_000` (120s) + `connectionTimeout: 10_000` + `throwOnRequestTimeout: true`, applied to the shared `createS3Client()` (so it also covers `getObjectBuffer`/`getSignedObjectUrl`/`deleteObjectFromSpaces`, not just uploads). 120s is comfortably below `REPORT_EXPORT_LEASE_MS` (300s, leaving ~180s for failure handling to run after a timeout) and comfortably above what the largest upload anywhere in this app (150MB meeting-intelligence recordings, `MAX_FILE_SIZE_BYTES`) needs on a DO-to-Spaces transfer. A timeout throws a plain `Error` (not a `PtaError`), which `isPermanentReportExportError`'s default-transient design already classifies as retryable — no further code change needed for that integration. Proven by a new test asserting `SPACES_REQUEST_TIMEOUT_MS < REPORT_EXPORT_LEASE_MS` with margin, plus a test confirming a timeout-shaped error is classified transient.
+
+### 2. Expired-COMPLETED cleanup didn't use the same durable mechanism as FAILED-artifact cleanup
+
+`runReportExportCleanup` (the expired-`COMPLETED`-export sweep) previously handled a delete failure by just `continue`-ing — leaving `fileUrl` set so the *next* sweep's query would happen to re-match the row, but with no attempt count, no backoff, and no persisted error. That contradicts "expired completed exports use the same durable cleanup mechanism" as the FAILED-artifact path, and made a persistently-failing expired-export deletion operationally invisible (indistinguishable from "not yet due").
+
+Fixed: `runReportExportCleanup`'s catch block now calls `markReportExportArtifactCleanupPending`, which was broadened from `status: "FAILED"` to `status: { in: ["FAILED", "COMPLETED"] }` (still explicitly excluding `PROCESSING`, so it can never touch an actively-claimed row). `runFailedArtifactCleanup`'s sweep already had no `status` filter, so it now drains both cases through one shared retry/backoff/visibility mechanism without any change to its eligibility query. The one real correctness wrinkle: a FAILED PTA row never had `fileUrl` persisted (completion never ran), so its object is only findable via the deterministic key — but a COMPLETED row (including the generic CSV branch's non-deterministic, random-suffixed key) always has `fileUrl` reliably set by `completeReportExport`. `runFailedArtifactCleanup` now resolves the key as `row.fileUrl ?? buildDeterministicVolunteerReportObjectKey(...)`, so it uses the stored value when present rather than reconstructing — reconstruction would silently target the wrong key for a CSV export. Also clears `fileUrl` on successful cleanup so `runReportExportCleanup`'s own query can never re-match the same row.
+
+Proven by 4 new/updated tests: the old "leaves fileUrl set, calls nothing" assertion was replaced with one proving a delete failure now creates a durable pending record; a new test proves the CSV/random-key case resolves via stored `fileUrl` rather than a reconstructed PTA-shaped key; a new test proves `fileUrl` is cleared on success; a new test proves the deterministic-key fallback still fires when `fileUrl` is absent (the FAILED-PTA case). `markReportExportArtifactCleanupPending`'s own test now asserts the broadened `status: { in: [...] }` where-clause and that `PROCESSING` is never included.
+
+Both fixes: `report-export-queue.test.ts` 39 → 42, `storage-report-export-safety.test.ts` 14 → 16. Real-Postgres concurrency suite unaffected (still 20/20 — these two fixes don't change any claim/lease/ownership behavior the concurrency suite exercises).
+
 ## What changed (original commit)
 
 - **New shared module**: `src/lib/report-export-queue.ts` — atomic claim, lease/stale recovery, bounded retry with permanent-error classification, deterministic object keys (PTA volunteer branch only), sanitized error storage, and a bounded cleanup sweep. Used by `processQueuedReportExport`/`processQueuedReportExports` in `src/lib/reports.ts`, for **both** report-export branches (PTA volunteer `.xlsx` and generic CSV) — the race condition is type-agnostic, so claim/lease/retry mechanics apply uniformly.

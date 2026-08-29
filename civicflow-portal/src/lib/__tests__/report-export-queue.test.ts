@@ -285,13 +285,18 @@ describe("runReportExportCleanup", () => {
     expect(call.where.expiresAt).toEqual({ lt: expect.any(Date) });
   });
 
-  it("is idempotent if the object is already absent — a delete failure just leaves fileUrl set for the next sweep, never throws", async () => {
+  it("never throws on a delete failure, and routes it into the durable artifactCleanupPending mechanism rather than an invisible retry-forever loop", async () => {
     findManyExports.mockResolvedValue([{ id: "export-1", fileUrl: "pta-volunteer-reports/org-1/export-1.xlsx" }]);
-    deleteObjectFromSpaces.mockRejectedValueOnce(new Error("NoSuchKey"));
+    deleteObjectFromSpaces.mockRejectedValueOnce(new Error("connection reset"));
     const { runReportExportCleanup } = await import("../report-export-queue");
     const result = await runReportExportCleanup(25);
     expect(result.deleted).toBe(0);
-    expect(updateManyExport).not.toHaveBeenCalled(); // fileUrl left as-is, retried next sweep
+    expect(updateManyExport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "export-1", status: { in: ["FAILED", "COMPLETED"] } },
+        data: expect.objectContaining({ artifactCleanupPending: true }),
+      })
+    );
   });
 
   it("respects the bounded limit", async () => {
@@ -318,11 +323,12 @@ describe("bestEffortCleanupFailedVolunteerReportUpload", () => {
 });
 
 describe("markReportExportArtifactCleanupPending", () => {
-  it("sets artifactCleanupPending and a sanitized error, scoped to FAILED rows only", async () => {
+  it("sets artifactCleanupPending and a sanitized error, scoped to terminal (FAILED or COMPLETED) rows only — never PROCESSING", async () => {
     const { markReportExportArtifactCleanupPending } = await import("../report-export-queue");
     await markReportExportArtifactCleanupPending("export-1", new Error("delete failed: postgresql://user:secretpw@host/db"));
     const call = updateManyExport.mock.calls[0][0];
-    expect(call.where).toEqual({ id: "export-1", status: "FAILED" });
+    expect(call.where).toEqual({ id: "export-1", status: { in: ["FAILED", "COMPLETED"] } });
+    expect(call.where.status.in).not.toContain("PROCESSING");
     expect(call.data.artifactCleanupPending).toBe(true);
     expect(call.data.artifactCleanupError).not.toContain("secretpw");
   });
@@ -378,5 +384,36 @@ describe("runFailedArtifactCleanup", () => {
     expect(deleteObjectFromSpaces).toHaveBeenCalledWith("pta-volunteer-reports/org-1/export-1.xlsx");
     expect(deleteObjectFromSpaces).toHaveBeenCalledWith("pta-volunteer-reports/org-2/export-2.xlsx");
     expect(deleteObjectFromSpaces).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses the row's stored fileUrl directly when present, rather than reconstructing a deterministic key — critical for a generic CSV export's random-suffixed key, which reconstruction would get wrong", async () => {
+    findManyExports.mockResolvedValue([
+      { id: "export-1", organizationId: "org-1", fileUrl: "reports/org-1/a1b2c3d4-family-summary.csv", artifactCleanupAttempts: 0 },
+    ]);
+    const { runFailedArtifactCleanup } = await import("../report-export-queue");
+    await runFailedArtifactCleanup(25);
+    expect(deleteObjectFromSpaces).toHaveBeenCalledWith("reports/org-1/a1b2c3d4-family-summary.csv");
+    expect(deleteObjectFromSpaces).not.toHaveBeenCalledWith("pta-volunteer-reports/org-1/export-1.xlsx");
+  });
+
+  it("clears fileUrl on successful cleanup so runReportExportCleanup's own query never re-matches the row", async () => {
+    findManyExports.mockResolvedValue([
+      { id: "export-1", organizationId: "org-1", fileUrl: "reports/org-1/some-key.csv", artifactCleanupAttempts: 0 },
+    ]);
+    const { runFailedArtifactCleanup } = await import("../report-export-queue");
+    await runFailedArtifactCleanup(25);
+    expect(updateManyExport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "export-1" },
+        data: expect.objectContaining({ fileUrl: null }),
+      })
+    );
+  });
+
+  it("falls back to the deterministic key when fileUrl is absent — the FAILED-PTA case, where completion (and thus fileUrl) never ran", async () => {
+    findManyExports.mockResolvedValue([{ id: "export-1", organizationId: "org-1", fileUrl: null, artifactCleanupAttempts: 0 }]);
+    const { runFailedArtifactCleanup } = await import("../report-export-queue");
+    await runFailedArtifactCleanup(25);
+    expect(deleteObjectFromSpaces).toHaveBeenCalledWith("pta-volunteer-reports/org-1/export-1.xlsx");
   });
 });

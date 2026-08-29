@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { sanitizeContentDispositionFilename } from "../storage";
-import { buildDeterministicVolunteerReportObjectKey } from "../report-export-queue";
+import { sanitizeContentDispositionFilename, SPACES_REQUEST_TIMEOUT_MS } from "../storage";
+import {
+  buildDeterministicVolunteerReportObjectKey,
+  isPermanentReportExportError,
+  REPORT_EXPORT_LEASE_MS,
+} from "../report-export-queue";
 
 /**
  * fix/report-export-queue-hardening follow-up — deterministic-key and
@@ -98,5 +102,26 @@ describe("sanitizeContentDispositionFilename — the actual user-influenceable s
   it("leaves an already-safe, real report filename completely unchanged", () => {
     const safe = "Pine_Grove_School_PTA_Family_Volunteer_Summary_2026-2027_2026-08-29.xlsx";
     expect(sanitizeContentDispositionFilename(safe)).toBe(safe);
+  });
+});
+
+describe("Spaces upload request timeout — bounded and shorter than the report-export lease", () => {
+  it("SPACES_REQUEST_TIMEOUT_MS is strictly less than REPORT_EXPORT_LEASE_MS, with meaningful margin for failure handling to run afterward", () => {
+    expect(SPACES_REQUEST_TIMEOUT_MS).toBeGreaterThan(0);
+    expect(SPACES_REQUEST_TIMEOUT_MS).toBeLessThan(REPORT_EXPORT_LEASE_MS);
+    // At least a third of the lease must remain after a timed-out upload for
+    // the failure/cleanup path to run before another worker could reclaim.
+    expect(REPORT_EXPORT_LEASE_MS - SPACES_REQUEST_TIMEOUT_MS).toBeGreaterThanOrEqual(
+      REPORT_EXPORT_LEASE_MS / 3
+    );
+  });
+
+  it("a stuck-upload timeout (a plain Error, not a PtaError) is classified as transient and gets the normal retry treatment, not treated as permanent", () => {
+    // Simulates what @smithy/node-http-handler throws when requestTimeout is
+    // exceeded with throwOnRequestTimeout enabled: a plain Error, not a
+    // PtaError — isPermanentReportExportError's default-transient design
+    // means this is retried rather than immediately given up on.
+    const timeoutError = new Error("Connection timed out after 120000ms");
+    expect(isPermanentReportExportError(timeoutError)).toBe(false);
   });
 });

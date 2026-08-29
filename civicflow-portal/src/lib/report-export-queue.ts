@@ -371,15 +371,19 @@ export async function bestEffortCleanupFailedVolunteerReportUpload(organizationI
 }
 
 /**
- * Persists a durable, retryable cleanup record for a permanently-FAILED PTA
- * volunteer export whose immediate best-effort delete (above) failed. Not
+ * Persists a durable, retryable cleanup record for a terminal export (FAILED
+ * or COMPLETED) whose immediate best-effort object delete failed — either a
+ * permanently-FAILED PTA volunteer export's uploaded-but-never-completed
+ * artifact (above), or an expired COMPLETED export (any report type) that
+ * runReportExportCleanup below couldn't delete on its first attempt. Not
  * conditioned on claimId — by the time this runs the export is already
- * terminal (FAILED), so there's no active ownership left to protect; this
- * only ever marks a FAILED row, never a PROCESSING or COMPLETED one.
+ * terminal, so there's no active ownership left to protect. Restricted to
+ * FAILED/COMPLETED specifically so this can never mark a PROCESSING row,
+ * which would be actively owned by a claim.
  */
 export async function markReportExportArtifactCleanupPending(exportId: string, error: unknown): Promise<void> {
   await prisma.reportExport.updateMany({
-    where: { id: exportId, status: "FAILED" },
+    where: { id: exportId, status: { in: ["FAILED", "COMPLETED"] } },
     data: {
       artifactCleanupPending: true,
       artifactCleanupError: sanitizeReportExportErrorMessage(error),
@@ -408,6 +412,14 @@ export async function markReportExportArtifactCleanupPending(exportId: string, e
  * an already-missing key, which is a safe no-op — and the update completes
  * that time. Self-healing across sweep interruptions without any special
  * casing.
+ *
+ * A delete that fails outright (not merely "already gone," but a real error)
+ * routes into the SAME durable artifactCleanupPending mechanism the FAILED
+ * PTA-artifact path uses (see markReportExportArtifactCleanupPending /
+ * runFailedArtifactCleanup below) rather than silently retrying every sweep
+ * forever with no attempt count, no backoff, and no persisted error — this
+ * is what keeps a persistently-failing expired-export deletion operationally
+ * visible instead of an invisible indefinite loop.
  */
 export async function runReportExportCleanup(limit: number): Promise<{ checked: number; deleted: number }> {
   const now = new Date();
@@ -423,8 +435,9 @@ export async function runReportExportCleanup(limit: number): Promise<{ checked: 
     if (!row.fileUrl) continue;
     try {
       await deleteObjectFromSpaces(row.fileUrl);
-    } catch {
-      continue; // leave fileUrl set so the next sweep retries this exact row
+    } catch (error) {
+      await markReportExportArtifactCleanupPending(row.id, error);
+      continue;
     }
     await prisma.reportExport.updateMany({ where: { id: row.id }, data: { fileUrl: null } });
     deleted += 1;
@@ -433,15 +446,26 @@ export async function runReportExportCleanup(limit: number): Promise<{ checked: 
 }
 
 /**
- * Durable retry sweep for permanently-FAILED PTA volunteer exports whose
- * immediate best-effort artifact delete failed (artifactCleanupPending).
- * Retries indefinitely at REPORT_EXPORT_CLEANUP_RETRY_BACKOFF_MS — "a
- * permanently failed export cannot be forgotten merely because its initial
- * deletion failed" — with attempt count + sanitized error persisted for
- * operational visibility rather than a hard give-up ceiling. Same
- * exact-key-only, idempotent-if-absent, never-touches-another-export's-
- * object guarantees as runReportExportCleanup, reusing the identical
- * deterministic-key derivation so it can never target the wrong object.
+ * Durable retry sweep for every export with artifactCleanupPending set —
+ * both a permanently-FAILED PTA volunteer export whose immediate best-effort
+ * artifact delete failed, AND an expired COMPLETED export (any report type)
+ * that runReportExportCleanup's own immediate delete attempt failed on. One
+ * shared mechanism for both, not two independently-drifting ones: retries
+ * indefinitely at REPORT_EXPORT_CLEANUP_RETRY_BACKOFF_MS — "a permanently
+ * failed export cannot be forgotten merely because its initial deletion
+ * failed" — with attempt count + sanitized error persisted for operational
+ * visibility rather than a hard give-up ceiling.
+ *
+ * Key resolution: a FAILED PTA row never had fileUrl persisted (completion
+ * never ran), so its object — if the upload got that far before a later step
+ * failed — is only findable via the deterministic key. A COMPLETED row (any
+ * report type, including the generic CSV branch's random-suffixed key)
+ * always has fileUrl reliably set by completeReportExport, so that stored
+ * value is used directly instead of being reconstructed — reconstruction
+ * would be wrong for a non-deterministic CSV key. Either way this is a
+ * single exact-key DeleteObject, never a prefix or bucket-wide operation,
+ * and DeleteObject on an already-missing key is a safe no-op, so it can
+ * never target — let alone delete — a different export's object.
  */
 export async function runFailedArtifactCleanup(limit: number): Promise<{ checked: number; cleaned: number }> {
   const now = new Date();
@@ -453,12 +477,12 @@ export async function runFailedArtifactCleanup(limit: number): Promise<{ checked
     },
     orderBy: { createdAt: "asc" },
     take: limit,
-    select: { id: true, organizationId: true, artifactCleanupAttempts: true },
+    select: { id: true, organizationId: true, fileUrl: true, artifactCleanupAttempts: true },
   });
 
   let cleaned = 0;
   for (const row of pending) {
-    const key = buildDeterministicVolunteerReportObjectKey(row.organizationId, row.id);
+    const key = row.fileUrl ?? buildDeterministicVolunteerReportObjectKey(row.organizationId, row.id);
     try {
       await deleteObjectFromSpaces(key);
       await prisma.reportExport.updateMany({
@@ -467,6 +491,7 @@ export async function runFailedArtifactCleanup(limit: number): Promise<{ checked
           artifactCleanupPending: false,
           artifactCleanupCompletedAt: new Date(),
           artifactCleanupError: null,
+          fileUrl: null,
         },
       });
       cleaned += 1;

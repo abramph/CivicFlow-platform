@@ -9,6 +9,23 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { getServerEnv } from "@/lib/env";
 
+/**
+ * fix/report-export-queue-hardening follow-up: the AWS SDK v3 NodeHttpHandler
+ * defaults to requestTimeout=0 (disabled) and, even when a timeout IS set,
+ * only warns rather than throws unless throwOnRequestTimeout is explicit —
+ * so without this config a stuck PutObject/GetObject could hang indefinitely.
+ * That matters specifically for the report-export queue: an upload that
+ * never resolves also never reaches the post-upload renewReportExportLease
+ * call, so the row's lease keeps counting down toward reclaim by another
+ * worker with no way to know the first attempt is merely stuck rather than
+ * crashed. 120s is comfortably below REPORT_EXPORT_LEASE_MS (300s) — leaving
+ * ~180s of lease for failure handling to run after a timeout — while staying
+ * well above what even the largest upload in this app (150MB meeting
+ * recordings, MAX_FILE_SIZE_BYTES) needs on a DO-to-Spaces transfer.
+ */
+export const SPACES_REQUEST_TIMEOUT_MS = 120_000;
+const SPACES_CONNECTION_TIMEOUT_MS = 10_000;
+
 function createS3Client() {
   const env = getServerEnv();
   return new S3Client({
@@ -18,6 +35,11 @@ function createS3Client() {
     credentials: {
       accessKeyId: env.DO_SPACES_ACCESS_KEY_ID,
       secretAccessKey: env.DO_SPACES_SECRET_ACCESS_KEY,
+    },
+    requestHandler: {
+      requestTimeout: SPACES_REQUEST_TIMEOUT_MS,
+      connectionTimeout: SPACES_CONNECTION_TIMEOUT_MS,
+      throwOnRequestTimeout: true,
     },
   });
 }
