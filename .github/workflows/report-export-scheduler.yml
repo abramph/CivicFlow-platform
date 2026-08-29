@@ -1,4 +1,10 @@
 name: Report Export Scheduler
+# Note: 2026-08-29 — schedule trigger did not fire for ~3h after this
+# workflow was first enabled (manual workflow_dispatch worked correctly
+# throughout). Matches a known GitHub-side scheduled-workflow registration
+# issue reported by other users; GitHub staff guidance is that any commit
+# to the default branch resyncs affected scheduled workflows. This comment
+# is that resync commit.
 
 # Pings the report-export queue worker (POST /api/cron/reports) on a fixed
 # cadence. This workflow does NOT check out the repository, install
