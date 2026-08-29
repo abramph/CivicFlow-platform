@@ -1,6 +1,12 @@
 import type { PtaVolunteerCategory, PtaVolunteerHourEntryStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { buildReportInfo, emptySummaryTotals, resolveReportHouseholds, STANDARD_CALCULATION_NOTES } from "./shared";
+import {
+  buildReportInfo,
+  emptySummaryTotals,
+  resolvePeriodLinkedHourEntryIds,
+  resolveReportHouseholds,
+  STANDARD_CALCULATION_NOTES,
+} from "./shared";
 import type { ReportColumn } from "./xlsx-builder";
 import type { ReportData, VolunteerReportFilters } from "./types";
 
@@ -33,16 +39,26 @@ export interface DetailActivityRow {
  * household/opportunity/slot (they're informal scalar references, unlike
  * its real `signup` relation) — every join here is a deliberate manual
  * batch fetch-and-merge rather than a nested `include`.
+ *
+ * Period scope (docs/pta-volunteer-hours-report-period-scope-fix.md):
+ * PtaVolunteerHourEntry carries no period FK, so "requirement-period mode"
+ * (filters.mode !== "ALL_TIME", the default) restricts results to entries
+ * with a recorded PtaVolunteerLedgerEntry mirror for the SELECTED period —
+ * see resolvePeriodLinkedHourEntryIds. An entry never appears merely because
+ * it belongs to the same household/org. "ALL_TIME" mode (explicit opt-in
+ * only) skips this restriction and surfaces full historical activity,
+ * clearly labeled as such in the report title and calculation notes.
  */
 export async function buildDetailActivityReportData(
   organizationId: string,
   filters: VolunteerReportFilters,
   generatedByName: string
 ): Promise<ReportData<DetailActivityRow>> {
+  const allTime = filters.mode === "ALL_TIME";
   const households = filters.householdId ? [{ id: filters.householdId }] : await resolveReportHouseholds(organizationId, filters);
   const householdIds = households.map((h) => h.id);
 
-  const entries = await prisma.ptaVolunteerHourEntry.findMany({
+  const candidateEntries = await prisma.ptaVolunteerHourEntry.findMany({
     where: {
       organizationId,
       householdId: householdIds.length > 0 ? { in: householdIds } : undefined,
@@ -51,6 +67,15 @@ export async function buildDetailActivityReportData(
     },
     orderBy: { createdAt: "desc" },
   });
+
+  const periodLinkedIds = allTime
+    ? null
+    : await resolvePeriodLinkedHourEntryIds(
+        organizationId,
+        filters.requirementPeriodId,
+        candidateEntries.map((e) => e.id)
+      );
+  const entries = allTime ? candidateEntries : candidateEntries.filter((e) => periodLinkedIds!.has(e.id));
 
   const opportunityIds = [...new Set(entries.map((e) => e.opportunityId))];
   const slotIds = [...new Set(entries.map((e) => e.slotId))];
@@ -123,7 +148,18 @@ export async function buildDetailActivityReportData(
   summary.totalFamilies = uniqueFamilies.size;
   summary.totalIndividualVolunteers = uniqueVolunteers.size;
 
-  const info = await buildReportInfo(organizationId, filters, "Detailed Family Volunteer Activity", generatedByName, STANDARD_CALCULATION_NOTES);
+  const reportTitle = allTime ? "All-Time Volunteer Activity" : "Detailed Family Volunteer Activity";
+  const calculationNotes = allTime
+    ? [
+        ...STANDARD_CALCULATION_NOTES,
+        "ALL-TIME MODE: shows every recorded hour entry for the selected household(s)/organization across every requirement period (or no period at all) — not restricted to one period. Does not represent, and must not be read as, requirement completion or compliance for any single period.",
+      ]
+    : [
+        ...STANDARD_CALCULATION_NOTES,
+        "Restricted to entries with a recorded relationship to the selected requirement period. An entry that was never processed under any period (e.g. activity predating this feature) is excluded here and is visible only in All-Time Volunteer Activity mode.",
+      ];
+
+  const info = await buildReportInfo(organizationId, filters, reportTitle, generatedByName, calculationNotes);
   return { info, summary, rows };
 }
 

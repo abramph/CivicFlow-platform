@@ -149,4 +149,36 @@ describe("buildIndividualVolunteerReportData — Report F", () => {
       expect(() => col.getValue(data.rows[0])).not.toThrow();
     }
   });
+
+  describe("period scoping (fix/pta-volunteer-reports-period-scope)", () => {
+    it("passes filters (including mode) through to Report B unchanged — never re-queries raw entries itself", async () => {
+      buildDetailActivityReportData.mockResolvedValue(detailFixture([row({})]));
+      const { buildIndividualVolunteerReportData } = await import("../individual-volunteer");
+      const scopedFilters = { ...filters, mode: "ALL_TIME" as const };
+      await buildIndividualVolunteerReportData("org-1", scopedFilters, "Officer Jones");
+      expect(buildDetailActivityReportData).toHaveBeenCalledWith("org-1", scopedFilters, "Officer Jones");
+    });
+
+    it("totals equal Report B's applicable per-volunteer totals — cannot diverge since it aggregates B's own already-period-filtered rows", async () => {
+      buildDetailActivityReportData.mockResolvedValue(
+        detailFixture([
+          row({ householdAdultId: "adult-1", reportedMinutes: 60, isEventBased: true }),
+          row({ householdAdultId: "adult-1", reportedMinutes: 90, isEventBased: false }),
+        ])
+      );
+      const { buildIndividualVolunteerReportData } = await import("../individual-volunteer");
+      const data = await buildIndividualVolunteerReportData("org-1", filters, "Officer Jones");
+      expect(data.summary.totalVerifiedMinutes).toBe(150);
+    });
+
+    it("labels the report All-Time only when ALL_TIME mode is explicitly requested", async () => {
+      buildDetailActivityReportData.mockResolvedValue(detailFixture([row({})]));
+      const { buildIndividualVolunteerReportData } = await import("../individual-volunteer");
+      const periodData = await buildIndividualVolunteerReportData("org-1", filters, "Officer Jones");
+      expect(periodData.info.reportTitle).toBe("Individual Volunteer Report");
+
+      const allTimeData = await buildIndividualVolunteerReportData("org-1", { ...filters, mode: "ALL_TIME" }, "Officer Jones");
+      expect(allTimeData.info.reportTitle).toBe("Individual Volunteer Report (All-Time)");
+    });
+  });
 });

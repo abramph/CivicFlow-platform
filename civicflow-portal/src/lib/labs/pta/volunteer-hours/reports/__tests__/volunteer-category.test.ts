@@ -149,4 +149,36 @@ describe("buildVolunteerCategoryReportData — Report G", () => {
       expect(() => col.getValue(data.rows[0])).not.toThrow();
     }
   });
+
+  describe("period scoping (fix/pta-volunteer-reports-period-scope)", () => {
+    it("passes filters (including mode) through to Report B unchanged — never re-queries raw activity itself", async () => {
+      buildDetailActivityReportData.mockResolvedValue(detailFixture([row({})]));
+      const { buildVolunteerCategoryReportData } = await import("../volunteer-category");
+      const scopedFilters = { ...filters, mode: "ALL_TIME" as const };
+      await buildVolunteerCategoryReportData("org-1", scopedFilters, "Officer Jones");
+      expect(buildDetailActivityReportData).toHaveBeenCalledWith("org-1", scopedFilters, "Officer Jones");
+    });
+
+    it("totals equal Report B's applicable per-category totals — cannot diverge since it aggregates B's own already-period-filtered rows", async () => {
+      buildDetailActivityReportData.mockResolvedValue(
+        detailFixture([
+          row({ volunteerCategory: "EVENT_SERVICE", reportedMinutes: 60, isEventBased: true }),
+          row({ volunteerCategory: "EVENT_SERVICE", reportedMinutes: 30, isEventBased: true }),
+        ])
+      );
+      const { buildVolunteerCategoryReportData } = await import("../volunteer-category");
+      const data = await buildVolunteerCategoryReportData("org-1", filters, "Officer Jones");
+      expect(data.summary.totalVerifiedMinutes).toBe(90);
+    });
+
+    it("labels the report All-Time only when ALL_TIME mode is explicitly requested", async () => {
+      buildDetailActivityReportData.mockResolvedValue(detailFixture([row({})]));
+      const { buildVolunteerCategoryReportData } = await import("../volunteer-category");
+      const periodData = await buildVolunteerCategoryReportData("org-1", filters, "Officer Jones");
+      expect(periodData.info.reportTitle).toBe("Volunteer Category Report");
+
+      const allTimeData = await buildVolunteerCategoryReportData("org-1", { ...filters, mode: "ALL_TIME" }, "Officer Jones");
+      expect(allTimeData.info.reportTitle).toBe("Volunteer Category Report (All-Time)");
+    });
+  });
 });

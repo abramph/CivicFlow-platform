@@ -93,9 +93,13 @@ export async function buildVolunteerCategoryReportData(
     summary.totalPendingMinutes += row.pendingMinutes;
   }
 
-  const info = await buildReportInfo(organizationId, filters, "Volunteer Category Report", generatedByName, [
+  const reportTitle = filters.mode === "ALL_TIME" ? "Volunteer Category Report (All-Time)" : "Volunteer Category Report";
+  const info = await buildReportInfo(organizationId, filters, reportTitle, generatedByName, [
     ...STANDARD_CALCULATION_NOTES,
     "Legacy entries with no category recorded are grouped under UNCATEGORIZED rather than excluded.",
+    filters.mode === "ALL_TIME"
+      ? "ALL-TIME MODE: aggregates activity across every requirement period (or no period at all) — not restricted to one period."
+      : "Restricted to the selected requirement period — aggregates the same period-filtered entries as the Detailed Family Volunteer Activity report.",
   ]);
   return { info, summary, rows };
 }
