@@ -3175,12 +3175,46 @@ model ReportExport {
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
 
+  /// fix/report-export-queue-hardening: queue-safety fields, all nullable/
+  /// defaulted so every existing row (and every future generic-CSV row that
+  /// never touches this machinery) is unaffected. `updatedAt` is NOT reused
+  /// for lease/claim tracking — it flips on ANY row update, so it can't
+  /// distinguish "actively being processed" from "just got its error
+  /// message rewritten." These fields exist so that distinction is explicit.
+  /// claimedAt: when the current PROCESSING attempt atomically claimed this row.
+  claimedAt      DateTime?
+  /// leaseExpiresAt: claimedAt + the configured lease duration. A PROCESSING
+  /// row whose lease has expired is reclaimable by the next sweep — this is
+  /// what makes a crashed worker's job recoverable instead of stuck forever.
+  leaseExpiresAt DateTime?
+  /// claimId: opaque per-attempt token, purely for tracing/observability —
+  /// not load-bearing for correctness (the atomic conditional claim is).
+  claimId        String?
+  /// attemptCount: incremented atomically on every claim (initial + every
+  /// stale-lease reclaim). Bounds retries — see REPORT_EXPORT_MAX_ATTEMPTS.
+  attemptCount   Int       @default(0)
+  /// nextAttemptAt: null until a transient failure returns this row to
+  /// QUEUED for retry. The claim query only considers QUEUED rows where this
+  /// is null or already in the past — this is the backoff mechanism.
+  nextAttemptAt  DateTime?
+  /// expiresAt: set at COMPLETED time (completedAt + retention window). The
+  /// download route denies access once past this instant even if the
+  /// Spaces object hasn't been physically removed yet by the cleanup sweep.
+  expiresAt      DateTime?
+
   organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   createdByUser User?        @relation("ReportExportCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
 
   @@index([organizationId])
   @@index([status])
   @@index([createdAt])
+  /// Supports the claim query's WHERE ((status='QUEUED' AND (nextAttemptAt IS
+  /// NULL OR nextAttemptAt <= now())) OR (status='PROCESSING' AND
+  /// leaseExpiresAt < now())) ORDER BY createdAt.
+  @@index([status, nextAttemptAt])
+  @@index([status, leaseExpiresAt])
+  /// Supports the cleanup sweep's WHERE status='COMPLETED' AND expiresAt < now().
+  @@index([status, expiresAt])
 }
 
 model EmailReminderLog {

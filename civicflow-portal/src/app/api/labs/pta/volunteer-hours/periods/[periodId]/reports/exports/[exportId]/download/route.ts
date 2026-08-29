@@ -31,6 +31,15 @@ export async function GET(_request: Request, { params }: { params: Promise<{ per
     if (exportJob.status !== "COMPLETED" || !exportJob.fileUrl) {
       return NextResponse.json({ ok: false, error: "This export is not ready yet." }, { status: 409 });
     }
+    // fix/report-export-queue-hardening: logical expiration — denies access
+    // once past the retention window even if the cleanup sweep hasn't
+    // physically removed the Spaces object yet (or already did, in which
+    // case fileUrl would be null and the check above would already have
+    // caught it). Fail-closed for the pilot per this phase's explicit
+    // decision: an expired export is never downloadable, no grace window.
+    if (exportJob.expiresAt && exportJob.expiresAt < new Date()) {
+      return NextResponse.json({ ok: false, error: "This export has expired." }, { status: 410 });
+    }
 
     const url = await getSignedObjectUrl(exportJob.fileUrl, 300);
     return NextResponse.redirect(url);

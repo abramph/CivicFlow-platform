@@ -39,6 +39,12 @@ export async function uploadBufferToSpaces(params: {
   buffer: Buffer;
   contentType: string;
   metadata?: Record<string, string>;
+  /** Sets the object's Content-Disposition so a browser download shows this
+   * name even when `key` itself is an opaque/deterministic identifier (see
+   * buildDeterministicVolunteerReportObjectKey) rather than a human-readable
+   * filename. Optional — omitted callers keep the prior default behavior
+   * (browser derives a name from the key/URL). */
+  downloadFilename?: string;
 }) {
   const env = getServerEnv();
   const s3 = createS3Client();
@@ -51,6 +57,7 @@ export async function uploadBufferToSpaces(params: {
       ContentType: params.contentType,
       ACL: "private",
       Metadata: params.metadata,
+      ContentDisposition: params.downloadFilename ? `attachment; filename="${params.downloadFilename}"` : undefined,
     })
   );
 
