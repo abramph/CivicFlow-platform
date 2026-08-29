@@ -20,6 +20,8 @@
     "db:seed:all-demos": "tsx prisma/seed-pta-demo.ts && tsx prisma/seed-hoa-demo.ts && tsx prisma/seed-union-demo.ts",
     "db:studio": "prisma studio",
     "typecheck": "tsc --noEmit",
+    "typecheck:full": "tsc --noEmit",
+    "typecheck:build": "tsc --noEmit -p tsconfig.build.json",
     "test": "vitest run",
     "worker:reminders": "tsx src/workers/reminders.ts",
     "worker:reports": "tsx src/workers/reports.ts",

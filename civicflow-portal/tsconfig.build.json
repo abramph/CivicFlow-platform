@@ -1,0 +1,36 @@
+// Production-only TypeScript project, used solely for the `next build`
+// type-check step (see next.config.ts, PHASE_PRODUCTION_BUILD). Extends the
+// full tsconfig.json's compilerOptions unchanged (no strictness weakened) —
+// only include/exclude narrow the file set to what actually ships. Local
+// development (`next dev`) and `npm run typecheck` (typecheck:full) both
+// continue to use tsconfig.json unchanged, which still checks every
+// production file AND every test/fixture/mock file. See
+// docs/portal-build-typecheck-separation.md for the full rationale and the
+// exact file-count proof behind this split.
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "lib/**/*.ts",
+    "middleware.ts",
+    "next.config.ts",
+    "prisma.config.ts",
+    "sentry.client.config.ts",
+    "sentry.edge.config.ts",
+    "sentry.server.config.ts",
+    ".next/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.spec.ts",
+    "**/*.spec.tsx",
+    "**/__tests__/**",
+    "scripts/**",
+    "vitest.config.ts",
+    ".next/dev/**"
+  ]
+}
