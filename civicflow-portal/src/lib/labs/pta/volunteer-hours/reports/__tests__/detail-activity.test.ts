@@ -10,6 +10,7 @@ const findManyActiveHouseholds = vi.fn();
 const findUniqueOrganization = vi.fn();
 const findUniqueOrgSettings = vi.fn();
 const findFirstPeriod = vi.fn();
+const findManyLedgerEntries = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -25,6 +26,7 @@ vi.mock("@/lib/prisma", () => ({
     organization: { findUnique: (...a: unknown[]) => findUniqueOrganization(...a) },
     orgSettings: { findUnique: (...a: unknown[]) => findUniqueOrgSettings(...a) },
     ptaVolunteerRequirementPeriod: { findFirst: (...a: unknown[]) => findFirstPeriod(...a) },
+    ptaVolunteerLedgerEntry: { findMany: (...a: unknown[]) => findManyLedgerEntries(...a) },
   },
 }));
 
@@ -75,6 +77,9 @@ beforeEach(() => {
     endsOn: new Date("2027-06-01"),
     timezone: "America/Chicago",
   });
+  // Default: the fixture entry IS ledger-linked to period-1 — matches every
+  // pre-existing test's assumption that PERIOD mode (the default) includes it.
+  findManyLedgerEntries.mockResolvedValue([{ sourceId: "entry-1" }]);
 });
 
 const filters = { requirementPeriodId: "period-1", householdId: "hh-1" };
@@ -132,5 +137,65 @@ describe("buildDetailActivityReportData — Report B", () => {
     for (const col of DETAIL_ACTIVITY_COLUMNS) {
       expect(() => col.getValue(row)).not.toThrow();
     }
+  });
+
+  describe("period scoping (fix/pta-volunteer-reports-period-scope)", () => {
+    it("PERIOD mode (the default, no mode specified) excludes an entry with no ledger relationship to any period", async () => {
+      findManyLedgerEntries.mockResolvedValue([]); // no ledger row at all for entry-1
+      const { buildDetailActivityReportData } = await import("../detail-activity");
+      const data = await buildDetailActivityReportData("org-1", filters, "Officer Jones");
+      expect(data.rows).toHaveLength(0);
+      expect(data.summary.totalVerifiedMinutes).toBe(0);
+    });
+
+    it("PERIOD mode excludes an entry ledger-linked to a DIFFERENT period than the one selected", async () => {
+      // resolvePeriodLinkedHourEntryIds queries ptaVolunteerLedgerEntry scoped
+      // to requirementPeriodId: filters.requirementPeriodId — a real Prisma
+      // call with that where-clause would never return a different-period
+      // row, so the mock returning [] here is the correct simulation of
+      // "this entry's ledger row belongs to another period."
+      findManyLedgerEntries.mockResolvedValue([]);
+      const { buildDetailActivityReportData } = await import("../detail-activity");
+      const data = await buildDetailActivityReportData("org-1", { ...filters, requirementPeriodId: "period-1" }, "Officer Jones");
+      expect(data.rows).toHaveLength(0);
+    });
+
+    it("does not infer period membership merely because the entry belongs to the same household", async () => {
+      findManyLedgerEntries.mockResolvedValue([]);
+      const { buildDetailActivityReportData } = await import("../detail-activity");
+      const data = await buildDetailActivityReportData("org-1", filters, "Officer Jones");
+      expect(data.rows).toHaveLength(0);
+    });
+
+    it("ALL_TIME mode (explicit opt-in) includes an entry with no period relationship at all", async () => {
+      findManyLedgerEntries.mockResolvedValue([]); // still no ledger row
+      const { buildDetailActivityReportData } = await import("../detail-activity");
+      const data = await buildDetailActivityReportData("org-1", { ...filters, mode: "ALL_TIME" }, "Officer Jones");
+      expect(data.rows).toHaveLength(1);
+      expect(data.info.reportTitle).toBe("All-Time Volunteer Activity");
+      expect(data.info.calculationNotes.some((n) => n.startsWith("ALL-TIME MODE"))).toBe(true);
+    });
+
+    it("mode defaults to PERIOD when unset — ALL_TIME is never the default when a period ID is supplied", async () => {
+      findManyLedgerEntries.mockResolvedValue([{ sourceId: "entry-1" }]);
+      const { buildDetailActivityReportData } = await import("../detail-activity");
+      const data = await buildDetailActivityReportData("org-1", filters, "Officer Jones");
+      expect(data.info.reportTitle).toBe("Detailed Family Volunteer Activity");
+      expect(data.info.calculationNotes.some((n) => n.startsWith("ALL-TIME MODE"))).toBe(false);
+    });
+
+    it("queries the ledger scoped to the exact organization and selected period, not merely the household", async () => {
+      const { buildDetailActivityReportData } = await import("../detail-activity");
+      await buildDetailActivityReportData("org-1", filters, "Officer Jones");
+      expect(findManyLedgerEntries).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            organizationId: "org-1",
+            requirementPeriodId: "period-1",
+            sourceType: "hourEntry",
+          }),
+        })
+      );
+    });
   });
 });

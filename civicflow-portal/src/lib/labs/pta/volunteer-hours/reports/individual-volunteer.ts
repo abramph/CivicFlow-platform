@@ -89,9 +89,12 @@ export async function buildIndividualVolunteerReportData(
     summary.totalPendingMinutes += row.pendingMinutes;
   }
 
-  const info = await buildReportInfo(organizationId, filters, "Individual Volunteer Report", generatedByName, [
+  const reportTitle = filters.mode === "ALL_TIME" ? "Individual Volunteer Report (All-Time)" : "Individual Volunteer Report";
+  const info = await buildReportInfo(organizationId, filters, reportTitle, generatedByName, [
     ...STANDARD_CALCULATION_NOTES,
-    "One row per individual who logged at least one pending or verified hour entry — computed from the same raw entries as the Detailed Family Volunteer Activity report.",
+    filters.mode === "ALL_TIME"
+      ? "ALL-TIME MODE: one row per individual who logged at least one pending or verified hour entry across every requirement period (or no period at all) — computed from the same raw entries as All-Time Volunteer Activity."
+      : "One row per individual who logged at least one pending or verified hour entry within the selected requirement period — computed from the same period-filtered entries as the Detailed Family Volunteer Activity report.",
   ]);
   return { info, summary, rows };
 }

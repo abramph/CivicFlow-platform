@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
-import { buildReportInfo, emptySummaryTotals, STANDARD_CALCULATION_NOTES } from "./shared";
+import { getVolunteerRequirementPeriod } from "../periods";
+import { buildReportInfo, emptySummaryTotals, resolvePeriodLinkedHourEntryIds, STANDARD_CALCULATION_NOTES } from "./shared";
 import type { ReportColumn } from "./xlsx-builder";
 import type { ReportData, VolunteerReportFilters } from "./types";
 
@@ -24,15 +25,32 @@ export interface EventHoursRow {
 
 const ATTENDED_SIGNUP_STATUSES = new Set(["ATTENDED", "COMPLETED", "PARTIAL"]);
 
-/** Report C: Event Volunteer-Hours Report — one row per event, aggregated
+/**
+ * Report C: Event Volunteer-Hours Report — one row per event, aggregated
  * across every opportunity linked to it (spec §11). Attendance/no-show
  * counts come from PtaVolunteerSignup.status (never inferred from hour
- * entries, which only exist for CREDITED time). */
+ * entries, which only exist for CREDITED time).
+ *
+ * Period scope (docs/pta-volunteer-hours-report-period-scope-fix.md): in
+ * requirement-period mode (filters.mode !== "ALL_TIME", the default), the
+ * event date window defaults to the selected period's own [startsOn,
+ * endsOn] range when the caller doesn't supply an explicit date filter, and
+ * every credited-hour figure (reported/verified/pending/rejected minutes)
+ * is restricted to hour entries with a recorded relationship to the
+ * selected period — an event being associated with a household is not
+ * enough on its own. ALL_TIME mode (explicit opt-in only) skips both
+ * restrictions.
+ */
 export async function buildEventHoursReportData(
   organizationId: string,
   filters: VolunteerReportFilters,
   generatedByName: string
 ): Promise<ReportData<EventHoursRow>> {
+  const allTime = filters.mode === "ALL_TIME";
+  const period = allTime ? null : await getVolunteerRequirementPeriod(organizationId, filters.requirementPeriodId);
+  const effectiveDateRangeStart = filters.dateRangeStart ?? period?.startsOn;
+  const effectiveDateRangeEnd = filters.dateRangeEnd ?? period?.endsOn;
+
   const opportunities = await prisma.ptaVolunteerOpportunity.findMany({
     where: {
       organizationId,
@@ -56,17 +74,26 @@ export async function buildEventHoursReportData(
   const slotToOpportunity = new Map(slots.map((s) => [s.id, s.opportunityId]));
   const slotIds = slots.map((s) => s.id);
 
-  const [signupsRaw, entries] = await Promise.all([
+  const [signupsRaw, candidateEntries] = await Promise.all([
     prisma.ptaVolunteerSignup.findMany({
       where: { organizationId, slotId: { in: slotIds }, status: { not: "CANCELLED" } },
       select: { slotId: true, status: true, householdId: true, householdAdultId: true },
     }),
     prisma.ptaVolunteerHourEntry.findMany({
       where: { organizationId, opportunityId: { in: opportunityIds } },
-      select: { opportunityId: true, status: true, creditedMinutes: true, householdId: true, householdAdultId: true },
+      select: { id: true, opportunityId: true, status: true, creditedMinutes: true, householdId: true, householdAdultId: true },
     }),
   ]);
   const signups = signupsRaw.map((s) => ({ ...s, opportunityId: slotToOpportunity.get(s.slotId) ?? "" }));
+
+  const periodLinkedIds = allTime
+    ? null
+    : await resolvePeriodLinkedHourEntryIds(
+        organizationId,
+        filters.requirementPeriodId,
+        candidateEntries.map((e) => e.id)
+      );
+  const entries = allTime ? candidateEntries : candidateEntries.filter((e) => periodLinkedIds!.has(e.id));
 
   const opportunityToEvent = new Map(opportunities.map((o) => [o.id, o.event]));
   const eventGroups = new Map<string, { opportunityIds: Set<string> }>();
@@ -80,8 +107,8 @@ export async function buildEventHoursReportData(
   for (const [eventId, group] of eventGroups) {
     const event = [...group.opportunityIds].map((id) => opportunityToEvent.get(id)).find(Boolean);
     if (!event) continue;
-    if (filters.dateRangeStart && event.startAt && event.startAt < filters.dateRangeStart) continue;
-    if (filters.dateRangeEnd && event.startAt && event.startAt > filters.dateRangeEnd) continue;
+    if (effectiveDateRangeStart && event.startAt && event.startAt < effectiveDateRangeStart) continue;
+    if (effectiveDateRangeEnd && event.startAt && event.startAt > effectiveDateRangeEnd) continue;
 
     const eventSignups = signups.filter((s) => group.opportunityIds.has(s.opportunityId));
     const eventEntries = entries.filter((e) => group.opportunityIds.has(e.opportunityId));
@@ -137,7 +164,17 @@ export async function buildEventHoursReportData(
   summary.totalFamilies = allFamilies.size;
   summary.totalIndividualVolunteers = allVolunteers.size;
 
-  const info = await buildReportInfo(organizationId, filters, "Event Volunteer-Hours Report", generatedByName, STANDARD_CALCULATION_NOTES);
+  const calculationNotes = allTime
+    ? [
+        ...STANDARD_CALCULATION_NOTES,
+        "ALL-TIME MODE: shows every event with recorded activity, across every requirement period (or no period at all) — not restricted to one period.",
+      ]
+    : [
+        ...STANDARD_CALCULATION_NOTES,
+        "Restricted to the selected requirement period: events are windowed to the period's own dates by default, and credited-hour totals include only hour entries with a recorded relationship to the selected period.",
+      ];
+
+  const info = await buildReportInfo(organizationId, filters, "Event Volunteer-Hours Report", generatedByName, calculationNotes);
   return { info, summary, rows };
 }
 

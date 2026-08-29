@@ -76,6 +76,39 @@ export async function buildHouseholdReportContexts(organizationId: string, filte
   return contexts;
 }
 
+/**
+ * The one unambiguous, documented relationship between a raw
+ * PtaVolunteerHourEntry and a requirement period: PtaVolunteerHourEntry has
+ * no period FK of its own (only a legacy `schoolYear` scalar), but every
+ * entry that has ever been processed through the real workflow
+ * (setPtaVolunteerAttendanceStatus / approve / reject) gets mirrored to
+ * PtaVolunteerLedgerEntry with sourceType:"hourEntry" and an explicit
+ * requirementPeriodId — see mirrorHourEntry*ToLedger in ../ledger.ts. An
+ * entry with no such ledger row was never processed under any period (e.g.
+ * genuine pre-Requirements-feature legacy activity) and must never be
+ * inferred into a period merely because it shares a household or
+ * organization. Used by Reports B/C (and, transitively, F/G which
+ * re-aggregate B's rows) to restrict "requirement-period mode" to entries
+ * with a real, recorded relationship to the selected period.
+ */
+export async function resolvePeriodLinkedHourEntryIds(
+  organizationId: string,
+  requirementPeriodId: string,
+  hourEntryIds: string[]
+): Promise<ReadonlySet<string>> {
+  if (hourEntryIds.length === 0) return new Set();
+  const rows = await prisma.ptaVolunteerLedgerEntry.findMany({
+    where: {
+      organizationId,
+      requirementPeriodId,
+      sourceType: "hourEntry",
+      sourceId: { in: hourEntryIds },
+    },
+    select: { sourceId: true },
+  });
+  return new Set(rows.map((r) => r.sourceId).filter((id): id is string => !!id));
+}
+
 export function describeAppliedFilters(filters: VolunteerReportFilters): Record<string, string> {
   const out: Record<string, string> = {};
   if (filters.dateRangeStart) out["Date range start"] = filters.dateRangeStart.toISOString().slice(0, 10);
@@ -131,17 +164,22 @@ export async function resolveGeneratedByName(userId: string): Promise<string> {
 }
 
 const APPROVAL_STATUSES = new Set(["PENDING", "APPROVED", "REJECTED"]);
+const REPORT_MODES = new Set(["PERIOD", "ALL_TIME"]);
 
 /** Parses the query-string filters every Report A-D route accepts, shared
  * so the on-screen JSON route and the .xlsx export route (spec §14) always
- * derive identical VolunteerReportFilters from the same request shape. */
+ * derive identical VolunteerReportFilters from the same request shape.
+ * `mode` must be explicitly requested as "ALL_TIME" via ?mode=ALL_TIME —
+ * any other/missing value defaults to "PERIOD", never the reverse. */
 export function parseVolunteerReportFilters(url: URL, requirementPeriodId: string): VolunteerReportFilters {
   const params = url.searchParams;
   const dateRangeStart = params.get("dateRangeStart");
   const dateRangeEnd = params.get("dateRangeEnd");
   const approvalStatus = params.get("approvalStatus");
+  const mode = params.get("mode");
   return {
     requirementPeriodId,
+    mode: mode && REPORT_MODES.has(mode) ? (mode as VolunteerReportFilters["mode"]) : "PERIOD",
     dateRangeStart: dateRangeStart ? new Date(dateRangeStart) : undefined,
     dateRangeEnd: dateRangeEnd ? new Date(dateRangeEnd) : undefined,
     householdId: params.get("householdId") ?? undefined,
@@ -165,6 +203,7 @@ export function volunteerReportFiltersToJson(
 ): Record<string, string | null> {
   return {
     requirementPeriodId: filters.requirementPeriodId,
+    mode: filters.mode ?? "PERIOD",
     dateRangeStart: filters.dateRangeStart ? filters.dateRangeStart.toISOString() : null,
     dateRangeEnd: filters.dateRangeEnd ? filters.dateRangeEnd.toISOString() : null,
     householdId: filters.householdId ?? null,
@@ -184,8 +223,10 @@ export function volunteerReportFiltersFromJson(json: unknown): VolunteerReportFi
   const j = (json && typeof json === "object" ? (json as Record<string, unknown>) : {}) as Record<string, unknown>;
   const str = (v: unknown): string | undefined => (typeof v === "string" && v.length > 0 ? v : undefined);
   const date = (v: unknown): Date | undefined => (typeof v === "string" && v.length > 0 ? new Date(v) : undefined);
+  const mode = str(j.mode);
   return {
     requirementPeriodId: str(j.requirementPeriodId) ?? "",
+    mode: mode === "ALL_TIME" ? "ALL_TIME" : "PERIOD",
     dateRangeStart: date(j.dateRangeStart),
     dateRangeEnd: date(j.dateRangeEnd),
     householdId: str(j.householdId),

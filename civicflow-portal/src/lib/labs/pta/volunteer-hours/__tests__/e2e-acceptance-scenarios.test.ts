@@ -67,6 +67,7 @@ const findManySlots = vi.fn();
 const findManySignups = vi.fn();
 const findManyEntries = vi.fn();
 const findManyRecorders = vi.fn();
+const findManyLedgerEntries = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -78,7 +79,10 @@ vi.mock("@/lib/prisma", () => ({
     ptaStudent: { findMany: (...a: unknown[]) => findManyStudents(...a) },
     ptaVolunteerBuyoutPurchase: { findMany: (...a: unknown[]) => findManyPurchases(...a) },
     ptaVolunteerAssessmentCharge: { findMany: (...a: unknown[]) => findManyCharges(...a) },
-    ptaVolunteerLedgerEntry: { findFirst: (...a: unknown[]) => findFirstLedgerEntry(...a) },
+    ptaVolunteerLedgerEntry: {
+      findFirst: (...a: unknown[]) => findFirstLedgerEntry(...a),
+      findMany: (...a: unknown[]) => findManyLedgerEntries(...a),
+    },
     organization: { findUnique: (...a: unknown[]) => findUniqueOrganization(...a) },
     orgSettings: { findUnique: (...a: unknown[]) => findUniqueOrgSettings(...a) },
     ptaVolunteerOpportunity: { findMany: (...a: unknown[]) => findManyOpportunities(...a) },
@@ -140,8 +144,13 @@ beforeEach(() => {
   findManySlots.mockResolvedValue([{ id: "slot-1", opportunityId: "opp-1" }]);
   findManySignups.mockResolvedValue([{ slotId: "slot-1", status: "ATTENDED", householdId: "hh-1", householdAdultId: "adult-1" }]);
   findManyEntries.mockResolvedValue([
-    { opportunityId: "opp-1", status: "APPROVED", creditedMinutes: VERIFIED_MINUTES, householdId: "hh-1", householdAdultId: "adult-1" },
+    { id: "entry-1", opportunityId: "opp-1", status: "APPROVED", creditedMinutes: VERIFIED_MINUTES, householdId: "hh-1", householdAdultId: "adult-1" },
   ]);
+  // fix/pta-volunteer-reports-period-scope: this fixture's entry-1 IS the
+  // pilot period's verified activity, so it's ledger-linked to period-1 —
+  // matching every scenario's assumption that Report C's period-mode totals
+  // still reflect it.
+  findManyLedgerEntries.mockResolvedValue([{ sourceId: "entry-1" }]);
   resolveVolunteerBuyoutRate.mockImplementation((_org: string, _period: string, rateType: string) =>
     rateType === "FINAL_ASSESSMENT" ? Promise.resolve({ id: "window-final", amountCents: ASSESSMENT_RATE_CENTS_PER_HOUR, rateType: "FINAL_ASSESSMENT" }) : Promise.resolve(null)
   );
