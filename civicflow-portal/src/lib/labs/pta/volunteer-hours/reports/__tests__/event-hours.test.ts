@@ -147,4 +147,73 @@ describe("buildEventHoursReportData — Report C", () => {
       expect(data.info.calculationNotes.some((n) => n.startsWith("ALL-TIME MODE"))).toBe(true);
     });
   });
+
+  describe("Report C six-scenario matrix (deploy authorization §4)", () => {
+    it("1. in-period event with credited hours: appears, correct totals, event presence never implies hours were credited beyond what's actually linked", async () => {
+      const { buildEventHoursReportData } = await import("../event-hours");
+      const data = await buildEventHoursReportData("org-1", filters, "Officer Jones");
+      expect(data.rows).toHaveLength(1);
+      expect(data.rows[0].totalVerifiedMinutes).toBe(120);
+      expect(data.rows[0].totalPendingMinutes).toBe(60);
+    });
+
+    it("2. in-period event with zero credited hours: still appears (event date alone is enough), with zero hour totals but real signup/attendance counts", async () => {
+      findManyEntries.mockResolvedValue([]); // no hour entries at all for this event
+      findManyLedgerEntries.mockResolvedValue([]);
+      const { buildEventHoursReportData } = await import("../event-hours");
+      const data = await buildEventHoursReportData("org-1", filters, "Officer Jones");
+      expect(data.rows).toHaveLength(1);
+      expect(data.rows[0].totalVerifiedMinutes).toBe(0);
+      expect(data.rows[0].totalPendingMinutes).toBe(0);
+      // signups still real and counted — presence of the event never implies hours were credited
+      expect(data.rows[0].signupCount).toBe(2);
+      expect(data.rows[0].attendedCount).toBe(1);
+    });
+
+    it("3. out-of-period event: does not appear at all", async () => {
+      findFirstPeriod.mockResolvedValue({
+        id: "period-1",
+        name: "Narrow Period",
+        startsOn: new Date("2020-01-01"),
+        endsOn: new Date("2020-02-01"),
+        timezone: "America/Chicago",
+      });
+      const { buildEventHoursReportData } = await import("../event-hours");
+      const data = await buildEventHoursReportData("org-1", filters, "Officer Jones");
+      expect(data.rows).toHaveLength(0);
+    });
+
+    it("4. in-period event containing an unlinked legacy entry: event appears, but the legacy entry's minutes are excluded from credited totals", async () => {
+      findManyEntries.mockResolvedValue([
+        { id: "he-legacy", opportunityId: "opp-1", status: "APPROVED", creditedMinutes: 900, householdId: "hh-legacy", householdAdultId: "adult-legacy" },
+      ]);
+      findManyLedgerEntries.mockResolvedValue([]); // he-legacy has no ledger row for period-1
+      const { buildEventHoursReportData } = await import("../event-hours");
+      const data = await buildEventHoursReportData("org-1", filters, "Officer Jones");
+      expect(data.rows).toHaveLength(1);
+      expect(data.rows[0].totalVerifiedMinutes).toBe(0); // legacy 900 min excluded
+    });
+
+    it("5. entry linked to another period: excluded from this period's credited totals", async () => {
+      findManyEntries.mockResolvedValue([
+        { id: "he-other-period", opportunityId: "opp-1", status: "APPROVED", creditedMinutes: 240, householdId: "hh-x", householdAdultId: "adult-x" },
+      ]);
+      // ledger row exists, but scoped to a DIFFERENT period than the one requested —
+      // resolvePeriodLinkedHourEntryIds queries WHERE requirementPeriodId = filters.requirementPeriodId,
+      // so a real Prisma call would never return this row for "period-1".
+      findManyLedgerEntries.mockResolvedValue([]);
+      const { buildEventHoursReportData } = await import("../event-hours");
+      const data = await buildEventHoursReportData("org-1", { ...filters, requirementPeriodId: "period-1" }, "Officer Jones");
+      expect(data.rows).toHaveLength(1);
+      expect(data.rows[0].totalVerifiedMinutes).toBe(0);
+    });
+
+    it("6. cross-organization event: every underlying query is scoped to the exact requested organizationId", async () => {
+      const { buildEventHoursReportData } = await import("../event-hours");
+      await buildEventHoursReportData("org-1", filters, "Officer Jones");
+      expect(findManyOpportunities).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ organizationId: "org-1" }) }));
+      expect(findManyEntries).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ organizationId: "org-1" }) }));
+      expect(findManyLedgerEntries).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ organizationId: "org-1" }) }));
+    });
+  });
 });
