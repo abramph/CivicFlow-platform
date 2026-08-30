@@ -19,6 +19,19 @@ vi.mock("@/lib/labs/pta/profile", () => ({
   upsertPtaProfile: (...a: unknown[]) => upsertPtaProfile(...a),
 }));
 
+const updatePtaVolunteerHoursFlags = vi.fn();
+vi.mock("@/lib/labs/pta/volunteer-hours/flags", () => ({
+  VOLUNTEER_HOURS_FLAG_KEYS: [
+    "ptaVolunteerRequirementsEnabled",
+    "ptaVolunteerBuyoutEnabled",
+    "ptaVolunteerAssessmentsEnabled",
+    "ptaVolunteerReportsEnabled",
+    "ptaVolunteerNotificationsEnabled",
+    "ptaVolunteerNativeMobileEnabled",
+  ],
+  updatePtaVolunteerHoursFlags: (...a: unknown[]) => updatePtaVolunteerHoursFlags(...a),
+}));
+
 import { GET, PUT } from "@/app/api/labs/pta/profile/route";
 
 function putRequest(body: unknown) {
@@ -36,6 +49,8 @@ describe("PUT /api/labs/pta/profile — volunteer-hours platform kill-switch", (
     vi.clearAllMocks();
     requirePtaAccess.mockResolvedValue({ organizationId: "org-1", session: { userId: "u1", userEmail: "officer@example.com" } });
     upsertPtaProfile.mockResolvedValue({ id: "profile-1" });
+    updatePtaVolunteerHoursFlags.mockResolvedValue({ profile: { id: "profile-1" }, changed: {} });
+    getPtaProfile.mockResolvedValue({ id: "profile-1" });
     // Default to allowlisted so every pre-existing test in this file (written
     // before the pilot allowlist existed) keeps exercising exactly the
     // platform-switch behavior it always did. Allowlist-specific tests below
@@ -78,9 +93,41 @@ describe("PUT /api/labs/pta/profile — volunteer-hours platform kill-switch", (
 
     expect(response.status).toBe(200);
     expect(data.ok).toBe(true);
+    // The six flags are no longer passed to upsertPtaProfile() at all — the
+    // atomic, separately-audited updatePtaVolunteerHoursFlags() is the sole
+    // path for them now (fix/pta-volunteer-settings-atomic-audit).
     expect(upsertPtaProfile).toHaveBeenCalledWith(
-      expect.objectContaining({ organizationId: "org-1", ptaVolunteerRequirementsEnabled: true })
+      expect.objectContaining({ organizationId: "org-1", schoolOrPtaName: "Riverside PTA", currentSchoolYear: "2026-2027" })
     );
+    expect(upsertPtaProfile).toHaveBeenCalledWith(expect.not.objectContaining({ ptaVolunteerRequirementsEnabled: expect.anything() }));
+    expect(updatePtaVolunteerHoursFlags).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: "org-1",
+        actorUserId: "u1",
+        actorEmail: "officer@example.com",
+        changes: { ptaVolunteerRequirementsEnabled: true },
+      })
+    );
+  });
+
+  it("does not call updatePtaVolunteerHoursFlags at all for an ordinary profile edit that touches none of the six flags", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(true);
+
+    const response = await PUT(putRequest(BASE_BODY));
+
+    expect(response.status).toBe(200);
+    expect(updatePtaVolunteerHoursFlags).not.toHaveBeenCalled();
+    expect(upsertPtaProfile).toHaveBeenCalled();
+  });
+
+  it("rejects a body containing an unrecognized field", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(true);
+
+    const response = await PUT(putRequest({ ...BASE_BODY, notARealField: "x" }));
+
+    expect(response.status).toBe(400);
+    expect(upsertPtaProfile).not.toHaveBeenCalled();
+    expect(updatePtaVolunteerHoursFlags).not.toHaveBeenCalled();
   });
 
   it("does not block ordinary profile edits that touch none of the six flags, even while the platform switch is off", async () => {
@@ -163,6 +210,69 @@ describe("PUT /api/labs/pta/profile — volunteer-hours platform kill-switch", (
 
     expect(platformOffResponse.status).toBe(notAllowlistedResponse.status);
     expect(platformOffData.error).toBe(notAllowlistedData.error);
+  });
+});
+
+describe("PUT /api/labs/pta/profile — settings-page save-path regression (fix/pta-volunteer-settings-atomic-audit)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    requirePtaAccess.mockResolvedValue({ organizationId: "org-1", session: { userId: "u1", userEmail: "officer@example.com" } });
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(true);
+    isPtaVolunteerHoursOrgAllowed.mockReturnValue(true);
+    upsertPtaProfile.mockResolvedValue({ id: "profile-1" });
+    updatePtaVolunteerHoursFlags.mockResolvedValue({ profile: { id: "profile-1" }, changed: { ptaVolunteerReportsEnabled: { before: false, after: false } } });
+    getPtaProfile.mockResolvedValue({ id: "profile-1", ptaVolunteerReportsEnabled: false });
+  });
+
+  it("reproduces the exact production bug: a flags-only body missing schoolOrPtaName/currentSchoolYear gets 400 Validation failed", async () => {
+    // This is exactly what PtaVolunteerHoursSettings.tsx sent before the fix
+    // — no identity fields at all, just a flag.
+    const response = await PUT(putRequest({ ptaVolunteerReportsEnabled: false }));
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.ok).toBe(false);
+    expect(upsertPtaProfile).not.toHaveBeenCalled();
+    expect(updatePtaVolunteerHoursFlags).not.toHaveBeenCalled();
+  });
+
+  it("the fixed request shape (identity fields preserved from the current profile) succeeds where the buggy shape 400ed", async () => {
+    // Exactly what buildVolunteerHoursSaveBody() now produces.
+    const response = await PUT(
+      putRequest({
+        schoolOrPtaName: "Pine Grove Elementary School PTA",
+        currentSchoolYear: "2026-2027",
+        ptaVolunteerReportsEnabled: false,
+      })
+    );
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data.ok).toBe(true);
+    expect(upsertPtaProfile).toHaveBeenCalledWith(
+      expect.objectContaining({ schoolOrPtaName: "Pine Grove Elementary School PTA", currentSchoolYear: "2026-2027" })
+    );
+    expect(updatePtaVolunteerHoursFlags).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: "org-1", changes: { ptaVolunteerReportsEnabled: false } })
+    );
+  });
+
+  it("upsertPtaProfile() runs before updatePtaVolunteerHoursFlags() — a brand-new org can save flags before ever having a profile row", async () => {
+    const order: string[] = [];
+    upsertPtaProfile.mockImplementation(async () => {
+      order.push("upsertPtaProfile");
+      return { id: "profile-1" };
+    });
+    updatePtaVolunteerHoursFlags.mockImplementation(async () => {
+      order.push("updatePtaVolunteerHoursFlags");
+      return { profile: { id: "profile-1" }, changed: {} };
+    });
+
+    await PUT(
+      putRequest({ schoolOrPtaName: "New PTA", currentSchoolYear: "2026-2027", ptaVolunteerReportsEnabled: true })
+    );
+
+    expect(order).toEqual(["upsertPtaProfile", "updatePtaVolunteerHoursFlags"]);
   });
 });
 

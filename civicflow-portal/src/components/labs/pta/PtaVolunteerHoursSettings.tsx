@@ -2,8 +2,17 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { buildVolunteerHoursSaveBody } from "@/lib/labs/pta/volunteer-hours/settings-form";
 
 interface FlagsLike {
+  /** PUT /api/labs/pta/profile requires these on every request, flags-only
+   * saves included — the parent page already fetches the full profile and
+   * passes it as `initialFlags`, so these are always present at runtime even
+   * though earlier revisions of this component's type only declared the six
+   * booleans and silently dropped them from the request. See
+   * docs/pta-volunteer-hours.md's settings-save-path note. */
+  schoolOrPtaName: string;
+  currentSchoolYear: string;
   ptaVolunteerRequirementsEnabled: boolean;
   ptaVolunteerBuyoutEnabled: boolean;
   ptaVolunteerAssessmentsEnabled: boolean;
@@ -47,6 +56,10 @@ export function PtaVolunteerHoursSettings({
   }
 
   async function submit() {
+    // Defensive re-entry guard in addition to the button's disabled={pending}
+    // — a second click that lands before React re-renders the disabled state
+    // must not fire a second overlapping request.
+    if (pending) return;
     setPending(true);
     setError(null);
     setSuccess(false);
@@ -54,16 +67,26 @@ export function PtaVolunteerHoursSettings({
       const res = await fetch("/api/labs/pta/profile", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          // The profile PUT endpoint requires the always-present fields too —
-          // the server ignores unrelated changes when only flags are toggled
-          // here (each flag has its own permission check independent of the
-          // rest of this payload).
-          ...(canManageRequirements ? { ptaVolunteerRequirementsEnabled: requirementsEnabled, ptaVolunteerNotificationsEnabled: notificationsEnabled } : {}),
-          ...(canManageBuyoutPricing ? { ptaVolunteerBuyoutEnabled: buyoutEnabled } : {}),
-          ...(canManageAssessments ? { ptaVolunteerAssessmentsEnabled: assessmentsEnabled } : {}),
-          ...(canManageReportsExport ? { ptaVolunteerReportsEnabled: reportsEnabled } : {}),
-        }),
+        // The profile PUT endpoint requires the two identity fields on every
+        // request, flags-only saves included (bodySchema.strict()) — sourced
+        // from the server-fetched initialFlags prop, never from an input in
+        // this form, so an untouched identity field can never be reset by a
+        // flags-only save.
+        body: JSON.stringify(
+          buildVolunteerHoursSaveBody({
+            schoolOrPtaName: initialFlags?.schoolOrPtaName ?? "",
+            currentSchoolYear: initialFlags?.currentSchoolYear ?? "",
+            canManageRequirements,
+            canManageBuyoutPricing,
+            canManageAssessments,
+            canManageReportsExport,
+            requirementsEnabled,
+            buyoutEnabled,
+            assessmentsEnabled,
+            reportsEnabled,
+            notificationsEnabled,
+          })
+        ),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok) {

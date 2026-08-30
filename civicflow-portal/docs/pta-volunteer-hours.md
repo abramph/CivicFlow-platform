@@ -1119,3 +1119,112 @@ per hour entry at any point. Full suite: 3703 tests passing across 360
 files (zero regressions from the pre-fix baseline of 3686/360).
 Typecheck clean. Lint clean (same 4 pre-existing unrelated files as
 every prior stage). Production build compiles successfully.
+
+## Post-launch correction — settings save-path bug and flag-audit atomicity (branch `fix/pta-volunteer-settings-atomic-audit`)
+
+Found during a live Stage B pilot verification pass on Pine Grove School
+PTA (real deployed org, feature already live for that org only): two
+independent defects, both now fixed.
+
+### Defect 1 — the Volunteer Hours Settings page could not save
+
+`PtaVolunteerHoursSettings.tsx` receives the org's full `PtaProfile`
+(including `schoolOrPtaName`/`currentSchoolYear`) via its `initialFlags`
+prop, but its own type only declared the six boolean flags, and its
+save handler never read or forwarded the two identity fields. `PUT
+/api/labs/pta/profile`'s `bodySchema` requires both on every request
+(`PtaProfileForm.tsx`, the page's other consumer of the same route,
+always sends them — proving the contract is intentional, not a bug to
+route around). Every click of "Save volunteer-hours settings" therefore
+400ed with `Validation failed`, for every organization, since this
+component first shipped — an officer could turn a capability on
+through this page, but never off (or on) again afterward.
+
+**Fix**: the request-body-building logic was extracted into a pure,
+independently unit-tested function, `buildVolunteerHoursSaveBody()`
+(`volunteer-hours/settings-form.ts` — kept out of the `.tsx` file
+specifically so it's testable; this repo's Vitest is Node-only, no
+jsdom/React Testing Library). It always includes the two identity
+fields, sourced from `initialFlags`, never from an input this form
+lets the user edit — so an untouched field can never be reset by a
+flags-only save. `bodySchema` also gained `.strict()`, matching this
+codebase's convention for sensitive admin-style write endpoints
+(`internal-trial-grants.md`'s route being the precedent) — an unknown
+field now fails closed with 400 instead of being silently dropped.
+
+### Defect 2 — flag write and its audit event were not atomic
+
+`upsertPtaProfile()` did the `PtaProfile` upsert and its
+`createAuditEvent()` call as two independent, non-transactional
+statements. During Stage B containment (disabling Pine Grove's reports
+flag after verification), the profile write committed but the audit
+insert failed on `AuditEvent_actorId_fkey` — an internal corrective
+script supplied a placeholder `actorUserId` that wasn't a real `User`
+row. The flag ended up in the exact right state; there is simply no
+audit event for that one transition. Grepped every `ptaProfile.update*`
+call site in production code: `upsertPtaProfile()` was the *only* one
+that ever touched any of the six volunteer-hours flags.
+
+**Fix**: `updatePtaVolunteerHoursFlags()`
+(`volunteer-hours/flags.ts`) is now the sole path for changing any of
+the six flags. It loads the current profile and writes the change plus
+its `pta.volunteer_hours.flags_changed` audit event inside one
+`prisma.$transaction` — a failed audit insert (invalid actor,
+connection drop, anything) now rolls back the flag change too, instead
+of leaving the split state this incident produced. `upsertPtaProfile()`
+no longer accepts the six flag fields at all, so the only way to touch
+them is the new atomic path. Concurrency safety reuses this codebase's
+established conditional-`updateMany`-plus-count-check idiom
+(`attemptClaimReportExport`, `grantInternalOrganizationTrial`'s
+anti-stacking update): the `WHERE` clause pins each changed column to
+the value read as "before," so a losing concurrent request's `UPDATE`
+either matches zero rows (`PTA_VOLUNTEER_HOURS_FLAGS_CONCURRENT_CONFLICT`)
+or, if its own read already observed the winner's committed value,
+resolves as a correct no-op — never two audit events for one real
+change, never a silently overwritten flag. A true no-op request (every
+requested value already matches) performs no write and creates no
+audit event, by design — nothing happened, so nothing is logged.
+
+### Historical audit-gap policy — the missing event is not backfilled by this correction
+
+The specific transition this incident is about — Pine Grove's
+`ptaVolunteerReportsEnabled` flipping `true → false` at profile
+`updatedAt = 2026-08-30T02:54:55.696Z` — has **no** corresponding
+`pta.volunteer_hours.flags_changed` audit event, and this branch does
+not create one. The actual flag state was independently re-verified
+read-only after this fix deployed and remains correct. Two remediation
+options exist, **neither executed by this branch** — both require
+separate, explicit authorization:
+
+1. Leave the gap documented here and in the Stage B report; the
+   correction below prevents recurrence, which is the load-bearing
+   guarantee.
+2. Add a new, current-time **reconciliation** event — explicitly
+   labeled as a reconciliation, never as the original event — carrying
+   the observed transition timestamp, the discovery timestamp, the
+   authenticated SUPER_ADMIN actor who requests it, the reason the
+   original audit is absent, the confirmed before/after values, and a
+   reference to the Stage B export verification that confirmed the
+   final state. This must never fabricate the original timestamp,
+   attribute the event to the invalid placeholder actor, or be written
+   in a way that appears to have committed atomically with the
+   original change.
+
+### Tests
+
+Real-Postgres atomicity/concurrency suite,
+`flags-concurrency.integration.test.ts` (skipped by default, same
+convention as `internal-trial-concurrency.integration.test.ts`):
+commit-together on success, forced-audit-failure rollback, a *real* FK
+violation from an invalid actor (reproducing the actual incident, not a
+simulation) causing zero writes, no-op detection, platform-off/
+non-allowlisted rejection with zero writes, same-flag concurrent race
+(one real change, the other a defined conflict or a legitimate no-op,
+never two audit events), disjoint-flag concurrent race (both succeed,
+correct final state). Route-level regression suite extended with the
+exact before/after proof: the original buggy request shape 400s, the
+fixed shape succeeds and routes through both `upsertPtaProfile()` (in
+create-if-missing order first) and `updatePtaVolunteerHoursFlags()`
+correctly. Full PTA-area suite (692 tests, `src/lib/labs/pta/**`) and
+the full volunteer-hours suite (379 tests) both pass with zero
+regressions.

@@ -83,6 +83,11 @@ export const PTA_ERROR_CODES = [
    * ACTIVE period sharing the same scopeLabel (or both null). */
   "PTA_VOLUNTEER_PERIOD_CONFLICT",
   "PTA_VOLUNTEER_PERIOD_INVALID_DATES",
+  /** fix/pta-volunteer-settings-atomic-audit: the atomic flag-update's
+   * conditional updateMany matched zero rows — another request changed one
+   * of the same flags between this request's read and write. Mirrors
+   * INTERNAL_TRIAL_CONCURRENT_CONFLICT's conditional-update idiom. */
+  "PTA_VOLUNTEER_HOURS_FLAGS_CONCURRENT_CONFLICT",
 ] as const;
 
 export type PtaErrorCode = (typeof PTA_ERROR_CODES)[number];
@@ -139,6 +144,7 @@ const STATUS_FOR_CODE: Record<PtaErrorCode, number> = {
   PTA_VOLUNTEER_PERIOD_NOT_FOUND: 404,
   PTA_VOLUNTEER_PERIOD_CONFLICT: 409,
   PTA_VOLUNTEER_PERIOD_INVALID_DATES: 400,
+  PTA_VOLUNTEER_HOURS_FLAGS_CONCURRENT_CONFLICT: 409,
 };
 
 export class PtaError extends Error {
