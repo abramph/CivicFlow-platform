@@ -4,6 +4,34 @@ Companion to `docs/pta-volunteer-hours-rollout-runbook.md` (the general dark-lau
 
 **Nothing in this document authorizes any action.** It is planning only. Every stage below requires separate explicit authorization before execution, per the standing program constraint.
 
+## Addendum (2026-08-30): a broader access gap than Stage C's Stripe question
+
+Stage B execution surfaced a gap this document hadn't anticipated: Pine
+Grove's non-billing-exempt status (§1 below, "relevant to Stage C") turned
+out to block **all authenticated application access**, not just the
+Stripe-test-mode question Stage C discusses — `src/lib/subscription-gate.ts`
+denies every organization that is neither billing-exempt, mid-trial
+(`trialEndsAt > now`), nor has an active `Subscription`, and Pine Grove
+(created directly by the seed script, never through signup) has
+`trialEndsAt = null`. Logging in as any Pine Grove officer redirected to
+`/subscription-required` before Stage B's on-screen report verification
+could even begin.
+
+The resolution is `docs/internal-trial-grants.md` — a new
+platform-admin-only service (`grantInternalOrganizationTrial()`) that gives
+an eligible organization the same 30-day `trialEndsAt` window every
+organization already gets for free at signup, with **no Stripe involvement
+and no change to `billingExempt`**. This is a different mechanism than
+Stage C's question below, which is specifically about unlocking
+`stripe-connect.ts`'s test-mode checkout pathway — the internal trial
+resolves general access; Stage C's `billingExempt` question, if it's ever
+needed, remains a separate decision.
+
+As of this addendum, the internal-trial service exists and is deployed but
+**Pine Grove's trial has not been granted** — that remains a separate,
+explicit action for a future authorization, per the standing program
+constraint above.
+
 ## 1. Recommended pilot organization
 
 Four PTA-vertical organizations exist in production today. Queried directly (read-only, non-sensitive fields only). **Real organization IDs are deliberately omitted from this general document** — see "Controlled deployment values" below for where the exact production ID is kept.
