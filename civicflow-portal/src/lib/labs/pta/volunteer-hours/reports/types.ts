@@ -68,9 +68,14 @@ export interface ReportSummaryTotals {
   familiesMeetingRequirement: number;
   familiesNotMeetingRequirement: number;
   familiesExempt: number;
-  totalBuyoutRevenueCents: number;
-  totalAssessmentsCents: number;
-  outstandingBalanceCents: number;
+  /** fix/pta-volunteer-financial-controls: optional, not just number-defaulting-
+   * to-0 — Report A's builder sets these to undefined (not 0) for a viewer
+   * without pta:volunteer-financial-reports:view, so the Excel Summary sheet
+   * omits the row entirely instead of showing a misleading "$0.00". Every
+   * other report continues setting an explicit 0/real total as before. */
+  totalBuyoutRevenueCents: number | undefined;
+  totalAssessmentsCents: number | undefined;
+  outstandingBalanceCents: number | undefined;
 }
 
 export interface ReportData<Row> {

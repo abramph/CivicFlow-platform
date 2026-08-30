@@ -1,8 +1,8 @@
 import { PERMISSIONS, type Permission } from "@/lib/rbac";
-import { buildComplianceReportData, COMPLIANCE_COLUMNS, type ComplianceFilter } from "./compliance";
+import { buildComplianceReportData, getComplianceColumns, type ComplianceFilter } from "./compliance";
 import { buildDetailActivityReportData, DETAIL_ACTIVITY_COLUMNS } from "./detail-activity";
 import { buildEventHoursReportData, EVENT_HOURS_COLUMNS } from "./event-hours";
-import { buildFamilySummaryReportData, FAMILY_SUMMARY_COLUMNS } from "./family-summary";
+import { buildFamilySummaryReportData, getFamilySummaryColumns } from "./family-summary";
 import { buildFinancialReportData, FINANCIAL_COLUMNS } from "./financial";
 import { buildIndividualVolunteerReportData, INDIVIDUAL_VOLUNTEER_COLUMNS } from "./individual-volunteer";
 import type { VolunteerReportFilters } from "./types";
@@ -47,15 +47,26 @@ export async function buildVolunteerReportExportFile(
   organizationId: string,
   reportType: VolunteerReportType,
   filters: VolunteerReportFilters & { complianceFilter?: string },
-  generatedByName: string
+  generatedByName: string,
+  /** fix/pta-volunteer-financial-controls: meaningful for
+   * PTA_VOLUNTEER_FAMILY_SUMMARY and PTA_VOLUNTEER_COMPLIANCE (RV-12: found
+   * and fixed the same unconditional-dollar-field leak FC-3 fixed for
+   * family-summary, previously present in compliance's
+   * estimatedFinalAssessmentCents) — every other report type ignores it (E
+   * is already fully financial-gated upstream via
+   * permissionForVolunteerReportType; B/C/F/G never carried dollar amounts
+   * in the first place). The caller (the background worker) is responsible
+   * for re-deriving this fresh from the export's creator's CURRENT
+   * permissions — see reports.ts. */
+  includeFinancials = false
 ): Promise<{ buffer: Buffer; filename: string }> {
   const info = { data: undefined as { organizationName: string; reportTitle: string; requirementPeriodName: string } | undefined };
   let buffer: Buffer;
 
   switch (reportType) {
     case "PTA_VOLUNTEER_FAMILY_SUMMARY": {
-      const data = await buildFamilySummaryReportData(organizationId, filters, generatedByName);
-      buffer = await buildVolunteerReportWorkbook(data, FAMILY_SUMMARY_COLUMNS);
+      const data = await buildFamilySummaryReportData(organizationId, filters, generatedByName, includeFinancials);
+      buffer = await buildVolunteerReportWorkbook(data, getFamilySummaryColumns(includeFinancials));
       info.data = data.info;
       break;
     }
@@ -72,8 +83,13 @@ export async function buildVolunteerReportExportFile(
       break;
     }
     case "PTA_VOLUNTEER_COMPLIANCE": {
-      const data = await buildComplianceReportData(organizationId, { ...filters, complianceFilter: filters.complianceFilter as ComplianceFilter | undefined }, generatedByName);
-      buffer = await buildVolunteerReportWorkbook(data, COMPLIANCE_COLUMNS);
+      const data = await buildComplianceReportData(
+        organizationId,
+        { ...filters, complianceFilter: filters.complianceFilter as ComplianceFilter | undefined },
+        generatedByName,
+        includeFinancials
+      );
+      buffer = await buildVolunteerReportWorkbook(data, getComplianceColumns(includeFinancials));
       info.data = data.info;
       break;
     }

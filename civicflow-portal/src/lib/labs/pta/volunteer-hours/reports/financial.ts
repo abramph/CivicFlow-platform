@@ -138,11 +138,11 @@ export async function buildFinancialReportData(
   summary.totalFamilies = new Set(rows.map((r) => r.householdId)).size;
   for (const row of rows) {
     if (row.transactionType === "BUYOUT_PURCHASE") {
-      summary.totalBuyoutRevenueCents += row.amountPaidCents;
+      summary.totalBuyoutRevenueCents = (summary.totalBuyoutRevenueCents ?? 0) + row.amountPaidCents;
       summary.totalPurchasedMinutes += row.hoursMinutes ?? 0;
     } else {
-      summary.totalAssessmentsCents += row.totalAmountCents;
-      summary.outstandingBalanceCents += row.outstandingCents;
+      summary.totalAssessmentsCents = (summary.totalAssessmentsCents ?? 0) + row.totalAmountCents;
+      summary.outstandingBalanceCents = (summary.outstandingBalanceCents ?? 0) + row.outstandingCents;
     }
   }
 

@@ -25,7 +25,15 @@ export interface ComplianceRow {
   completionStatus: "MET" | "NOT_MET" | "EXEMPT";
   volunteerDeadline: Date | null;
   daysRemainingOrOverdue: number | null;
-  estimatedFinalAssessmentCents: number | null;
+  /** RV-12: undefined (never a redacted null/0) for a caller without
+   * pta:volunteer-financial-reports:view — this is a real dollar estimate,
+   * not an hours figure, and this report's route was only ever gated on
+   * the general pta:volunteer-reports:view permission (STAFF/READ_ONLY
+   * both hold it), unlike Report E's dedicated financial-permission gate.
+   * `null` still means its ordinary business meaning (not applicable —
+   * MET/EXEMPT, or no FINAL_ASSESSMENT rate configured) for a caller who
+   * DOES have financial access. */
+  estimatedFinalAssessmentCents: number | null | undefined;
   exemptionOrAdjustmentIndicator: string | null;
 }
 
@@ -34,11 +42,22 @@ export interface ComplianceRow {
  * deadline-countdown and an estimate of what a not-yet-posted assessment
  * would charge at the currently active FINAL_ASSESSMENT rate (a live
  * estimate only — never what actually posts, which VH-G's own preview
- * computes and snapshots independently at post time). */
+ * computes and snapshots independently at post time).
+ *
+ * RV-12: `includeFinancials` follows the identical contract Report A's
+ * builder established (`family-summary.ts`) — must be explicitly `true`;
+ * callers that omit it get the safe (nonfinancial) default. This report's
+ * only dollar figure, `estimatedFinalAssessmentCents`, was previously
+ * computed and returned unconditionally regardless of the caller's
+ * permission — a real financial-data leak to any STAFF/READ_ONLY caller,
+ * found during RV-12's re-verification and fixed here the same way FC-3
+ * fixed Report A's leak.
+ */
 export async function buildComplianceReportData(
   organizationId: string,
   filters: VolunteerReportFilters & { complianceFilter?: ComplianceFilter },
-  generatedByName: string
+  generatedByName: string,
+  includeFinancials = false
 ): Promise<ReportData<ComplianceRow>> {
   const period = await getVolunteerRequirementPeriod(organizationId, filters.requirementPeriodId);
   const finalAssessmentWindow = await resolveVolunteerBuyoutRate(organizationId, filters.requirementPeriodId, "FINAL_ASSESSMENT");
@@ -78,8 +97,12 @@ export async function buildComplianceReportData(
     if (!complianceMatch) continue;
 
     const daysRemainingOrOverdue = period.volunteerDeadline ? Math.round((period.volunteerDeadline.getTime() - now) / (1000 * 60 * 60 * 24)) : null;
-    const estimatedFinalAssessmentCents =
+    const rawEstimatedFinalAssessmentCents =
       completionStatus === "NOT_MET" && finalAssessmentWindow ? Math.round((ctx.remainingMinutes / 60) * finalAssessmentWindow.amountCents) : null;
+    // RV-12: the field genuinely does not exist for a non-financial viewer
+    // (undefined, dropped by JSON.stringify), not that it happens to be
+    // null/0 — mirrors family-summary.ts's identical discipline.
+    const estimatedFinalAssessmentCents = includeFinancials ? rawEstimatedFinalAssessmentCents : undefined;
 
     rows.push({
       householdId: ctx.householdId,
@@ -103,12 +126,19 @@ export async function buildComplianceReportData(
 
   const summary = emptySummaryTotals();
   summary.totalFamilies = rows.length;
+  // RV-12: undefined (never a redacted "$0.00") for a non-financial caller
+  // — mirrors family-summary.ts's identical discipline exactly.
+  if (!includeFinancials) {
+    summary.totalAssessmentsCents = undefined;
+  }
   for (const row of rows) {
     summary.totalVerifiedMinutes += row.verifiedMinutes;
     summary.totalPurchasedMinutes += row.purchasedMinutes;
     summary.totalWaivedMinutes += row.waivedMinutes;
     summary.totalRemainingMinutes += row.remainingMinutes;
-    summary.totalAssessmentsCents += row.estimatedFinalAssessmentCents ?? 0;
+    if (includeFinancials) {
+      summary.totalAssessmentsCents = (summary.totalAssessmentsCents ?? 0) + (row.estimatedFinalAssessmentCents ?? 0);
+    }
     if (row.completionStatus === "MET") summary.familiesMeetingRequirement += 1;
     else if (row.completionStatus === "EXEMPT") summary.familiesExempt += 1;
     else summary.familiesNotMeetingRequirement += 1;
@@ -121,7 +151,7 @@ export async function buildComplianceReportData(
   return { info, summary, rows };
 }
 
-export const COMPLIANCE_COLUMNS: ReportColumn<ComplianceRow>[] = [
+const COMPLIANCE_OPERATIONAL_COLUMNS: ReportColumn<ComplianceRow>[] = [
   { header: "Family", format: "text", width: 24, getValue: (r) => r.householdDisplayName },
   { header: "Adjusted required (h)", format: "hours", width: 14, getValue: (r) => r.adjustedRequiredMinutes },
   { header: "Verified (h)", format: "hours", width: 12, getValue: (r) => r.verifiedMinutes },
@@ -132,6 +162,25 @@ export const COMPLIANCE_COLUMNS: ReportColumn<ComplianceRow>[] = [
   { header: "Status", format: "text", width: 12, getValue: (r) => r.completionStatus },
   { header: "Volunteer deadline", format: "date", width: 14, getValue: (r) => r.volunteerDeadline },
   { header: "Days remaining/overdue", format: "integer", width: 16, getValue: (r) => r.daysRemainingOrOverdue },
-  { header: "Est. final assessment", format: "currency", width: 16, getValue: (r) => r.estimatedFinalAssessmentCents },
   { header: "Exemption / adjustment", format: "text", width: 24, getValue: (r) => r.exemptionOrAdjustmentIndicator },
 ];
+
+/** RV-12: the one dollar column, split out exactly like
+ * family-summary.ts's FAMILY_SUMMARY_FINANCIAL_COLUMNS — a non-financial
+ * viewer's workbook omits this column entirely (never shows it blank),
+ * matching the row data itself already being `undefined` for them. */
+const COMPLIANCE_FINANCIAL_COLUMNS: ReportColumn<ComplianceRow>[] = [
+  { header: "Est. final assessment", format: "currency", width: 16, getValue: (r) => r.estimatedFinalAssessmentCents },
+];
+
+/** @deprecated RV-12: use getComplianceColumns(includeFinancials) instead —
+ * this constant always included the financial column unconditionally,
+ * which is exactly the leak this correction fixes. No remaining callers in
+ * this codebase; kept only until any external reference is confirmed gone. */
+export const COMPLIANCE_COLUMNS: ReportColumn<ComplianceRow>[] = [...COMPLIANCE_OPERATIONAL_COLUMNS, ...COMPLIANCE_FINANCIAL_COLUMNS];
+
+export function getComplianceColumns(includeFinancials: boolean): ReportColumn<ComplianceRow>[] {
+  return includeFinancials
+    ? [...COMPLIANCE_OPERATIONAL_COLUMNS, ...COMPLIANCE_FINANCIAL_COLUMNS]
+    : COMPLIANCE_OPERATIONAL_COLUMNS;
+}

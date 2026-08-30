@@ -97,7 +97,12 @@ export async function buildVolunteerReportWorkbook<Row>(
   styleHeaderRow(summarySheet.getRow(1));
   summarySheet.views = [{ state: "frozen", ySplit: 1 }];
   const s = data.summary;
-  const summaryRows: [string, number, ColumnFormat][] = [
+  // fix/pta-volunteer-financial-controls: `undefined` (not 0) means the
+  // caller was never given this figure to begin with (see
+  // ReportSummaryTotals's doc comment) — the Summary sheet must omit the
+  // row entirely, not show a misleading "$0.00" a non-financial viewer could
+  // misread as "no balance."
+  const summaryRows: [string, number | undefined, ColumnFormat][] = [
     ["Total families", s.totalFamilies, "integer"],
     ["Total individual volunteers", s.totalIndividualVolunteers, "integer"],
     ["Total verified volunteer hours", s.totalVerifiedMinutes, "hours"],
@@ -115,6 +120,7 @@ export async function buildVolunteerReportWorkbook<Row>(
     ["Outstanding balance", s.outstandingBalanceCents, "currency"],
   ];
   for (const [metric, value, format] of summaryRows) {
+    if (value === undefined) continue;
     const row = summarySheet.addRow({ metric, value: cellValue(format, value) });
     const numFmt = NUMBER_FORMATS[format];
     if (numFmt) row.getCell("value").numFmt = numFmt;

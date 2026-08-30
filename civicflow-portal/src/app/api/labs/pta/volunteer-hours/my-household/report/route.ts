@@ -26,7 +26,17 @@ export async function GET(request: Request) {
       periodId = current.id;
     }
 
-    const data = await buildFamilySummaryReportData(organizationId, { requirementPeriodId: periodId, householdId: adult.householdId }, adult.name).catch(
+    // includeFinancials=true: this route is already scoped to the caller's
+    // own household only (adult.householdId, never client-supplied) — a
+    // family seeing its own buyout/assessment dollar figures is the
+    // legitimate self-service case fix/pta-volunteer-financial-controls
+    // explicitly preserves, distinct from the admin Report A leak it closes.
+    const data = await buildFamilySummaryReportData(
+      organizationId,
+      { requirementPeriodId: periodId, householdId: adult.householdId },
+      adult.name,
+      true
+    ).catch(
       (error) => {
         if (error instanceof PtaError && error.code === "PTA_VOLUNTEER_PERIOD_NOT_FOUND") return null;
         throw error;

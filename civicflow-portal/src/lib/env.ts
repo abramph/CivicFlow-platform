@@ -99,6 +99,18 @@ const serverEnvSchema = z.object({
   // the parsing/fail-closed rules. Unset/empty means no organization is
   // eligible, even with the platform switch on.
   PTA_VOLUNTEER_HOURS_ALLOWED_ORG_IDS: z.string().optional(),
+  // RV-11 (fix/pta-volunteer-financial-controls): a SEPARATE kill-switch,
+  // additional to the two above, specifically for LIVE assessment posting
+  // (postAssessmentBatch) — not preview. Deliberately off by default and
+  // independent of PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED/the org-level
+  // ptaVolunteerAssessmentsEnabled flag: those gate the assessments
+  // capability generally (preview AND post together); this one exists
+  // because posting a real charge is currently irreversible — no
+  // assessment adjustment/reversal design has been authorized yet
+  // (docs/pta-volunteer-hours-assessment-reversal-boundary.md) — and must
+  // stay blocked even for an org that otherwise has assessments fully
+  // enabled, until that design is built. Preview is never gated by this.
+  PTA_VOLUNTEER_ASSESSMENT_POSTING_ENABLED: z.string().optional(),
   // Base64-encoded 32-byte AES-256-GCM key for encrypting Twilio credentials
   // stored in PlatformSmsSettings (see lib/crypto-secrets.ts). Optional at
   // boot like the other SMS_* vars — only required once a super admin
@@ -174,6 +186,7 @@ export function getServerEnv(): ServerEnv {
     SMS_CREDENTIAL_ENCRYPTION_KEY: process.env.SMS_CREDENTIAL_ENCRYPTION_KEY,
     PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED: process.env.PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED,
     PTA_VOLUNTEER_HOURS_ALLOWED_ORG_IDS: process.env.PTA_VOLUNTEER_HOURS_ALLOWED_ORG_IDS,
+    PTA_VOLUNTEER_ASSESSMENT_POSTING_ENABLED: process.env.PTA_VOLUNTEER_ASSESSMENT_POSTING_ENABLED,
   };
 
   if (raw.NODE_ENV === "production") {
@@ -245,6 +258,7 @@ export function getServerEnv(): ServerEnv {
     SMS_CREDENTIAL_ENCRYPTION_KEY: parsed.SMS_CREDENTIAL_ENCRYPTION_KEY,
     PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED: parsed.PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED,
     PTA_VOLUNTEER_HOURS_ALLOWED_ORG_IDS: parsed.PTA_VOLUNTEER_HOURS_ALLOWED_ORG_IDS,
+    PTA_VOLUNTEER_ASSESSMENT_POSTING_ENABLED: parsed.PTA_VOLUNTEER_ASSESSMENT_POSTING_ENABLED,
   };
 
   return cached;
@@ -266,6 +280,24 @@ export function isPtaVolunteerHoursPlatformEnabled() {
   return (
     env.PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED === "1" ||
     env.PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED === "true"
+  );
+}
+
+/**
+ * RV-11: hard-blocks LIVE assessment posting (postAssessmentBatch) only —
+ * preview is never affected by this and has no gate here. Off by default.
+ * See PTA_VOLUNTEER_ASSESSMENT_POSTING_ENABLED's own doc comment above for
+ * why this exists as a separate switch from the general assessments
+ * capability flag: posting a real charge is currently irreversible, and
+ * must stay blocked platform-wide — even for an org with assessments
+ * otherwise fully enabled — until an assessment adjustment/reversal design
+ * is separately authorized and built.
+ */
+export function isPtaVolunteerAssessmentPostingEnabled() {
+  const env = getServerEnv();
+  return (
+    env.PTA_VOLUNTEER_ASSESSMENT_POSTING_ENABLED === "1" ||
+    env.PTA_VOLUNTEER_ASSESSMENT_POSTING_ENABLED === "true"
   );
 }
 

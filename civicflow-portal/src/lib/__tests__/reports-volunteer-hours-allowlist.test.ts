@@ -21,6 +21,17 @@ vi.mock("@/lib/labs/pta/volunteer-hours/guard", () => ({
   requireVolunteerHoursFlag: (...a: unknown[]) => requireVolunteerHoursFlag(...a),
 }));
 
+// fix/pta-volunteer-financial-controls (FC-3): reports.ts re-derives the
+// financial-report permission fresh at processing time, not just at
+// enqueue time — this test suite is about the allowlist/claim mechanics,
+// not that RBAC split (covered in family-summary.test.ts and the
+// family-summary route test), so it's mocked to a fixed value here rather
+// than exercising the real @/lib/prisma organizationMembership lookup.
+const hasCurrentPermissionForOrg = vi.fn().mockResolvedValue(false);
+vi.mock("@/lib/role-permissions", () => ({
+  hasCurrentPermissionForOrg: (...a: unknown[]) => hasCurrentPermissionForOrg(...a),
+}));
+
 const isVolunteerReportType = vi.fn();
 const buildVolunteerReportExportFile = vi.fn();
 vi.mock("@/lib/labs/pta/volunteer-hours/reports/dispatch", () => ({

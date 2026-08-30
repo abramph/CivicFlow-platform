@@ -446,6 +446,20 @@ synchronous-card Checkout Session flow (the amount Stripe already
 collected can't retroactively change); `lockTiming` remains a real,
 tested column for VH-G/future async-payment-method work.
 
+> **Correction (fix/pta-volunteer-financial-controls, FC-4, 2026-08-30):**
+> the paragraph above described the intent, not the code — `lockTiming`
+> was stored and shown in the settings UI as a real choice, but nothing
+> ever branched on its value, so an admin selecting "payment success"
+> (the prior default) was told about re-quote behavior that never ran.
+> Corrected to a real `ELECTION | CHECKOUT` dispatch that actually
+> governs which price a purchase honors; `PAYMENT_SUCCESS` is removed
+> as a value entirely, since it's unsafe to reprice after a payment has
+> already been collected. See
+> `docs/pta-volunteer-hours-pricing-lock-design.md` for the full design
+> note and rationale. Left the original paragraph in place rather than
+> rewriting history — this correction is the record of what changed and
+> why.
+
 **Webhook** (`src/app/api/webhooks/stripe-connect/route.ts`): a new
 branch mirrors the existing `giving`/`public-giving` branches exactly
 — added *after* the shared `settlePendingPaymentBySession` step that

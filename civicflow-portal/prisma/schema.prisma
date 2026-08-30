@@ -5293,9 +5293,12 @@ model PtaVolunteerRequirementPeriod {
   /// allowed). All nullable/default-permissive so existing periods (created
   /// before these fields existed) behave exactly as before.
   /// Whether a family may buy out the entire requirement in one flat
-  /// purchase. Forced to false at the application layer whenever
-  /// buyoutMinServiceMinutes > 0 (a mandatory-service floor and a "full"
-  /// buyout are contradictory) regardless of this stored value.
+  /// purchase. RV-4: periods.ts's validateBuyoutPolicy REJECTS saving this
+  /// true while buyoutMinServiceMinutes > 0 (a mandatory-service floor and a
+  /// "full" buyout are contradictory) — never silently coerced to false, so
+  /// a stored true here is always actually honorable. elections.ts's
+  /// buildBuyoutQuote independently re-checks the same condition at
+  /// checkout time as defense in depth.
   buyoutFullAllowed        Boolean                  @default(true)
   /// Minimum hours a family must purchase if choosing a partial per-hour
   /// buyout at all. Null = no minimum beyond one increment.
@@ -5424,9 +5427,17 @@ enum PtaVolunteerRateType {
 /// CHECKOUT_START freezes the rate the instant a purchase/checkout record is
 /// created; PAYMENT_SUCCESS re-resolves at webhook-confirmation time and
 /// fails the checkout if no window is active then. See VH-F.
+/// fix/pta-volunteer-financial-controls (FC-4): a provider cannot safely
+/// change an amount after payment succeeds, so "lock at payment success" is
+/// not a supported moment — see docs/pta-volunteer-hours-pricing-lock-design.md.
+/// ELECTION freezes the rate at the household's acknowledged election;
+/// CHECKOUT (default) freezes it when the server creates the provider
+/// checkout session, which is when this program actually resolves a price
+/// today. Both are frozen forever after that point — payment-success
+/// processing only verifies the provider-collected amount, never reprices.
 enum PtaVolunteerRateLockTiming {
-  CHECKOUT_START
-  PAYMENT_SUCCESS
+  ELECTION
+  CHECKOUT
 }
 
 model PtaVolunteerPricingWindow {
@@ -5451,7 +5462,7 @@ model PtaVolunteerPricingWindow {
   /// VH-E/VH-F; this column is pure configuration.
   contractSigningOnly Boolean                    @default(false)
   active              Boolean                    @default(true)
-  lockTiming          PtaVolunteerRateLockTiming @default(PAYMENT_SUCCESS)
+  lockTiming          PtaVolunteerRateLockTiming @default(CHECKOUT)
   createdByUserId     String?
   createdAt           DateTime                   @default(now())
   updatedAt           DateTime                   @updatedAt
@@ -5685,6 +5696,24 @@ enum PtaVolunteerPurchasePaymentMethod {
 /// Stripe-Connect checkout infrastructure (pendingPaymentId) rather than
 /// inventing parallel payment plumbing — see PendingPayment.paymentPurpose
 /// = "pta-volunteer-buyout".
+///
+/// fix/pta-volunteer-financial-controls (RV-2): a real partial unique index
+/// — PtaVolunteerBuyoutPurchase_org_period_household_pending, "at most one
+/// PENDING purchase per (organizationId, requirementPeriodId, householdId)"
+/// — exists on this table, added by hand-editing migration
+/// 20260830172424_pta_volunteer_buyout_purchase_pending_dedupe/migration.sql,
+/// for the same Prisma-DSL-has-no-partial-index reason as
+/// PtaVolunteerAssessmentCharge (see that model's identical warning).
+/// Deliberately narrower than the assessment-charge index — only PENDING
+/// blocks a new purchase; COMPLETED does not, since a household legitimately
+/// buying hours in more than one purchase over time is normal (each
+/// COMPLETED row is real, independent history). `createVolunteerBuyoutCheckout`
+/// (src/lib/labs/pta/volunteer-hours/purchases.ts) catches the resulting
+/// P2002 and re-fetches the now-current PENDING purchase rather than
+/// erroring, so a genuine concurrent race resolves to both callers reaching
+/// the SAME checkout, never two. **Any future migration touching this
+/// model must manually re-add the CREATE UNIQUE INDEX ... WHERE ...
+/// statement** if a generated migration drops it.
 model PtaVolunteerBuyoutPurchase {
   id                       String                            @id @default(cuid())
   organizationId           String
@@ -5842,6 +5871,41 @@ model PtaVolunteerAssessmentLine {
 /// charge, matching PendingPayment's own settle-once model; the columns
 /// here already support adding multi-attempt tracking later without a
 /// migration if partial/installment payment is ever needed.
+///
+/// fix/pta-volunteer-financial-controls (FC-8, corrected RV-10): a real
+/// partial unique index — PtaVolunteerAssessmentCharge_org_period_household_active,
+/// "at most one charge per (organizationId, requirementPeriodId,
+/// householdId) whose status is PENDING, PARTIAL, or PAID" — exists on this
+/// table, added by hand-editing migration
+/// 20260830144659_pta_volunteer_assessment_charge_dedupe/migration.sql,
+/// because Prisma's schema DSL has no partial/filtered-unique-index syntax
+/// (same limitation as PropertyResident, see the identical warning on that
+/// model). The predicate is an EXPLICIT positive list of the statuses that
+/// represent an active obligation, not a `!= VOID` exclusion — PAID is
+/// deliberately included (an already-fully-paid charge is still exactly
+/// one historical obligation; a second batch must not create a duplicate
+/// for it) and only VOID is excluded, since VOID is the sole status that
+/// represents a reversed/superseded charge. This is what actually prevents
+/// two independently-created assessment batches from both charging the
+/// same household for the same period — the LINE model's
+/// `@@unique([batchId, householdId])` below only dedupes WITHIN one batch,
+/// never across batches. Because this index has no `@@unique`
+/// representation here, `prisma migrate dev`/`migrate diff` cannot see it
+/// and may propose DROPping it as "extra" the next time this model
+/// changes. **Any future migration touching PtaVolunteerAssessmentCharge
+/// must manually re-add the CREATE UNIQUE INDEX ... WHERE ... statement**
+/// if a generated migration drops it — verify by grepping the newly
+/// generated migration.sql for this index name before applying, and by
+/// running the Postgres-metadata drift test in
+/// assessment-charge-dedupe-concurrency.integration.test.ts, which queries
+/// pg_indexes directly and fails if the name, columns, or predicate ever
+/// drift from what's documented here.
+/// `postAssessmentBatch` (src/lib/labs/pta/volunteer-hours/assessments.ts)
+/// catches the resulting P2002 per-line, in its own small transaction
+/// (never inside one giant whole-batch transaction — Postgres aborts an
+/// entire transaction on the first constraint violation, which would
+/// otherwise roll back every OTHER household's legitimate charge in the
+/// same batch), and auto-excludes that line instead of charging it twice.
 model PtaVolunteerAssessmentCharge {
   id                       String                             @id @default(cuid())
   organizationId           String

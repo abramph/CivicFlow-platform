@@ -94,7 +94,7 @@ describe("buildFamilySummaryReportData — Report A", () => {
     findFirstLedgerEntry.mockResolvedValue({ effectiveDate: new Date("2026-11-01") });
 
     const { buildFamilySummaryReportData } = await import("../family-summary");
-    const data = await buildFamilySummaryReportData("org-1", filters, "Officer Jones");
+    const data = await buildFamilySummaryReportData("org-1", filters, "Officer Jones", true);
 
     expect(data.rows).toHaveLength(1);
     const row = data.rows[0];
@@ -162,7 +162,7 @@ describe("buildFamilySummaryReportData — Report A", () => {
     getHouseholdLedgerTotals.mockResolvedValue(ledgerTotals({ verifiedMinutes: 60 }));
     findManyCharges.mockResolvedValue([{ amountCents: 9000, amountPaidCents: 0, status: "PENDING" }]);
     const { buildFamilySummaryReportData } = await import("../family-summary");
-    const data = await buildFamilySummaryReportData("org-1", filters, "Officer Jones");
+    const data = await buildFamilySummaryReportData("org-1", filters, "Officer Jones", true);
     expect(data.rows[0].requirementStatus).toBe("ASSESSMENT_DUE");
     expect(data.rows[0].outstandingBalanceCents).toBe(9000);
     expect(data.rows[0].paymentStatus).toBe("Balance due");
@@ -175,15 +175,84 @@ describe("buildFamilySummaryReportData — Report A", () => {
     expect(data.rows).toHaveLength(0);
   });
 
-  it("FAMILY_SUMMARY_COLUMNS.getValue reads the exact fields present on the row (headers can never silently drift from the data)", async () => {
+  it("getFamilySummaryColumns(true).getValue reads the exact fields present on the row (headers can never silently drift from the data)", async () => {
     getHouseholdLedgerTotals.mockResolvedValue(ledgerTotals({ verifiedMinutes: 120, eventMinutes: 120 }));
-    const { buildFamilySummaryReportData, FAMILY_SUMMARY_COLUMNS } = await import("../family-summary");
-    const data = await buildFamilySummaryReportData("org-1", filters, "Officer Jones");
+    const { buildFamilySummaryReportData, getFamilySummaryColumns } = await import("../family-summary");
+    const data = await buildFamilySummaryReportData("org-1", filters, "Officer Jones", true);
     const row = data.rows[0];
-    for (const col of FAMILY_SUMMARY_COLUMNS) {
+    const columns = getFamilySummaryColumns(true);
+    for (const col of columns) {
       expect(() => col.getValue(row)).not.toThrow();
     }
-    const familyCol = FAMILY_SUMMARY_COLUMNS.find((c) => c.header === "Family")!;
+    const familyCol = columns.find((c) => c.header === "Family")!;
     expect(familyCol.getValue(row)).toBe("The Smiths");
+  });
+});
+
+describe("buildFamilySummaryReportData — Report A financial-data redaction (fix/pta-volunteer-financial-controls)", () => {
+  it("defaults to withholding every dollar field when includeFinancials is omitted", async () => {
+    getHouseholdLedgerTotals.mockResolvedValue(ledgerTotals({ verifiedMinutes: 300, purchasedMinutes: 300 }));
+    findManyPurchases.mockResolvedValue([{ baseAmountCents: 15_000, coverageAmountCents: 500, refundedAmountCents: 0 }]);
+    findManyCharges.mockResolvedValue([{ amountCents: 9000, amountPaidCents: 0, status: "PENDING" }]);
+
+    const { buildFamilySummaryReportData } = await import("../family-summary");
+    const data = await buildFamilySummaryReportData("org-1", filters, "Officer Jones");
+
+    const row = data.rows[0];
+    expect(row.buyoutAmountPaidCents).toBeUndefined();
+    expect(row.assessmentAmountCents).toBeUndefined();
+    expect(row.outstandingBalanceCents).toBeUndefined();
+    expect(data.summary.totalBuyoutRevenueCents).toBeUndefined();
+    expect(data.summary.totalAssessmentsCents).toBeUndefined();
+    expect(data.summary.outstandingBalanceCents).toBeUndefined();
+    // The JSON key must be genuinely absent, not present-with-value-undefined
+    // — Response.json()/JSON.stringify() only drop the former.
+    expect(Object.keys(JSON.parse(JSON.stringify(row)))).not.toContain("buyoutAmountPaidCents");
+    expect(Object.keys(JSON.parse(JSON.stringify(data.summary)))).not.toContain("totalBuyoutRevenueCents");
+  });
+
+  it("explicit includeFinancials=false behaves identically to the default", async () => {
+    findManyPurchases.mockResolvedValue([{ baseAmountCents: 15_000, coverageAmountCents: 0, refundedAmountCents: 0 }]);
+    const { buildFamilySummaryReportData } = await import("../family-summary");
+    const data = await buildFamilySummaryReportData("org-1", filters, "Officer Jones", false);
+    expect(data.rows[0].buyoutAmountPaidCents).toBeUndefined();
+  });
+
+  it("nonfinancial hour quantities (purchasedMinutes, remainingMinutes, requirementStatus) are still present when financials are withheld — Report A stays operationally useful", async () => {
+    getHouseholdLedgerTotals.mockResolvedValue(ledgerTotals({ verifiedMinutes: 300, purchasedMinutes: 300 }));
+    const { buildFamilySummaryReportData } = await import("../family-summary");
+    const data = await buildFamilySummaryReportData("org-1", filters, "Officer Jones", false);
+    const row = data.rows[0];
+    expect(row.purchasedMinutes).toBe(300);
+    expect(row.verifiedMinutes).toBe(300);
+    expect(row.remainingMinutes).toBe(0);
+    expect(row.requirementStatus).toBe("MET_COMBINED");
+    expect(row.paymentStatus).toBe("No assessment"); // categorical, not a dollar amount — still fine to show
+  });
+
+  it("getFamilySummaryColumns(false) contains no currency column at all — the Excel dataset itself omits them, not just the value", async () => {
+    const { getFamilySummaryColumns } = await import("../family-summary");
+    const columns = getFamilySummaryColumns(false);
+    expect(columns.some((c) => c.format === "currency")).toBe(false);
+    expect(columns.some((c) => c.header === "Buyout paid")).toBe(false);
+    expect(columns.some((c) => c.header === "Assessment")).toBe(false);
+    expect(columns.some((c) => c.header === "Outstanding balance")).toBe(false);
+  });
+
+  it("getFamilySummaryColumns(true) includes exactly the three currency columns, in addition to every operational column", async () => {
+    const { getFamilySummaryColumns } = await import("../family-summary");
+    const withFinancials = getFamilySummaryColumns(true);
+    const without = getFamilySummaryColumns(false);
+    expect(withFinancials.length).toBe(without.length + 3);
+    expect(withFinancials.filter((c) => c.format === "currency").map((c) => c.header)).toEqual(["Buyout paid", "Assessment", "Outstanding balance"]);
+  });
+
+  it("includeFinancials=true still returns real values (the household self-service and financial-permission paths)", async () => {
+    getHouseholdLedgerTotals.mockResolvedValue(ledgerTotals({ verifiedMinutes: 300, purchasedMinutes: 300 }));
+    findManyPurchases.mockResolvedValue([{ baseAmountCents: 15_000, coverageAmountCents: 500, refundedAmountCents: 0 }]);
+    const { buildFamilySummaryReportData } = await import("../family-summary");
+    const data = await buildFamilySummaryReportData("org-1", filters, "Officer Jones", true);
+    expect(data.rows[0].buyoutAmountPaidCents).toBe(15_500);
+    expect(data.summary.totalBuyoutRevenueCents).toBe(15_500);
   });
 });

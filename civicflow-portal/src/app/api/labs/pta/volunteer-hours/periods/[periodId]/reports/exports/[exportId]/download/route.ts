@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { PERMISSIONS } from "@/lib/rbac";
 import { requireVolunteerHoursAccess } from "@/lib/labs/pta/volunteer-hours/guard";
 import { isVolunteerReportType, permissionForVolunteerReportType } from "@/lib/labs/pta/volunteer-hours/reports/dispatch";
 import { prisma } from "@/lib/prisma";
@@ -14,6 +15,22 @@ import { withApiErrorHandling } from "@/lib/api-route";
  * download a queued Report E export just by knowing its id. Here the
  * permission is resolved per the export's own reportType before the
  * signed URL is ever generated.
+ *
+ * Deployment-gate review: `permissionForVolunteerReportType` alone is too
+ * coarse for the two DUAL-MODE report types (A/family-summary,
+ * D/compliance) — it maps a report TYPE to a baseline permission, but
+ * whether one of THESE SPECIFIC files actually contains financial columns
+ * depends on who queued it and what they held at that moment (see
+ * reports.ts's `includeFinancialsAtEnqueue`/`includeFinancials`). Without
+ * this check, a FINANCE officer's financial-inclusive Report A export could
+ * be downloaded by any STAFF officer in the same org who merely holds the
+ * general reports:view permission and knows the export's id. `filters`
+ * already carries `_includeFinancialsAtEnqueue` (stored by the enqueue
+ * route) as a reliable, already-persisted UPPER BOUND: the worker's own
+ * `includeFinancials` can only be true if this was also true, so treating
+ * "might have financial content" (enqueue-time flag true) the same as
+ * "does" here is the conservative, fail-safe direction — no new field, no
+ * migration, no dependency on also recording the worker's final decision.
  */
 export async function GET(_request: Request, { params }: { params: Promise<{ periodId: string; exportId: string }> }) {
   return withApiErrorHandling(async () => {
@@ -23,7 +40,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ per
       return NextResponse.json({ ok: false, error: "Export not found." }, { status: 404 });
     }
 
-    const permission = permissionForVolunteerReportType(exportJob.reportType);
+    const mightContainFinancials =
+      (exportJob.filters as { _includeFinancialsAtEnqueue?: boolean } | null)?._includeFinancialsAtEnqueue === true;
+    const permission = mightContainFinancials ? PERMISSIONS.PTA_VOLUNTEER_FINANCIAL_REPORTS_VIEW : permissionForVolunteerReportType(exportJob.reportType);
     const { organizationId } = await requireVolunteerHoursAccess(permission, "reports");
     if (organizationId !== exportJob.organizationId) {
       return NextResponse.json({ ok: false, error: "Export not found." }, { status: 404 });

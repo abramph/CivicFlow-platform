@@ -141,6 +141,56 @@ describe("recordVolunteerAssessmentPayment — webhook idempotency", () => {
     expect(result).toEqual({ outcome: "RECORDED" });
     expect(postLedgerEntry).toHaveBeenCalledWith(expect.objectContaining({ entryType: "PAYMENT_ELECTRONIC", amountCents: 12_500 }));
   });
+
+  it("FC-9: rejects on a connected-account mismatch — a successful event on one org's account can never fulfill another org's charge", async () => {
+    findFirstCharge.mockResolvedValue(charge); // charge.stripeConnectedAccountId is "acct_123"
+    const { recordVolunteerAssessmentPayment } = await import("../assessment-payments");
+    const result = await recordVolunteerAssessmentPayment({
+      organizationId: "org-1",
+      chargeId: "charge-1",
+      amountTotalCents: 12_500,
+      stripeConnectedAccountId: "acct_ATTACKER",
+      providerPaymentIntentId: "pi_1",
+      providerSessionId: "cs_1",
+    });
+    expect(result).toEqual({ outcome: "REJECTED", reason: "connected account mismatch" });
+    expect(updateManyCharge).not.toHaveBeenCalled();
+    expect(postLedgerEntry).not.toHaveBeenCalled();
+  });
+
+  it("FC-9: loses the settle race gracefully — a concurrent webhook already completed it, no double PAID transition, no double ledger post", async () => {
+    findFirstCharge.mockResolvedValue(charge); // findFirst still sees PENDING (read before the race)
+    updateManyCharge.mockResolvedValue({ count: 0 }); // but the compare-and-swap update matches nothing -- lost the race
+    findUniqueCharge.mockResolvedValue({ ...charge, status: "PAID" }); // the winner already flipped it to PAID
+    const { recordVolunteerAssessmentPayment } = await import("../assessment-payments");
+    const result = await recordVolunteerAssessmentPayment({
+      organizationId: "org-1",
+      chargeId: "charge-1",
+      amountTotalCents: 12_500,
+      stripeConnectedAccountId: "acct_123",
+      providerPaymentIntentId: "pi_1",
+      providerSessionId: "cs_1",
+    });
+    expect(result).toEqual({ outcome: "ALREADY_RECORDED" });
+    expect(postLedgerEntry).not.toHaveBeenCalled();
+  });
+
+  it("FC-9: a truly lost race (neither PENDING/PARTIAL nor PAID at re-check) rejects rather than silently succeeding", async () => {
+    findFirstCharge.mockResolvedValue(charge);
+    updateManyCharge.mockResolvedValue({ count: 0 });
+    findUniqueCharge.mockResolvedValue({ ...charge, status: "PARTIAL" }); // still not PAID -- some other unexpected transition
+    const { recordVolunteerAssessmentPayment } = await import("../assessment-payments");
+    const result = await recordVolunteerAssessmentPayment({
+      organizationId: "org-1",
+      chargeId: "charge-1",
+      amountTotalCents: 12_500,
+      stripeConnectedAccountId: "acct_123",
+      providerPaymentIntentId: "pi_1",
+      providerSessionId: "cs_1",
+    });
+    expect(result).toEqual({ outcome: "REJECTED", reason: "lost settle race" });
+    expect(postLedgerEntry).not.toHaveBeenCalled();
+  });
 });
 
 describe("recordOfflineVolunteerAssessmentPayment", () => {

@@ -33,9 +33,14 @@ Open the period → **Assignment rules & preview**. By default every family gets
 
 ## 3. Setting buyout pricing (optional)
 
-Requires the **Buyout** toggle. Open the period → **Pricing windows**. A window has a rate type (full buyout, per-hour, or the final-assessment rate), a dollar amount, and a start/end date-time. Two active windows of the *same* rate type can never overlap — the system rejects it outright rather than silently averaging two rates.
+Requires the **Buyout** toggle. Open the period → **Pricing windows**. A window has a rate type (full buyout, per-hour, or the final-assessment rate), a dollar amount, a start/end date-time, and when its rate locks. Two active windows of the *same* rate type can never overlap — the system rejects it outright rather than silently averaging two rates.
 
-The price a family is quoted is always resolved server-side at the moment they request a quote or start checkout — nothing about pricing is ever trusted from the browser.
+A price is always computed server-side — nothing about pricing is ever trusted from the browser — but *when* that price is frozen depends on the window's **rate locks at** setting:
+
+- **Checkout** (the default): the family is charged whatever rate is active the moment they start checkout, even if it's changed since they made their election. Choose this when you want everyone paying today's rate regardless of when they committed.
+- **Election**: the family's rate is frozen the instant they acknowledge their election, and stays honored — through Stripe checkout or an offline payment you record later — for as long as that same pricing window remains open. If the window closes before they pay, the lock no longer applies and a new checkout re-quotes at whatever's active then. Choose this when you want to honor an early-bird rate for a family who commits early but pays later.
+
+No charge occurs merely from configuring a pricing window, from a family making an election, or from previewing a quote — a charge only happens when a family completes checkout or you record an offline payment.
 
 ## 4. Recording an offline payment
 

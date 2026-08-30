@@ -1,7 +1,8 @@
+import { PERMISSIONS } from "@/lib/rbac";
 import { createAuditEvent } from "@/lib/audit";
 import { withApiErrorHandling } from "@/lib/api-route";
 import { requireVolunteerHoursAccess } from "@/lib/labs/pta/volunteer-hours/guard";
-import { buildComplianceReportData, COMPLIANCE_COLUMNS, type ComplianceFilter } from "@/lib/labs/pta/volunteer-hours/reports/compliance";
+import { buildComplianceReportData, getComplianceColumns, type ComplianceFilter } from "@/lib/labs/pta/volunteer-hours/reports/compliance";
 import { parseVolunteerReportFilters, resolveGeneratedByName } from "@/lib/labs/pta/volunteer-hours/reports/shared";
 import { buildReportFilename, buildVolunteerReportWorkbook } from "@/lib/labs/pta/volunteer-hours/reports/xlsx-builder";
 
@@ -15,10 +16,12 @@ const COMPLIANCE_FILTERS = new Set<ComplianceFilter>([
   "EXEMPT",
 ]);
 
-/** GET — Report D: Volunteer Requirement Compliance Report, real .xlsx download. */
+/** GET — Report D: Volunteer Requirement Compliance Report, real .xlsx download.
+ * RV-12: same financial-permission gate as the JSON route — see that
+ * route's doc comment. */
 export async function GET(request: Request, { params }: { params: Promise<{ periodId: string }> }) {
   return withApiErrorHandling(async () => {
-    const { organizationId, session } = await requireVolunteerHoursAccess("pta:volunteer-reports:export", "reports");
+    const { organizationId, session, can } = await requireVolunteerHoursAccess("pta:volunteer-reports:export", "reports");
     const { periodId } = await params;
     const url = new URL(request.url);
     const filters = parseVolunteerReportFilters(url, periodId);
@@ -26,8 +29,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ peri
     const complianceFilter =
       complianceFilterParam && COMPLIANCE_FILTERS.has(complianceFilterParam as ComplianceFilter) ? (complianceFilterParam as ComplianceFilter) : undefined;
     const generatedByName = await resolveGeneratedByName(session.userId);
-    const data = await buildComplianceReportData(organizationId, { ...filters, complianceFilter }, generatedByName);
-    const buffer = await buildVolunteerReportWorkbook(data, COMPLIANCE_COLUMNS);
+    const includeFinancials = can(PERMISSIONS.PTA_VOLUNTEER_FINANCIAL_REPORTS_VIEW);
+    const data = await buildComplianceReportData(organizationId, { ...filters, complianceFilter }, generatedByName, includeFinancials);
+    const buffer = await buildVolunteerReportWorkbook(data, getComplianceColumns(includeFinancials));
     const filename = buildReportFilename(data.info.organizationName, data.info.reportTitle, data.info.requirementPeriodName);
 
     await createAuditEvent({

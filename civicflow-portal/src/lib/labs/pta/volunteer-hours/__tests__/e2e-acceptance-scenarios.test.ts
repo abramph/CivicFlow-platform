@@ -161,7 +161,7 @@ const filters = { requirementPeriodId: "period-1" };
 describe("VH-L acceptance scenario 1 — family totals", () => {
   it("Report A computes remainingMinutes and completion consistently with the raw ledger totals", async () => {
     const { buildFamilySummaryReportData } = await import("../reports/family-summary");
-    const data = await buildFamilySummaryReportData("org-1", filters, "Officer Jones");
+    const data = await buildFamilySummaryReportData("org-1", filters, "Officer Jones", true);
     const row = data.rows[0];
     expect(row.verifiedMinutes).toBe(VERIFIED_MINUTES);
     expect(row.purchasedMinutes).toBe(PURCHASED_MINUTES);
@@ -179,7 +179,7 @@ describe("VH-L acceptance scenario 2 — event report", () => {
     expect(eventRow.familyCount).toBe(1);
 
     const { buildFamilySummaryReportData } = await import("../reports/family-summary");
-    const familyData = await buildFamilySummaryReportData("org-1", filters, "Officer Jones");
+    const familyData = await buildFamilySummaryReportData("org-1", filters, "Officer Jones", true);
     expect(familyData.rows[0].eventMinutes).toBe(eventRow.totalVerifiedMinutes);
   });
 });
@@ -189,7 +189,7 @@ describe("VH-L acceptance scenario 3 — buyout math", () => {
     expect(PURCHASE_TOTAL_CENTS).toBe(5_000);
 
     const { buildFamilySummaryReportData } = await import("../reports/family-summary");
-    const familyData = await buildFamilySummaryReportData("org-1", filters, "Officer Jones");
+    const familyData = await buildFamilySummaryReportData("org-1", filters, "Officer Jones", true);
     expect(familyData.rows[0].buyoutAmountPaidCents).toBe(PURCHASE_TOTAL_CENTS);
 
     const { buildFinancialReportData } = await import("../reports/financial");
@@ -205,12 +205,12 @@ describe("VH-L acceptance scenario 4 — assessment math", () => {
     expect(ASSESSMENT_TOTAL_CENTS).toBe(10_000);
 
     const { buildFamilySummaryReportData } = await import("../reports/family-summary");
-    const familyData = await buildFamilySummaryReportData("org-1", filters, "Officer Jones");
+    const familyData = await buildFamilySummaryReportData("org-1", filters, "Officer Jones", true);
     expect(familyData.rows[0].assessmentAmountCents).toBe(ASSESSMENT_TOTAL_CENTS);
     expect(familyData.rows[0].outstandingBalanceCents).toBe(ASSESSMENT_TOTAL_CENTS);
 
     const { buildComplianceReportData } = await import("../reports/compliance");
-    const complianceData = await buildComplianceReportData("org-1", filters, "Officer Jones");
+    const complianceData = await buildComplianceReportData("org-1", filters, "Officer Jones", true);
     expect(complianceData.rows[0].estimatedFinalAssessmentCents).toBe(ASSESSMENT_TOTAL_CENTS);
     expect(complianceData.rows[0].remainingMinutes).toBe(REMAINING_MINUTES);
 
@@ -230,9 +230,9 @@ describe("VH-L acceptance scenarios — full chain, one fixture", () => {
     const { buildFinancialReportData } = await import("../reports/financial");
 
     const [family, events, compliance, financial] = await Promise.all([
-      buildFamilySummaryReportData("org-1", filters, "Officer Jones"),
+      buildFamilySummaryReportData("org-1", filters, "Officer Jones", true),
       buildEventHoursReportData("org-1", filters, "Officer Jones"),
-      buildComplianceReportData("org-1", filters, "Officer Jones"),
+      buildComplianceReportData("org-1", filters, "Officer Jones", true),
       buildFinancialReportData("org-1", filters, "Treasurer Lee"),
     ]);
 

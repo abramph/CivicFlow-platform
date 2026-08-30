@@ -32,8 +32,24 @@ function money(cents: number) {
 }
 
 /** Volunteer Hour Requirements & Buyout program, VH-G — the assessment
- * preview/exclude/post workflow (spec §18). */
-export function PtaVolunteerAssessmentManager({ periodId, draftBatch }: { periodId: string; draftBatch: AssessmentBatchLike | null }) {
+ * preview/exclude/post workflow (spec §18).
+ *
+ * Deployment-gate review: `postingEnabled` (server-resolved from
+ * `isPtaVolunteerAssessmentPostingEnabled()`, see env.ts/RV-11) is surfaced
+ * PROACTIVELY here — before an admin ever attempts to post, not only as a
+ * reactive error message after a failed attempt. Off by default; absent
+ * from the production app spec, so every organization sees this banner
+ * until that's deliberately changed. Preview/exclude/include/cancel are
+ * never affected — only the post button itself is disabled. */
+export function PtaVolunteerAssessmentManager({
+  periodId,
+  draftBatch,
+  postingEnabled,
+}: {
+  periodId: string;
+  draftBatch: AssessmentBatchLike | null;
+  postingEnabled: boolean;
+}) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -203,23 +219,45 @@ export function PtaVolunteerAssessmentManager({ periodId, draftBatch }: { period
             </table>
           </div>
           {draftBatch.status === "DRAFT" ? (
-            <div className="flex gap-2">
-              <button
-                type="button"
-                disabled={pending}
-                onClick={postBatch}
-                className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
-              >
-                {pending ? "Posting..." : "Confirm and post assessment"}
-              </button>
-              <button
-                type="button"
-                disabled={pending}
-                onClick={cancelBatch}
-                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-50"
-              >
-                Cancel batch
-              </button>
+            <div className="space-y-2">
+              <p className="text-xs text-slate-500">
+                No charges exist yet — this batch is only a preview. Posting creates a real charge for every included
+                family, using each family&apos;s hours as they stand at the moment you post (re-verified fresh then,
+                not frozen from when this preview was generated — a family that finishes their remaining hours before
+                you post won&apos;t be charged). The rate shown above is locked in from this preview and won&apos;t
+                change even if you edit pricing windows before posting.
+              </p>
+              <p className="text-xs font-medium text-amber-700">
+                There is currently no way to adjust or reverse a posted charge from within Unestra. If you post a
+                mistake, contact support before taking any other action — do not attempt to work around it by editing
+                hours, re-posting, or recording an offline refund.
+              </p>
+              {!postingEnabled ? (
+                <p role="status" className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+                  Posting a remaining-hours assessment is temporarily disabled platform-wide — this preview, and every
+                  family shown above, is unaffected, but the &ldquo;Confirm and post assessment&rdquo; button below is
+                  disabled until this is turned back on.
+                </p>
+              ) : null}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={pending || !postingEnabled}
+                  onClick={postBatch}
+                  title={postingEnabled ? undefined : "Posting is temporarily disabled platform-wide"}
+                  className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
+                >
+                  {pending ? "Posting..." : "Confirm and post assessment"}
+                </button>
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={cancelBatch}
+                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Cancel batch
+                </button>
+              </div>
             </div>
           ) : (
             <p className="text-sm font-medium text-emerald-700">This batch has been posted.</p>

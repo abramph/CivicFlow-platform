@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { PERMISSIONS } from "@/lib/rbac";
 
 const findFirstExport = vi.fn();
 vi.mock("@/lib/prisma", () => ({ prisma: { reportExport: { findFirst: (...a: unknown[]) => findFirstExport(...a) } } }));
@@ -142,5 +143,68 @@ describe("download route (fix/report-export-queue-hardening: expiration)", () =>
     expect(res.status).not.toBe(200);
     expect(res.status).not.toBe(307);
     expect(getSignedObjectUrl).not.toHaveBeenCalled();
+  });
+
+  describe("deployment-gate review: dual-mode (Report A/D) download authorization reflects the SPECIFIC file's content, not just the report type's baseline permission", () => {
+    it("a Report A export queued WITHOUT financial permission (nonfinancial file) is downloadable by any general reports:view holder", async () => {
+      findFirstExport.mockResolvedValue({
+        id: "export-1",
+        organizationId: "org-1",
+        reportType: "PTA_VOLUNTEER_FAMILY_SUMMARY",
+        status: "COMPLETED",
+        fileUrl: "pta-volunteer-reports/org-1/export-1.xlsx",
+        expiresAt: new Date(Date.now() + 60_000),
+        filters: { _includeFinancialsAtEnqueue: false },
+      });
+      const { GET } = await import("../route");
+      const res = await GET(new Request("https://x.test"), { params });
+      expect(res.status).toBeGreaterThanOrEqual(300);
+      expect(res.status).toBeLessThan(400);
+      expect(requireVolunteerHoursAccess).toHaveBeenCalledWith("pta:volunteer-reports:view", "reports");
+    });
+
+    it("a Report A export queued WITH financial permission (financial-inclusive file) requires the financial permission to download -- a general reports:view-only caller who merely knows the export id is denied", async () => {
+      findFirstExport.mockResolvedValue({
+        id: "export-1",
+        organizationId: "org-1",
+        reportType: "PTA_VOLUNTEER_FAMILY_SUMMARY",
+        status: "COMPLETED",
+        fileUrl: "pta-volunteer-reports/org-1/export-1.xlsx",
+        expiresAt: new Date(Date.now() + 60_000),
+        filters: { _includeFinancialsAtEnqueue: true },
+      });
+      const { PtaError } = await import("@/lib/labs/pta/errors");
+      // Simulate a STAFF-shaped caller: requireVolunteerHoursAccess throws
+      // when asked for the financial permission specifically.
+      requireVolunteerHoursAccess.mockImplementation(async (permission: string) => {
+        if (permission === PERMISSIONS.PTA_VOLUNTEER_FINANCIAL_REPORTS_VIEW) {
+          throw new PtaError("PTA_VOLUNTEER_REPORTS_DISABLED", "missing financial permission");
+        }
+        return { organizationId: "org-1" };
+      });
+
+      const { GET } = await import("../route");
+      const res = await GET(new Request("https://x.test"), { params });
+
+      expect(requireVolunteerHoursAccess).toHaveBeenCalledWith(PERMISSIONS.PTA_VOLUNTEER_FINANCIAL_REPORTS_VIEW, "reports");
+      expect(res.status).not.toBe(200);
+      expect(res.status).not.toBe(307);
+      expect(getSignedObjectUrl).not.toHaveBeenCalled();
+    });
+
+    it("a Report D (compliance) export queued WITH financial permission also requires the financial permission to download", async () => {
+      findFirstExport.mockResolvedValue({
+        id: "export-1",
+        organizationId: "org-1",
+        reportType: "PTA_VOLUNTEER_COMPLIANCE",
+        status: "COMPLETED",
+        fileUrl: "pta-volunteer-reports/org-1/export-1.xlsx",
+        expiresAt: new Date(Date.now() + 60_000),
+        filters: { _includeFinancialsAtEnqueue: true },
+      });
+      const { GET } = await import("../route");
+      await GET(new Request("https://x.test"), { params });
+      expect(requireVolunteerHoursAccess).toHaveBeenCalledWith(PERMISSIONS.PTA_VOLUNTEER_FINANCIAL_REPORTS_VIEW, "reports");
+    });
   });
 });
