@@ -80,12 +80,12 @@ afterEach(() => {
 const filters = { requirementPeriodId: "period-1" };
 
 describe("buildComplianceReportData — Report D", () => {
-  it("estimates a final assessment for a NOT_MET household using the currently active FINAL_ASSESSMENT rate", async () => {
+  it("estimates a final assessment for a NOT_MET household using the currently active FINAL_ASSESSMENT rate (includeFinancials=true)", async () => {
     getHouseholdLedgerTotals.mockResolvedValue(ledgerTotals({ verifiedMinutes: 240, eventMinutes: 240 }));
     resolveVolunteerBuyoutRate.mockResolvedValue({ id: "window-1", amountCents: 2_000, rateType: "FINAL_ASSESSMENT" });
 
     const { buildComplianceReportData } = await import("../compliance");
-    const data = await buildComplianceReportData("org-1", filters, "Officer Jones");
+    const data = await buildComplianceReportData("org-1", filters, "Officer Jones", true);
 
     expect(data.rows).toHaveLength(1);
     const row = data.rows[0];
@@ -93,13 +93,14 @@ describe("buildComplianceReportData — Report D", () => {
     expect(row.completionStatus).toBe("NOT_MET");
     expect(row.estimatedFinalAssessmentCents).toBe(12_000);
     expect(row.daysRemainingOrOverdue).toBe(31);
+    expect(data.summary.totalAssessmentsCents).toBe(12_000);
   });
 
   it("never estimates an assessment when no FINAL_ASSESSMENT window is active — never fabricates a rate", async () => {
     getHouseholdLedgerTotals.mockResolvedValue(ledgerTotals({ verifiedMinutes: 240 }));
     resolveVolunteerBuyoutRate.mockResolvedValue(null);
     const { buildComplianceReportData } = await import("../compliance");
-    const data = await buildComplianceReportData("org-1", filters, "Officer Jones");
+    const data = await buildComplianceReportData("org-1", filters, "Officer Jones", true);
     expect(data.rows[0].estimatedFinalAssessmentCents).toBeNull();
   });
 
@@ -107,9 +108,42 @@ describe("buildComplianceReportData — Report D", () => {
     getHouseholdLedgerTotals.mockResolvedValue(ledgerTotals({ verifiedMinutes: 600, eventMinutes: 600 }));
     resolveVolunteerBuyoutRate.mockResolvedValue({ id: "window-1", amountCents: 2_000, rateType: "FINAL_ASSESSMENT" });
     const { buildComplianceReportData } = await import("../compliance");
-    const data = await buildComplianceReportData("org-1", filters, "Officer Jones");
+    const data = await buildComplianceReportData("org-1", filters, "Officer Jones", true);
     expect(data.rows[0].completionStatus).toBe("MET");
     expect(data.rows[0].estimatedFinalAssessmentCents).toBeNull();
+  });
+
+  describe("RV-12: financial-permission gating (found unconditionally leaking during re-verification, fixed like FC-3's Report A)", () => {
+    it("defaults to withholding the dollar field entirely when includeFinancials is omitted", async () => {
+      getHouseholdLedgerTotals.mockResolvedValue(ledgerTotals({ verifiedMinutes: 240, eventMinutes: 240 }));
+      resolveVolunteerBuyoutRate.mockResolvedValue({ id: "window-1", amountCents: 2_000, rateType: "FINAL_ASSESSMENT" });
+      const { buildComplianceReportData } = await import("../compliance");
+      const data = await buildComplianceReportData("org-1", filters, "Officer Jones");
+      expect(data.rows[0].estimatedFinalAssessmentCents).toBeUndefined();
+      expect(data.summary.totalAssessmentsCents).toBeUndefined();
+      // The literal review requirement: after JSON serialization (exactly
+      // what Response.json() does), the field NAME itself must not appear,
+      // not merely hold a redacted value.
+      expect(Object.keys(JSON.parse(JSON.stringify(data.rows[0])))).not.toContain("estimatedFinalAssessmentCents");
+      expect(Object.keys(JSON.parse(JSON.stringify(data.summary)))).not.toContain("totalAssessmentsCents");
+    });
+
+    it("explicit includeFinancials=false behaves identically to the default", async () => {
+      getHouseholdLedgerTotals.mockResolvedValue(ledgerTotals({ verifiedMinutes: 240, eventMinutes: 240 }));
+      resolveVolunteerBuyoutRate.mockResolvedValue({ id: "window-1", amountCents: 2_000, rateType: "FINAL_ASSESSMENT" });
+      const { buildComplianceReportData } = await import("../compliance");
+      const data = await buildComplianceReportData("org-1", filters, "Officer Jones", false);
+      expect(data.rows[0].estimatedFinalAssessmentCents).toBeUndefined();
+      expect(data.summary.totalAssessmentsCents).toBeUndefined();
+    });
+
+    it("getComplianceColumns(false) omits the financial column entirely -- a non-financial workbook never even shows the header", async () => {
+      const { getComplianceColumns } = await import("../compliance");
+      const nonFinancialColumns = getComplianceColumns(false);
+      expect(nonFinancialColumns.find((c) => c.header === "Est. final assessment")).toBeUndefined();
+      const financialColumns = getComplianceColumns(true);
+      expect(financialColumns.find((c) => c.header === "Est. final assessment")).toBeDefined();
+    });
   });
 
   it("filters to only NOT_MET rows when complianceFilter=NOT_MET", async () => {

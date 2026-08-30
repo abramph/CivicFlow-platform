@@ -8,7 +8,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ ba
   return withApiErrorHandling(async () => {
     const { organizationId, session } = await requireVolunteerHoursAccess("pta:volunteer-assessments:preview-post", "assessments");
     const { batchId } = await params;
-    const charges = await postAssessmentBatch(organizationId, batchId, { userId: session.userId, userEmail: session.userEmail });
-    return Response.json({ ok: true, data: charges });
+    const result = await postAssessmentBatch(organizationId, batchId, { userId: session.userId, userEmail: session.userEmail });
+    return Response.json({ ok: true, data: result.charges, batchFullyPosted: result.batchFullyPosted, remainingLineCount: result.remainingLineCount });
   });
 }

@@ -4,8 +4,42 @@ import { prisma } from "@/lib/prisma";
 import { PtaError } from "../errors";
 import { resolveHouseholdRequirement, type HouseholdRequirementResult } from "./assignments";
 import { getHouseholdLedgerTotals, type HouseholdLedgerTotals } from "./ledger";
-import { getVolunteerRequirementPeriod } from "./periods";
+import { assertBuyoutWindowOpen, getVolunteerRequirementPeriod } from "./periods";
 import { resolveVolunteerBuyoutRate } from "./pricing";
+
+/**
+ * The shared eligibility gate every FULL_BUYOUT/PARTIAL_BUYOUT quote,
+ * election, or checkout must pass — deliberately separate from price
+ * resolution so an ELECTION-locked checkout (which skips `buildBuyoutQuote`
+ * entirely to preserve its frozen price) still gets the SAME live
+ * eligibility re-check every fresh quote gets. Never applied to VOLUNTEER
+ * elections, which are always free and available regardless of buyout
+ * window state. `remainingMinutes` already reflects COMPLETED purchases
+ * (via `getHouseholdLedgerTotals`) — a family that already fully bought out
+ * or worked their requirement has nothing left to buy. Duplicate-completion
+ * risk from a second, concurrently-PENDING purchase is closed separately in
+ * `purchases.ts` by superseding any prior PENDING purchase before a new
+ * checkout is created, not by restricting how many hours are purchasable —
+ * restricting hours here would also block a family legitimately retrying
+ * after an abandoned/failed checkout attempt.
+ */
+function assertBuyoutEligible(
+  period: Parameters<typeof assertBuyoutWindowOpen>[0],
+  requirement: HouseholdRequirementResult,
+  remainingMinutes: number,
+  now: Date
+): void {
+  assertBuyoutWindowOpen(period, now);
+  if (requirement.exempt) {
+    throw new PtaError("PTA_VOLUNTEER_HOUSEHOLD_EXEMPT", "This household is exempt from the volunteer-hour requirement — there is nothing to buy out.");
+  }
+  if (remainingMinutes <= 0) {
+    throw new PtaError(
+      "PTA_VOLUNTEER_ALREADY_SATISFIED",
+      "This household's requirement is already fully met by verified hours and/or completed purchases."
+    );
+  }
+}
 
 /** Bump whenever the family-facing disclosure text materially changes — an
  * already-made election keeps the version it was made under, never
@@ -88,6 +122,9 @@ export async function buildBuyoutQuote(organizationId: string, periodId: string,
     return { electionType: "VOLUNTEER", hoursElectedMinutes: 0, rateCents: 0, totalCents: 0, pricingWindowId: null, remainingAfterMinutes: remainingMinutes };
   }
 
+  const now = new Date();
+  assertBuyoutEligible(period, requirement, remainingMinutes, now);
+
   if (input.electionType === "FULL_BUYOUT") {
     if (!period.buyoutFullAllowed) {
       throw new PtaError("PTA_VALIDATION_ERROR", "A full buyout is not offered for this requirement period.");
@@ -95,8 +132,8 @@ export async function buildBuyoutQuote(organizationId: string, periodId: string,
     if (serviceFloorMinutes > 0) {
       throw new PtaError("PTA_VALIDATION_ERROR", "This period requires a minimum amount of actual service — a full buyout isn't available.");
     }
-    const window = await resolveVolunteerBuyoutRate(organizationId, periodId, "FULL_BUYOUT");
-    if (!window) throw new PtaError("PTA_VALIDATION_ERROR", "No full-buyout rate is currently active for this period.");
+    const window = await resolveVolunteerBuyoutRate(organizationId, periodId, "FULL_BUYOUT", now);
+    if (!window) throw new PtaError("PTA_VOLUNTEER_NO_APPLICABLE_RATE", "No full-buyout rate is currently active for this period.");
 
     const hoursElectedMinutes = requirement.requiredMinutes;
     return {
@@ -125,13 +162,17 @@ export async function buildBuyoutQuote(organizationId: string, periodId: string,
   if (requested < minPurchase) {
     throw new PtaError("PTA_VALIDATION_ERROR", `You must purchase at least ${(minPurchase / 60).toString()} hours.`);
   }
-  const maxPurchase = Math.min(period.buyoutMaxPurchaseMinutes ?? maxBuyableMinutes, maxBuyableMinutes);
+  // Bounded by the period's configured max, the requirement-minus-service-floor
+  // ceiling, AND (FC-5) what's actually still owed after verified hours and
+  // completed purchases — never let a family buy more than they could
+  // possibly still owe, on top of the period's own configured limits.
+  const maxPurchase = Math.min(period.buyoutMaxPurchaseMinutes ?? maxBuyableMinutes, maxBuyableMinutes, remainingMinutes);
   if (requested > maxPurchase) {
     throw new PtaError("PTA_VALIDATION_ERROR", `You can purchase at most ${(maxPurchase / 60).toString()} hours for this period.`);
   }
 
-  const window = await resolveVolunteerBuyoutRate(organizationId, periodId, "PER_HOUR");
-  if (!window) throw new PtaError("PTA_VALIDATION_ERROR", "No per-hour buyout rate is currently active for this period.");
+  const window = await resolveVolunteerBuyoutRate(organizationId, periodId, "PER_HOUR", now);
+  if (!window) throw new PtaError("PTA_VOLUNTEER_NO_APPLICABLE_RATE", "No per-hour buyout rate is currently active for this period.");
 
   const totalCents = Math.round((requested / 60) * window.amountCents);
   return {
@@ -202,4 +243,66 @@ export async function getLatestElection(organizationId: string, periodId: string
     where: { organizationId, requirementPeriodId: periodId, householdId },
     orderBy: { createdAt: "desc" },
   });
+}
+
+/**
+ * fix/pta-volunteer-financial-controls (FC-4, design note
+ * docs/pta-volunteer-hours-pricing-lock-design.md): the single dispatch
+ * point every purchase-creation path (Stripe checkout, offline recording)
+ * must call instead of `buildBuyoutQuote` directly. Honors an
+ * ELECTION-locked election's frozen `quotedRateCents`/`quotedTotalCents`
+ * only when ALL of: the election belongs to this org/period/household, it
+ * is still the household's *latest* election (a later re-election always
+ * supersedes an earlier lock), and the pricing window it was quoted against
+ * is `lockTiming=ELECTION`, still active, and not yet past its own close
+ * (`endAt`) — the same boundary FC-5 enforces for new elections/checkouts,
+ * not a separate expiration clock. Every other case (no election id,
+ * election not found/not latest, window inactive/closed/deleted, or
+ * `lockTiming=CHECKOUT`) falls back to a fresh `buildBuyoutQuote` call,
+ * which is today's actual (and CHECKOUT's intended) behavior. Only the
+ * price/hours are ever taken from the lock — `remainingAfterMinutes` is
+ * always recomputed against current ledger totals, since that is a live
+ * progress figure, not a frozen price.
+ */
+export async function resolveLockedOrFreshQuote(
+  organizationId: string,
+  periodId: string,
+  householdId: string,
+  input: BuyoutQuoteInput & { electionId?: string | null }
+): Promise<BuyoutQuote> {
+  if (input.electionId) {
+    const election = await prisma.ptaVolunteerBuyoutElection.findFirst({
+      where: { id: input.electionId, organizationId, requirementPeriodId: periodId, householdId },
+    });
+    if (election?.pricingWindowId && (election.electionType === "FULL_BUYOUT" || election.electionType === "PARTIAL_BUYOUT")) {
+      const latest = await getLatestElection(organizationId, periodId, householdId);
+      if (latest?.id === election.id) {
+        const now = new Date();
+        const window = await prisma.ptaVolunteerPricingWindow.findUnique({ where: { id: election.pricingWindowId } });
+        if (window && window.lockTiming === "ELECTION" && window.active && window.endAt > now) {
+          const period = await getVolunteerRequirementPeriod(organizationId, periodId);
+          const requirement = await resolveHouseholdRequirement(organizationId, periodId, householdId);
+          const totals = await getHouseholdLedgerTotals(organizationId, periodId, householdId);
+          const remainingMinutes = Math.max(
+            0,
+            requirement.requiredMinutes - totals.verifiedMinutes - totals.purchasedMinutes - totals.creditMinutes - totals.waivedMinutes
+          );
+          // Price is frozen by the lock, but eligibility to REDEEM it is not
+          // — re-verified fresh every time, same as a brand-new quote would
+          // be, so a household that's become exempt or already satisfied
+          // since electing can't still complete a locked purchase.
+          assertBuyoutEligible(period, requirement, remainingMinutes, now);
+          return {
+            electionType: election.electionType,
+            hoursElectedMinutes: election.hoursElectedMinutes,
+            rateCents: election.quotedRateCents,
+            totalCents: election.quotedTotalCents,
+            pricingWindowId: election.pricingWindowId,
+            remainingAfterMinutes: Math.max(0, remainingMinutes - election.hoursElectedMinutes),
+          };
+        }
+      }
+    }
+  }
+  return buildBuyoutQuote(organizationId, periodId, householdId, input);
 }

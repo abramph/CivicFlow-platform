@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { createAuditEvent } from "@/lib/audit";
 import { requireVolunteerHoursFlag } from "@/lib/labs/pta/volunteer-hours/guard";
+import { PERMISSIONS } from "@/lib/rbac";
+import { hasCurrentPermissionForOrg } from "@/lib/role-permissions";
 import { buildVolunteerReportExportFile, isVolunteerReportType } from "@/lib/labs/pta/volunteer-hours/reports/dispatch";
 import { resolveGeneratedByName, volunteerReportFiltersFromJson } from "@/lib/labs/pta/volunteer-hours/reports/shared";
 import { buildSafeObjectKey, uploadBufferToSpaces } from "@/lib/storage";
@@ -156,6 +158,29 @@ export async function processQueuedReportExport(exportId: string) {
       await requireVolunteerHoursFlag(exportJob.organizationId, "reports");
       const filters = volunteerReportFiltersFromJson(exportJob.filters);
       const generatedByName = await resolveGeneratedByName(exportJob.createdByUserId ?? "");
+      // Deployment-gate review: financial content requires the permission to
+      // hold at BOTH enqueue time and processing time, not processing time
+      // alone. `hasCurrentPermissionForOrg` re-derives fresh from the
+      // export's creator's CURRENT org role/permissions — same "must still
+      // hold at the moment a queued job actually runs" reasoning as the flag
+      // re-check just above, and it's what makes a permission LOSS between
+      // enqueue and processing correctly narrow the export. On its own,
+      // though, that check would let a permission GAINED after enqueue
+      // silently EXPAND an already-queued export beyond what its requester
+      // was authorized to see when they clicked "export" — the enqueue route
+      // (.../reports/exports/route.ts) snapshots `_includeFinancialsAtEnqueue`
+      // into this same job's `filters` for exactly this reason (no schema
+      // migration needed; volunteerReportFiltersFromJson already ignores
+      // unknown keys). ANDing the two means the export's financial content
+      // is bounded by the MINIMUM of what held at either moment — a later
+      // gain can never expand it, only a loss can narrow it further. Only
+      // affects PTA_VOLUNTEER_FAMILY_SUMMARY and PTA_VOLUNTEER_COMPLIANCE;
+      // harmless no-op lookup for every other report type (their
+      // `_includeFinancialsAtEnqueue` key is simply absent/unused).
+      const includeFinancialsAtEnqueue = (exportJob.filters as { _includeFinancialsAtEnqueue?: boolean } | null)?._includeFinancialsAtEnqueue === true;
+      const includeFinancials =
+        includeFinancialsAtEnqueue &&
+        (await hasCurrentPermissionForOrg(exportJob.organizationId, exportJob.createdByUserId ?? "", PERMISSIONS.PTA_VOLUNTEER_FINANCIAL_REPORTS_VIEW));
       // The bulk of this call's work (exceljs's workbook.xlsx.writeBuffer)
       // is synchronous CPU-bound XML/zip construction — no heartbeat can
       // reliably fire mid-call. REPORT_EXPORT_LEASE_MS is sized to
@@ -163,7 +188,13 @@ export async function processQueuedReportExport(exportId: string) {
       // specifically so this gap can never legitimately outlive the lease
       // (see report-export-queue.ts's documented reasoning). The renewal
       // immediately after is the real async boundary this code DOES have.
-      const { buffer, filename } = await buildVolunteerReportExportFile(exportJob.organizationId, exportJob.reportType, filters, generatedByName);
+      const { buffer, filename } = await buildVolunteerReportExportFile(
+        exportJob.organizationId,
+        exportJob.reportType,
+        filters,
+        generatedByName,
+        includeFinancials
+      );
 
       if (!(await renewReportExportLease(exportId, claimId))) {
         logOwnershipLost(exportId, "before-upload");

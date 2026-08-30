@@ -3,11 +3,12 @@ import { withApiErrorHandling } from "@/lib/api-route";
 import { PtaError } from "@/lib/labs/pta/errors";
 import { requireVolunteerHoursHouseholdAccess } from "@/lib/labs/pta/volunteer-hours/guard";
 import { getCurrentActivePeriod } from "@/lib/labs/pta/volunteer-hours/periods";
-import { buildFamilySummaryReportData, FAMILY_SUMMARY_COLUMNS } from "@/lib/labs/pta/volunteer-hours/reports/family-summary";
+import { buildFamilySummaryReportData, getFamilySummaryColumns } from "@/lib/labs/pta/volunteer-hours/reports/family-summary";
 import { buildReportFilename, buildVolunteerReportWorkbook } from "@/lib/labs/pta/volunteer-hours/reports/xlsx-builder";
 
 // Same admin-column strip as the JSON route, applied to the xlsx column set.
-const FAMILY_SELF_SERVICE_COLUMNS = FAMILY_SUMMARY_COLUMNS.filter((col) => col.header !== "Notes / exception");
+// includeFinancials=true: own-household self-service, see route.ts's note.
+const FAMILY_SELF_SERVICE_COLUMNS = getFamilySummaryColumns(true).filter((col) => col.header !== "Notes / exception");
 
 /** GET — a family's own downloadable .xlsx volunteer-hour summary. */
 export async function GET(request: Request) {
@@ -21,7 +22,12 @@ export async function GET(request: Request) {
       periodId = current.id;
     }
 
-    const data = await buildFamilySummaryReportData(organizationId, { requirementPeriodId: periodId, householdId: adult.householdId }, adult.name).catch(
+    const data = await buildFamilySummaryReportData(
+      organizationId,
+      { requirementPeriodId: periodId, householdId: adult.householdId },
+      adult.name,
+      true
+    ).catch(
       (error) => {
         if (error instanceof PtaError && error.code === "PTA_VOLUNTEER_PERIOD_NOT_FOUND") return null;
         throw error;

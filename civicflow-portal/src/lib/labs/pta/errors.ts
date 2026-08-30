@@ -83,11 +83,66 @@ export const PTA_ERROR_CODES = [
    * ACTIVE period sharing the same scopeLabel (or both null). */
   "PTA_VOLUNTEER_PERIOD_CONFLICT",
   "PTA_VOLUNTEER_PERIOD_INVALID_DATES",
+  /** RV-4: the period's buyout POLICY fields (full-buyout-allowed,
+   * min/max purchase, mandatory-service floor, purchase increment) fail
+   * internal validation — see validateBuyoutPolicy in periods.ts. */
+  "PTA_VOLUNTEER_PERIOD_INVALID_BUYOUT_POLICY",
   /** fix/pta-volunteer-settings-atomic-audit: the atomic flag-update's
    * conditional updateMany matched zero rows — another request changed one
    * of the same flags between this request's read and write. Mirrors
    * INTERNAL_TRIAL_CONCURRENT_CONFLICT's conditional-update idiom. */
   "PTA_VOLUNTEER_HOURS_FLAGS_CONCURRENT_CONFLICT",
+  // fix/pta-volunteer-financial-controls, FC-5 — server-side buyout-window
+  // enforcement (docs/pta-volunteer-hours-pricing-lock-design.md's sibling
+  // gaps). Stable, non-sensitive codes: never reveal WHY in a way that
+  // leaks other households'/periods' data, just the boundary that applies.
+  /** The requirement period this quote/election/checkout targets isn't
+   * ACTIVE (still DRAFT, or already CLOSED/ARCHIVED). */
+  "PTA_VOLUNTEER_PERIOD_NOT_ACTIVE",
+  /** Before the period's buyoutWindowStart (inclusive-open boundary). */
+  "PTA_VOLUNTEER_BUYOUT_NOT_YET_OPEN",
+  /** At or after the period's buyoutWindowEnd (exclusive-close boundary) —
+   * also the "quote/election has expired" case, since a quote here is
+   * never a separately-persisted object with its own TTL; its validity is
+   * always bounded by this same window (see the pricing-lock design note,
+   * §4). */
+  "PTA_VOLUNTEER_BUYOUT_CLOSED",
+  /** No active PtaVolunteerPricingWindow covers the requested rate type
+   * right now — nothing to quote at all. */
+  "PTA_VOLUNTEER_NO_APPLICABLE_RATE",
+  /** The household is exempt from this period's requirement — there is
+   * nothing to buy out. */
+  "PTA_VOLUNTEER_HOUSEHOLD_EXEMPT",
+  /** The household's requirement is already fully met by verified hours,
+   * completed purchases, and/or reserved (recent, still-pending) purchases
+   * — no remaining hours are available to buy out. */
+  "PTA_VOLUNTEER_ALREADY_SATISFIED",
+  // FC-7 — assessment dates must control behavior, not decorate UI.
+  /** The period's assessmentDate (the cutoff/effective instant) hasn't been
+   * reached yet — a batch may be PREVIEWED anytime (no side effects) but
+   * not POSTED before this instant. */
+  "PTA_VOLUNTEER_ASSESSMENT_NOT_YET_DUE",
+  // FC-8 — database-backed duplicate-assessment-charge prevention.
+  /** A non-VOID assessment charge already exists for this
+   * (organization, period, household) — enforced by a real partial unique
+   * index (see the schema-drift warning on PtaVolunteerAssessmentCharge),
+   * not just an application-layer check. Surfaced when a line loses that
+   * race at post time; the line is auto-excluded rather than double-charged. */
+  "PTA_VOLUNTEER_ASSESSMENT_ALREADY_CHARGED",
+  // RV-11 — assessment reversal remains a hard boundary; live posting is
+  // gated behind its own separate kill-switch (isPtaVolunteerAssessmentPostingEnabled)
+  // until an assessment adjustment/reversal design is separately authorized.
+  // Preview is never gated by this.
+  "PTA_VOLUNTEER_ASSESSMENT_POSTING_BLOCKED",
+  // RV-2 — database-backed duplicate-PENDING-purchase prevention.
+  /** Lost a genuine concurrent race against
+   * PtaVolunteerBuyoutPurchase_org_period_household_pending (see the
+   * schema-drift warning on that model) AND the winning concurrent
+   * purchase's own Stripe Checkout Session isn't reusable yet (it hasn't
+   * reached Stripe, or retrieval failed) — never silently duplicated,
+   * never silently superseded; the caller is asked to retry shortly, by
+   * which point the winner's session should be reusable. */
+  "PTA_VOLUNTEER_CHECKOUT_IN_PROGRESS",
 ] as const;
 
 export type PtaErrorCode = (typeof PTA_ERROR_CODES)[number];
@@ -144,7 +199,18 @@ const STATUS_FOR_CODE: Record<PtaErrorCode, number> = {
   PTA_VOLUNTEER_PERIOD_NOT_FOUND: 404,
   PTA_VOLUNTEER_PERIOD_CONFLICT: 409,
   PTA_VOLUNTEER_PERIOD_INVALID_DATES: 400,
+  PTA_VOLUNTEER_PERIOD_INVALID_BUYOUT_POLICY: 400,
   PTA_VOLUNTEER_HOURS_FLAGS_CONCURRENT_CONFLICT: 409,
+  PTA_VOLUNTEER_PERIOD_NOT_ACTIVE: 409,
+  PTA_VOLUNTEER_BUYOUT_NOT_YET_OPEN: 409,
+  PTA_VOLUNTEER_BUYOUT_CLOSED: 409,
+  PTA_VOLUNTEER_NO_APPLICABLE_RATE: 409,
+  PTA_VOLUNTEER_HOUSEHOLD_EXEMPT: 409,
+  PTA_VOLUNTEER_ALREADY_SATISFIED: 409,
+  PTA_VOLUNTEER_ASSESSMENT_NOT_YET_DUE: 409,
+  PTA_VOLUNTEER_ASSESSMENT_ALREADY_CHARGED: 409,
+  PTA_VOLUNTEER_ASSESSMENT_POSTING_BLOCKED: 403,
+  PTA_VOLUNTEER_CHECKOUT_IN_PROGRESS: 409,
 };
 
 export class PtaError extends Error {

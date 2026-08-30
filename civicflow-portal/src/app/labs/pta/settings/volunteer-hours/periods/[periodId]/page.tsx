@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { isPtaVolunteerAssessmentPostingEnabled } from "@/lib/env";
 import { getPtaPageGate } from "@/lib/labs/pta/guard";
 import { listAssessmentBatches, getAssessmentBatch } from "@/lib/labs/pta/volunteer-hours/assessments";
 import { listPeriodAssignments } from "@/lib/labs/pta/volunteer-hours/assignments";
@@ -80,6 +81,7 @@ export default async function PtaVolunteerPeriodAssignmentsPage({ params }: { pa
             periodId={periodId}
             windows={pricingWindows.map((w) => ({ ...w, startAt: w.startAt.toISOString(), endAt: w.endAt.toISOString() }))}
             canManage={canViewPricing}
+            timezone={period.timezone}
           />
         </SectionCard>
       ) : null}
@@ -98,6 +100,7 @@ export default async function PtaVolunteerPeriodAssignmentsPage({ params }: { pa
         >
           <PtaVolunteerAssessmentManager
             periodId={periodId}
+            postingEnabled={isPtaVolunteerAssessmentPostingEnabled()}
             draftBatch={
               draftBatch
                 ? {

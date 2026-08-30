@@ -32,10 +32,15 @@ beforeEach(() => {
 
 const actor = { userId: "u1", userEmail: "officer@example.com" };
 
+// FC-6: PricingWindowInput.startAt/endAt are now zone-less-or-absolute
+// strings, not Date objects — see src/lib/labs/pta/volunteer-hours/timezone.ts.
+// These carry an explicit "Z" suffix so resolveOrgWallTimeToUtc treats them
+// as already-absolute instants (short-circuits the org-timezone math),
+// keeping these tests' exact instant values identical to before FC-6.
 const baseInput = {
   name: "Contract signing through Aug 15",
-  startAt: new Date("2026-06-01T00:00:00Z"),
-  endAt: new Date("2026-08-15T00:00:00Z"),
+  startAt: "2026-06-01T00:00:00Z",
+  endAt: "2026-08-15T00:00:00Z",
   rateType: "FULL_BUYOUT" as const,
   amountCents: 25_000,
 };
@@ -51,7 +56,7 @@ describe("createPricingWindow — validation", () => {
   it("rejects endAt on or before startAt", async () => {
     const { createPricingWindow } = await import("../pricing");
     await expect(
-      createPricingWindow("org-1", "period-1", { ...baseInput, startAt: new Date("2026-09-01"), endAt: new Date("2026-08-01") }, actor)
+      createPricingWindow("org-1", "period-1", { ...baseInput, startAt: "2026-09-01T00:00:00Z", endAt: "2026-08-01T00:00:00Z" }, actor)
     ).rejects.toMatchObject({ code: "PTA_VALIDATION_ERROR" });
   });
 
@@ -87,7 +92,7 @@ describe("createPricingWindow — overlap prevention", () => {
 
   it("allows adjacent (non-overlapping, touching) windows of the same rateType", async () => {
     findManyWindows.mockResolvedValue([
-      { id: "existing", name: "Standard rate", startAt: baseInput.endAt, endAt: new Date("2026-10-01") },
+      { id: "existing", name: "Standard rate", startAt: new Date(baseInput.endAt), endAt: new Date("2026-10-01") },
     ]);
     const { createPricingWindow } = await import("../pricing");
     await expect(createPricingWindow("org-1", "period-1", baseInput, actor)).resolves.toBeTruthy();

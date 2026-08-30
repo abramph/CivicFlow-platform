@@ -20,7 +20,7 @@ If your PTA has turned on buyouts, you'll see options to:
 2. **Purchase all required hours** (if your PTA allows a full buyout).
 3. **Purchase part of your hours** — enter how many hours you want to buy, in whatever increment your PTA allows (e.g. whole hours or half hours).
 
-**Get a quote** shows you the exact cost, computed fresh by the server every time — never a price you can influence from your browser. Selecting an option and confirming it **records your choice — it is not a payment yet**. Hours are only credited to your account once payment is actually confirmed. If you chose a paid option, you'll then see a **Pay now** button that takes you to a secure Stripe checkout.
+**Get a quote** shows you the exact cost, computed by the server — never a price you can influence from your browser. Selecting an option and confirming it **records your choice — it is not a payment yet**. Hours are only credited to your account once payment is actually confirmed. If you chose a paid option, you'll then see a **Pay now** button that takes you to a secure Stripe checkout. Depending on how your PTA configured this period, the price you pay is either the rate active right when you start checkout, or the rate you were quoted when you made your choice, held for you until that pricing option closes — your PTA can tell you which applies.
 
 Refunds, if needed, follow your PTA's stated refund policy — talk to your PTA officers.
 

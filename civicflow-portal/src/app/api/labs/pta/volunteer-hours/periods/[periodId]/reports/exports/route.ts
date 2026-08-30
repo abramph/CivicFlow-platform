@@ -38,7 +38,20 @@ export async function POST(request: Request, { params }: { params: Promise<{ per
     const { periodId } = await params;
     const input = await parseJsonBody(request, queueBodySchema);
     const permission = input.reportType === "PTA_VOLUNTEER_FINANCIAL" ? PERMISSIONS.PTA_VOLUNTEER_FINANCIAL_REPORTS_VIEW : PERMISSIONS.PTA_VOLUNTEER_REPORTS_EXPORT;
-    const { organizationId, session } = await requireVolunteerHoursAccess(permission, "reports");
+    const { organizationId, session, can } = await requireVolunteerHoursAccess(permission, "reports");
+    // Deployment-gate review: a caller's financial-report permission at the
+    // MOMENT OF ENQUEUE is snapshotted into filters (no schema migration --
+    // reuses the existing Json column; volunteerReportFiltersFromJson
+    // ignores unknown keys, so this is additive and invisible to every other
+    // reader of this field). processQueuedReportExport (reports.ts) requires
+    // BOTH this snapshot AND a fresh recheck at processing time before
+    // including financial content -- a permission GAINED after enqueue can
+    // never expand what an already-queued export contains, only a LOSS can
+    // narrow it further. Meaningful for PTA_VOLUNTEER_FAMILY_SUMMARY and
+    // PTA_VOLUNTEER_COMPLIANCE (the two report types whose financial content
+    // is gated by a permission finer than the report TYPE itself); harmless
+    // no-op for every other type.
+    const includeFinancialsAtEnqueue = can(PERMISSIONS.PTA_VOLUNTEER_FINANCIAL_REPORTS_VIEW);
 
     const filters = volunteerReportFiltersToJson({
       requirementPeriodId: periodId,
@@ -61,7 +74,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ per
         organizationId,
         reportType: input.reportType,
         outputFormat: "xlsx",
-        filters: filters as Prisma.InputJsonValue,
+        filters: { ...filters, _includeFinancialsAtEnqueue: includeFinancialsAtEnqueue } as Prisma.InputJsonValue,
         status: "QUEUED",
         createdByUserId: session.userId,
       },

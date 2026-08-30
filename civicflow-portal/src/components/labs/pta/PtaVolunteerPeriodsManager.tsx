@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { formatOrgWallTime, formatOrgWallTimeEndOfDayInclusive } from "@/lib/labs/pta/volunteer-hours/timezone";
 
 export interface VolunteerRequirementPeriodLike {
   id: string;
@@ -20,6 +21,18 @@ export interface VolunteerRequirementPeriodLike {
   adminNotes: string | null;
   familyPolicyText: string | null;
   scopeLabel: string | null;
+  /** FC-6: the period's own snapshotted IANA zone — every date on this
+   * period is displayed/edited in this zone, not the browser's or the
+   * server's. */
+  timezone: string;
+  /** RV-4: buyout policy limits — see docs/pta-volunteer-hours-date-semantics.md's
+   * sibling doc for the enforcement details; all four are server-enforced
+   * at quote/checkout time (elections.ts: buildBuyoutQuote), not decorative. */
+  buyoutFullAllowed: boolean;
+  buyoutMinPurchaseMinutes: number | null;
+  buyoutMaxPurchaseMinutes: number | null;
+  buyoutMinServiceMinutes: number | null;
+  buyoutIncrementMinutes: number;
 }
 
 const PERIOD_TYPE_LABEL: Record<VolunteerRequirementPeriodLike["periodType"], string> = {
@@ -38,9 +51,9 @@ const STATUS_BADGE: Record<VolunteerRequirementPeriodLike["status"], string> = {
   ARCHIVED: "bg-slate-100 text-slate-500",
 };
 
-function toDateInputValue(iso: string | null): string {
+function toDateInputValue(iso: string | null, timezone: string): string {
   if (!iso) return "";
-  return iso.slice(0, 10);
+  return formatOrgWallTime(iso, timezone, false);
 }
 
 interface FormState {
@@ -58,6 +71,14 @@ interface FormState {
   adminNotes: string;
   familyPolicyText: string;
   scopeLabel: string;
+  /** RV-4: hours strings for display/entry — always converted to/from
+   * integer minutes at the form boundary (formToPayload/periodToForm),
+   * exactly like requiredHours already does. Empty string = no limit. */
+  buyoutFullAllowed: boolean;
+  buyoutMinPurchaseHours: string;
+  buyoutMaxPurchaseHours: string;
+  buyoutMinServiceHours: string;
+  buyoutIncrementMinutes: "15" | "30" | "60";
 }
 
 const EMPTY_FORM: FormState = {
@@ -75,24 +96,54 @@ const EMPTY_FORM: FormState = {
   adminNotes: "",
   familyPolicyText: "",
   scopeLabel: "",
+  buyoutFullAllowed: true,
+  buyoutMinPurchaseHours: "",
+  buyoutMaxPurchaseHours: "",
+  buyoutMinServiceHours: "",
+  buyoutIncrementMinutes: "60",
 };
+
+function minutesToHoursInputValue(minutes: number | null): string {
+  return minutes == null ? "" : String(minutes / 60);
+}
+
+/** RV-6: buyoutWindowEnd's display-direction inverse — shows the admin the
+ * LAST BUYABLE day they'd expect to see back (the day they originally
+ * typed), not the exclusive following-day instant the server actually
+ * stores. Round-trips exactly with the server's resolveOrgWallTimeEndOfDayToUtc. */
+function toEndOfDayInclusiveDateInputValue(iso: string | null, timezone: string): string {
+  if (!iso) return "";
+  return formatOrgWallTimeEndOfDayInclusive(iso, timezone);
+}
+
+function hoursInputToMinutesOrNull(hoursValue: string): number | null {
+  const trimmed = hoursValue.trim();
+  if (!trimmed) return null;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? Math.round(parsed * 60) : null;
+}
 
 function periodToForm(period: VolunteerRequirementPeriodLike): FormState {
   return {
     name: period.name,
     periodType: period.periodType,
-    startsOn: toDateInputValue(period.startsOn),
-    endsOn: toDateInputValue(period.endsOn),
+    startsOn: toDateInputValue(period.startsOn, period.timezone),
+    endsOn: toDateInputValue(period.endsOn, period.timezone),
     requiredHours: String(period.requiredMinutesDefault / 60),
-    volunteerDeadline: toDateInputValue(period.volunteerDeadline),
-    buyoutWindowStart: toDateInputValue(period.buyoutWindowStart),
-    buyoutWindowEnd: toDateInputValue(period.buyoutWindowEnd),
-    assessmentDate: toDateInputValue(period.assessmentDate),
-    assessmentPaymentDueDate: toDateInputValue(period.assessmentPaymentDueDate),
+    volunteerDeadline: toDateInputValue(period.volunteerDeadline, period.timezone),
+    buyoutWindowStart: toDateInputValue(period.buyoutWindowStart, period.timezone),
+    buyoutWindowEnd: toEndOfDayInclusiveDateInputValue(period.buyoutWindowEnd, period.timezone),
+    assessmentDate: toDateInputValue(period.assessmentDate, period.timezone),
+    assessmentPaymentDueDate: toDateInputValue(period.assessmentPaymentDueDate, period.timezone),
     status: period.status,
     adminNotes: period.adminNotes ?? "",
     familyPolicyText: period.familyPolicyText ?? "",
     scopeLabel: period.scopeLabel ?? "",
+    buyoutFullAllowed: period.buyoutFullAllowed,
+    buyoutMinPurchaseHours: minutesToHoursInputValue(period.buyoutMinPurchaseMinutes),
+    buyoutMaxPurchaseHours: minutesToHoursInputValue(period.buyoutMaxPurchaseMinutes),
+    buyoutMinServiceHours: minutesToHoursInputValue(period.buyoutMinServiceMinutes),
+    buyoutIncrementMinutes: String(period.buyoutIncrementMinutes) as FormState["buyoutIncrementMinutes"],
   };
 }
 
@@ -112,6 +163,11 @@ function formToPayload(form: FormState) {
     adminNotes: form.adminNotes.trim() || null,
     familyPolicyText: form.familyPolicyText.trim() || null,
     scopeLabel: form.scopeLabel.trim() || null,
+    buyoutFullAllowed: form.buyoutFullAllowed,
+    buyoutMinPurchaseMinutes: hoursInputToMinutesOrNull(form.buyoutMinPurchaseHours),
+    buyoutMaxPurchaseMinutes: hoursInputToMinutesOrNull(form.buyoutMaxPurchaseHours),
+    buyoutMinServiceMinutes: hoursInputToMinutesOrNull(form.buyoutMinServiceHours),
+    buyoutIncrementMinutes: Number(form.buyoutIncrementMinutes),
   };
 }
 
@@ -194,6 +250,10 @@ function PeriodForm({
             onChange={(e) => setForm({ ...form, volunteerDeadline: e.target.value })}
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
           />
+          <span className="block text-xs font-normal text-slate-500">
+            Informational — drives the days-remaining countdown families see and deadline-reminder notifications (if
+            enabled). Does not itself block hour submission or buying out hours after this date.
+          </span>
         </label>
         <label className="space-y-1 text-sm font-medium text-slate-900">
           <span>Scope (optional — for concurrent periods)</span>
@@ -225,6 +285,13 @@ function PeriodForm({
             onChange={(e) => setForm({ ...form, buyoutWindowEnd: e.target.value })}
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
           />
+          <span className="block text-xs font-normal text-slate-500">
+            Enforced server-side: buying out hours opens at the very start of the &ldquo;start&rdquo; date and stays
+            open through the very end (11:59pm, the organization&apos;s local time) of the &ldquo;end&rdquo; date —
+            the end date you choose here is the LAST buyable day, not excluded from it. A checkout attempted outside
+            this window is rejected regardless of what the browser shows. Leave both blank for no period-level
+            restriction (only each pricing window&apos;s own dates then apply).
+          </span>
         </label>
         <label className="space-y-1 text-sm font-medium text-slate-900">
           <span>Remaining-hours assessment date</span>
@@ -234,6 +301,11 @@ function PeriodForm({
             onChange={(e) => setForm({ ...form, assessmentDate: e.target.value })}
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
           />
+          <span className="block text-xs font-normal text-slate-500">
+            Enforced server-side: an administrator can preview an assessment batch at any time (a preview never
+            charges anyone), but cannot POST it — creating real charges — before this date. Leave blank for no
+            cutoff.
+          </span>
         </label>
         <label className="space-y-1 text-sm font-medium text-slate-900">
           <span>Assessment payment due date</span>
@@ -243,8 +315,94 @@ function PeriodForm({
             onChange={(e) => setForm({ ...form, assessmentPaymentDueDate: e.target.value })}
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
           />
+          <span className="block text-xs font-normal text-slate-500">
+            Informational only — shown to families as the due date on a posted charge and in payment-reminder
+            notifications (if enabled). Nothing automatically happens if this date passes unpaid; there is no late
+            fee or auto-escalation.
+          </span>
         </label>
       </div>
+
+      <fieldset className="space-y-3 rounded-lg border border-slate-200 p-3">
+        <legend className="px-1 text-sm font-semibold text-slate-900">Buyout policy limits</legend>
+        <p className="text-xs text-slate-500">
+          Every field below is enforced server-side at quote and checkout time — not just UI guidance. Hours are
+          shown here for convenience; they&apos;re stored (and validated) as whole minutes.
+        </p>
+        <div className="grid gap-3 md:grid-cols-2">
+          <label className="flex items-center gap-2 text-sm font-medium text-slate-900">
+            <input
+              type="checkbox"
+              checked={form.buyoutFullAllowed}
+              onChange={(e) => setForm({ ...form, buyoutFullAllowed: e.target.checked })}
+              className="h-4 w-4 rounded border-slate-300"
+            />
+            <span>Allow a full buyout (pay for the entire requirement at once)</span>
+          </label>
+          <label className="space-y-1 text-sm font-medium text-slate-900">
+            <span>Purchase increment</span>
+            <select
+              value={form.buyoutIncrementMinutes}
+              onChange={(e) => setForm({ ...form, buyoutIncrementMinutes: e.target.value as FormState["buyoutIncrementMinutes"] })}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            >
+              <option value="60">Whole hours</option>
+              <option value="30">Half hours</option>
+              <option value="15">Quarter hours</option>
+            </select>
+            <span className="block text-xs font-normal text-slate-500">
+              Every partial-buyout purchase must be an exact multiple of this.
+            </span>
+          </label>
+          <label className="space-y-1 text-sm font-medium text-slate-900">
+            <span>Minimum purchase (hours)</span>
+            <input
+              type="number"
+              min={0}
+              step="0.25"
+              value={form.buyoutMinPurchaseHours}
+              onChange={(e) => setForm({ ...form, buyoutMinPurchaseHours: e.target.value })}
+              placeholder="No minimum beyond one increment"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+            <span className="block text-xs font-normal text-slate-500">Smallest partial buyout a family may choose. Leave blank for no minimum.</span>
+          </label>
+          <label className="space-y-1 text-sm font-medium text-slate-900">
+            <span>Maximum purchase (hours)</span>
+            <input
+              type="number"
+              min={0}
+              step="0.25"
+              value={form.buyoutMaxPurchaseHours}
+              onChange={(e) => setForm({ ...form, buyoutMaxPurchaseHours: e.target.value })}
+              placeholder="Up to the full requirement"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+            <span className="block text-xs font-normal text-slate-500">
+              Largest partial buyout a family may choose. Can&apos;t exceed the required hours above minus the
+              mandatory-service floor below. Leave blank for no cap beyond that.
+            </span>
+          </label>
+          <label className="space-y-1 text-sm font-medium text-slate-900 md:col-span-2">
+            <span>Mandatory-service floor (hours)</span>
+            <input
+              type="number"
+              min={0}
+              step="0.25"
+              value={form.buyoutMinServiceHours}
+              onChange={(e) => setForm({ ...form, buyoutMinServiceHours: e.target.value })}
+              placeholder="No mandatory-service requirement"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+            <span className="block text-xs font-normal text-slate-500">
+              Hours that must come from actual service no matter how much a family buys out — caps every buyout at
+              (required hours − this value). Setting this above 0 also disables full buyout for this period (the two
+              are contradictory).
+            </span>
+          </label>
+        </div>
+      </fieldset>
+
       <label className="block space-y-1 text-sm font-medium text-slate-900">
         <span>Family-facing policy description</span>
         <textarea
@@ -376,8 +534,8 @@ export function PtaVolunteerPeriodsManager({ periods }: { periods: VolunteerRequ
                     ) : null}
                   </div>
                   <p className="mt-0.5 text-xs text-slate-500">
-                    {PERIOD_TYPE_LABEL[period.periodType]} · {toDateInputValue(period.startsOn)} – {toDateInputValue(period.endsOn)} ·{" "}
-                    {(period.requiredMinutesDefault / 60).toString()} required hours
+                    {PERIOD_TYPE_LABEL[period.periodType]} · {toDateInputValue(period.startsOn, period.timezone)} –{" "}
+                    {toDateInputValue(period.endsOn, period.timezone)} · {(period.requiredMinutesDefault / 60).toString()} required hours
                   </p>
                 </div>
                 <div className="flex gap-2">

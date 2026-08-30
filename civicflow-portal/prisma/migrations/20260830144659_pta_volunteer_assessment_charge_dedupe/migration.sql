@@ -1,0 +1,37 @@
+-- fix/pta-volunteer-financial-controls, FC-8/RV-10: prevent two independently-
+-- created assessment batches from both posting a charge for the same
+-- household+period. PtaVolunteerAssessmentLine's @@unique([batchId,
+-- householdId]) (already Prisma-declared) only dedupes WITHIN one batch; it
+-- does nothing across two separate batches. This is a real database-level
+-- guarantee, not just an application-layer check (see the concurrency test
+-- suite) — a race between two simultaneous posts fails one of them with a
+-- catchable unique-constraint violation, never a check-then-insert window.
+--
+-- Hand-authored (not `prisma migrate diff`-generated): Prisma's schema DSL
+-- has no partial/filtered-unique-index syntax, so this index has no
+-- @@unique/@@index representation in schema.prisma — see the schema-drift
+-- warning on the PtaVolunteerAssessmentCharge model doc comment. Mirrors
+-- the exact precedent already established for PropertyResident's two
+-- partial indexes (20260801122342_add_hoa_property_foundation/migration.sql).
+--
+-- RV-10 correction: the predicate is an EXPLICIT positive list of the
+-- statuses that represent an active financial obligation
+-- (PtaVolunteerAssessmentChargeStatus: PENDING | PARTIAL | PAID | VOID —
+-- schema.prisma), not a negative "!= VOID" exclusion. PAID is deliberately
+-- included: a household that already paid in full still has exactly one
+-- historical obligation for this period, and a second batch must not be
+-- able to create a duplicate charge for it. VOID is the only status that
+-- represents a reversed/superseded obligation (no reversal workflow exists
+-- yet to actually PRODUCE a VOID row — see FC-9/FC-11 — but the enum value
+-- and this exclusion exist so that workflow can be added later without a
+-- second migration). A positive list is deliberately more defensive than
+-- `!= VOID` against future enum growth: if a new TERMINAL status is added
+-- later (e.g. a written-off or superseded-by-correction state that should
+-- also allow a fresh charge), `!= VOID` would silently keep blocking it,
+-- while this explicit list makes the omission a visible, reviewable diff
+-- the next migration must consciously make. There is no meaningful
+-- difference in behavior today — the enum has exactly these four values —
+-- only in how safely this constraint survives the enum changing.
+CREATE UNIQUE INDEX "PtaVolunteerAssessmentCharge_org_period_household_active"
+  ON "PtaVolunteerAssessmentCharge"("organizationId", "requirementPeriodId", "householdId")
+  WHERE "status" IN ('PENDING', 'PARTIAL', 'PAID');

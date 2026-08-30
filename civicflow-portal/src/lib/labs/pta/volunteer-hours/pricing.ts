@@ -3,23 +3,44 @@ import { createAuditEvent } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 import { PtaError } from "../errors";
 import { getVolunteerRequirementPeriod } from "./periods";
+import { resolveOrgWallTimeToUtc } from "./timezone";
 
+/** FC-6: `startAt`/`endAt` are zone-less wall-clock strings from
+ * `<input type="datetime-local">` ("YYYY-MM-DDTHH:mm"), resolved against
+ * the owning period's own snapshotted `timezone` — never `Date`-typed at
+ * this layer, for the same reason as `VolunteerRequirementPeriodInput`
+ * (periods.ts). */
 export interface PricingWindowInput {
   name: string;
-  startAt: Date;
-  endAt: Date;
+  startAt: string;
+  endAt: string;
   rateType: PtaVolunteerRateType;
   amountCents: number;
+  /** FC-10 (fix/pta-volunteer-financial-controls): stored, but NOT YET
+   * enforced anywhere — no code path restricts a window marked
+   * contractSigningOnly=true to a household's first election only; every
+   * election/checkout can use it exactly like any other active window of
+   * the same rateType. The create-window admin UI no longer offers this as
+   * a choice (removed rather than left as a promise the backend doesn't
+   * keep — see PtaVolunteerPricingWindowsManager.tsx); this field remains
+   * settable via the API/schema only so an already-true value (none exist
+   * in production or dev as of this correction) isn't silently reinterpreted,
+   * and so real enforcement can be added later without a migration. */
   contractSigningOnly?: boolean;
   active?: boolean;
   lockTiming?: PtaVolunteerRateLockTiming;
 }
 
-function validatePricingWindowInput(input: PricingWindowInput) {
+interface ResolvedPricingWindowDates {
+  startAt: Date;
+  endAt: Date;
+}
+
+function validatePricingWindowInput(input: PricingWindowInput, dates: ResolvedPricingWindowDates) {
   if (!input.name.trim()) {
     throw new PtaError("PTA_VALIDATION_ERROR", "The pricing window needs a name.");
   }
-  if (input.startAt >= input.endAt) {
+  if (dates.startAt >= dates.endAt) {
     throw new PtaError("PTA_VALIDATION_ERROR", "The pricing window's end must be after its start.");
   }
   if (!Number.isInteger(input.amountCents) || input.amountCents < 0) {
@@ -32,20 +53,20 @@ function validatePricingWindowInput(input: PricingWindowInput) {
  * window can freely overlap since it's not live, mirroring how a DRAFT
  * requirement period never conflicts with anything (periods.ts). Never
  * silently averages or picks a "best" rate between ambiguous windows. */
-async function assertNoOverlap(periodId: string, input: PricingWindowInput, excludeWindowId?: string) {
-  if (input.active === false) return;
+async function assertNoOverlap(periodId: string, rateType: PtaVolunteerRateType, active: boolean | undefined, dates: ResolvedPricingWindowDates, excludeWindowId?: string) {
+  if (active === false) return;
 
   const candidates = await prisma.ptaVolunteerPricingWindow.findMany({
     where: {
       periodId,
-      rateType: input.rateType,
+      rateType,
       active: true,
       id: excludeWindowId ? { not: excludeWindowId } : undefined,
     },
     select: { id: true, name: true, startAt: true, endAt: true },
   });
 
-  const conflict = candidates.find((c) => input.startAt < c.endAt && c.startAt < input.endAt);
+  const conflict = candidates.find((c) => dates.startAt < c.endAt && c.startAt < dates.endAt);
   if (conflict) {
     throw new PtaError(
       "PTA_VALIDATION_ERROR",
@@ -69,22 +90,26 @@ export async function createPricingWindow(
   actor: { userId: string; userEmail?: string | null }
 ) {
   const period = await getVolunteerRequirementPeriod(organizationId, periodId);
-  validatePricingWindowInput(input);
-  await assertNoOverlap(periodId, input);
+  const dates: ResolvedPricingWindowDates = {
+    startAt: resolveOrgWallTimeToUtc(input.startAt, period.timezone),
+    endAt: resolveOrgWallTimeToUtc(input.endAt, period.timezone),
+  };
+  validatePricingWindowInput(input, dates);
+  await assertNoOverlap(periodId, input.rateType, input.active, dates);
 
   const window = await prisma.ptaVolunteerPricingWindow.create({
     data: {
       organizationId,
       periodId,
       name: input.name.trim(),
-      startAt: input.startAt,
-      endAt: input.endAt,
+      startAt: dates.startAt,
+      endAt: dates.endAt,
       timezone: period.timezone,
       rateType: input.rateType,
       amountCents: input.amountCents,
       contractSigningOnly: input.contractSigningOnly ?? false,
       active: input.active ?? true,
-      lockTiming: input.lockTiming ?? "PAYMENT_SUCCESS",
+      lockTiming: input.lockTiming ?? "CHECKOUT",
       createdByUserId: actor.userId,
     },
   });
@@ -111,20 +136,27 @@ export async function updatePricingWindow(
 ) {
   const existing = await prisma.ptaVolunteerPricingWindow.findFirst({ where: { id: windowId, organizationId, periodId } });
   if (!existing) throw new PtaError("PTA_VALIDATION_ERROR", "Pricing window not found in this organization.");
-  validatePricingWindowInput(input);
-  await assertNoOverlap(periodId, input, windowId);
+  // FC-6: resolved against the window's own already-snapshotted timezone
+  // (same as PtaVolunteerRequirementPeriod update), not the period's
+  // possibly-different current one and not re-fetched from OrgSettings.
+  const dates: ResolvedPricingWindowDates = {
+    startAt: resolveOrgWallTimeToUtc(input.startAt, existing.timezone),
+    endAt: resolveOrgWallTimeToUtc(input.endAt, existing.timezone),
+  };
+  validatePricingWindowInput(input, dates);
+  await assertNoOverlap(periodId, input.rateType, input.active, dates, windowId);
 
   const window = await prisma.ptaVolunteerPricingWindow.update({
     where: { id: windowId },
     data: {
       name: input.name.trim(),
-      startAt: input.startAt,
-      endAt: input.endAt,
+      startAt: dates.startAt,
+      endAt: dates.endAt,
       rateType: input.rateType,
       amountCents: input.amountCents,
       contractSigningOnly: input.contractSigningOnly ?? false,
       active: input.active ?? true,
-      lockTiming: input.lockTiming ?? "PAYMENT_SUCCESS",
+      lockTiming: input.lockTiming ?? "CHECKOUT",
     },
   });
 

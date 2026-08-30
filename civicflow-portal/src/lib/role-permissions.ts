@@ -46,6 +46,31 @@ export async function canDoForOrg(organizationId: string, role: Role, permission
   return effective.includes(permission);
 }
 
+/**
+ * Resolves whether a specific user CURRENTLY holds a permission in an org,
+ * from just (organizationId, userId) — no live session/request required.
+ * For a background job (the report-export worker) that only has
+ * `ReportExport.createdByUserId` to go on, re-deriving from the DB at
+ * processing time (rather than trusting a permission decision snapshotted
+ * at enqueue time) matches this same file/queue's existing convention of
+ * re-checking capability flags "not just at enqueue time" — a role change
+ * between enqueue and processing must take effect immediately, the same way
+ * a flag change does.
+ *
+ * Fails closed (false) if the user has no active membership in the org —
+ * an export whose creator can no longer be resolved to a real member must
+ * never be treated as having elevated access.
+ */
+export async function hasCurrentPermissionForOrg(organizationId: string, userId: string, permission: Permission): Promise<boolean> {
+  if (!userId) return false;
+  const membership = await prisma.organizationMembership.findUnique({
+    where: { organizationId_userId: { organizationId, userId } },
+    select: { role: true, status: true },
+  });
+  if (!membership || membership.status !== "active") return false;
+  return canDoForOrg(organizationId, membership.role, permission);
+}
+
 /** The role's hardcoded default set, exposed for the editor UI to show what "Reset to default" restores. */
 export function defaultPermissionsFor(role: CustomizableRole): Permission[] {
   return permissionsFor(role);
