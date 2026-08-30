@@ -45,16 +45,27 @@ export async function GET(request: Request, { params }: { params: Promise<{ orga
   });
 }
 
-const bodySchema = z.object({
-  /** Required — every internal trial grant must be explainable in the audit
-   * trail. Duration, start, and end are deliberately NOT accepted here —
-   * the server always computes a fixed 30-day window
-   * (INTERNAL_TRIAL_DURATION_DAYS in internal-trial.ts). */
-  reason: z.string().trim().min(1, "A reason is required to grant an internal trial.").max(2000),
-  /** Explicit confirmation flag the UI must send — mirrors the primary-vertical
-   * and Labs-enrollment routes' irreversibility-confirmation pattern. */
-  confirm: z.literal(true),
-});
+/** `.strict()` — an unknown property (duration, trialEndsAt, billingExempt, a
+ * Stripe identifier, anything) fails validation with 400 rather than being
+ * silently dropped. The server remains the only source of trial duration
+ * and timestamps; this schema has no field a client could use to influence
+ * either, so there is nothing to strip, only unknown keys to reject. */
+const bodySchema = z
+  .object({
+    /** Required — every internal trial grant must be explainable in the
+     * audit trail. A short min length rejects placeholder/noise input
+     * ("x", "n/a") without being so strict it rejects genuine short
+     * reasons; max length keeps the audit metadata bounded. */
+    reason: z
+      .string()
+      .trim()
+      .min(10, "A meaningful reason (at least 10 characters) is required to grant an internal trial.")
+      .max(500, "Reason must be 500 characters or fewer."),
+    /** Explicit confirmation flag the UI must send — mirrors the primary-vertical
+     * and Labs-enrollment routes' irreversibility-confirmation pattern. */
+    confirm: z.literal(true),
+  })
+  .strict();
 
 /** POST: platform-admin grant of a one-time, 30-day, Stripe-free internal
  * trial. All eligibility/atomicity/anti-stacking/audit enforcement lives in

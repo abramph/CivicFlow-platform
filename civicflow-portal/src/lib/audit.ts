@@ -22,6 +22,12 @@ interface CreateAuditEventInput {
   entityId?: string | null;
   metadata?: Prisma.InputJsonValue;
   ipAddress?: string | null;
+  /** Pass the active `$transaction` client to have this audit insert commit
+   * (or roll back) atomically with the other writes in that transaction —
+   * same `PrismaClient | Prisma.TransactionClient` convention as
+   * admin-seats.ts's `Db` type. Defaults to the top-level `prisma` client,
+   * i.e. every existing call site's behavior is unchanged. */
+  tx?: Prisma.TransactionClient;
 }
 
 /**
@@ -55,7 +61,8 @@ async function detectImpersonator(actorUserId?: string | null): Promise<{ userId
  */
 export async function createAuditEvent(input: CreateAuditEventInput) {
   const impersonator = await detectImpersonator(input.actorUserId);
-  return prisma.auditEvent.create({
+  const client = input.tx ?? prisma;
+  return client.auditEvent.create({
     data: {
       organizationId: input.organizationId,
       actorId: input.actorUserId ?? null,
