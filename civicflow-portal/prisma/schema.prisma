@@ -806,6 +806,8 @@ model Organization {
   ptaVolunteerAssessmentCharges      PtaVolunteerAssessmentCharge[]
   ptaVolunteerReviewFlags            PtaVolunteerReviewFlag[]
   ptaVolunteerNotificationLogs       PtaVolunteerNotificationLog[]
+  ptaVolunteerAgreementVersions      PtaVolunteerAgreementVersion[]
+  ptaVolunteerAgreementAcceptances   PtaVolunteerAgreementAcceptance[]
 
   hoaProperties             Property[]
   hoaPropertyResidents      PropertyResident[]
@@ -4744,6 +4746,7 @@ model PtaHousehold {
   volunteerAssessmentCharges      PtaVolunteerAssessmentCharge[]
   volunteerReviewFlags            PtaVolunteerReviewFlag[]
   volunteerNotificationLogs       PtaVolunteerNotificationLog[]
+  volunteerAgreementAcceptances   PtaVolunteerAgreementAcceptance[]
 
   @@unique([organizationId, displayName, schoolYear])
   @@index([organizationId])
@@ -4801,6 +4804,7 @@ model PtaHouseholdAdult {
   electionCandidacies    PtaElectionCandidate[]
   electionVoterRows      PtaElectionVoter[]
   volunteerLedgerEntries PtaVolunteerLedgerEntry[]
+  volunteerAgreementAcceptances PtaVolunteerAgreementAcceptance[]
 
   @@unique([organizationId, userId])
   @@index([organizationId])
@@ -5313,6 +5317,41 @@ model PtaVolunteerRequirementPeriod {
   /// Purchase increment: 60 = whole hours, 30 = half hours, 15 = quarter
   /// hours. Every buyout request must be an exact multiple of this.
   buyoutIncrementMinutes   Int                      @default(60)
+  /// feature/pta-family-agreement-buyout: whether a household must accept
+  /// `assignedAgreementVersion` before making ANY election (VOLUNTEER
+  /// included, not just buyout) or getting buyout access for this period.
+  /// Default false so every existing period (and every org that never
+  /// touches this feature) is completely unaffected.
+  agreementRequired               Boolean  @default(false)
+  /// Which PUBLISHED version of this period's own agreement is currently
+  /// recognized — see PtaVolunteerAgreementVersion's own doc comment for why
+  /// this is a separate FK from that model's own `requirementPeriodId`
+  /// (a period may accumulate several versions over time; this points at
+  /// exactly one). Publishing a new version does NOT automatically move
+  /// this pointer — an admin must explicitly reassign it (docs
+  /// section 10's amendment policy), so existing acceptances of the
+  /// previously-assigned version are never silently invalidated.
+  agreementVersionId              String?
+  /// Whether a contract-linked (`contractSigningOnly=true`) pricing window
+  /// may be resolved for a household that has accepted the assigned
+  /// agreement version. Independent of `agreementRequired` — a period could
+  /// require acceptance without offering contract-linked pricing at all.
+  contractLinkedBuyoutEnabled     Boolean  @default(false)
+  /// Calendar days after `PtaVolunteerAgreementAcceptance.acceptedAt` during
+  /// which a contract-linked election may still be made, resolved in this
+  /// period's own `timezone` (see timezone.ts's day-boundary helpers — same
+  /// DST-safe convention as `buyoutWindowEnd`). Null = contract-linked
+  /// buyout not offered even if `contractLinkedBuyoutEnabled` is somehow
+  /// true (belt-and-suspenders; the admin service also refuses to enable
+  /// one without the other).
+  contractLinkedEligibilityDays   Int?
+  /// True (default): the rate applicable AT ACCEPTANCE TIME is frozen for
+  /// the household's contract-linked eligibility window (resolveVolunteerBuyoutRate
+  /// is called with `acceptedAt`, not "now"). False: contract-linked pricing
+  /// is still gated on acceptance + the eligibility window, but resolves at
+  /// the CURRENT instant like a normal quote — for a PTA that wants
+  /// contract-signing to unlock early access without also rate-locking it.
+  contractLinkedUsesAcceptanceRate Boolean @default(true)
   createdAt                DateTime                 @default(now())
   updatedAt                DateTime                 @updatedAt
 
@@ -5328,6 +5367,9 @@ model PtaVolunteerRequirementPeriod {
   assessmentCharges PtaVolunteerAssessmentCharge[]
   reviewFlags       PtaVolunteerReviewFlag[]
   notificationLogs  PtaVolunteerNotificationLog[]
+  assignedAgreementVersion PtaVolunteerAgreementVersion?     @relation("PtaVolunteerPeriodAssignedAgreement", fields: [agreementVersionId], references: [id], onDelete: SetNull)
+  agreementVersions        PtaVolunteerAgreementVersion[]    @relation("PtaVolunteerAgreementVersionPeriod")
+  agreementAcceptances     PtaVolunteerAgreementAcceptance[]
 
   @@index([organizationId, status])
   @@index([organizationId, startsOn, endsOn])
@@ -5629,15 +5671,158 @@ model PtaVolunteerBuyoutElection {
   /// already-made election.
   ackVersion           String
   ipAddress            String?
+  /// feature/pta-family-agreement-buyout: set when this election was made
+  /// while a contract-linked pricing window was resolved for the household
+  /// (see elections.ts: resolveContractLinkedEligibility) — pure
+  /// traceability for reporting ("was this election contract-linked, and
+  /// under which acceptance"), never itself re-consulted to re-derive
+  /// eligibility (that is always re-verified fresh from the acceptance
+  /// record + period config, the same "price is frozen, eligibility is not"
+  /// discipline resolveLockedOrFreshQuote already applies to ELECTION-locked
+  /// windows). Null for every election made without contract-linked pricing
+  /// — i.e. every election that predates this feature, unaffected.
+  contractAcceptanceId String?
   createdAt            DateTime                 @default(now())
 
   organization Organization                  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   period       PtaVolunteerRequirementPeriod @relation(fields: [requirementPeriodId], references: [id], onDelete: Cascade)
   household    PtaHousehold                  @relation(fields: [householdId], references: [id], onDelete: Cascade)
   purchases    PtaVolunteerBuyoutPurchase[]
+  contractAcceptance PtaVolunteerAgreementAcceptance? @relation(fields: [contractAcceptanceId], references: [id], onDelete: SetNull)
 
   @@index([organizationId, requirementPeriodId, householdId])
   @@index([organizationId, householdId])
+}
+
+/// feature/pta-family-agreement-buyout. An immutable-once-published
+/// versioned "PTA Volunteer Commitment Agreement" — an acknowledgment
+/// record, deliberately NOT marketed or implemented as a certified
+/// electronic signature (no identity verification, no e-signature
+/// compliance framework backs this — see docs/pta-family-agreement-buyout.md).
+/// A period may accumulate several versions over time (DRAFT while being
+/// written, PUBLISHED once live, ARCHIVED when superseded) — only one may be
+/// `assignedAgreementVersion` on the period at a time (see that field's own
+/// comment), and archiving/superseding never deletes a version a household
+/// already accepted (see PtaVolunteerAgreementAcceptance's own FK, which is
+/// Restrict, not Cascade, specifically to make that structurally impossible).
+model PtaVolunteerAgreementVersion {
+  id                  String                      @id @default(cuid())
+  organizationId      String
+  requirementPeriodId String
+  title               String
+  /// Monotonically increasing per (organizationId, requirementPeriodId),
+  /// assigned at creation — the human-readable "version identifier" the
+  /// spec requires, independent of `id` (which is an opaque cuid).
+  versionNumber       Int
+  /// Plain text only (see PTA_FAMILY_AGREEMENT constants for the
+  /// sanitization boundary enforced at write time) — no executable HTML,
+  /// no script/style injection surface.
+  content              String
+  /// sha256(content), computed server-side at PUBLISH time (not draft-save
+  /// time, since content can still change while DRAFT) — the acceptance
+  /// record snapshots this same hash, so a later (impossible, but
+  /// defense-in-depth) content mutation would be detectable.
+  contentHash          String
+  status               PtaVolunteerAgreementStatus @default(DRAFT)
+  /// Both null while DRAFT; set together, once, when published — a
+  /// published version's `content`/`contentHash`/`title` are never
+  /// updated again (enforced in the service layer, not just this comment;
+  /// see publishAgreementVersion's own guard).
+  publishedAt          DateTime?
+  publishedByUserId    String?
+  /// Optional — "in effect starting X" if a PTA wants to publish ahead of
+  /// when it should actually start being recognized. Purely informational
+  /// today (nothing gates on it) unless a later phase wires it in; a
+  /// version is either PUBLISHED (assignable) or it isn't, and assignment
+  /// itself (not this field) is what actually turns enforcement on for a
+  /// period. Documented here rather than silently omitted, since the spec
+  /// explicitly asks for the field.
+  effectiveDate        DateTime?
+  archivedAt           DateTime?
+  archivedByUserId     String?
+  createdByUserId      String
+  createdAt            DateTime                    @default(now())
+  updatedAt            DateTime                    @updatedAt
+
+  organization      Organization                      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  period            PtaVolunteerRequirementPeriod     @relation("PtaVolunteerAgreementVersionPeriod", fields: [requirementPeriodId], references: [id], onDelete: Cascade)
+  assignedToPeriods PtaVolunteerRequirementPeriod[]   @relation("PtaVolunteerPeriodAssignedAgreement")
+  acceptances       PtaVolunteerAgreementAcceptance[]
+
+  @@unique([organizationId, requirementPeriodId, versionNumber])
+  @@index([organizationId, requirementPeriodId, status])
+}
+
+enum PtaVolunteerAgreementStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+/// feature/pta-family-agreement-buyout. Immutable, household-scoped record
+/// of one authorized adult accepting one specific PUBLISHED agreement
+/// version on behalf of their household — an acknowledgment, not a
+/// certified e-signature (see PtaVolunteerAgreementVersion's own doc
+/// comment). Never edited or superseded in place; a later acceptance of a
+/// DIFFERENT version is a new row, and re-submitting the SAME version is
+/// idempotent (see the unique constraint below + acceptAgreement's
+/// insert-then-catch-P2002 handling, matching every other idempotency
+/// pattern in this program).
+///
+/// Deliberately does NOT store IP address or user-agent — unlike
+/// PtaVolunteerBuyoutElection.ipAddress (a pre-existing, unrelated field
+/// this model does not need to match), this is new code and the spec
+/// explicitly asks to omit device metadata unless a genuine need is
+/// justified first. None was.
+model PtaVolunteerAgreementAcceptance {
+  id                     String   @id @default(cuid())
+  organizationId         String
+  requirementPeriodId    String
+  agreementVersionId     String
+  householdId            String
+  acceptedByUserId       String
+  /// The specific household-adult identity, when resolvable (it always is
+  /// for this program's own accept route, which resolves it the same way
+  /// every other household-self-service route does — nullable only for
+  /// schema-level defensiveness, never actually null in practice).
+  acceptedByAdultId      String?
+  /// Server-generated at the exact moment the write happens — `new Date()`
+  /// in the service layer (this program's established convention; see
+  /// elections.ts's `acknowledgedAt`), never a DB default and never
+  /// accepted from the request body, so it can neither be spoofed nor
+  /// backdated by a client or an administrator.
+  acceptedAt             DateTime
+  /// Redundant snapshot of the version's contentHash at the moment of
+  /// acceptance — defense in depth against the (structurally prevented,
+  /// but this is belt-and-suspenders) scenario of a published version's
+  /// content ever changing after the fact.
+  contentHashAtAcceptance String
+  /// Versioned checkbox/acknowledgment COPY (distinct from the agreement
+  /// CONTENT's own version) — bumped only if the "I acknowledge..." framing
+  /// text itself materially changes, mirroring VOLUNTEER_HOURS_ACK_VERSION's
+  /// exact pattern one layer up.
+  ackVersion             String
+  /// Optional typed full name, shown back to the family as "Accepted by."
+  typedName              String?
+  createdAt              DateTime @default(now())
+
+  organization     Organization                   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  period           PtaVolunteerRequirementPeriod   @relation(fields: [requirementPeriodId], references: [id], onDelete: Cascade)
+  /// Restrict, not Cascade: a version with at least one acceptance can
+  /// never be deleted out from under the households that accepted it —
+  /// "agreement deletion must not destroy acceptance history" is enforced
+  /// at the database level, not just documented as a service-layer promise.
+  agreementVersion PtaVolunteerAgreementVersion    @relation(fields: [agreementVersionId], references: [id], onDelete: Restrict)
+  household        PtaHousehold                    @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  acceptedByAdult  PtaHouseholdAdult?              @relation(fields: [acceptedByAdultId], references: [id], onDelete: SetNull)
+  elections        PtaVolunteerBuyoutElection[]
+
+  /// The database-level idempotency guard section 5 requires: at most one
+  /// acceptance per household per agreement version, ever — a repeated
+  /// submission (including N simultaneous ones) must resolve to this one
+  /// row, never a duplicate.
+  @@unique([organizationId, householdId, agreementVersionId])
+  @@index([organizationId, requirementPeriodId])
 }
 
 enum PtaVolunteerHourDisputeStatus {

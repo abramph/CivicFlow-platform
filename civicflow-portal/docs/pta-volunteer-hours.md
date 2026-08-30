@@ -1242,3 +1242,39 @@ create-if-missing order first) and `updatePtaVolunteerHoursFlags()`
 correctly. Full PTA-area suite (692 tests, `src/lib/labs/pta/**`) and
 the full volunteer-hours suite (379 tests) both pass with zero
 regressions.
+
+## Deployment risk statement (post `fix/pta-volunteer-financial-controls`, commit `1fb0bc3`)
+
+The FC/RV correction round and its deployment-gate follow-up are live in
+production as of this commit, dormant (buyout and assessments off for
+every organization, confirmed read-only post-deploy). This statement is
+the authoritative summary of what risk that deployment does and does not
+carry, superseding any looser "remaining risk" language in earlier
+per-stage sections above.
+
+- **There are no new deployment-specific risks.** The deploy itself was
+  verified end-to-end: exact file/test-count reconciliation, enum-migration
+  zero-downtime safety (fresh production reads plus a full 115-migration
+  production-equivalent replay), a proven pending-purchase safety-property
+  set (10/10, including a race the deployment-gate review found and fixed),
+  export permission-scope proof, posting-kill-switch inertness proof, and a
+  clean production cutover (3 migrations applied automatically and in
+  order via the app's own `db:deploy` startup step, zero errors, zero
+  side-effect audit events). Nothing about the deployment mechanism itself
+  is an open risk.
+- **Contract-linked buyout remains an incomplete product requirement.**
+  `contractSigningOnly` on `PtaVolunteerPricingWindow` is stored but still
+  inert — no authoritative household-agreement record exists to link a
+  buyout offer to (see `docs/pta-volunteer-hours-contract-signing-design.md`
+  for the investigation and bounded design). The buyout/assessment feature
+  is not requirement-complete on this account; a separately scoped program
+  is required before this can be offered to a real PTA.
+- **Assessment reversal/adjustment remains a blocker to live assessment
+  posting.** `postAssessmentBatch` is hard-gated off platform-wide via
+  `PTA_VOLUNTEER_ASSESSMENT_POSTING_ENABLED` (absent from the production
+  app spec) specifically because no code path anywhere can adjust, void, or
+  reverse a posted `PtaVolunteerAssessmentCharge` (see
+  `docs/pta-volunteer-hours-assessment-reversal-boundary.md`). This
+  kill-switch must stay off until a separately authorized
+  reversal/adjustment design is built — it is a product blocker, not a
+  deployment risk.

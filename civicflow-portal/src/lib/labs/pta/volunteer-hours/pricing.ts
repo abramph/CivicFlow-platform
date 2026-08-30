@@ -199,25 +199,63 @@ export async function deletePricingWindow(
 
 /**
  * The server-side source of truth for "what does this cost right now" —
- * selects the ACTIVE window of the requested rateType whose [startAt, endAt)
- * contains `atInstant`. Returns null when nothing is configured for that
- * moment/type (caller decides what that means — e.g. buyout unavailable).
- * Never trusts a client-supplied price; every checkout/assessment call site
- * must call this (or resolve via the snapshot already stored on a completed
- * purchase) rather than accept a rate from the request body.
+ * selects the ACTIVE, non-contract-linked window of the requested rateType
+ * whose [startAt, endAt) contains `atInstant`. Returns null when nothing is
+ * configured for that moment/type (caller decides what that means — e.g.
+ * buyout unavailable). Never trusts a client-supplied price; every
+ * checkout/assessment call site must call this (or resolve via the snapshot
+ * already stored on a completed purchase) rather than accept a rate from
+ * the request body.
+ *
+ * feature/pta-family-agreement-buyout: `contractSigningOnly` is now an
+ * explicit `false` filter here (previously this query didn't filter on it
+ * at all — FC-10's own finding was that the field was completely inert;
+ * this is the "replace the inert boolean with a real relational model"
+ * change the spec calls for). Safe, non-breaking tightening: zero
+ * contractSigningOnly=true rows exist anywhere as of this change (RV-8),
+ * so no existing quote/election/checkout path's resolved window changes.
+ *
+ * When `options.contractLinkedResolutionInstant` is supplied — meaning the
+ * caller has ALREADY verified the household's contract-linked eligibility
+ * via agreements.ts's `resolveHouseholdAgreementStatus` — a
+ * `contractSigningOnly=true` window active at THAT instant is preferred
+ * over the regular one, evaluated separately (frozen at acceptance time, or
+ * "now," depending on the period's `contractLinkedUsesAcceptanceRate`
+ * setting — the caller decides which instant to pass). Falls through to the
+ * regular resolution at `atInstant` if no contract-linked window is active
+ * at that instant, so a PTA is never forced to also deactivate its regular
+ * window during a contract-linked offer period.
  */
 export async function resolveVolunteerBuyoutRate(
   organizationId: string,
   periodId: string,
   rateType: PtaVolunteerRateType,
-  atInstant: Date = new Date()
+  atInstant: Date = new Date(),
+  options?: { contractLinkedResolutionInstant?: Date }
 ) {
+  if (options?.contractLinkedResolutionInstant) {
+    const contractLinkedWindow = await prisma.ptaVolunteerPricingWindow.findFirst({
+      where: {
+        organizationId,
+        periodId,
+        rateType,
+        active: true,
+        contractSigningOnly: true,
+        startAt: { lte: options.contractLinkedResolutionInstant },
+        endAt: { gt: options.contractLinkedResolutionInstant },
+      },
+      orderBy: { startAt: "desc" },
+    });
+    if (contractLinkedWindow) return contractLinkedWindow;
+  }
+
   return prisma.ptaVolunteerPricingWindow.findFirst({
     where: {
       organizationId,
       periodId,
       rateType,
       active: true,
+      contractSigningOnly: false,
       startAt: { lte: atInstant },
       endAt: { gt: atInstant },
     },

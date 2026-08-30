@@ -15,6 +15,9 @@ vi.mock("../ledger", () => ({ getHouseholdLedgerTotals: (...a: unknown[]) => get
 const resolveVolunteerBuyoutRate = vi.fn();
 vi.mock("../pricing", () => ({ resolveVolunteerBuyoutRate: (...a: unknown[]) => resolveVolunteerBuyoutRate(...a) }));
 
+const resolveHouseholdAgreementStatus = vi.fn();
+vi.mock("../agreements", () => ({ resolveHouseholdAgreementStatus: (...a: unknown[]) => resolveHouseholdAgreementStatus(...a) }));
+
 const createElection = vi.fn();
 const findFirstElection = vi.fn();
 const findUniquePricingWindow = vi.fn();
@@ -67,6 +70,10 @@ beforeEach(() => {
   getVolunteerRequirementPeriod.mockResolvedValue(basePeriod);
   resolveHouseholdRequirement.mockResolvedValue({ requiredMinutes: 1200, assignmentType: "STANDARD", matchedScopeType: null, assignmentId: null, reason: null, exempt: false });
   getHouseholdLedgerTotals.mockResolvedValue(emptyTotals);
+  // Not eligible for contract-linked pricing by default -- every existing
+  // test in this file (written before this feature existed) must see
+  // IDENTICAL behavior to before, so this is the safe default.
+  resolveHouseholdAgreementStatus.mockResolvedValue({ contractLinkedEligibleNow: false, acceptance: null });
 });
 
 describe("buildBuyoutQuote — VOLUNTEER", () => {
@@ -451,5 +458,116 @@ describe("resolveLockedOrFreshQuote — FC-4 lock-timing dispatch (docs/pta-volu
     const { resolveLockedOrFreshQuote } = await import("../elections");
     const quote = await resolveLockedOrFreshQuote("org-1", "period-1", "hh-1", { electionType: "PARTIAL_BUYOUT", electionId: "not-mine", hoursElectedMinutes: 480 });
     expect(quote.rateCents).toBe(2_000);
+  });
+});
+
+describe("buildBuyoutQuote — feature/pta-family-agreement-buyout contract-linked pricing", () => {
+  it("not eligible: never passes contractLinkedResolutionInstant to resolveVolunteerBuyoutRate, quote.contractAcceptanceId is null", async () => {
+    resolveHouseholdAgreementStatus.mockResolvedValue({ contractLinkedEligibleNow: false, acceptance: null });
+    resolveVolunteerBuyoutRate.mockResolvedValue({ id: "window-regular", amountCents: 25_000, contractSigningOnly: false });
+
+    const { buildBuyoutQuote } = await import("../elections");
+    const quote = await buildBuyoutQuote("org-1", "period-1", "hh-1", { electionType: "FULL_BUYOUT" });
+
+    expect(quote.contractAcceptanceId).toBeNull();
+    expect(resolveVolunteerBuyoutRate).toHaveBeenCalledWith("org-1", "period-1", "FULL_BUYOUT", expect.any(Date), undefined);
+  });
+
+  it("eligible + contractLinkedUsesAcceptanceRate=true: passes the ACCEPTANCE instant (not now) as the contract-linked resolution instant", async () => {
+    const acceptedAt = new Date("2027-01-01T12:00:00Z");
+    resolveHouseholdAgreementStatus.mockResolvedValue({ contractLinkedEligibleNow: true, acceptance: { id: "acc-1", acceptedAt } });
+    getVolunteerRequirementPeriod.mockResolvedValue({ ...basePeriod, contractLinkedUsesAcceptanceRate: true });
+    resolveVolunteerBuyoutRate.mockResolvedValue({ id: "window-contract", amountCents: 15_000, contractSigningOnly: true });
+
+    const { buildBuyoutQuote } = await import("../elections");
+    const quote = await buildBuyoutQuote("org-1", "period-1", "hh-1", { electionType: "FULL_BUYOUT" });
+
+    expect(resolveVolunteerBuyoutRate).toHaveBeenCalledWith("org-1", "period-1", "FULL_BUYOUT", expect.any(Date), { contractLinkedResolutionInstant: acceptedAt });
+    expect(quote.contractAcceptanceId).toBe("acc-1"); // the resolved window WAS the contract-linked one
+    expect(quote.rateCents).toBe(15_000);
+  });
+
+  it("eligible + contractLinkedUsesAcceptanceRate=false: passes the CURRENT instant, not the (stale) acceptance instant", async () => {
+    const acceptedAt = new Date("2020-01-01T00:00:00Z"); // long ago -- must NOT be used as the resolution instant
+    resolveHouseholdAgreementStatus.mockResolvedValue({ contractLinkedEligibleNow: true, acceptance: { id: "acc-1", acceptedAt } });
+    getVolunteerRequirementPeriod.mockResolvedValue({ ...basePeriod, contractLinkedUsesAcceptanceRate: false });
+    resolveVolunteerBuyoutRate.mockResolvedValue({ id: "window-contract", amountCents: 15_000, contractSigningOnly: true });
+
+    const { buildBuyoutQuote } = await import("../elections");
+    await buildBuyoutQuote("org-1", "period-1", "hh-1", { electionType: "FULL_BUYOUT" });
+
+    const call = resolveVolunteerBuyoutRate.mock.calls[0];
+    const passedInstant = (call[4] as { contractLinkedResolutionInstant: Date }).contractLinkedResolutionInstant;
+    expect(passedInstant.getTime()).not.toBe(acceptedAt.getTime());
+    expect(passedInstant.getTime()).toBeGreaterThan(acceptedAt.getTime());
+  });
+
+  it("eligible, but the resolved window is the REGULAR (non-contract) one -- contractAcceptanceId stays null even though eligibility was verified", async () => {
+    resolveHouseholdAgreementStatus.mockResolvedValue({ contractLinkedEligibleNow: true, acceptance: { id: "acc-1", acceptedAt: new Date() } });
+    // pricing.ts's own fallback logic is what would return a non-contract
+    // window here in reality; this test proves elections.ts trusts
+    // whatever window comes back rather than assuming eligibility implies
+    // a contract-linked window was actually used.
+    resolveVolunteerBuyoutRate.mockResolvedValue({ id: "window-regular", amountCents: 25_000, contractSigningOnly: false });
+
+    const { buildBuyoutQuote } = await import("../elections");
+    const quote = await buildBuyoutQuote("org-1", "period-1", "hh-1", { electionType: "FULL_BUYOUT" });
+    expect(quote.contractAcceptanceId).toBeNull();
+  });
+
+  it("PARTIAL_BUYOUT also carries contract-linked resolution through (not just FULL_BUYOUT)", async () => {
+    resolveHouseholdAgreementStatus.mockResolvedValue({ contractLinkedEligibleNow: true, acceptance: { id: "acc-2", acceptedAt: new Date() } });
+    getVolunteerRequirementPeriod.mockResolvedValue({ ...basePeriod, contractLinkedUsesAcceptanceRate: true });
+    resolveVolunteerBuyoutRate.mockResolvedValue({ id: "window-contract-hourly", amountCents: 1_200, contractSigningOnly: true });
+
+    const { buildBuyoutQuote } = await import("../elections");
+    const quote = await buildBuyoutQuote("org-1", "period-1", "hh-1", { electionType: "PARTIAL_BUYOUT", hoursElectedMinutes: 60 });
+    expect(quote.contractAcceptanceId).toBe("acc-2");
+    expect(resolveVolunteerBuyoutRate).toHaveBeenCalledWith("org-1", "period-1", "PER_HOUR", expect.any(Date), expect.objectContaining({ contractLinkedResolutionInstant: expect.any(Date) }));
+  });
+
+  it("recordElection persists contractAcceptanceId from the quote onto the created election row", async () => {
+    resolveHouseholdAgreementStatus.mockResolvedValue({ contractLinkedEligibleNow: true, acceptance: { id: "acc-3", acceptedAt: new Date() } });
+    getVolunteerRequirementPeriod.mockResolvedValue({ ...basePeriod, contractLinkedUsesAcceptanceRate: true });
+    resolveVolunteerBuyoutRate.mockResolvedValue({ id: "window-contract", amountCents: 25_000, contractSigningOnly: true });
+    createElection.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ id: "election-1", ...data }));
+
+    const { recordElection } = await import("../elections");
+    await recordElection("org-1", "period-1", "hh-1", { electionType: "FULL_BUYOUT", acknowledged: true }, { userId: "u1" });
+
+    expect(createElection).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ contractAcceptanceId: "acc-3" }) }));
+  });
+
+  it("resolveLockedOrFreshQuote's ELECTION-lock branch reuses the election's OWN stored contractAcceptanceId, never re-deriving it from current agreement status", async () => {
+    findFirstElection.mockResolvedValue({
+      id: "election-1",
+      electionType: "FULL_BUYOUT",
+      pricingWindowId: "window-1",
+      hoursElectedMinutes: 1200,
+      quotedRateCents: 25_000,
+      quotedTotalCents: 25_000,
+      contractAcceptanceId: "acc-frozen",
+    });
+    findFirstElection.mockResolvedValueOnce({
+      id: "election-1",
+      electionType: "FULL_BUYOUT",
+      pricingWindowId: "window-1",
+      hoursElectedMinutes: 1200,
+      quotedRateCents: 25_000,
+      quotedTotalCents: 25_000,
+      contractAcceptanceId: "acc-frozen",
+    });
+    // getLatestElection call (second findFirst call) must return the SAME election id.
+    findFirstElection.mockResolvedValueOnce({ id: "election-1" });
+    findUniquePricingWindow.mockResolvedValue({ id: "window-1", lockTiming: "ELECTION", active: true, endAt: new Date(Date.now() + 86_400_000) });
+    // Even if agreement status now says NOT eligible (e.g. offer window
+    // since expired), the already-locked election's frozen
+    // contractAcceptanceId must still be honored -- it's a snapshot, exactly
+    // like quotedRateCents/quotedTotalCents already are.
+    resolveHouseholdAgreementStatus.mockResolvedValue({ contractLinkedEligibleNow: false, acceptance: null });
+
+    const { resolveLockedOrFreshQuote } = await import("../elections");
+    const quote = await resolveLockedOrFreshQuote("org-1", "period-1", "hh-1", { electionType: "FULL_BUYOUT", electionId: "election-1" });
+    expect(quote.contractAcceptanceId).toBe("acc-frozen");
   });
 });

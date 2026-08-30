@@ -143,6 +143,10 @@ export const PTA_ERROR_CODES = [
    * never silently superseded; the caller is asked to retry shortly, by
    * which point the winner's session should be reusable. */
   "PTA_VOLUNTEER_CHECKOUT_IN_PROGRESS",
+  // feature/pta-family-agreement-buyout
+  "PTA_VOLUNTEER_AGREEMENT_VERSION_NOT_FOUND",
+  "PTA_VOLUNTEER_AGREEMENT_NOT_DRAFT",
+  "PTA_VOLUNTEER_AGREEMENT_NOT_ASSIGNED",
 ] as const;
 
 export type PtaErrorCode = (typeof PTA_ERROR_CODES)[number];
@@ -211,6 +215,9 @@ const STATUS_FOR_CODE: Record<PtaErrorCode, number> = {
   PTA_VOLUNTEER_ASSESSMENT_ALREADY_CHARGED: 409,
   PTA_VOLUNTEER_ASSESSMENT_POSTING_BLOCKED: 403,
   PTA_VOLUNTEER_CHECKOUT_IN_PROGRESS: 409,
+  PTA_VOLUNTEER_AGREEMENT_VERSION_NOT_FOUND: 404,
+  PTA_VOLUNTEER_AGREEMENT_NOT_DRAFT: 409,
+  PTA_VOLUNTEER_AGREEMENT_NOT_ASSIGNED: 409,
 };
 
 export class PtaError extends Error {
