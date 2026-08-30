@@ -3,16 +3,10 @@ import { isPtaVolunteerHoursOrgAllowed, isPtaVolunteerHoursPlatformEnabled } fro
 import { PtaError } from "@/lib/labs/pta/errors";
 import { requirePtaAccess } from "@/lib/labs/pta/guard";
 import { getPtaProfile, upsertPtaProfile } from "@/lib/labs/pta/profile";
+import { VOLUNTEER_HOURS_FLAG_KEYS, updatePtaVolunteerHoursFlags } from "@/lib/labs/pta/volunteer-hours/flags";
 import { parseJsonBody, z } from "@/lib/validation";
 
-const VOLUNTEER_HOURS_FLAG_FIELDS = [
-  "ptaVolunteerRequirementsEnabled",
-  "ptaVolunteerBuyoutEnabled",
-  "ptaVolunteerAssessmentsEnabled",
-  "ptaVolunteerReportsEnabled",
-  "ptaVolunteerNotificationsEnabled",
-  "ptaVolunteerNativeMobileEnabled",
-] as const;
+const VOLUNTEER_HOURS_FLAG_FIELDS = VOLUNTEER_HOURS_FLAG_KEYS;
 
 export async function GET() {
   return withApiErrorHandling(async () => {
@@ -42,7 +36,7 @@ const bodySchema = z.object({
   ptaVolunteerReportsEnabled: z.boolean().optional(),
   ptaVolunteerNotificationsEnabled: z.boolean().optional(),
   ptaVolunteerNativeMobileEnabled: z.boolean().optional(),
-});
+}).strict();
 
 export async function PUT(request: Request) {
   return withApiErrorHandling(async () => {
@@ -103,7 +97,49 @@ export async function PUT(request: Request) {
     if (input.ptaVolunteerReportsEnabled !== undefined) {
       await requirePtaAccess("pta:volunteer-reports:export");
     }
-    const profile = await upsertPtaProfile({ organizationId, actorUserId: session.userId, actorEmail: session.userEmail, ...input });
-    return Response.json({ ok: true, data: profile });
+
+    // fix/pta-volunteer-settings-atomic-audit: the six flags are no longer
+    // accepted by upsertPtaProfile() at all — every RBAC check above stays
+    // exactly as it was (still per-flag, still checked before any write),
+    // but the actual mutation for these six columns now goes through
+    // updatePtaVolunteerHoursFlags(), which updates the flag(s) and writes
+    // their audit event in a single transaction. upsertPtaProfile() runs
+    // FIRST — it create-if-missing's the profile row, so a brand-new org
+    // that saves flags before ever saving its base profile still gets a row
+    // for the flags step to find, exactly matching the old combined
+    // upsert's behavior for that edge case.
+    const {
+      ptaVolunteerRequirementsEnabled,
+      ptaVolunteerBuyoutEnabled,
+      ptaVolunteerAssessmentsEnabled,
+      ptaVolunteerReportsEnabled,
+      ptaVolunteerNotificationsEnabled,
+      ptaVolunteerNativeMobileEnabled,
+      ...profileFields
+    } = input;
+    await upsertPtaProfile({ organizationId, actorUserId: session.userId, actorEmail: session.userEmail, ...profileFields });
+
+    if (touchesVolunteerHoursFlags) {
+      await updatePtaVolunteerHoursFlags({
+        organizationId,
+        actorUserId: session.userId,
+        actorEmail: session.userEmail,
+        changes: {
+          ...(ptaVolunteerRequirementsEnabled !== undefined ? { ptaVolunteerRequirementsEnabled } : {}),
+          ...(ptaVolunteerBuyoutEnabled !== undefined ? { ptaVolunteerBuyoutEnabled } : {}),
+          ...(ptaVolunteerAssessmentsEnabled !== undefined ? { ptaVolunteerAssessmentsEnabled } : {}),
+          ...(ptaVolunteerReportsEnabled !== undefined ? { ptaVolunteerReportsEnabled } : {}),
+          ...(ptaVolunteerNotificationsEnabled !== undefined ? { ptaVolunteerNotificationsEnabled } : {}),
+          ...(ptaVolunteerNativeMobileEnabled !== undefined ? { ptaVolunteerNativeMobileEnabled } : {}),
+        },
+      });
+    }
+
+    // Re-fetch once for a single, accurate combined response — profile
+    // (above) doesn't reflect the flags step's own write, and the flags
+    // step's returned row doesn't reflect a concurrent unrelated-field edit
+    // by someone else that could have landed between the two calls.
+    const finalProfile = await getPtaProfile(organizationId);
+    return Response.json({ ok: true, data: finalProfile });
   });
 }
