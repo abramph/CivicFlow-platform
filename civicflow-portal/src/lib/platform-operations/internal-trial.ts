@@ -151,7 +151,14 @@ export async function grantInternalOrganizationTrial(
   const now = new Date();
   const expiresAt = new Date(now.getTime() + INTERNAL_TRIAL_DURATION_MS);
 
-  await prisma.$transaction(async (tx) => {
+  // The grant and its audit event commit or roll back together — an
+  // organization must never receive access without a matching audit
+  // record. createAuditEvent() runs through this same `tx`, so if the
+  // audit insert fails for any reason (constraint violation, connection
+  // drop), the whole transaction rolls back, including the trialEndsAt
+  // update below. Nothing is returned to the caller until this resolves,
+  // i.e. until the transaction has actually committed.
+  const auditEventId = await prisma.$transaction(async (tx) => {
     const org = await tx.organization.findUnique({
       where: { id: input.organizationId },
       select: { id: true, status: true, billingExempt: true, trialEndsAt: true },
@@ -205,23 +212,26 @@ export async function grantInternalOrganizationTrial(
         "Another request already granted or invalidated this trial concurrently. Please refresh and check current status."
       );
     }
-  });
 
-  const auditEvent = await createAuditEvent({
-    organizationId: input.organizationId,
-    actorUserId: input.actorUserId,
-    actorEmail: input.actorEmail,
-    action: "platform.organization.internal_trial_granted",
-    entityType: "organization",
-    entityId: input.organizationId,
-    metadata: {
-      actorRole: input.actorRole,
-      trialStartsAt: now.toISOString(),
-      trialExpiresAt: expiresAt.toISOString(),
-      durationDays: INTERNAL_TRIAL_DURATION_DAYS,
-      reason,
-      requestId: input.requestId ?? null,
-    },
+    const auditEvent = await createAuditEvent({
+      organizationId: input.organizationId,
+      actorUserId: input.actorUserId,
+      actorEmail: input.actorEmail,
+      action: "platform.organization.internal_trial_granted",
+      entityType: "organization",
+      entityId: input.organizationId,
+      metadata: {
+        actorRole: input.actorRole,
+        trialStartsAt: now.toISOString(),
+        trialExpiresAt: expiresAt.toISOString(),
+        durationDays: INTERNAL_TRIAL_DURATION_DAYS,
+        reason,
+        requestId: input.requestId ?? null,
+      },
+      tx,
+    });
+
+    return auditEvent.id;
   });
 
   return {
@@ -229,7 +239,7 @@ export async function grantInternalOrganizationTrial(
     trialStartsAt: now.toISOString(),
     trialExpiresAt: expiresAt.toISOString(),
     accessActive: true,
-    auditEventId: auditEvent.id,
+    auditEventId,
   };
 }
 
@@ -267,6 +277,10 @@ export async function terminateInternalOrganizationTrialEarly(
 
   const now = new Date();
 
+  // Same commit-together guarantee as the grant path above: the
+  // termination update and its audit event share one transaction, so a
+  // failed audit insert rolls back the trialEndsAt change — the prior
+  // trial's end time is left exactly as it was, never partially shortened.
   await prisma.$transaction(async (tx) => {
     const org = await tx.organization.findUnique({
       where: { id: input.organizationId },
@@ -279,6 +293,12 @@ export async function terminateInternalOrganizationTrialEarly(
       throw new InternalTrialError("INTERNAL_TRIAL_NOT_ACTIVE", "Organization has no active internal trial to end.");
     }
 
+    // Conditioned on the exact trialEndsAt value just read, mirroring the
+    // grant path's anti-stacking updateMany: two concurrent termination
+    // attempts can both pass the read above, but only one UPDATE can match
+    // the still-current trialEndsAt — the loser gets a well-defined
+    // CONCURRENT_CONFLICT rather than silently writing a second time (which
+    // would otherwise create a duplicate termination audit event).
     const result = await tx.organization.updateMany({
       where: { id: input.organizationId, trialEndsAt: org.trialEndsAt },
       data: { trialEndsAt: now },
@@ -289,16 +309,17 @@ export async function terminateInternalOrganizationTrialEarly(
         "Trial state changed concurrently; please refresh and retry."
       );
     }
-  });
 
-  await createAuditEvent({
-    organizationId: input.organizationId,
-    actorUserId: input.actorUserId,
-    actorEmail: input.actorEmail,
-    action: "platform.organization.internal_trial_terminated",
-    entityType: "organization",
-    entityId: input.organizationId,
-    metadata: { actorRole: input.actorRole, reason, terminatedAt: now.toISOString() },
+    await createAuditEvent({
+      organizationId: input.organizationId,
+      actorUserId: input.actorUserId,
+      actorEmail: input.actorEmail,
+      action: "platform.organization.internal_trial_terminated",
+      entityType: "organization",
+      entityId: input.organizationId,
+      metadata: { actorRole: input.actorRole, reason, terminatedAt: now.toISOString() },
+      tx,
+    });
   });
 
   return { organizationId: input.organizationId, terminatedAt: now.toISOString() };

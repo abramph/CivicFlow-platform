@@ -160,52 +160,41 @@ describe("POST /api/admin/organizations/[organizationId]/internal-trial", () => 
   it("rejects a request missing the explicit confirm flag", async () => {
     getServerSession.mockResolvedValue(authedSession);
     requireSuperAdmin.mockResolvedValueOnce(authed);
-    const response = await POST(postReq({ reason: "Pilot" }), ctx("org-1"));
+    const response = await POST(postReq({ reason: "Pilot access request" }), ctx("org-1"));
     expect(response.status).toBe(400);
     expect(grantInternalOrganizationTrial).not.toHaveBeenCalled();
   });
 
-  it("rejects a client-supplied duration/date — the schema has no field for it, so extra keys are simply ignored", async () => {
+  it("rejects a client-supplied duration/date/billingExempt — the strict schema has no field for any of them", async () => {
     getServerSession.mockResolvedValue(authedSession);
     requireSuperAdmin.mockResolvedValueOnce(authed);
-    grantInternalOrganizationTrial.mockResolvedValueOnce({
-      organizationId: "org-1",
-      trialStartsAt: "2026-08-30T00:00:00.000Z",
-      trialExpiresAt: "2026-09-29T00:00:00.000Z",
-      accessActive: true,
-      auditEventId: "audit-1",
-    });
 
-    await POST(
-      postReq({ reason: "Pilot", confirm: true, durationDays: 9999, trialEndsAt: "2099-01-01", billingExempt: true }),
+    const response = await POST(
+      postReq({
+        reason: "Pilot access request",
+        confirm: true,
+        durationDays: 9999,
+        trialEndsAt: "2099-01-01",
+        billingExempt: true,
+      }),
       ctx("org-1")
     );
 
-    // The service is only ever called with organizationId/actor/reason —
-    // none of the extra client-supplied fields reach it.
-    expect(grantInternalOrganizationTrial).toHaveBeenCalledWith({
-      organizationId: "org-1",
-      actorUserId: "admin-1",
-      actorEmail: "admin@aphtechnologies.example",
-      actorRole: "SUPER_ADMIN",
-      reason: "Pilot",
-    });
+    expect(response.status).toBe(400);
+    expect(grantInternalOrganizationTrial).not.toHaveBeenCalled();
   });
 
-  it("ignores a client-supplied organizationId in the body — the URL path param is always authoritative (cross-organization manipulation denied)", async () => {
+  it("rejects a client-supplied organizationId in the body — unknown keys are rejected outright, not silently ignored (cross-organization manipulation denied)", async () => {
     getServerSession.mockResolvedValue(authedSession);
     requireSuperAdmin.mockResolvedValueOnce(authed);
-    grantInternalOrganizationTrial.mockResolvedValueOnce({
-      organizationId: "org-1",
-      trialStartsAt: "2026-08-30T00:00:00.000Z",
-      trialExpiresAt: "2026-09-29T00:00:00.000Z",
-      accessActive: true,
-      auditEventId: "audit-1",
-    });
 
-    await POST(postReq({ reason: "Pilot", confirm: true, organizationId: "some-other-org" }), ctx("org-1"));
+    const response = await POST(
+      postReq({ reason: "Pilot access request", confirm: true, organizationId: "some-other-org" }),
+      ctx("org-1")
+    );
 
-    expect(grantInternalOrganizationTrial).toHaveBeenCalledWith(expect.objectContaining({ organizationId: "org-1" }));
+    expect(response.status).toBe(400);
+    expect(grantInternalOrganizationTrial).not.toHaveBeenCalled();
   });
 
   it("grants the trial and returns 201 with the actor's real identity for audit attribution", async () => {
@@ -244,10 +233,134 @@ describe("POST /api/admin/organizations/[organizationId]/internal-trial", () => 
       new InternalTrialError("INTERNAL_TRIAL_ALREADY_ACTIVE", "Organization has already used its one-time internal trial.")
     );
 
-    const response = await POST(postReq({ reason: "Pilot", confirm: true }), ctx("org-1"));
+    const response = await POST(postReq({ reason: "Pilot access request", confirm: true }), ctx("org-1"));
     const data = await response.json();
 
     expect(response.status).toBe(409);
     expect(data.code).toBe("INTERNAL_TRIAL_ALREADY_ACTIVE");
+  });
+});
+
+describe("POST — strict request validation", () => {
+  function rawPostReq(body: string) {
+    return new Request("https://portal.test/api/admin/organizations/org-1/internal-trial", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+    });
+  }
+
+  beforeEach(() => {
+    getServerSession.mockResolvedValue(authedSession);
+    requireSuperAdmin.mockResolvedValue(authed);
+  });
+
+  it("accepts a valid { reason, confirm: true } body", async () => {
+    grantInternalOrganizationTrial.mockResolvedValueOnce({
+      organizationId: "org-1",
+      trialStartsAt: "2026-08-30T00:00:00.000Z",
+      trialExpiresAt: "2026-09-29T00:00:00.000Z",
+      accessActive: true,
+      auditEventId: "audit-1",
+    });
+    const response = await POST(postReq({ reason: "Pilot access request", confirm: true }), ctx("org-1"));
+    expect(response.status).toBe(201);
+  });
+
+  it("rejects confirm: false", async () => {
+    const response = await POST(postReq({ reason: "Pilot access request", confirm: false }), ctx("org-1"));
+    expect(response.status).toBe(400);
+    expect(grantInternalOrganizationTrial).not.toHaveBeenCalled();
+  });
+
+  it("rejects a missing reason", async () => {
+    const response = await POST(postReq({ confirm: true }), ctx("org-1"));
+    expect(response.status).toBe(400);
+  });
+
+  it("rejects a blank (whitespace-only) reason", async () => {
+    const response = await POST(postReq({ reason: "          ", confirm: true }), ctx("org-1"));
+    expect(response.status).toBe(400);
+  });
+
+  it("rejects a too-short reason (below the 10-character minimum)", async () => {
+    const response = await POST(postReq({ reason: "short", confirm: true }), ctx("org-1"));
+    expect(response.status).toBe(400);
+  });
+
+  it("rejects a too-long reason (above the 500-character maximum)", async () => {
+    const response = await POST(postReq({ reason: "x".repeat(501), confirm: true }), ctx("org-1"));
+    expect(response.status).toBe(400);
+  });
+
+  it("rejects an unknown harmless-looking field", async () => {
+    const response = await POST(postReq({ reason: "Pilot access request", confirm: true, notes: "fyi" }), ctx("org-1"));
+    expect(response.status).toBe(400);
+    expect(grantInternalOrganizationTrial).not.toHaveBeenCalled();
+  });
+
+  it("rejects a client-supplied custom duration", async () => {
+    const response = await POST(postReq({ reason: "Pilot access request", confirm: true, duration: 90 }), ctx("org-1"));
+    expect(response.status).toBe(400);
+  });
+
+  it("rejects a client-supplied end date", async () => {
+    const response = await POST(postReq({ reason: "Pilot access request", confirm: true, endDate: "2099-01-01" }), ctx("org-1"));
+    expect(response.status).toBe(400);
+  });
+
+  it("rejects a client-supplied billingExempt flag", async () => {
+    const response = await POST(postReq({ reason: "Pilot access request", confirm: true, billingExempt: true }), ctx("org-1"));
+    expect(response.status).toBe(400);
+  });
+
+  it("rejects a client-supplied Stripe identifier", async () => {
+    const response = await POST(
+      postReq({ reason: "Pilot access request", confirm: true, stripeCustomerId: "cus_fake123" }),
+      ctx("org-1")
+    );
+    expect(response.status).toBe(400);
+  });
+
+  it("rejects an array body", async () => {
+    const response = await POST(rawPostReq(JSON.stringify(["reason", true])), ctx("org-1"));
+    expect(response.status).toBe(400);
+    expect(grantInternalOrganizationTrial).not.toHaveBeenCalled();
+  });
+
+  it("rejects a null body", async () => {
+    const response = await POST(rawPostReq("null"), ctx("org-1"));
+    expect(response.status).toBe(400);
+  });
+
+  it("rejects a string body", async () => {
+    const response = await POST(rawPostReq(JSON.stringify("just a string")), ctx("org-1"));
+    expect(response.status).toBe(400);
+  });
+
+  it("rejects malformed JSON", async () => {
+    const response = await POST(rawPostReq("{not valid json"), ctx("org-1"));
+    expect(response.status).toBe(400);
+    expect(grantInternalOrganizationTrial).not.toHaveBeenCalled();
+  });
+
+  it("resolves duplicate JSON keys to the last occurrence (standard JSON.parse behavior) and validates that value", async () => {
+    // JSON.parse keeps only the final value for a repeated key — there is no
+    // "both values" to reason about at the route layer. Confirms that
+    // behavior doesn't create a bypass: the last confirm value (true) must
+    // still pass with a valid reason, and the last reason value is what's used.
+    grantInternalOrganizationTrial.mockResolvedValueOnce({
+      organizationId: "org-1",
+      trialStartsAt: "2026-08-30T00:00:00.000Z",
+      trialExpiresAt: "2026-09-29T00:00:00.000Z",
+      accessActive: true,
+      auditEventId: "audit-1",
+    });
+    const response = await POST(
+      rawPostReq('{"reason":"short","reason":"Pilot access request","confirm":false,"confirm":true}'),
+      ctx("org-1")
+    );
+    expect(response.status).toBe(201);
+    expect(grantInternalOrganizationTrial).toHaveBeenCalledWith(expect.objectContaining({ reason: "Pilot access request" }));
   });
 });

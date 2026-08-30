@@ -81,8 +81,20 @@ Enforced entirely inside `grantInternalOrganizationTrial()`, not the route:
    (`internal-trial-concurrency.integration.test.ts`) proves this against
    an actual database, not just a mock — see that file for how to run it.
 
-The audit event is written *after* the transaction commits (matching this
-codebase's existing convention, e.g. `upsertPtaProfile`) — not inside it.
+**The audit event is written through the same `tx` client, inside step 3's
+transaction** — not after it commits. This is a deliberate departure from
+this codebase's more common convention (e.g. `upsertPtaProfile`, which
+audits after its writes complete) precisely because an internal trial is
+itself a security-relevant access grant: without this, a grant could
+theoretically commit while its audit insert failed for an unrelated reason
+(connection drop, constraint violation), leaving an organization with
+access and no audit trail for it. `createAuditEvent()` (`src/lib/audit.ts`)
+now accepts an optional `tx: Prisma.TransactionClient` for exactly this —
+defaulting to the top-level `prisma` client, so every one of its other
+200+ call sites is unaffected. If the audit insert throws, the whole
+transaction rolls back, including the `trialEndsAt` update — the caller
+never gets a success response for a grant that didn't also audit. The same
+applies to `terminateInternalOrganizationTrialEarly()`.
 
 ## No Stripe side effects
 
@@ -130,11 +142,19 @@ replay" toward, since the trial must never be extended by a retry.
 eligibility preview, powers the admin UI's pre-confirmation panel.
 
 `POST /api/admin/organizations/[organizationId]/internal-trial` — grants
-the trial. Body: `{ reason: string, confirm: true }`. Rate-limited
+the trial. Body: `{ reason: string, confirm: true }`, validated by a
+**strict** zod schema — `reason` must be 10-500 trimmed characters,
+`confirm` must be exactly `true`, and **any other property in the body
+(including a client-supplied duration, `trialEndsAt`/`trialStartsAt`,
+`billingExempt`, a Stripe identifier, or an `organizationId` in the body
+itself) is rejected outright with 400**, not silently dropped. Only the URL
+path's `organizationId` is ever used. A non-object body (array, `null`,
+string) or malformed JSON is also rejected with 400. Rate-limited
 (`api:admin:organizations:internal-trial`, 10/60s). Responses: `201`
-success, `400` invalid body, `401` unauthenticated, `403` not a platform
-admin, `404` organization not found, `409` already-active/already-used/
-billing-exempt/has-subscription/concurrent-conflict, `429` rate limited.
+success, `400` invalid/unknown-field body, `401` unauthenticated, `403` not
+a platform admin, `404` organization not found, `409` already-active/
+already-used/billing-exempt/has-subscription/concurrent-conflict, `429`
+rate limited.
 
 ## UI
 
