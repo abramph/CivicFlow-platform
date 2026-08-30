@@ -11,6 +11,7 @@ import { OpenInOrganizationPortalButton } from "@/components/admin/OpenInOrganiz
 import { ImpersonateUserPanel } from "@/components/admin/ImpersonateUserPanel";
 import { PrimaryVerticalManager } from "@/components/admin/PrimaryVerticalManager";
 import { AdminSeatOverrideManager } from "@/components/admin/AdminSeatOverrideManager";
+import { InternalTrialManager } from "@/components/admin/InternalTrialManager";
 import { getVerticalTerminology } from "@/lib/vertical-terminology";
 import { getAdminSeatOverrideDetail } from "@/lib/admin-seat-override";
 
@@ -205,6 +206,15 @@ export default async function PlatformOrganizationDetailPage({
           <EmptyState title="No subscription record" description="This organization has no Subscription row at all." />
         )}
       </SectionCard>
+
+      {!identity.billingExempt ? (
+        <SectionCard
+          title="Internal trial"
+          description="A one-time, 30-day, Stripe-free application-access grant for organizations with no paid subscription — e.g. an internal pilot. Never creates a Stripe object, payment method, or charge. Not available once used, and not shown for billing-exempt organizations (see the banner above)."
+        >
+          <InternalTrialManager organizationId={identity.id} />
+        </SectionCard>
+      ) : null}
 
       <SectionCard title="Communications summary">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
