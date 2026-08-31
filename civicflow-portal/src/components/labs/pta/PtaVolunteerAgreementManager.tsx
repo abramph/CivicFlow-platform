@@ -60,6 +60,8 @@ export function PtaVolunteerAgreementManager({
   const [draftContent, setDraftContent] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [policyForm, setPolicyForm] = useState(policy);
+  const [archivingId, setArchivingId] = useState<string | null>(null);
+  const [replacementId, setReplacementId] = useState("");
 
   async function submitJson(url: string, method: string, body?: unknown) {
     setPending(true);
@@ -109,8 +111,26 @@ export function PtaVolunteerAgreementManager({
     await submitJson(`/api/labs/pta/volunteer-hours/periods/${periodId}/agreements/${versionId}/publish`, "POST");
   }
 
-  async function archive(versionId: string) {
-    await submitJson(`/api/labs/pta/volunteer-hours/periods/${periodId}/agreements/${versionId}/archive`, "POST");
+  /** FA2 §5: the currently-required version can't archive without an atomic
+   * replacement — clicking Archive on it opens an inline picker instead of
+   * submitting immediately; every other version archives right away. */
+  function isActivelyRequired(versionId: string) {
+    return policy.agreementRequired && policy.agreementVersionId === versionId;
+  }
+
+  async function archive(versionId: string, withReplacementId?: string) {
+    if (isActivelyRequired(versionId) && !withReplacementId) {
+      setArchivingId(versionId);
+      setReplacementId("");
+      return;
+    }
+    const result = await submitJson(`/api/labs/pta/volunteer-hours/periods/${periodId}/agreements/${versionId}/archive`, "POST", {
+      replacementVersionId: withReplacementId,
+    });
+    if (result) {
+      setArchivingId(null);
+      setReplacementId("");
+    }
   }
 
   async function savePolicy() {
@@ -276,6 +296,48 @@ export function PtaVolunteerAgreementManager({
                   ) : null}
                 </div>
               </div>
+              {archivingId === v.id ? (
+                <div className="mt-2 rounded border border-amber-300 bg-amber-50 p-2">
+                  <p className="text-xs text-amber-900">
+                    This version is currently required by this period. Choose a replacement published version to assign atomically as you
+                    archive it.
+                  </p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <select
+                      value={replacementId}
+                      onChange={(e) => setReplacementId(e.target.value)}
+                      className="rounded border border-slate-300 px-2 py-1 text-xs"
+                    >
+                      <option value="">Choose a replacement version…</option>
+                      {publishedVersions
+                        .filter((pv) => pv.id !== v.id)
+                        .map((pv) => (
+                          <option key={pv.id} value={pv.id}>
+                            v{pv.versionNumber} — {pv.title}
+                          </option>
+                        ))}
+                    </select>
+                    <button
+                      type="button"
+                      disabled={pending || !replacementId}
+                      onClick={() => archive(v.id, replacementId)}
+                      className="rounded bg-amber-700 px-2 py-1 text-xs font-semibold text-white hover:bg-amber-800 disabled:opacity-50"
+                    >
+                      Archive with replacement
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setArchivingId(null);
+                        setReplacementId("");
+                      }}
+                      className="rounded border border-slate-300 bg-white px-2 py-1 text-xs font-semibold hover:bg-slate-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : null}
               {editingId === v.id ? (
                 <div className="mt-2 space-y-2">
                   <input

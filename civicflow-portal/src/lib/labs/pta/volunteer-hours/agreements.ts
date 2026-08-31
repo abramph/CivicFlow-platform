@@ -196,32 +196,88 @@ export async function publishAgreementVersion(organizationId: string, versionId:
 }
 
 /** Archiving never deletes anything — it only marks a version as no longer
- * assignable to a period going forward. A period currently pointing at this
- * version via `assignedAgreementVersion` keeps pointing at it (archiving
- * does not auto-unassign); an admin must explicitly reassign if that's what
- * they want (see docs section 10's amendment policy). Existing acceptances
- * of an archived version remain fully valid and remain visible to the
- * household that made them. */
-export async function archiveAgreementVersion(organizationId: string, versionId: string, actor: { userId: string; userEmail?: string | null }) {
+ * assignable to a period going forward. Existing acceptances of an archived
+ * version remain fully valid and remain visible to the household that made
+ * them (see docs section 10's amendment policy).
+ *
+ * FA2 §5: a version that is the period's CURRENT `agreementVersionId` while
+ * `agreementRequired` is true cannot simply be archived out from under
+ * families who are actively being asked to accept it — that would silently
+ * strand the requirement pointing at a version no longer assignable, with
+ * no UI path to even view it as "the" agreement going forward. Archiving
+ * such a version requires `replacementVersionId`: a different, PUBLISHED
+ * version belonging to the SAME period, atomically swapped in via the exact
+ * same transaction that archives the old one (reusing
+ * updateAgreementPolicy's own validation, not a second copy of it) — so a
+ * period is never observably left with `agreementRequired=true` and an
+ * ARCHIVED `agreementVersionId`, not even for one intermediate read. A
+ * version that is merely assigned-but-not-required, or not the CURRENT
+ * assignment at all, archives immediately with no replacement needed. */
+export async function archiveAgreementVersion(
+  organizationId: string,
+  versionId: string,
+  actor: { userId: string; userEmail?: string | null },
+  replacementVersionId?: string
+) {
   const existing = await getAgreementVersion(organizationId, versionId);
   if (existing.status === "ARCHIVED") return existing;
   if (existing.status === "DRAFT") {
     throw new PtaError("PTA_VALIDATION_ERROR", "A draft can be edited or left as-is — there's nothing to archive until it's published.");
   }
 
-  const archived = await prisma.ptaVolunteerAgreementVersion.update({
-    where: { id: versionId },
-    data: { status: "ARCHIVED", archivedAt: new Date(), archivedByUserId: actor.userId },
-  });
+  const period = await getVolunteerRequirementPeriod(organizationId, existing.requirementPeriodId);
+  const isActivelyRequired = period.agreementRequired && period.agreementVersionId === versionId;
 
-  await createAuditEvent({
-    organizationId,
-    actorUserId: actor.userId,
-    actorEmail: actor.userEmail ?? null,
-    action: "pta.volunteer_hours.agreement_archived",
-    entityType: "pta_volunteer_agreement_version",
-    entityId: archived.id,
-    metadata: { periodId: archived.requirementPeriodId },
+  if (isActivelyRequired && !replacementVersionId) {
+    throw new PtaError(
+      "PTA_VOLUNTEER_AGREEMENT_ACTIVELY_REQUIRED",
+      "This version is currently required by its period. Assign a replacement published version before archiving it."
+    );
+  }
+
+  let replacement: { id: string; status: string; requirementPeriodId: string } | null = null;
+  if (isActivelyRequired && replacementVersionId) {
+    if (replacementVersionId === versionId) {
+      throw new PtaError("PTA_VALIDATION_ERROR", "The replacement must be a different agreement version.");
+    }
+    replacement = await prisma.ptaVolunteerAgreementVersion.findFirst({
+      where: { id: replacementVersionId, organizationId },
+      select: { id: true, status: true, requirementPeriodId: true },
+    });
+    if (!replacement) throw new PtaError("PTA_VOLUNTEER_AGREEMENT_VERSION_NOT_FOUND", "Replacement agreement version not found in this organization.");
+    if (replacement.requirementPeriodId !== existing.requirementPeriodId) {
+      throw new PtaError("PTA_VALIDATION_ERROR", "The replacement version must belong to the same requirement period.");
+    }
+    if (replacement.status !== "PUBLISHED") {
+      throw new PtaError("PTA_VALIDATION_ERROR", "Only a published agreement version can replace the currently required one.");
+    }
+  }
+
+  const archived = await prisma.$transaction(async (tx) => {
+    const row = await tx.ptaVolunteerAgreementVersion.update({
+      where: { id: versionId },
+      data: { status: "ARCHIVED", archivedAt: new Date(), archivedByUserId: actor.userId },
+    });
+
+    if (replacement) {
+      await tx.ptaVolunteerRequirementPeriod.update({
+        where: { id: existing.requirementPeriodId },
+        data: { agreementVersionId: replacement.id },
+      });
+    }
+
+    await createAuditEvent({
+      organizationId,
+      actorUserId: actor.userId,
+      actorEmail: actor.userEmail ?? null,
+      action: "pta.volunteer_hours.agreement_archived",
+      entityType: "pta_volunteer_agreement_version",
+      entityId: row.id,
+      metadata: { periodId: row.requirementPeriodId, replacementVersionId: replacement?.id ?? null },
+      tx,
+    });
+
+    return row;
   });
 
   return archived;
@@ -360,6 +416,22 @@ export async function resolveHouseholdAgreementStatus(
   const assignedVersion = await getAgreementVersion(organizationId, period.agreementVersionId);
   const acceptance = await findHouseholdAcceptance(organizationId, householdId, assignedVersion.id);
 
+  // FA2 §5: "a content-hash mismatch fails closed." Published content is
+  // already structurally immutable (updateAgreementDraft refuses to touch
+  // anything but a DRAFT), so acceptance.contentHashAtAcceptance and
+  // assignedVersion.contentHash can only ever disagree here if something
+  // bypassed the application layer entirely (a direct DB write). Rather
+  // than silently returning a status a family or admin could read as
+  // valid, this is the one place that actively checks the snapshot against
+  // the live value and refuses to proceed — belt-and-suspenders made real,
+  // not just documented.
+  if (acceptance && acceptance.contentHashAtAcceptance !== assignedVersion.contentHash) {
+    throw new PtaError(
+      "PTA_VOLUNTEER_AGREEMENT_CONTENT_HASH_MISMATCH",
+      "This household's recorded acceptance no longer matches the agreement's stored content. Contact support before relying on this status."
+    );
+  }
+
   let contractLinkedEligibleUntil: Date | null = null;
   if (acceptance && period.contractLinkedBuyoutEnabled && period.contractLinkedEligibilityDays) {
     contractLinkedEligibleUntil = new Date(acceptance.acceptedAt.getTime() + period.contractLinkedEligibilityDays * 24 * 60 * 60 * 1000);
@@ -403,6 +475,18 @@ export async function acceptAgreement(
     throw new PtaError("PTA_VALIDATION_ERROR", "You must acknowledge the agreement before continuing.");
   }
   const period = await getVolunteerRequirementPeriod(organizationId, periodId);
+  // FA2 §5: "a period moved to ARCHIVED remains historically viewable but
+  // cannot receive new acceptance." Reuses the exact error code
+  // periods.ts's assertBuyoutWindowOpen already established for the
+  // identical "this period isn't ACTIVE" condition, rather than inventing a
+  // second one — a DRAFT or CLOSED period is blocked by the same check,
+  // which is correct: only an ACTIVE period should ever accept a NEW
+  // household acceptance. (An already-accepted household's EXISTING record
+  // remains fully readable via resolveHouseholdAgreementStatus regardless
+  // of period status — this check only guards the WRITE path.)
+  if (period.status !== "ACTIVE") {
+    throw new PtaError("PTA_VOLUNTEER_PERIOD_NOT_ACTIVE", "This requirement period isn't currently active.");
+  }
   if (!period.agreementVersionId) {
     throw new PtaError("PTA_VOLUNTEER_AGREEMENT_NOT_ASSIGNED", "No agreement is currently assigned to this requirement period.");
   }

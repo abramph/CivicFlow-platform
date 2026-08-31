@@ -7,6 +7,7 @@ const updateHousehold = vi.fn();
 const deleteHousehold = vi.fn();
 const createOrgMember = vi.fn();
 const countDuesCharge = vi.fn();
+const countAgreementAcceptance = vi.fn();
 const findFirstAdult = vi.fn();
 const createAdult = vi.fn();
 const updateHouseholdAdult = vi.fn();
@@ -22,6 +23,7 @@ vi.mock("@/lib/prisma", () => ({
     ptaHousehold: { findFirst: (...a: unknown[]) => findFirstHousehold(...a), findMany: (...a: unknown[]) => findManyHousehold(...a), create: (...a: unknown[]) => createHousehold(...a), update: (...a: unknown[]) => updateHousehold(...a), delete: (...a: unknown[]) => deleteHousehold(...a) },
     orgMember: { create: (...a: unknown[]) => createOrgMember(...a), findUnique: (...a: unknown[]) => findUniqueOrgMember(...a), update: (...a: unknown[]) => updateOrgMember(...a) },
     duesCharge: { count: (...a: unknown[]) => countDuesCharge(...a) },
+    ptaVolunteerAgreementAcceptance: { count: (...a: unknown[]) => countAgreementAcceptance(...a) },
     ptaHouseholdAdult: { findFirst: (...a: unknown[]) => findFirstAdult(...a), create: (...a: unknown[]) => createAdult(...a), update: (...a: unknown[]) => updateHouseholdAdult(...a), delete: (...a: unknown[]) => deleteAdult(...a) },
     ptaStudent: { findFirst: (...a: unknown[]) => findFirstStudent(...a), create: (...a: unknown[]) => createStudent(...a), update: (...a: unknown[]) => updateStudent(...a) },
     // PTA-A dual-write: create paths resolve the schoolYearId FK twin of the label.
@@ -101,11 +103,36 @@ describe("deletePtaHousehold — payment-history preservation", () => {
   it("allows a hard delete when there is no dues history at all", async () => {
     findFirstHousehold.mockResolvedValueOnce({ id: "household-1", organizationId: "org-a", orgMemberId: "member-1" });
     countDuesCharge.mockResolvedValueOnce(0);
+    countAgreementAcceptance.mockResolvedValueOnce(0);
     deleteHousehold.mockResolvedValueOnce({ id: "household-1" });
 
     const { deletePtaHousehold } = await import("../households");
     await expect(deletePtaHousehold("org-a", "household-1", "u1")).resolves.toBeUndefined();
     expect(deleteHousehold).toHaveBeenCalledWith({ where: { id: "household-1" } });
+  });
+
+  // FA2 §7: PtaVolunteerAgreementAcceptance.householdId is onDelete: Cascade
+  // (matching every other household-scoped model in this vertical), so this
+  // guard is what actually keeps that cascade from ever firing in practice —
+  // mirrors the DuesCharge guard immediately above.
+  it("refuses a hard delete once any agreement acceptance exists, preserving that history", async () => {
+    findFirstHousehold.mockResolvedValueOnce({ id: "household-1", organizationId: "org-a", orgMemberId: "member-1" });
+    countDuesCharge.mockResolvedValueOnce(0);
+    countAgreementAcceptance.mockResolvedValueOnce(1);
+
+    const { deletePtaHousehold } = await import("../households");
+    await expect(deletePtaHousehold("org-a", "household-1", "u1")).rejects.toMatchObject({ code: "PTA_HOUSEHOLD_HAS_AGREEMENT_HISTORY" });
+    expect(deleteHousehold).not.toHaveBeenCalled();
+  });
+
+  it("checks agreement history even for a household with no orgMemberId (never had dues billing)", async () => {
+    findFirstHousehold.mockResolvedValueOnce({ id: "household-1", organizationId: "org-a", orgMemberId: null });
+    countAgreementAcceptance.mockResolvedValueOnce(1);
+
+    const { deletePtaHousehold } = await import("../households");
+    await expect(deletePtaHousehold("org-a", "household-1", "u1")).rejects.toMatchObject({ code: "PTA_HOUSEHOLD_HAS_AGREEMENT_HISTORY" });
+    expect(countDuesCharge).not.toHaveBeenCalled(); // no orgMemberId -> dues check is skipped entirely
+    expect(deleteHousehold).not.toHaveBeenCalled();
   });
 });
 

@@ -35,6 +35,7 @@ vi.mock("@/lib/prisma", () => ({
       fn({
         ptaVolunteerAgreementAcceptance: { create: (...a: unknown[]) => createAcceptance(...a) },
         ptaVolunteerRequirementPeriod: { update: (...a: unknown[]) => updatePeriod(...a) },
+        ptaVolunteerAgreementVersion: { update: (...a: unknown[]) => updateVersion(...a) },
       }),
   },
 }));
@@ -50,6 +51,7 @@ const BASE_PERIOD = {
   organizationId: "org-1",
   name: "2026-2027 School Year",
   timezone: "America/Chicago",
+  status: "ACTIVE" as const,
   agreementRequired: false,
   agreementVersionId: null as string | null,
   contractLinkedBuyoutEnabled: false,
@@ -147,6 +149,54 @@ describe("agreement versioning", () => {
     const result = await archiveAgreementVersion("org-1", "v3", { userId: "u1" });
     expect(result.status).toBe("ARCHIVED");
     expect(updateVersion).toHaveBeenCalledTimes(1); // only the first (real) transition wrote anything
+  });
+
+  it("FA2 §5: refuses to archive the period's currently-required version without a replacement", async () => {
+    findFirstVersion.mockResolvedValueOnce({ id: "v1", organizationId: "org-1", status: "PUBLISHED", requirementPeriodId: "period-1" });
+    findFirstPeriod.mockResolvedValueOnce({ ...BASE_PERIOD, agreementRequired: true, agreementVersionId: "v1" });
+
+    const { archiveAgreementVersion } = await import("../agreements");
+    await expect(archiveAgreementVersion("org-1", "v1", { userId: "u1" })).rejects.toMatchObject({
+      code: "PTA_VOLUNTEER_AGREEMENT_ACTIVELY_REQUIRED",
+    });
+    expect(updateVersion).not.toHaveBeenCalled();
+  });
+
+  it("FA2 §5: archives the currently-required version AND atomically reassigns the period when a valid replacement is supplied", async () => {
+    findFirstVersion.mockResolvedValueOnce({ id: "v1", organizationId: "org-1", status: "PUBLISHED", requirementPeriodId: "period-1" });
+    findFirstPeriod.mockResolvedValueOnce({ ...BASE_PERIOD, agreementRequired: true, agreementVersionId: "v1" });
+    findFirstVersion.mockResolvedValueOnce({ id: "v2", organizationId: "org-1", status: "PUBLISHED", requirementPeriodId: "period-1" });
+    updateVersion.mockResolvedValueOnce({ id: "v1", status: "ARCHIVED", requirementPeriodId: "period-1" });
+    updatePeriod.mockResolvedValueOnce({ id: "period-1", agreementVersionId: "v2" });
+
+    const { archiveAgreementVersion } = await import("../agreements");
+    const archived = await archiveAgreementVersion("org-1", "v1", { userId: "u1" }, "v2");
+    expect(archived.status).toBe("ARCHIVED");
+    expect(updatePeriod).toHaveBeenCalledWith({ where: { id: "period-1" }, data: { agreementVersionId: "v2" } });
+    expect(createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "pta.volunteer_hours.agreement_archived", metadata: expect.objectContaining({ replacementVersionId: "v2" }), tx: expect.anything() })
+    );
+  });
+
+  it("FA2 §5: rejects a replacement that is a DRAFT or belongs to a different period", async () => {
+    findFirstVersion.mockResolvedValueOnce({ id: "v1", organizationId: "org-1", status: "PUBLISHED", requirementPeriodId: "period-1" });
+    findFirstPeriod.mockResolvedValueOnce({ ...BASE_PERIOD, agreementRequired: true, agreementVersionId: "v1" });
+    findFirstVersion.mockResolvedValueOnce({ id: "v2", organizationId: "org-1", status: "DRAFT", requirementPeriodId: "period-1" });
+
+    const { archiveAgreementVersion } = await import("../agreements");
+    await expect(archiveAgreementVersion("org-1", "v1", { userId: "u1" }, "v2")).rejects.toMatchObject({ code: "PTA_VALIDATION_ERROR" });
+    expect(updateVersion).not.toHaveBeenCalled();
+  });
+
+  it("FA2 §5: a version that is assigned but not currently required, or not the period's current assignment, archives without needing a replacement", async () => {
+    findFirstVersion.mockResolvedValueOnce({ id: "v1", organizationId: "org-1", status: "PUBLISHED", requirementPeriodId: "period-1" });
+    findFirstPeriod.mockResolvedValueOnce({ ...BASE_PERIOD, agreementRequired: false, agreementVersionId: "v1" }); // assigned, but not required
+    updateVersion.mockResolvedValueOnce({ id: "v1", status: "ARCHIVED", requirementPeriodId: "period-1" });
+
+    const { archiveAgreementVersion } = await import("../agreements");
+    const archived = await archiveAgreementVersion("org-1", "v1", { userId: "u1" });
+    expect(archived.status).toBe("ARCHIVED");
+    expect(updatePeriod).not.toHaveBeenCalled();
   });
 });
 
@@ -260,6 +310,39 @@ describe("resolveHouseholdAgreementStatus", () => {
     expect(status.contractLinkedEligibleNow).toBe(false);
     expect(status.contractLinkedEligibleUntil).toBeNull();
   });
+
+  describe("FA2 §5: a content-hash mismatch fails closed", () => {
+    it("throws rather than returning a status when the acceptance's snapshotted hash no longer matches the assigned version's live hash", async () => {
+      findFirstPeriod.mockResolvedValue({ ...BASE_PERIOD, agreementVersionId: "v1" });
+      findFirstVersion.mockResolvedValue({ id: "v1", status: "PUBLISHED", contentHash: "hash-current" });
+      findUniqueAcceptance.mockResolvedValue({ id: "acc-1", acceptedAt: new Date(), contentHashAtAcceptance: "hash-STALE-OR-TAMPERED" });
+
+      const { resolveHouseholdAgreementStatus } = await import("../agreements");
+      await expect(resolveHouseholdAgreementStatus("org-1", "period-1", "hh-1")).rejects.toMatchObject({
+        code: "PTA_VOLUNTEER_AGREEMENT_CONTENT_HASH_MISMATCH",
+      });
+    });
+
+    it("resolves normally when the hashes match (the expected case for every real acceptance, since published content is immutable)", async () => {
+      findFirstPeriod.mockResolvedValue({ ...BASE_PERIOD, agreementVersionId: "v1" });
+      findFirstVersion.mockResolvedValue({ id: "v1", status: "PUBLISHED", contentHash: "hash-abc" });
+      findUniqueAcceptance.mockResolvedValue({ id: "acc-1", acceptedAt: new Date(), contentHashAtAcceptance: "hash-abc" });
+
+      const { resolveHouseholdAgreementStatus } = await import("../agreements");
+      await expect(resolveHouseholdAgreementStatus("org-1", "period-1", "hh-1")).resolves.toMatchObject({
+        acceptance: { id: "acc-1" },
+      });
+    });
+
+    it("never even compares hashes when there's no acceptance at all -- nothing to mismatch", async () => {
+      findFirstPeriod.mockResolvedValue({ ...BASE_PERIOD, agreementVersionId: "v1" });
+      findFirstVersion.mockResolvedValue({ id: "v1", status: "PUBLISHED", contentHash: "hash-abc" });
+      findUniqueAcceptance.mockResolvedValue(null);
+
+      const { resolveHouseholdAgreementStatus } = await import("../agreements");
+      await expect(resolveHouseholdAgreementStatus("org-1", "period-1", "hh-1")).resolves.toMatchObject({ acceptance: null });
+    });
+  });
 });
 
 describe("acceptAgreement", () => {
@@ -287,6 +370,38 @@ describe("acceptAgreement", () => {
     ).rejects.toMatchObject({ code: "PTA_VOLUNTEER_AGREEMENT_NOT_ASSIGNED" });
   });
 
+  describe("FA2 §5: a period must be ACTIVE to receive a NEW acceptance", () => {
+    it.each(["DRAFT", "CLOSED", "ARCHIVED"] as const)("rejects when the period's own status is %s, even with a valid assigned+published version", async (status) => {
+      findFirstPeriod.mockResolvedValue({ ...BASE_PERIOD, status, agreementVersionId: "v1" });
+      findFirstVersion.mockResolvedValue({ id: "v1", status: "PUBLISHED", contentHash: "hash-abc" });
+      const { acceptAgreement } = await import("../agreements");
+      await expect(
+        acceptAgreement("org-1", "period-1", "hh-1", { acknowledged: true }, { userId: "u1", adultId: "adult-1" })
+      ).rejects.toMatchObject({ code: "PTA_VOLUNTEER_PERIOD_NOT_ACTIVE" });
+      expect(createAcceptance).not.toHaveBeenCalled();
+    });
+
+    it("a client-supplied periodId cannot smuggle a new acceptance into a non-ACTIVE period -- checked before any version lookup even runs", async () => {
+      findFirstPeriod.mockResolvedValue({ ...BASE_PERIOD, status: "ARCHIVED", agreementVersionId: "v1" });
+      const { acceptAgreement } = await import("../agreements");
+      await expect(
+        acceptAgreement("org-1", "period-1", "hh-1", { acknowledged: true }, { userId: "u1", adultId: "adult-1" })
+      ).rejects.toMatchObject({ code: "PTA_VOLUNTEER_PERIOD_NOT_ACTIVE" });
+      expect(findFirstVersion).not.toHaveBeenCalled();
+    });
+
+    it("still allows acceptance for an ACTIVE period (regression guard for the check above)", async () => {
+      findFirstPeriod.mockResolvedValue({ ...BASE_PERIOD, status: "ACTIVE", agreementVersionId: "v1" });
+      findFirstVersion.mockResolvedValue({ id: "v1", status: "PUBLISHED", contentHash: "hash-abc" });
+      findUniqueAcceptance.mockResolvedValue(null);
+      createAcceptance.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ id: "acc-1", ...data }));
+      const { acceptAgreement } = await import("../agreements");
+      await expect(
+        acceptAgreement("org-1", "period-1", "hh-1", { acknowledged: true }, { userId: "u1", adultId: "adult-1" })
+      ).resolves.toMatchObject({ id: "acc-1" });
+    });
+  });
+
   it("creates a real acceptance with a server-generated acceptedAt, never trusting a client-supplied timestamp (there's no such input at all)", async () => {
     findFirstPeriod.mockResolvedValue({ ...BASE_PERIOD, agreementVersionId: "v1" });
     findFirstVersion.mockResolvedValue({ id: "v1", status: "PUBLISHED", contentHash: "hash-abc" });
@@ -303,6 +418,20 @@ describe("acceptAgreement", () => {
     expect((acceptance.acceptedAt as Date).getTime()).toBeGreaterThanOrEqual(before);
     expect((acceptance.acceptedAt as Date).getTime()).toBeLessThanOrEqual(after);
     expect(createAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "pta.volunteer_hours.agreement_accepted", tx: expect.anything() }));
+  });
+
+  it("audit-failure rollback: if createAuditEvent throws inside the transaction, acceptAgreement rejects rather than returning a 'successful' acceptance -- the write and its audit event commit or fail together, never one without the other", async () => {
+    findFirstPeriod.mockResolvedValue({ ...BASE_PERIOD, agreementVersionId: "v1" });
+    findFirstVersion.mockResolvedValue({ id: "v1", status: "PUBLISHED", contentHash: "hash-abc" });
+    findUniqueAcceptance.mockResolvedValue(null);
+    createAcceptance.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ id: "acc-1", ...data }));
+    const auditFailure = new Error("audit sink unavailable");
+    createAuditEvent.mockRejectedValueOnce(auditFailure);
+
+    const { acceptAgreement } = await import("../agreements");
+    await expect(
+      acceptAgreement("org-1", "period-1", "hh-1", { acknowledged: true }, { userId: "u1", adultId: "adult-1" })
+    ).rejects.toBe(auditFailure);
   });
 
   it("is idempotent: a repeated submission for the same household+version returns the EXISTING acceptance, never creating a duplicate", async () => {

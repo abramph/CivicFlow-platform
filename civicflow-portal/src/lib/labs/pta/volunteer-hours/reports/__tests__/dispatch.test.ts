@@ -78,7 +78,7 @@ beforeEach(() => {
 });
 
 describe("isVolunteerReportType", () => {
-  it("recognizes every one of this program's 7 report types", async () => {
+  it("recognizes every one of this program's report types", async () => {
     const { isVolunteerReportType, VOLUNTEER_REPORT_TYPES } = await import("../dispatch");
     for (const type of VOLUNTEER_REPORT_TYPES) {
       expect(isVolunteerReportType(type)).toBe(true);
@@ -109,7 +109,7 @@ describe("permissionForVolunteerReportType", () => {
 });
 
 describe("buildVolunteerReportExportFile", () => {
-  it("builds a real .xlsx buffer and a filename for every one of the 7 report types", async () => {
+  it("builds a real .xlsx buffer and a filename for every one of this program's report types", async () => {
     const { buildVolunteerReportExportFile, VOLUNTEER_REPORT_TYPES } = await import("../dispatch");
     for (const type of VOLUNTEER_REPORT_TYPES) {
       const { buffer, filename } = await buildVolunteerReportExportFile("org-1", type, { requirementPeriodId: "period-1" }, "Officer Jones");

@@ -287,6 +287,21 @@ export async function deletePtaHousehold(organizationId: string, householdId: st
     }
   }
 
+  // feature/pta-family-agreement-buyout follow-up (FA2 §7): agreement
+  // acceptances are historical records and must never be lost merely
+  // because a household record is removed. The FK is Cascade (matching
+  // every other household-scoped model in the volunteer-hours vertical —
+  // buyout elections/purchases, assessment charges, hour disputes all use
+  // the identical pattern), so this guard is what actually keeps the
+  // cascade unreachable, mirroring the DuesCharge check immediately above.
+  const agreementAcceptanceCount = await prisma.ptaVolunteerAgreementAcceptance.count({ where: { organizationId, householdId } });
+  if (agreementAcceptanceCount > 0) {
+    throw new PtaError(
+      "PTA_HOUSEHOLD_HAS_AGREEMENT_HISTORY",
+      "This household has volunteer agreement acceptance history — deactivate it instead of deleting it."
+    );
+  }
+
   await prisma.ptaHousehold.delete({ where: { id: existing.id } });
 
   await createAuditEvent({

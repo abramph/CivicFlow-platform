@@ -10,7 +10,8 @@ type ReportType =
   | "compliance"
   | "financial"
   | "individual-volunteer"
-  | "volunteer-category";
+  | "volunteer-category"
+  | "family-agreement-status";
 
 const REPORT_LABELS: Record<ReportType, string> = {
   "family-summary": "A — Family Volunteer Summary",
@@ -20,6 +21,7 @@ const REPORT_LABELS: Record<ReportType, string> = {
   financial: "E — Purchased-Hours & Financial",
   "individual-volunteer": "F — Individual Volunteer",
   "volunteer-category": "G — Volunteer Category",
+  "family-agreement-status": "H — Family Agreement Status",
 };
 
 const REPORT_TYPE_TO_EXPORT_TYPE: Record<ReportType, string> = {
@@ -30,6 +32,7 @@ const REPORT_TYPE_TO_EXPORT_TYPE: Record<ReportType, string> = {
   financial: "PTA_VOLUNTEER_FINANCIAL",
   "individual-volunteer": "PTA_VOLUNTEER_INDIVIDUAL",
   "volunteer-category": "PTA_VOLUNTEER_CATEGORY",
+  "family-agreement-status": "PTA_VOLUNTEER_FAMILY_AGREEMENT_STATUS",
 };
 
 const VOLUNTEER_CATEGORIES = [
@@ -177,6 +180,19 @@ const COLUMNS: Record<ReportType, DisplayColumn[]> = {
     { key: "entryCount", header: "Entries", kind: "integer" },
     { key: "uniqueVolunteers", header: "Volunteers", kind: "integer" },
     { key: "uniqueFamilies", header: "Families", kind: "integer" },
+  ],
+  "family-agreement-status": [
+    { key: "householdDisplayName", header: "Family", kind: "text" },
+    { key: "agreementRequired", header: "Required", kind: "bool" },
+    { key: "assignedAgreementTitle", header: "Assigned agreement", kind: "text" },
+    { key: "acceptanceStatus", header: "Acceptance status", kind: "text" },
+    { key: "acceptedByName", header: "Accepted by", kind: "text" },
+    { key: "acceptedAtOrgTime", header: "Accepted (org time)", kind: "text" },
+    { key: "contractLinkedOfferStatus", header: "Contract-linked offer", kind: "text" },
+    { key: "offerExpirationOrgTime", header: "Offer expiration (org time)", kind: "text" },
+    { key: "electionStatus", header: "Election", kind: "text" },
+    { key: "versionMismatchNote", header: "Version mismatch / reacceptance", kind: "text" },
+    { key: "operationalExceptionStatus", header: "Operational exception/review", kind: "text" },
   ],
 };
 
@@ -356,6 +372,8 @@ export function PtaVolunteerReportsCenter({
         ) : null}
 
         {reportType === "compliance" ? <FilterSelect label="Compliance" value={complianceFilter} onChange={setComplianceFilter} options={COMPLIANCE_FILTERS} /> : null}
+
+        {reportType === "family-agreement-status" ? <FilterInput label="Family ID" value={householdId} onChange={setHouseholdId} /> : null}
 
         {reportType === "financial" ? (
           <>

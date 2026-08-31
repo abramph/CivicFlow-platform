@@ -223,6 +223,58 @@ describe("requireVolunteerHoursAccess", () => {
   });
 });
 
+describe("requireVolunteerHoursAuditAccess (FA2 §4, rule 5: audit survives any capability being disabled)", () => {
+  it("resolves even when 'requirements' (the master flag) is off, unlike every other guard in this file", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(true);
+    isPtaVolunteerHoursOrgAllowed.mockReturnValue(true);
+    requirePermission.mockResolvedValueOnce({ organizationId: "org-1", session: { userId: "u1" }, role: "ORG_ADMIN" });
+    // Deliberately NOT mocking findUniqueProfile at all -- if this guard
+    // read PtaProfile the way requireVolunteerHoursFlag does, the default
+    // undefined mock would make it fail; resolving proves it never does.
+    const { requireVolunteerHoursAuditAccess } = await import("../guard");
+    const result = await requireVolunteerHoursAuditAccess("pta:volunteer-audit:view");
+    expect(result.organizationId).toBe("org-1");
+    expect(findUniqueProfile).not.toHaveBeenCalled();
+  });
+
+  it("still denies when the platform kill-switch is off", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(false);
+    requirePermission.mockResolvedValueOnce({ organizationId: "org-1", session: { userId: "u1" }, role: "ORG_ADMIN" });
+    const { requireVolunteerHoursAuditAccess } = await import("../guard");
+    await expect(requireVolunteerHoursAuditAccess("pta:volunteer-audit:view")).rejects.toMatchObject({
+      code: "PTA_VOLUNTEER_HOURS_PLATFORM_DISABLED",
+    });
+  });
+
+  it("still denies when the org isn't on the pilot allowlist", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(true);
+    isPtaVolunteerHoursOrgAllowed.mockReturnValue(false);
+    requirePermission.mockResolvedValueOnce({ organizationId: FICTIONAL_OTHER_ORG, session: { userId: "u1" }, role: "ORG_ADMIN" });
+    const { requireVolunteerHoursAuditAccess } = await import("../guard");
+    await expect(requireVolunteerHoursAuditAccess("pta:volunteer-audit:view")).rejects.toMatchObject({
+      code: "PTA_VOLUNTEER_HOURS_ORG_NOT_ALLOWLISTED",
+    });
+  });
+
+  it("still denies when the org isn't PTA vertical", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(true);
+    isPtaVolunteerHoursOrgAllowed.mockReturnValue(true);
+    requirePermission.mockResolvedValueOnce({ organizationId: "org-1", session: { userId: "u1" }, role: "ORG_ADMIN" });
+    findUniqueOrganization.mockResolvedValueOnce({ primaryVertical: "COMMUNITY", status: "active" });
+    const { requireVolunteerHoursAuditAccess } = await import("../guard");
+    await expect(requireVolunteerHoursAuditAccess("pta:volunteer-audit:view")).rejects.toMatchObject({
+      code: "PTA_ORGANIZATION_NOT_PTA_VERTICAL",
+    });
+  });
+
+  it("still denies when the caller's RBAC permission check fails, before any PTA-specific check runs", async () => {
+    requirePermission.mockRejectedValueOnce(new Error("forbidden"));
+    const { requireVolunteerHoursAuditAccess } = await import("../guard");
+    await expect(requireVolunteerHoursAuditAccess("pta:volunteer-audit:view")).rejects.toThrow();
+    expect(findUniqueOrganization).not.toHaveBeenCalled();
+  });
+});
+
 describe("checkVolunteerHoursAvailable", () => {
   it("returns false rather than throwing when the flag is off", async () => {
     isPtaVolunteerHoursPlatformEnabled.mockReturnValue(false);

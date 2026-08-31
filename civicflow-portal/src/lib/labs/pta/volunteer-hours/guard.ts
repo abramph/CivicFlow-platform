@@ -97,6 +97,36 @@ export async function requireVolunteerHoursAccess(permission: Permission, capabi
   return { organizationId, session, role, can };
 }
 
+/**
+ * feature/pta-family-agreement-buyout follow-up (FA2 §4, capability-guard
+ * rule 5): a historical/audit-viewing guard that deliberately does NOT call
+ * requireVolunteerHoursFlag — every other capability (including
+ * "requirements" itself) is checked there, so gating audit history behind
+ * ANY of them means turning a capability off also erases an administrator's
+ * ability to review what already happened under it, exactly when an
+ * after-the-fact review is most likely to matter (a dispute, an incident, a
+ * PTA winding a feature down for the year). This still requires the
+ * platform kill-switch and org allowlist — the two gates that decide
+ * whether this vertical exists for the organization AT ALL — plus the
+ * caller's own RBAC permission and PTA-vertical membership, so a
+ * non-allowlisted, platform-disabled, or non-PTA organization gets exactly
+ * the same denial it always would. Every underlying AuditEvent row is
+ * immutable and already exists regardless of any flag's current state
+ * (createAuditEvent never checks capability flags before writing) — this
+ * guard only concerns who may read them, not whether they were recorded.
+ */
+export async function requireVolunteerHoursAuditAccess(permission: Permission) {
+  const { organizationId, session, role, can } = await requirePermission(permission, "throw");
+  await requirePtaVertical(organizationId);
+  if (!isPtaVolunteerHoursPlatformEnabled()) {
+    throw new PtaError("PTA_VOLUNTEER_HOURS_PLATFORM_DISABLED", "Volunteer hour requirements are not available on this platform.");
+  }
+  if (!isPtaVolunteerHoursOrgAllowed(organizationId)) {
+    throw new PtaError("PTA_VOLUNTEER_HOURS_ORG_NOT_ALLOWLISTED", "Volunteer hour requirements are not available on this platform.");
+  }
+  return { organizationId, session, role, can };
+}
+
 /** Family/household self-service composed guard: linkage-based access (no
  * Permission involved — mirrors requirePtaHouseholdSelfAccess) + platform/org
  * flags for the requested capability. */

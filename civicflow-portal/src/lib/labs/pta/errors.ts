@@ -147,6 +147,23 @@ export const PTA_ERROR_CODES = [
   "PTA_VOLUNTEER_AGREEMENT_VERSION_NOT_FOUND",
   "PTA_VOLUNTEER_AGREEMENT_NOT_DRAFT",
   "PTA_VOLUNTEER_AGREEMENT_NOT_ASSIGNED",
+  // feature/pta-family-agreement-buyout follow-up (FA2)
+  /** deletePtaHousehold's pre-delete guard: a household with any real
+   * PtaVolunteerAgreementAcceptance history cannot be hard-deleted, since
+   * that FK is Restrict-free (Cascade) and the acceptance row is a
+   * historical record — mirrors PTA_HOUSEHOLD_HAS_PAYMENT_HISTORY exactly. */
+  "PTA_HOUSEHOLD_HAS_AGREEMENT_HISTORY",
+  /** archiveAgreementVersion: cannot archive a version that is the period's
+   * CURRENTLY assigned/required agreement without an atomic replacement —
+   * archiving would silently strand `agreementRequired=true` pointing at a
+   * version new households can no longer be shown as "the" agreement. */
+  "PTA_VOLUNTEER_AGREEMENT_ACTIVELY_REQUIRED",
+  /** resolveHouseholdAgreementStatus: an acceptance's snapshotted content
+   * hash no longer matches the assigned version's live hash — structurally
+   * should never happen (published content is immutable), so surfacing
+   * this loudly rather than silently proceeding is the "fails closed"
+   * behavior FA2 §5 requires. */
+  "PTA_VOLUNTEER_AGREEMENT_CONTENT_HASH_MISMATCH",
 ] as const;
 
 export type PtaErrorCode = (typeof PTA_ERROR_CODES)[number];
@@ -218,6 +235,9 @@ const STATUS_FOR_CODE: Record<PtaErrorCode, number> = {
   PTA_VOLUNTEER_AGREEMENT_VERSION_NOT_FOUND: 404,
   PTA_VOLUNTEER_AGREEMENT_NOT_DRAFT: 409,
   PTA_VOLUNTEER_AGREEMENT_NOT_ASSIGNED: 409,
+  PTA_HOUSEHOLD_HAS_AGREEMENT_HISTORY: 409,
+  PTA_VOLUNTEER_AGREEMENT_ACTIVELY_REQUIRED: 409,
+  PTA_VOLUNTEER_AGREEMENT_CONTENT_HASH_MISMATCH: 500,
 };
 
 export class PtaError extends Error {

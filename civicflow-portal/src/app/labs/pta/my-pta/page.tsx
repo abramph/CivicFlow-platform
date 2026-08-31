@@ -10,6 +10,7 @@ import { PageHeader, SectionCard } from "@/components/app/PageChrome";
 import { PtaLabsBadge } from "@/components/labs/pta/PtaLabsBadge";
 import { PtaMyPta } from "@/components/labs/pta/PtaMyPta";
 import { PtaVolunteerRequirementCard } from "@/components/labs/pta/PtaVolunteerRequirementCard";
+import { PtaVolunteerAgreementStatusCard } from "@/components/labs/pta/PtaVolunteerAgreementStatusCard";
 
 /**
  * PTA Vertical 2.0, PR PTA-J — "My PTA" (§19): the member's view of their
@@ -117,6 +118,14 @@ export default async function PtaMyPtaPage() {
       {volunteerRequirementsAvailable ? (
         <SectionCard title="Volunteer Requirement" description="Your family's volunteer-hour requirement, progress, and options.">
           <PtaVolunteerRequirementCard buyoutAvailable={volunteerBuyoutAvailable} reportsAvailable={volunteerReportsAvailable} />
+          {/* feature/pta-family-agreement-buyout follow-up (FA2 §3): self-hiding
+              — renders nothing unless an agreement is actually assigned to this
+              household's active period. Kept inside this existing SectionCard
+              (not a new one) so a period with no agreement assigned shows
+              exactly what it showed before this feature existed. */}
+          <div className="mt-4">
+            <PtaVolunteerAgreementStatusCard />
+          </div>
         </SectionCard>
       ) : null}
       <SectionCard title="Your PTA at a glance" description="Everything here is shared with members deliberately by your officers.">
