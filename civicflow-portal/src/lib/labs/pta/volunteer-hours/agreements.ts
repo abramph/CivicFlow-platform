@@ -498,6 +498,29 @@ export async function acceptAgreement(
   const existing = await findHouseholdAcceptance(organizationId, householdId, version.id);
   if (existing) return existing;
 
+  // FA3 §1/§4: resolved and snapshotted BEFORE the write, permanently —
+  // never re-derived on read. This is what actually makes historical
+  // display survive the accepting adult's household-membership being
+  // removed (acceptedByAdultId SetNulls) or their user account being
+  // deleted (acceptedByUserId is a plain, non-FK string that simply goes
+  // stale, same convention as audit events' actorId). The adult lookup is
+  // expected to always succeed here — the accept route resolves adultId
+  // via the same requireVolunteerHoursHouseholdAccess guard that created
+  // it — but a defensive fallback to the authenticated user's own
+  // displayName/email exists so this column is never left blank by a
+  // future caller that somehow reaches this function without a resolvable
+  // adult.
+  const signerAdult = await prisma.ptaHouseholdAdult.findUnique({
+    where: { id: actor.adultId },
+    select: { name: true, relationshipLabel: true },
+  });
+  let signerDisplayNameAtAcceptance = signerAdult?.name?.trim() || "";
+  if (!signerDisplayNameAtAcceptance) {
+    const fallbackUser = await prisma.user.findUnique({ where: { id: actor.userId }, select: { displayName: true, email: true } });
+    signerDisplayNameAtAcceptance = fallbackUser?.displayName?.trim() || fallbackUser?.email || "Unknown signer";
+  }
+  const signerRelationshipAtAcceptance = signerAdult?.relationshipLabel?.trim() || null;
+
   const acceptedAt = new Date();
   let acceptance;
   try {
@@ -514,6 +537,8 @@ export async function acceptAgreement(
           contentHashAtAcceptance: version.contentHash,
           ackVersion: PTA_FAMILY_AGREEMENT_ACK_VERSION,
           typedName: input.typedName?.trim() || null,
+          signerDisplayNameAtAcceptance,
+          signerRelationshipAtAcceptance,
         },
       });
 
@@ -631,18 +656,80 @@ export { resolveOrgWallTimeToUtc };
 
 export type AgreementNotificationType = "AGREEMENT_AVAILABLE" | "AGREEMENT_REMINDER" | "AGREEMENT_ACCEPTED_CONFIRMATION" | "CONTRACT_OFFER_EXPIRING";
 
+export interface AgreementNotificationRendered {
+  subject: string;
+  text: string;
+}
+
+const AGREEMENT_NOTIFICATION_SUBJECT_BY_TYPE: Record<AgreementNotificationType, (periodName: string) => string> = {
+  AGREEMENT_AVAILABLE: (periodName) => `A volunteer commitment agreement is ready to review — ${periodName}`,
+  AGREEMENT_REMINDER: (periodName) => `Reminder: please accept your volunteer commitment agreement — ${periodName}`,
+  AGREEMENT_ACCEPTED_CONFIRMATION: (periodName) => `Your volunteer commitment agreement was accepted — ${periodName}`,
+  CONTRACT_OFFER_EXPIRING: (periodName) => `Your contract-linked buyout offer is expiring soon — ${periodName}`,
+};
+
+function renderAgreementNotification(notificationType: AgreementNotificationType, periodName: string): AgreementNotificationRendered {
+  return {
+    subject: AGREEMENT_NOTIFICATION_SUBJECT_BY_TYPE[notificationType](periodName),
+    text: [`Notification type: ${notificationType}`, `Requirement period: ${periodName}`].join("\n"),
+  };
+}
+
 /**
- * feature/pta-family-agreement-buyout, FA-8. Preview/test-send ONLY —
- * mirrors notifications.ts's `previewVolunteerHoursNotification` exactly
- * (same "[TEST]" subject convention, same audit event, same requirement
- * that the requirements capability be on). Deliberately does NOT log to
- * PtaVolunteerNotificationLog (that table's dedup semantics are for a REAL
- * automated sweep, which does not exist for this feature yet — see docs)
- * and is never called from any cron/worker path; this is the only function
- * in this whole file that can send an email, and it can only ever send to
- * an admin-supplied test address, never to a real family.
+ * feature/pta-family-agreement-buyout follow-up (FA3 §5): renders one of
+ * the 4 agreement notification templates and returns the content — it
+ * NEVER calls sendEmail. This is what makes it safe to gate on the
+ * "requirements" capability alone (an admin must be able to see what these
+ * templates say before ever deciding to turn the "notifications" flag on,
+ * so gating preview behind that same flag would be circular) rather than
+ * requiring "notifications" to be enabled. Previously this function and
+ * the real send were the same operation (see git history) — that let a
+ * "preview" call actually deliver an email to an arbitrary address without
+ * the notifications flag ever being checked, which is exactly the gap this
+ * split closes. Use sendTestAgreementNotification for an actual send.
  */
 export async function previewAgreementNotification(
+  organizationId: string,
+  periodId: string,
+  notificationType: AgreementNotificationType,
+  actor: { userId: string; userEmail: string }
+): Promise<AgreementNotificationRendered> {
+  const period = await getVolunteerRequirementPeriod(organizationId, periodId);
+  const rendered = renderAgreementNotification(notificationType, period.name);
+
+  await createAuditEvent({
+    organizationId,
+    actorUserId: actor.userId,
+    actorEmail: actor.userEmail,
+    action: "pta.volunteer_hours.agreement_notification_previewed",
+    entityType: "pta_volunteer_requirement_period",
+    entityId: periodId,
+    metadata: { notificationType },
+  });
+
+  return rendered;
+}
+
+/**
+ * feature/pta-family-agreement-buyout follow-up (FA3 §5): the ONLY
+ * function in this file that actually sends an email, and it can only
+ * ever send to an admin-typed test address supplied directly in THIS
+ * call — never a real household's contact details (no household is even
+ * looked up here), never a batch, never called from any cron/worker path.
+ * Deliberately does NOT log to PtaVolunteerNotificationLog (that table's
+ * dedup semantics are for a REAL automated sweep, which does not exist for
+ * this feature yet — see docs). Callers (the API route) are responsible
+ * for requiring the "notifications" capability, a dedicated
+ * notification-management permission, rate limiting, and a typed
+ * confirmation BEFORE calling this — this function itself has no way to
+ * know whether those were satisfied, same division of responsibility as
+ * every other service function in this file trusting its route's guard.
+ * The audit event is written AFTER the send attempt and always reflects
+ * the real outcome (`delivered: false` on failure) — it must never claim
+ * a delivery that didn't happen, and a failed send still re-throws so the
+ * caller sees a real error rather than a false "ok".
+ */
+export async function sendTestAgreementNotification(
   organizationId: string,
   periodId: string,
   notificationType: AgreementNotificationType,
@@ -653,32 +740,32 @@ export async function previewAgreementNotification(
   const email = testRecipientEmail.trim();
   if (!email) throw new PtaError("PTA_VALIDATION_ERROR", "A test recipient email is required.");
 
-  const subjectByType: Record<AgreementNotificationType, string> = {
-    AGREEMENT_AVAILABLE: `[TEST] A volunteer commitment agreement is ready to review — ${period.name}`,
-    AGREEMENT_REMINDER: `[TEST] Reminder: please accept your volunteer commitment agreement — ${period.name}`,
-    AGREEMENT_ACCEPTED_CONFIRMATION: `[TEST] Your volunteer commitment agreement was accepted — ${period.name}`,
-    CONTRACT_OFFER_EXPIRING: `[TEST] Your contract-linked buyout offer is expiring soon — ${period.name}`,
-  };
-
-  await sendEmail({
-    to: email,
-    subject: subjectByType[notificationType],
-    text: [
-      "This is a TEST notification sent by an administrator previewing the volunteer-agreement notification templates.",
-      "No real family received this message, and no real acceptance or obligation exists.",
-      "",
-      `Notification type: ${notificationType}`,
-      `Requirement period: ${period.name}`,
-    ].join("\n"),
-  });
+  const rendered = renderAgreementNotification(notificationType, period.name);
+  let sendError: unknown = null;
+  try {
+    await sendEmail({
+      to: email,
+      subject: `[TEST] ${rendered.subject}`,
+      text: [
+        "This is a TEST notification sent by an administrator testing the volunteer-agreement notification templates.",
+        "No real family received this message, and no real acceptance or obligation exists.",
+        "",
+        rendered.text,
+      ].join("\n"),
+    });
+  } catch (err) {
+    sendError = err;
+  }
 
   await createAuditEvent({
     organizationId,
     actorUserId: actor.userId,
     actorEmail: actor.userEmail,
-    action: "pta.volunteer_hours.agreement_notification_previewed",
+    action: "pta.volunteer_hours.agreement_notification_test_sent",
     entityType: "pta_volunteer_requirement_period",
     entityId: periodId,
-    metadata: { notificationType, testRecipientEmail: email },
+    metadata: { notificationType, testRecipientEmail: email, delivered: sendError === null },
   });
+
+  if (sendError) throw sendError;
 }

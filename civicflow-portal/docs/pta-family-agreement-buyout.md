@@ -184,28 +184,34 @@ page; Report H is the exportable, per-household detail view.
 ## Notifications
 
 Four templates (`AGREEMENT_AVAILABLE`, `AGREEMENT_REMINDER`,
-`AGREEMENT_ACCEPTED_CONFIRMATION`, `CONTRACT_OFFER_EXPIRING`) exist as
-`previewAgreementNotification` — admin-triggered, test-recipient-only,
-audited, mirroring `previewVolunteerHoursNotification`'s exact pattern.
-Wired to a real route in the FA2 follow-up round,
-`POST /api/labs/pta/volunteer-hours/periods/[periodId]/agreement-notifications/preview`,
-gated on `pta:volunteer-requirements:manage` + the "requirements"
-capability (not "notifications" — see the capability-guard matrix below for
-why preview intentionally does not require the flag that gates real sends).
-The request body requires an explicit, validated `testRecipientEmail` —
-there is no household/member lookup anywhere in this function, so a real
-family's address can never be substituted in, silently or otherwise. None
-of the 4 templates contain any link (payment or otherwise) today, so the
-"no functional payment link before eligibility" constraint holds trivially,
-not via a special-cased check. **No automated sweep exists for this
-feature** — nothing schedules or sends a real notification to a real
-family; no cron/worker file references any of the 4 notification types.
-This is intentionally the same scope boundary both the original spec and
-the FA2 follow-up requested ("notifications remain disabled... do not wire
-or run a production notification sweep"). A future real sweep should reuse
-`PtaVolunteerNotificationLog`'s existing dedup pattern (already used by the
-non-agreement volunteer-hours reminders) rather than inventing a second
-one.
+`AGREEMENT_ACCEPTED_CONFIRMATION`, `CONTRACT_OFFER_EXPIRING`). As of the FA3
+follow-up, preview and a real test-send are two distinct, separately gated
+service functions and routes — see "Follow-up (FA3)" → Notification
+preview/test-send split for the full rationale and gating matrix; the
+summary: `previewAgreementNotification`
+(`POST .../agreement-notifications/preview`) only ever renders subject/text
+and never calls `sendEmail`, gated on `pta:volunteer-requirements:manage` +
+"requirements" (so an admin can review template copy before the
+notifications flag is ever turned on); `sendTestAgreementNotification`
+(`POST .../agreement-notifications/test-send`) is the only function in this
+feature that can send a real email, gated on the new
+`pta:volunteer-notifications:manage` permission + the "notifications"
+capability (so it fails closed even when "requirements" is on and
+"notifications" is off), rate-limited, and requires a typed `"SEND TEST"`
+confirmation. Both take an explicit, validated recipient directly in the
+request — there is no household/member lookup anywhere in either function,
+so a real family's address can never be substituted in, silently or
+otherwise. None of the 4 templates contain any link (payment or otherwise)
+today, so the "no functional payment link before eligibility" constraint
+holds trivially, not via a special-cased check. **No automated sweep exists
+for this feature** — nothing schedules or sends a real notification to a
+real family; no cron/worker file references any of the 4 notification
+types. This is intentionally the same scope boundary the original spec, the
+FA2 follow-up, and the FA3 follow-up all requested ("notifications remain
+disabled... do not wire or run a production notification sweep"). A future
+real sweep should reuse `PtaVolunteerNotificationLog`'s existing dedup
+pattern (already used by the non-agreement volunteer-hours reminders)
+rather than inventing a second one.
 
 ## Known limitations / deferred
 
@@ -226,13 +232,11 @@ one.
   application code path; there is deliberately no automated recovery,
   since a mismatch would only occur via direct database tampering and
   should get a human's attention, not a silent fix.
-- **Pre-existing gap this feature is consistent with, not the source of**:
-  `deletePtaHousehold`'s hard-delete guard now also checks for agreement
-  acceptance history (FA2 fix), but the identical pre-existing gap for
-  buyout elections/purchases/assessment charges/hour disputes (all of
-  which cascade-delete on household removal the same way, and predate
-  this feature) was not touched — flagged as a natural follow-up, not
-  fixed here to keep this round's diff scoped to the agreement feature.
+- **Resolved in FA3, previously flagged here as a follow-up**: the
+  household/period Cascade on buyout elections/purchases/assessment
+  charges/hour disputes (which predated this feature) is now `Restrict` at
+  the database level, matching the acceptance table — see "Follow-up
+  (FA3)" → Database-level retention hardening for the full record.
 
 ## Migration
 
@@ -254,7 +258,12 @@ changes — Report H reuses `ReportExport.reportType`, which is a plain
 `"PTA_VOLUNTEER_FAMILY_AGREEMENT_STATUS"` to the `VOLUNTEER_REPORT_TYPES`
 TypeScript const array was sufficient; type safety comes entirely from that
 array and the union type derived from it, exactly as it already did for
-Reports A-G.
+Reports A-G. The FA3 follow-up added one more additive migration,
+`20260831120000_pta_family_agreement_retention_hardening` — see "Follow-up
+(FA3)" → Database-level retention hardening for the full contents. Neither
+migration has been applied to production; both were validated locally only
+against a production-equivalent 118-migration baseline (120 total after
+both apply).
 
 ## Follow-up (FA2)
 
@@ -363,6 +372,186 @@ expiration and a pricing window's own `[startAt, endAt)` expiration are
 each enforced independently (an expired contract-linked window falls back
 to the regular one, never to "no rate"); acceptance alone creates no
 purchase, ledger entry, or election of any kind.
+
+## Follow-up (FA3)
+
+A third, separately authorized round on this same branch, after FA2 was
+accepted as architecturally sound but held back from deployment review
+pending a database-level retention/security hardening pass. Still not
+merged, pushed, or deployed; no production flag enabled; no production
+agreement/acceptance created; no email sent; Stripe not contacted; mobile
+and QR code untouched; assessment-reversal work not started.
+
+**Database-level retention hardening.** The single biggest gap this round
+closed: every history-bearing model's `householdId`/`requirementPeriodId`
+foreign key was `onDelete: Cascade` at the database level (matching this
+vertical's ordinary, non-historical convention), meaning a household or
+period hard-delete would silently destroy that history via ANY write path
+— not just `deletePtaHousehold`'s own application-level guard, which a
+future service, migration, or raw admin command could simply not call. The
+new migration, `20260831120000_pta_family_agreement_retention_hardening`,
+recreates 11 foreign keys as `ON DELETE RESTRICT ON UPDATE CASCADE`:
+
+| Model | Restrict FKs | Reason |
+|---|---|---|
+| `PtaVolunteerAgreementVersion` | `requirementPeriodId` | a published version a household accepted must survive a period delete attempt |
+| `PtaVolunteerAgreementAcceptance` | `requirementPeriodId`, `householdId` | the acceptance itself is the historical record this whole round protects |
+| `PtaVolunteerBuyoutElection` | `requirementPeriodId`, `householdId` | a stated election is real financial history |
+| `PtaVolunteerBuyoutPurchase` | `requirementPeriodId`, `householdId` | a completed or pending purchase is real payment history |
+| `PtaVolunteerAssessmentCharge` | `requirementPeriodId`, `householdId` | a posted charge is a real financial obligation |
+| `PtaVolunteerHourDispute` | `requirementPeriodId`, `householdId` | a submitted dispute is an operational/compliance record |
+
+Deliberately unchanged (still Cascade, out of scope): `PtaVolunteerAssessmentCharge`'s
+own `batchId`/`lineId` FKs and `PtaVolunteerAssessmentBatch`/`Line`'s FKs to
+period/household — Postgres aborts an entire `DELETE` statement if ANY
+single `Restrict` FK on the target row would be violated, so the charge's
+own direct `Restrict` FK is already sufficient to block a period/household
+delete whenever charge history exists, independent of these other,
+never-directly-exercised relationships. `PtaVolunteerReviewFlag` and
+`PtaVolunteerNotificationLog` were also left untouched — genuinely
+non-historical, operational-only records, and out of the user's named
+scope for this pass. Confirmed via read-only production row counts, before
+writing the migration, that all 4 newly-restricted sibling tables (buyout
+elections/purchases, assessment charges, hour disputes) were empty in
+production — so this is a pure future-behavior change, not a data
+migration; no existing row anywhere is affected.
+
+`PtaVolunteerAgreementAcceptance` also gained two permanent, non-PII signer
+snapshot columns — `signerDisplayNameAtAcceptance` (`NOT NULL`, default
+`''` for migration safety) and `signerRelationshipAtAcceptance` (nullable)
+— resolved once, server-side, at `acceptAgreement()` time from the
+accepting adult's `PtaHouseholdAdult.name`/`relationshipLabel`, with a
+defensive fallback to the authenticated user's own displayName/email if the
+adult lookup somehow fails to yield a name. Deliberately NOT collected:
+IP address, device fingerprint, user agent. This is what makes historical
+"Accepted by" display survive `acceptedByAdultId` being `SetNull`'d (when a
+household member is removed) without ever re-deriving from a live join —
+Report H's `acceptedByName` resolution now prefers this snapshot over the
+live `acceptedByAdult` join and the legacy `typedName` field, in that
+order. `acceptedByUserId` was deliberately left as a plain, non-FK string
+(unchanged from the original round) rather than made `SetNull` — deleting
+the signer's `User` row does not touch the acceptance at all, and the id
+simply goes stale rather than ever being reassignable to a different user,
+which is a stronger guarantee against "a new user claiming an old
+acceptance" than a nullable FK would have been.
+
+**Real-Postgres proof, not just mocked unit tests.** Two new integration
+test files (both skipped by default; see each file's own header for the
+exact env vars to run them), plus new named cases added to the existing
+concurrency suite:
+
+- `agreement-acceptance-concurrency.integration.test.ts` (extended): 2-way
+  and 10-way simultaneous acceptance submissions each collapse to exactly
+  one row AND exactly one `agreement_accepted` audit event (not just "one
+  row" — both counts are asserted); two different authorized adults in the
+  same household racing still produce one household acceptance; two
+  households racing simultaneously remain fully independent (one row/one
+  audit event each); a sequential repeat after success creates neither
+  another row nor another audit event; and — the new proof this round
+  specifically required — forcing `createAuditEvent` to throw (via a thin
+  wrapper around the real `@/lib/audit` module, not a mocked Prisma client)
+  rolls the acceptance row back for real, in real Postgres, inside the same
+  `$transaction`, and an immediate retry afterward succeeds exactly once.
+- `retention-hardening.integration.test.ts` (new): raw SQL `DELETE`
+  statements (bypassing every application code path) against a household
+  or period with acceptance/election/purchase/charge/dispute history are
+  rejected by Postgres itself; removing household membership (deleting the
+  `PtaHouseholdAdult` row) `SetNull`s `acceptedByAdultId` without deleting
+  the acceptance or touching its snapshot columns; deleting the signer's
+  `User` row leaves the acceptance completely untouched; archiving (a
+  status update) retains all history; a same-shaped org B's rows are
+  unaffected by an org A delete attempt; and a constraint-metadata drift
+  test queries `information_schema` directly for exactly the 11 FKs above
+  and asserts `delete_rule = 'RESTRICT'` on each — so a future schema
+  change that silently reintroduces `Cascade` on any of them fails this
+  suite immediately, independent of whether any delete-attempt test above
+  would happen to catch it too.
+
+**Notification preview/test-send split.** Previously, one function
+(`previewAgreementNotification`) both rendered a template AND sent a real
+email to a caller-supplied address, gated only on the "requirements"
+capability — meaning a real send was possible with the "notifications"
+flag off. This round split it into `previewAgreementNotification` (render
+only, never calls `sendEmail`, same "requirements"-only gate, since
+preview must work before notifications is ever turned on) and the new
+`sendTestAgreementNotification` (the only function in this file that can
+send), fronted by a new route,
+`POST .../periods/[periodId]/agreement-notifications/test-send`, gated on
+a new dedicated permission (`pta:volunteer-notifications:manage`, granted
+to `ORG_OWNER`/`ORG_ADMIN`/`STAFF`, not `FINANCE`) **and** the
+"notifications" capability — so with an org's notifications flag off, a
+test-send now fails closed even when "requirements" is on. The route is
+additionally rate-limited (5/minute/IP, same `requireRateLimit` helper and
+before-auth-check ordering the household-adult-invite route already uses)
+and requires a typed `"SEND TEST"` confirmation (mirroring
+`/api/account/delete`'s "type DELETE to confirm" pattern) before it will
+call `sendTestAgreementNotification`. The audit event
+(`agreement_notification_test_sent`) is always written AFTER the send
+attempt and always reflects the real outcome (`delivered: true`/`false`)
+— it never falsely claims a delivery that didn't happen, and a failed send
+still re-throws so the caller sees a real error. No CSRF token was added:
+this route relies on the same baseline every other authenticated POST
+route in this app already relies on (NextAuth's `SameSite=Lax` session
+cookie plus the required `application/json` body, which a plain cross-site
+HTML form cannot send) — the typed confirmation phrase is a guard against
+an accidental or replayed submission, not a CSRF token, and this
+repository has no CSRF-token infrastructure anywhere else to be consistent
+with.
+
+**Historical audit access reconfirmed, not changed.** `requireVolunteerHoursAuditAccess`
+(introduced in FA2) still requires: an authenticated user and resolved org
+context (via `requirePermission`, which takes no client-suppliable org id
+at all — cross-org ID guessing is structurally impossible, confirmed by a
+new test proving two different callers, in two different sessions, only
+ever get back their OWN org); the caller's own RBAC permission; PTA-vertical
+membership; the platform kill-switch; and the pilot org allowlist. It
+deliberately does NOT require any per-capability flag (`requirements`,
+`notifications`, etc.) — audit review must survive a capability being
+turned off, since that is often exactly when a review is needed. Confirmed
+via a repo-wide search that this guard has exactly one call site (the
+dedicated `GET .../volunteer-hours/audit` route) — it cannot be reused as a
+bypass for any active feature route. New tests added this round: the
+platform-off/org-not-allowlisted/insufficient-permission cases already
+existed from FA2; this round added the explicit cross-org-ID-guessing
+proof at both the guard layer (two sessions, two different resolved orgs)
+and the route layer (a guessed `?organizationId=` query param in the URL
+has zero effect, since the route reads no such parameter at all).
+
+**`deletePtaHousehold` guard alignment.** The existing application-level
+guard (already checking agreement-acceptance history since FA2) was
+extended to also check buyout election/purchase/assessment-charge/hour-dispute
+history, mirroring the database-level `Restrict` FKs above — this remains
+defense in depth, a friendly typed `PtaError` in front of what the database
+itself already refuses; it is not the only thing preventing the loss.
+
+**Test-count reconciliation.** A fresh, isolated `vitest run` on this
+commit: **4,264 passed / 144 skipped** (up from the pre-FA1 baseline of
+4,130 passed / 121 skipped at commit `1fb0bc3`), fully accounted for by
+net-new tests added across all three rounds — no existing test was
+deleted, and no previously-passing test became newly skipped. Full
+verification suite run on this commit: `tsc --noEmit` (both the full and
+production-only `tsconfig.build.json` variants), ESLint clean across every
+file changed in all three commits, `prisma validate` and `prisma migrate
+status` (120 migrations, schema up to date against the local
+production-equivalent database), a full production build (`next build`,
+clean exit), and the mobile-compatibility contract-test suite (88/88
+passing, confirming zero `/api/mobile/pta/*` response-shape drift).
+
+**`git worktree` / `node_modules` incident — verified no lasting damage.**
+An earlier round in this same branch's history recovered from a
+`git worktree remove --force` that recursed through a Windows junction and
+deleted the real `node_modules`. Objective, itemized re-verification this
+round: `git worktree list` shows only the primary worktree (no orphaned
+registration); no symlink or junction exists anywhere in the repo tree;
+`node_modules` is confirmed a real directory via `fs.lstatSync`, not a
+symlink; `package.json`/`package-lock.json` have zero diff against `HEAD`;
+the generated Prisma client reflects the current schema (including this
+round's brand-new signer-snapshot columns), confirming a fresh, non-stale
+`prisma generate`; `git fsck` reports only ordinary dangling objects (no
+corruption); `git log`/`HEAD` match the expected commit sequence exactly;
+and every command in this section — typecheck, lint, the full test suite,
+real-Postgres integration tests, and the production build — ran
+successfully against this exact, restored dependency tree.
 
 ## Rollback / dormant deployment behavior
 

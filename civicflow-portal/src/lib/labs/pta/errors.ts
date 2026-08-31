@@ -149,10 +149,19 @@ export const PTA_ERROR_CODES = [
   "PTA_VOLUNTEER_AGREEMENT_NOT_ASSIGNED",
   // feature/pta-family-agreement-buyout follow-up (FA2)
   /** deletePtaHousehold's pre-delete guard: a household with any real
-   * PtaVolunteerAgreementAcceptance history cannot be hard-deleted, since
-   * that FK is Restrict-free (Cascade) and the acceptance row is a
-   * historical record — mirrors PTA_HOUSEHOLD_HAS_PAYMENT_HISTORY exactly. */
+   * PtaVolunteerAgreementAcceptance history cannot be hard-deleted — this
+   * is now a friendly pre-check in front of an actual DB-level ON DELETE
+   * RESTRICT (as of the FA3 retention-hardening migration), not the only
+   * thing preventing the loss — mirrors PTA_HOUSEHOLD_HAS_PAYMENT_HISTORY. */
   "PTA_HOUSEHOLD_HAS_AGREEMENT_HISTORY",
+  // feature/pta-family-agreement-buyout follow-up (FA3 §2): the same
+  // retention-hardening migration also moved buyout election/purchase,
+  // assessment charge, and hour dispute householdId FKs to RESTRICT.
+  /** deletePtaHousehold's pre-delete guard for the remaining four
+   * household-scoped historical/financial models — a single combined code
+   * (rather than one per model) since the remedy is identical in every
+   * case: deactivate instead of hard-deleting. */
+  "PTA_HOUSEHOLD_HAS_VOLUNTEER_FINANCIAL_HISTORY",
   /** archiveAgreementVersion: cannot archive a version that is the period's
    * CURRENTLY assigned/required agreement without an atomic replacement —
    * archiving would silently strand `agreementRequired=true` pointing at a
@@ -236,6 +245,7 @@ const STATUS_FOR_CODE: Record<PtaErrorCode, number> = {
   PTA_VOLUNTEER_AGREEMENT_NOT_DRAFT: 409,
   PTA_VOLUNTEER_AGREEMENT_NOT_ASSIGNED: 409,
   PTA_HOUSEHOLD_HAS_AGREEMENT_HISTORY: 409,
+  PTA_HOUSEHOLD_HAS_VOLUNTEER_FINANCIAL_HISTORY: 409,
   PTA_VOLUNTEER_AGREEMENT_ACTIVELY_REQUIRED: 409,
   PTA_VOLUNTEER_AGREEMENT_CONTENT_HASH_MISMATCH: 500,
 };

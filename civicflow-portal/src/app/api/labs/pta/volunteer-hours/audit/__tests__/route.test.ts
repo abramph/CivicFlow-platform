@@ -38,6 +38,15 @@ describe("GET .../volunteer-hours/audit", () => {
     expect(findManyAuditEvent).not.toHaveBeenCalled();
   });
 
+  it("FA3 §9: ignores any client-supplied organizationId -- the route reads no such query param at all, so a guessed/attacker-supplied org id in the URL has zero effect on which org's history is returned", async () => {
+    requireVolunteerHoursAuditAccess.mockResolvedValue({ organizationId: "org-1" }); // the guard resolves this from the caller's OWN session, never from the request
+    const { GET } = await import("../route");
+    await GET(new Request("https://x.test?organizationId=someone-elses-org&take=50"));
+    expect(findManyAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { organizationId: "org-1", action: { startsWith: "pta.volunteer_hours." } } })
+    );
+  });
+
   it("clamps the take parameter to [1, 500]", async () => {
     const { GET } = await import("../route");
     await GET(new Request("https://x.test?take=99999"));

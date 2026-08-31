@@ -287,6 +287,12 @@ export const PERMISSIONS = {
   PTA_VOLUNTEER_PAYMENTS_RECORD_OFFLINE:   "pta:volunteer-payments:record-offline",
   PTA_VOLUNTEER_PAYMENTS_REFUND:           "pta:volunteer-payments:refund",
   PTA_VOLUNTEER_AUDIT_VIEW:                "pta:volunteer-audit:view",
+  // feature/pta-family-agreement-buyout follow-up (FA3 §5): a distinct
+  // permission for actually SENDING a test volunteer-hours/agreement
+  // notification to a real inbox — separate from
+  // PTA_VOLUNTEER_REQUIREMENTS_MANAGE, which is enough to render/preview a
+  // template's content but not enough, on its own, to trigger a real send.
+  PTA_VOLUNTEER_NOTIFICATIONS_MANAGE:      "pta:volunteer-notifications:manage",
 
   // Unestra for HOA — Property/Resident foundation (PR #43, see
   // docs/hoa-domain-model.md and docs/hoa-navigation-proposal.md). Gated
@@ -512,6 +518,7 @@ const ORG_OWNER_PERMISSIONS: Permission[] = [
   PERMISSIONS.PTA_VOLUNTEER_REPORTS_EXPORT,
   PERMISSIONS.PTA_VOLUNTEER_FINANCIAL_REPORTS_VIEW,
   PERMISSIONS.PTA_VOLUNTEER_ASSESSMENTS_PREVIEW_POST,
+  PERMISSIONS.PTA_VOLUNTEER_NOTIFICATIONS_MANAGE,
   PERMISSIONS.PTA_VOLUNTEER_PAYMENTS_RECORD_OFFLINE,
   PERMISSIONS.PTA_VOLUNTEER_PAYMENTS_REFUND,
   PERMISSIONS.PTA_VOLUNTEER_AUDIT_VIEW,
@@ -658,6 +665,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.PTA_VOLUNTEER_REPORTS_EXPORT,
     PERMISSIONS.PTA_VOLUNTEER_FINANCIAL_REPORTS_VIEW,
     PERMISSIONS.PTA_VOLUNTEER_ASSESSMENTS_PREVIEW_POST,
+    PERMISSIONS.PTA_VOLUNTEER_NOTIFICATIONS_MANAGE,
     PERMISSIONS.PTA_VOLUNTEER_PAYMENTS_RECORD_OFFLINE,
     PERMISSIONS.PTA_VOLUNTEER_PAYMENTS_REFUND,
     PERMISSIONS.PTA_VOLUNTEER_AUDIT_VIEW,
@@ -843,6 +851,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.PTA_VOLUNTEER_REPORTS_VIEW,
     PERMISSIONS.PTA_VOLUNTEER_REPORTS_EXPORT,
     PERMISSIONS.PTA_VOLUNTEER_ASSESSMENTS_PREVIEW_POST,
+    PERMISSIONS.PTA_VOLUNTEER_NOTIFICATIONS_MANAGE,
     PERMISSIONS.DOCUMENTS_READ,
     PERMISSIONS.DOCUMENTS_WRITE,
     // Governance READ only — publishing/superseding bylaws is board authority.

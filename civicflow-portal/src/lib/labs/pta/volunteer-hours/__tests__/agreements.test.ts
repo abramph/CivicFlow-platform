@@ -11,6 +11,8 @@ const updatePeriod = vi.fn();
 const findManyAssignments = vi.fn();
 const findManyElections = vi.fn();
 const findManyAcceptances = vi.fn();
+const findUniqueHouseholdAdult = vi.fn();
+const findUniqueUser = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -31,6 +33,8 @@ vi.mock("@/lib/prisma", () => ({
     },
     ptaVolunteerRequirementAssignment: { findMany: (...a: unknown[]) => findManyAssignments(...a) },
     ptaVolunteerBuyoutElection: { findMany: (...a: unknown[]) => findManyElections(...a) },
+    ptaHouseholdAdult: { findUnique: (...a: unknown[]) => findUniqueHouseholdAdult(...a) },
+    user: { findUnique: (...a: unknown[]) => findUniqueUser(...a) },
     $transaction: async (fn: (tx: unknown) => unknown) =>
       fn({
         ptaVolunteerAgreementAcceptance: { create: (...a: unknown[]) => createAcceptance(...a) },
@@ -62,6 +66,7 @@ const BASE_PERIOD = {
 beforeEach(() => {
   vi.clearAllMocks();
   findFirstPeriod.mockResolvedValue(BASE_PERIOD);
+  findUniqueHouseholdAdult.mockResolvedValue({ name: "Jane Doe", relationshipLabel: "Parent" });
 });
 
 describe("agreement versioning", () => {
@@ -420,6 +425,50 @@ describe("acceptAgreement", () => {
     expect(createAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "pta.volunteer_hours.agreement_accepted", tx: expect.anything() }));
   });
 
+  it("FA3 signer snapshot: permanently records the accepting adult's name/relationship on the acceptance row, not just a live FK", async () => {
+    findFirstPeriod.mockResolvedValue({ ...BASE_PERIOD, agreementVersionId: "v1" });
+    findFirstVersion.mockResolvedValue({ id: "v1", status: "PUBLISHED", contentHash: "hash-abc" });
+    findUniqueAcceptance.mockResolvedValue(null);
+    findUniqueHouseholdAdult.mockResolvedValue({ name: "Priya Patel", relationshipLabel: "Guardian" });
+    createAcceptance.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ id: "acc-1", ...data }));
+
+    const { acceptAgreement } = await import("../agreements");
+    const acceptance = await acceptAgreement("org-1", "period-1", "hh-1", { acknowledged: true }, { userId: "u1", adultId: "adult-1" });
+
+    expect(findUniqueHouseholdAdult).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "adult-1" } }));
+    expect(acceptance.signerDisplayNameAtAcceptance).toBe("Priya Patel");
+    expect(acceptance.signerRelationshipAtAcceptance).toBe("Guardian");
+    expect(findUniqueUser).not.toHaveBeenCalled(); // adult lookup succeeded -- no need for the fallback path
+  });
+
+  it("FA3 signer snapshot fallback: falls back to the authenticated user's displayName, then email, then a literal placeholder when the household adult has no usable name", async () => {
+    findFirstPeriod.mockResolvedValue({ ...BASE_PERIOD, agreementVersionId: "v1" });
+    findFirstVersion.mockResolvedValue({ id: "v1", status: "PUBLISHED", contentHash: "hash-abc" });
+    findUniqueAcceptance.mockResolvedValue(null);
+    createAcceptance.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ id: "acc-1", ...data }));
+
+    // Adult record exists but has no name (blank/whitespace) and no relationship label.
+    findUniqueHouseholdAdult.mockResolvedValue({ name: "   ", relationshipLabel: null });
+    findUniqueUser.mockResolvedValueOnce({ displayName: "Jordan Lee", email: "jordan@example.com" });
+    const { acceptAgreement } = await import("../agreements");
+    const withDisplayName = await acceptAgreement("org-1", "period-1", "hh-1", { acknowledged: true }, { userId: "u1", adultId: "adult-1" });
+    expect(withDisplayName.signerDisplayNameAtAcceptance).toBe("Jordan Lee");
+    expect(withDisplayName.signerRelationshipAtAcceptance).toBeNull();
+
+    // Fallback user has no displayName -- falls further back to email.
+    findUniqueAcceptance.mockResolvedValue(null);
+    findUniqueUser.mockResolvedValueOnce({ displayName: null, email: "no-name@example.com" });
+    const withEmailOnly = await acceptAgreement("org-1", "period-1", "hh-1", { acknowledged: true }, { userId: "u1", adultId: "adult-1" });
+    expect(withEmailOnly.signerDisplayNameAtAcceptance).toBe("no-name@example.com");
+
+    // Adult lookup itself comes back null (defensive edge case) -- falls all the way to the literal placeholder.
+    findUniqueAcceptance.mockResolvedValue(null);
+    findUniqueHouseholdAdult.mockResolvedValueOnce(null);
+    findUniqueUser.mockResolvedValueOnce({ displayName: null, email: "" });
+    const withNoIdentity = await acceptAgreement("org-1", "period-1", "hh-1", { acknowledged: true }, { userId: "u1", adultId: "adult-1" });
+    expect(withNoIdentity.signerDisplayNameAtAcceptance).toBe("Unknown signer");
+  });
+
   it("audit-failure rollback: if createAuditEvent throws inside the transaction, acceptAgreement rejects rather than returning a 'successful' acceptance -- the write and its audit event commit or fail together, never one without the other", async () => {
     findFirstPeriod.mockResolvedValue({ ...BASE_PERIOD, agreementVersionId: "v1" });
     findFirstVersion.mockResolvedValue({ id: "v1", status: "PUBLISHED", contentHash: "hash-abc" });
@@ -463,5 +512,91 @@ describe("acceptAgreement", () => {
     const { acceptAgreement } = await import("../agreements");
     const result = await acceptAgreement("org-1", "period-1", "hh-1", { acknowledged: true }, { userId: "u1", adultId: "adult-1" });
     expect(result).toBe(winner);
+  });
+});
+
+// FA3 §5: preview renders only (never sends); a real test-send is a
+// separate, more strictly gated operation. These are service-layer unit
+// tests -- the API-route-level gating (capability/permission/rate-limit/
+// confirm-phrase) is covered by each route's own test file.
+describe("previewAgreementNotification -- render-only, never sends", () => {
+  beforeEach(() => {
+    findFirstPeriod.mockResolvedValue(BASE_PERIOD);
+  });
+
+  it("returns rendered subject/text and never calls sendEmail", async () => {
+    const { previewAgreementNotification } = await import("../agreements");
+    const result = await previewAgreementNotification("org-1", "period-1", "AGREEMENT_AVAILABLE", { userId: "u1", userEmail: "officer@example.test" });
+
+    expect(result.subject).toContain(BASE_PERIOD.name);
+    expect(result.subject).not.toContain("[TEST]"); // that prefix belongs only to a real test-send
+    expect(result.text).toContain("AGREEMENT_AVAILABLE");
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("audits the preview as its own distinct action, with no recipient in the metadata (there isn't one)", async () => {
+    const { previewAgreementNotification } = await import("../agreements");
+    await previewAgreementNotification("org-1", "period-1", "CONTRACT_OFFER_EXPIRING", { userId: "u1", userEmail: "officer@example.test" });
+
+    expect(createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "pta.volunteer_hours.agreement_notification_previewed",
+        metadata: { notificationType: "CONTRACT_OFFER_EXPIRING" },
+      })
+    );
+  });
+});
+
+describe("sendTestAgreementNotification -- the only function here that can actually send", () => {
+  beforeEach(() => {
+    findFirstPeriod.mockResolvedValue(BASE_PERIOD);
+  });
+
+  it("sends to exactly the caller-supplied address with a [TEST]-prefixed subject, and audits delivered:true on success", async () => {
+    sendEmail.mockResolvedValueOnce(undefined);
+    const { sendTestAgreementNotification } = await import("../agreements");
+    await sendTestAgreementNotification("org-1", "period-1", "AGREEMENT_REMINDER", "officer-test@example.test", {
+      userId: "u1",
+      userEmail: "officer@example.test",
+    });
+
+    expect(sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "officer-test@example.test", subject: expect.stringContaining("[TEST]") })
+    );
+    expect(createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "pta.volunteer_hours.agreement_notification_test_sent",
+        metadata: { notificationType: "AGREEMENT_REMINDER", testRecipientEmail: "officer-test@example.test", delivered: true },
+      })
+    );
+  });
+
+  it("rejects a blank/whitespace-only recipient without ever calling sendEmail", async () => {
+    const { sendTestAgreementNotification } = await import("../agreements");
+    await expect(
+      sendTestAgreementNotification("org-1", "period-1", "AGREEMENT_AVAILABLE", "   ", { userId: "u1", userEmail: "officer@example.test" })
+    ).rejects.toMatchObject({ code: "PTA_VALIDATION_ERROR" });
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("when sendEmail fails, re-throws the real error AND audits delivered:false -- the audit event never falsely claims a delivery that didn't happen", async () => {
+    const sendFailure = new Error("SMTP provider unavailable");
+    sendEmail.mockRejectedValueOnce(sendFailure);
+    const { sendTestAgreementNotification } = await import("../agreements");
+
+    await expect(
+      sendTestAgreementNotification("org-1", "period-1", "AGREEMENT_AVAILABLE", "officer-test@example.test", {
+        userId: "u1",
+        userEmail: "officer@example.test",
+      })
+    ).rejects.toBe(sendFailure);
+
+    expect(createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "pta.volunteer_hours.agreement_notification_test_sent",
+        metadata: { notificationType: "AGREEMENT_AVAILABLE", testRecipientEmail: "officer-test@example.test", delivered: false },
+      })
+    );
   });
 });

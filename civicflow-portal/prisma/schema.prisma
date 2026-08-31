@@ -5685,8 +5685,14 @@ model PtaVolunteerBuyoutElection {
   createdAt            DateTime                 @default(now())
 
   organization Organization                  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  period       PtaVolunteerRequirementPeriod @relation(fields: [requirementPeriodId], references: [id], onDelete: Cascade)
-  household    PtaHousehold                  @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  /// feature/pta-family-agreement-buyout follow-up (FA3 §2): Restrict, not
+  /// Cascade — a household's stated election is real financial history
+  /// (it drives what they were quoted/charged) and must not disappear
+  /// because a period or household row is deleted. Production tables for
+  /// this model were confirmed empty before this change (read-only count,
+  /// FA3 §1), so this is a pure safety hardening, not a data migration.
+  period       PtaVolunteerRequirementPeriod @relation(fields: [requirementPeriodId], references: [id], onDelete: Restrict)
+  household    PtaHousehold                  @relation(fields: [householdId], references: [id], onDelete: Restrict)
   purchases    PtaVolunteerBuyoutPurchase[]
   contractAcceptance PtaVolunteerAgreementAcceptance? @relation(fields: [contractAcceptanceId], references: [id], onDelete: SetNull)
 
@@ -5745,7 +5751,13 @@ model PtaVolunteerAgreementVersion {
   updatedAt            DateTime                    @updatedAt
 
   organization      Organization                      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  period            PtaVolunteerRequirementPeriod     @relation("PtaVolunteerAgreementVersionPeriod", fields: [requirementPeriodId], references: [id], onDelete: Cascade)
+  /// feature/pta-family-agreement-buyout follow-up (FA3 §1): Restrict, not
+  /// Cascade — a period's agreement configuration must not silently
+  /// disappear if a period row is ever deleted (no application code path
+  /// does this today; this is the database-level backstop the acceptance
+  /// row's own Restrict FKs below make necessary anyway, since a period
+  /// delete would otherwise need to cascade THROUGH this table first).
+  period            PtaVolunteerRequirementPeriod     @relation("PtaVolunteerAgreementVersionPeriod", fields: [requirementPeriodId], references: [id], onDelete: Restrict)
   assignedToPeriods PtaVolunteerRequirementPeriod[]   @relation("PtaVolunteerPeriodAssignedAgreement")
   acceptances       PtaVolunteerAgreementAcceptance[]
 
@@ -5804,16 +5816,47 @@ model PtaVolunteerAgreementAcceptance {
   ackVersion             String
   /// Optional typed full name, shown back to the family as "Accepted by."
   typedName              String?
+  /// feature/pta-family-agreement-buyout follow-up (FA3 §1/§4): the signer's
+  /// display name, resolved server-side and snapshotted PERMANENTLY at the
+  /// moment of acceptance — NOT a live join to acceptedByAdult/typedName,
+  /// both of which can become null/absent later (a removed household
+  /// member SetNulls acceptedByAdultId; typedName was always optional).
+  /// This is what actually satisfies "retains a non-sensitive signer
+  /// display snapshot sufficient for historical display" — every other
+  /// signer field can go missing over time, this one cannot, because it is
+  /// never re-derived after the write. Resolution order at write time:
+  /// the accepting adult's PtaHouseholdAdult.name, falling back to the
+  /// authenticated user's own display name/email only in the defensive
+  /// case where the adult record is somehow unresolvable.
+  signerDisplayNameAtAcceptance String @default("")
+  /// The accepting adult's PtaHouseholdAdult.relationshipLabel at the
+  /// moment of acceptance, if one was on file — nullable, since this was
+  /// already an optional field upstream and not every household fills it
+  /// in. Never re-derived later, same reasoning as the name snapshot above.
+  signerRelationshipAtAcceptance String?
   createdAt              DateTime @default(now())
 
   organization     Organization                   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  period           PtaVolunteerRequirementPeriod   @relation(fields: [requirementPeriodId], references: [id], onDelete: Cascade)
+  /// feature/pta-family-agreement-buyout follow-up (FA3 §1): Restrict, not
+  /// Cascade — an accepted agreement is immutable historical evidence and
+  /// must not disappear merely because a period row is deleted. This is
+  /// what actually makes "requirement periods with acceptance history
+  /// cannot be hard-deleted" true at the database level, independent of
+  /// any application-layer guard.
+  period           PtaVolunteerRequirementPeriod   @relation(fields: [requirementPeriodId], references: [id], onDelete: Restrict)
   /// Restrict, not Cascade: a version with at least one acceptance can
   /// never be deleted out from under the households that accepted it —
   /// "agreement deletion must not destroy acceptance history" is enforced
   /// at the database level, not just documented as a service-layer promise.
   agreementVersion PtaVolunteerAgreementVersion    @relation(fields: [agreementVersionId], references: [id], onDelete: Restrict)
-  household        PtaHousehold                    @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  /// feature/pta-family-agreement-buyout follow-up (FA3 §1): Restrict, not
+  /// Cascade — a household with acceptance history can never be hard-deleted
+  /// out from under that history. deletePtaHousehold's existing
+  /// application-level guard (households.ts) gives a clean PtaError before
+  /// ever reaching the database; this FK is the backstop for any OTHER
+  /// write path (a future service, a migration, a raw admin command) that
+  /// might attempt the same delete without going through that guard.
+  household        PtaHousehold                    @relation(fields: [householdId], references: [id], onDelete: Restrict)
   acceptedByAdult  PtaHouseholdAdult?              @relation(fields: [acceptedByAdultId], references: [id], onDelete: SetNull)
   elections        PtaVolunteerBuyoutElection[]
 
@@ -5850,8 +5893,13 @@ model PtaVolunteerHourDispute {
   updatedAt           DateTime                      @updatedAt
 
   organization Organization                  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  period       PtaVolunteerRequirementPeriod @relation(fields: [requirementPeriodId], references: [id], onDelete: Cascade)
-  household    PtaHousehold                  @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  /// feature/pta-family-agreement-buyout follow-up (FA3 §2): Restrict, not
+  /// Cascade — a household-submitted dispute (open, resolved, or
+  /// dismissed) is an operational/compliance record with real audit value
+  /// and must not disappear because a period or household row is deleted.
+  /// Production table confirmed empty before this change (FA3 §1).
+  period       PtaVolunteerRequirementPeriod @relation(fields: [requirementPeriodId], references: [id], onDelete: Restrict)
+  household    PtaHousehold                  @relation(fields: [householdId], references: [id], onDelete: Restrict)
 
   @@index([organizationId, requirementPeriodId, status])
   @@index([organizationId, householdId])
@@ -5947,8 +5995,13 @@ model PtaVolunteerBuyoutPurchase {
 
   organization Organization                  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   election     PtaVolunteerBuyoutElection?   @relation(fields: [electionId], references: [id], onDelete: SetNull)
-  period       PtaVolunteerRequirementPeriod @relation(fields: [requirementPeriodId], references: [id], onDelete: Cascade)
-  household    PtaHousehold                  @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  /// feature/pta-family-agreement-buyout follow-up (FA3 §2): Restrict, not
+  /// Cascade — a completed or pending purchase is real payment history
+  /// (money actually moved, or a checkout was in flight) and must not
+  /// disappear because a period or household row is deleted. Production
+  /// table confirmed empty before this change (FA3 §1).
+  period       PtaVolunteerRequirementPeriod @relation(fields: [requirementPeriodId], references: [id], onDelete: Restrict)
+  household    PtaHousehold                  @relation(fields: [householdId], references: [id], onDelete: Restrict)
 
   @@index([organizationId, requirementPeriodId, householdId])
   @@index([organizationId, status])
@@ -6116,8 +6169,19 @@ model PtaVolunteerAssessmentCharge {
   updatedAt                DateTime                           @updatedAt
 
   organization Organization                  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  period       PtaVolunteerRequirementPeriod @relation(fields: [requirementPeriodId], references: [id], onDelete: Cascade)
-  household    PtaHousehold                  @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  /// feature/pta-family-agreement-buyout follow-up (FA3 §2): Restrict, not
+  /// Cascade — a posted assessment charge is a real financial obligation
+  /// (paid, partially paid, or still owed) and must not disappear because
+  /// a period or household row is deleted. This alone is also what blocks
+  /// period/household deletion whenever charge history exists — Postgres
+  /// aborts the WHOLE delete on any single Restrict violation, so this FK
+  /// is sufficient protection regardless of the separate batch/line
+  /// Cascade relationships below (which govern a different, still-Cascade,
+  /// concern: a batch/line row's own lifecycle, never exercised by any
+  /// code path that deletes a period or household). Production table
+  /// confirmed empty before this change (FA3 §1).
+  period       PtaVolunteerRequirementPeriod @relation(fields: [requirementPeriodId], references: [id], onDelete: Restrict)
+  household    PtaHousehold                  @relation(fields: [householdId], references: [id], onDelete: Restrict)
   batch        PtaVolunteerAssessmentBatch   @relation(fields: [batchId], references: [id], onDelete: Cascade)
   line         PtaVolunteerAssessmentLine    @relation(fields: [lineId], references: [id], onDelete: Cascade)
 

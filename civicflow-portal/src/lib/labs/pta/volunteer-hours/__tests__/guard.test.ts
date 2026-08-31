@@ -273,6 +273,20 @@ describe("requireVolunteerHoursAuditAccess (FA2 §4, rule 5: audit survives any 
     await expect(requireVolunteerHoursAuditAccess("pta:volunteer-audit:view")).rejects.toThrow();
     expect(findUniqueOrganization).not.toHaveBeenCalled();
   });
+
+  it("FA3 §9: cross-org ID guessing is structurally impossible -- this function takes no organizationId argument at all; the org is exclusively whatever requirePermission resolved from the caller's OWN authenticated session, never anything a caller could pass or guess", async () => {
+    isPtaVolunteerHoursPlatformEnabled.mockReturnValue(true);
+    isPtaVolunteerHoursOrgAllowed.mockReturnValue(true);
+
+    requirePermission.mockResolvedValueOnce({ organizationId: "org-caller-a", session: { userId: "user-a" }, role: "ORG_ADMIN" });
+    const { requireVolunteerHoursAuditAccess } = await import("../guard");
+    const resultA = await requireVolunteerHoursAuditAccess("pta:volunteer-audit:view");
+    expect(resultA.organizationId).toBe("org-caller-a");
+
+    requirePermission.mockResolvedValueOnce({ organizationId: "org-caller-b", session: { userId: "user-b" }, role: "ORG_ADMIN" });
+    const resultB = await requireVolunteerHoursAuditAccess("pta:volunteer-audit:view");
+    expect(resultB.organizationId).toBe("org-caller-b"); // a different caller, in a different session, always and only gets THEIR own org back
+  });
 });
 
 describe("checkVolunteerHoursAvailable", () => {

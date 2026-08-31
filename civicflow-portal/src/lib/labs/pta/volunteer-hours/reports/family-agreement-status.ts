@@ -93,7 +93,20 @@ export async function buildFamilyAgreementStatusReportData(
         prisma.ptaVolunteerAgreementAcceptance.findMany({
           where: { organizationId, requirementPeriodId: filters.requirementPeriodId, householdId: { in: householdIds } },
           orderBy: { acceptedAt: "desc" },
-          select: { householdId: true, agreementVersionId: true, acceptedAt: true, acceptedByAdult: { select: { name: true } }, typedName: true },
+          // FA3 §1/§4: signerDisplayNameAtAcceptance is the permanent,
+          // always-populated snapshot -- never a live join to
+          // acceptedByAdult, which can go null if the adult's household
+          // membership is later removed. acceptedByAdult/typedName are
+          // still selected only as a legacy fallback for any acceptance
+          // row written before this snapshot column existed.
+          select: {
+            householdId: true,
+            agreementVersionId: true,
+            acceptedAt: true,
+            signerDisplayNameAtAcceptance: true,
+            acceptedByAdult: { select: { name: true } },
+            typedName: true,
+          },
         }),
         prisma.ptaVolunteerHourDispute.findMany({
           where: { organizationId, requirementPeriodId: filters.requirementPeriodId, householdId: { in: householdIds } },
@@ -166,7 +179,9 @@ export async function buildFamilyAgreementStatusReportData(
       assignedAgreementTitle: assignedVersion?.title ?? null,
       assignedAgreementVersionNumber: assignedVersion?.versionNumber ?? null,
       acceptanceStatus,
-      acceptedByName: currentAcceptance ? currentAcceptance.acceptedByAdult?.name || currentAcceptance.typedName || null : null,
+      acceptedByName: currentAcceptance
+        ? currentAcceptance.signerDisplayNameAtAcceptance || currentAcceptance.acceptedByAdult?.name || currentAcceptance.typedName || null
+        : null,
       acceptedAtOrgTime: currentAcceptance ? formatOrgWallTime(currentAcceptance.acceptedAt.toISOString(), period.timezone, true) : null,
       contractLinkedOfferStatus,
       offerExpirationOrgTime,
