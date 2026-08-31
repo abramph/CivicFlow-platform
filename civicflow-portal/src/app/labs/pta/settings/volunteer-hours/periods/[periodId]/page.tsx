@@ -8,7 +8,9 @@ import { listPeriodDisputes } from "@/lib/labs/pta/volunteer-hours/disputes";
 import { checkVolunteerHoursAvailable } from "@/lib/labs/pta/volunteer-hours/guard";
 import { getVolunteerRequirementPeriod } from "@/lib/labs/pta/volunteer-hours/periods";
 import { listPricingWindows } from "@/lib/labs/pta/volunteer-hours/pricing";
+import { getAgreementStatusCounts, listAgreementVersions } from "@/lib/labs/pta/volunteer-hours/agreements";
 import { PageHeader, SectionCard } from "@/components/app/PageChrome";
+import { PtaVolunteerAgreementManager } from "@/components/labs/pta/PtaVolunteerAgreementManager";
 import { PtaVolunteerAssessmentManager } from "@/components/labs/pta/PtaVolunteerAssessmentManager";
 import { PtaVolunteerAssignmentsManager } from "@/components/labs/pta/PtaVolunteerAssignmentsManager";
 import { PtaVolunteerDisputesManager } from "@/components/labs/pta/PtaVolunteerDisputesManager";
@@ -40,12 +42,15 @@ export default async function PtaVolunteerPeriodAssignmentsPage({ params }: { pa
   const canManageNotifications = can("pta:volunteer-requirements:manage");
   const notificationSendingAvailable = canManageNotifications && (await checkVolunteerHoursAvailable(organizationId, "notifications"));
 
-  const [assignments, pricingWindows, disputes, assessmentBatches, reviewFlags] = await Promise.all([
+  const canViewRequirements = can("pta:volunteer-requirements:view");
+  const [assignments, pricingWindows, disputes, assessmentBatches, reviewFlags, agreementVersions, agreementStatusCounts] = await Promise.all([
     listPeriodAssignments(organizationId, periodId),
     buyoutAvailable ? listPricingWindows(organizationId, periodId) : Promise.resolve([]),
     listPeriodDisputes(organizationId, periodId),
     canManageAssessments ? listAssessmentBatches(organizationId, periodId) : Promise.resolve([]),
-    can("pta:volunteer-requirements:view") ? listReviewFlags(organizationId, periodId) : Promise.resolve([]),
+    canViewRequirements ? listReviewFlags(organizationId, periodId) : Promise.resolve([]),
+    canViewRequirements ? listAgreementVersions(organizationId, periodId) : Promise.resolve([]),
+    canViewRequirements ? getAgreementStatusCounts(organizationId, periodId) : Promise.resolve(null),
   ]);
   const draftBatchSummary = assessmentBatches.find((b) => b.status === "DRAFT");
   const draftBatch = draftBatchSummary ? await getAssessmentBatch(organizationId, draftBatchSummary.id) : null;
@@ -72,6 +77,34 @@ export default async function PtaVolunteerPeriodAssignmentsPage({ params }: { pa
           canAdjustFamily={can("pta:volunteer-requirements:adjust-family")}
         />
       </SectionCard>
+      {canViewRequirements && agreementStatusCounts ? (
+        <SectionCard
+          title="Volunteer commitment agreement"
+          description="Optional family acknowledgment, and (if enabled) contract-linked buyout pricing tied to when a household accepts it."
+        >
+          <PtaVolunteerAgreementManager
+            periodId={periodId}
+            timezone={period.timezone}
+            versions={agreementVersions.map((v) => ({
+              id: v.id,
+              title: v.title,
+              versionNumber: v.versionNumber,
+              content: v.content,
+              status: v.status,
+              publishedAt: v.publishedAt ? v.publishedAt.toISOString() : null,
+              archivedAt: v.archivedAt ? v.archivedAt.toISOString() : null,
+            }))}
+            policy={{
+              agreementRequired: period.agreementRequired,
+              agreementVersionId: period.agreementVersionId,
+              contractLinkedBuyoutEnabled: period.contractLinkedBuyoutEnabled,
+              contractLinkedEligibilityDays: period.contractLinkedEligibilityDays,
+              contractLinkedUsesAcceptanceRate: period.contractLinkedUsesAcceptanceRate,
+            }}
+            statusCounts={agreementStatusCounts}
+          />
+        </SectionCard>
+      ) : null}
       {buyoutAvailable ? (
         <SectionCard
           title="Pricing windows"

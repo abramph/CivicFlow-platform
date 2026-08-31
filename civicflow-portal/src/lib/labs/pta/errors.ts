@@ -143,6 +143,45 @@ export const PTA_ERROR_CODES = [
    * never silently superseded; the caller is asked to retry shortly, by
    * which point the winner's session should be reusable. */
   "PTA_VOLUNTEER_CHECKOUT_IN_PROGRESS",
+  // feature/pta-family-agreement-buyout
+  "PTA_VOLUNTEER_AGREEMENT_VERSION_NOT_FOUND",
+  "PTA_VOLUNTEER_AGREEMENT_NOT_DRAFT",
+  "PTA_VOLUNTEER_AGREEMENT_NOT_ASSIGNED",
+  // feature/pta-family-agreement-buyout follow-up (FA2)
+  /** deletePtaHousehold's pre-delete guard: a household with any real
+   * PtaVolunteerAgreementAcceptance history cannot be hard-deleted — this
+   * is now a friendly pre-check in front of an actual DB-level ON DELETE
+   * RESTRICT (as of the FA3 retention-hardening migration), not the only
+   * thing preventing the loss — mirrors PTA_HOUSEHOLD_HAS_PAYMENT_HISTORY. */
+  "PTA_HOUSEHOLD_HAS_AGREEMENT_HISTORY",
+  // feature/pta-family-agreement-buyout follow-up (FA3 §2): the same
+  // retention-hardening migration also moved buyout election/purchase,
+  // assessment charge, and hour dispute householdId FKs to RESTRICT.
+  /** deletePtaHousehold's pre-delete guard for the remaining four
+   * household-scoped historical/financial models — a single combined code
+   * (rather than one per model) since the remedy is identical in every
+   * case: deactivate instead of hard-deleting. */
+  "PTA_HOUSEHOLD_HAS_VOLUNTEER_FINANCIAL_HISTORY",
+  /** archiveAgreementVersion: cannot archive a version that is the period's
+   * CURRENTLY assigned/required agreement without an atomic replacement —
+   * archiving would silently strand `agreementRequired=true` pointing at a
+   * version new households can no longer be shown as "the" agreement. */
+  "PTA_VOLUNTEER_AGREEMENT_ACTIVELY_REQUIRED",
+  /** resolveHouseholdAgreementStatus: an acceptance's snapshotted content
+   * hash no longer matches the assigned version's live hash — structurally
+   * should never happen (published content is immutable), so surfacing
+   * this loudly rather than silently proceeding is the "fails closed"
+   * behavior FA2 §5 requires. */
+  "PTA_VOLUNTEER_AGREEMENT_CONTENT_HASH_MISMATCH",
+  // feature/pta-family-agreement-buyout follow-up (FA4 §2)
+  /** acceptAgreement: neither the accepting adult's PtaHouseholdAdult.name
+   * nor the authenticated user's own displayName/email yielded a
+   * non-blank signer identity. signerDisplayNameAtAcceptance is permanent
+   * historical evidence of who acknowledged the agreement, so this fails
+   * the acceptance rather than falling back to a placeholder string —
+   * the remedy is for an admin to add a name to the household adult
+   * record, not for the system to invent one. */
+  "PTA_VOLUNTEER_AGREEMENT_SIGNER_UNRESOLVED",
 ] as const;
 
 export type PtaErrorCode = (typeof PTA_ERROR_CODES)[number];
@@ -211,6 +250,14 @@ const STATUS_FOR_CODE: Record<PtaErrorCode, number> = {
   PTA_VOLUNTEER_ASSESSMENT_ALREADY_CHARGED: 409,
   PTA_VOLUNTEER_ASSESSMENT_POSTING_BLOCKED: 403,
   PTA_VOLUNTEER_CHECKOUT_IN_PROGRESS: 409,
+  PTA_VOLUNTEER_AGREEMENT_VERSION_NOT_FOUND: 404,
+  PTA_VOLUNTEER_AGREEMENT_NOT_DRAFT: 409,
+  PTA_VOLUNTEER_AGREEMENT_NOT_ASSIGNED: 409,
+  PTA_HOUSEHOLD_HAS_AGREEMENT_HISTORY: 409,
+  PTA_HOUSEHOLD_HAS_VOLUNTEER_FINANCIAL_HISTORY: 409,
+  PTA_VOLUNTEER_AGREEMENT_ACTIVELY_REQUIRED: 409,
+  PTA_VOLUNTEER_AGREEMENT_CONTENT_HASH_MISMATCH: 500,
+  PTA_VOLUNTEER_AGREEMENT_SIGNER_UNRESOLVED: 400,
 };
 
 export class PtaError extends Error {

@@ -2,10 +2,35 @@ import type { PtaVolunteerElectionType } from "@prisma/client";
 import { createAuditEvent } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 import { PtaError } from "../errors";
+import { resolveHouseholdAgreementStatus } from "./agreements";
 import { resolveHouseholdRequirement, type HouseholdRequirementResult } from "./assignments";
 import { getHouseholdLedgerTotals, type HouseholdLedgerTotals } from "./ledger";
 import { assertBuyoutWindowOpen, getVolunteerRequirementPeriod } from "./periods";
 import { resolveVolunteerBuyoutRate } from "./pricing";
+
+/**
+ * feature/pta-family-agreement-buyout: the ONE place buildBuyoutQuote
+ * consults to decide whether a contract-linked pricing window may even be
+ * considered for this household, and — if so — at which instant it should
+ * be evaluated. Returns null (never throws) whenever contract-linked
+ * pricing does not apply, so every existing non-agreement period/org is
+ * completely unaffected by this call. `resolveHouseholdAgreementStatus`
+ * (agreements.ts) is the single source of truth also used by the family UI
+ * and admin status counts — this can never diverge from what a family is
+ * shown.
+ */
+async function resolveContractLinkedResolutionInstant(
+  organizationId: string,
+  periodId: string,
+  householdId: string,
+  now: Date
+): Promise<{ instant: Date; acceptanceId: string } | null> {
+  const status = await resolveHouseholdAgreementStatus(organizationId, periodId, householdId, now);
+  if (!status.contractLinkedEligibleNow || !status.acceptance) return null;
+  const period = await getVolunteerRequirementPeriod(organizationId, periodId);
+  const instant = period.contractLinkedUsesAcceptanceRate ? status.acceptance.acceptedAt : now;
+  return { instant, acceptanceId: status.acceptance.id };
+}
 
 /**
  * The shared eligibility gate every FULL_BUYOUT/PARTIAL_BUYOUT quote,
@@ -101,6 +126,12 @@ export interface BuyoutQuote {
   totalCents: number;
   pricingWindowId: string | null;
   remainingAfterMinutes: number;
+  /** Set only when the resolved rate actually came from a contract-linked
+   * window at this household's verified acceptance-derived instant — never
+   * set just because contract-linked pricing was ELIGIBLE, only when it was
+   * actually USED (the regular window may still win if no contract-linked
+   * window happens to be active). */
+  contractAcceptanceId: string | null;
 }
 
 /** The server-side quote authority every election/checkout call site must
@@ -119,11 +150,20 @@ export async function buildBuyoutQuote(organizationId: string, periodId: string,
   const maxBuyableMinutes = Math.max(0, requirement.requiredMinutes - serviceFloorMinutes);
 
   if (input.electionType === "VOLUNTEER") {
-    return { electionType: "VOLUNTEER", hoursElectedMinutes: 0, rateCents: 0, totalCents: 0, pricingWindowId: null, remainingAfterMinutes: remainingMinutes };
+    return {
+      electionType: "VOLUNTEER",
+      hoursElectedMinutes: 0,
+      rateCents: 0,
+      totalCents: 0,
+      pricingWindowId: null,
+      remainingAfterMinutes: remainingMinutes,
+      contractAcceptanceId: null,
+    };
   }
 
   const now = new Date();
   assertBuyoutEligible(period, requirement, remainingMinutes, now);
+  const contractLinked = await resolveContractLinkedResolutionInstant(organizationId, periodId, householdId, now);
 
   if (input.electionType === "FULL_BUYOUT") {
     if (!period.buyoutFullAllowed) {
@@ -132,7 +172,13 @@ export async function buildBuyoutQuote(organizationId: string, periodId: string,
     if (serviceFloorMinutes > 0) {
       throw new PtaError("PTA_VALIDATION_ERROR", "This period requires a minimum amount of actual service — a full buyout isn't available.");
     }
-    const window = await resolveVolunteerBuyoutRate(organizationId, periodId, "FULL_BUYOUT", now);
+    const window = await resolveVolunteerBuyoutRate(
+      organizationId,
+      periodId,
+      "FULL_BUYOUT",
+      now,
+      contractLinked ? { contractLinkedResolutionInstant: contractLinked.instant } : undefined
+    );
     if (!window) throw new PtaError("PTA_VOLUNTEER_NO_APPLICABLE_RATE", "No full-buyout rate is currently active for this period.");
 
     const hoursElectedMinutes = requirement.requiredMinutes;
@@ -143,6 +189,7 @@ export async function buildBuyoutQuote(organizationId: string, periodId: string,
       totalCents: window.amountCents,
       pricingWindowId: window.id,
       remainingAfterMinutes: Math.max(0, remainingMinutes - hoursElectedMinutes),
+      contractAcceptanceId: window.contractSigningOnly ? (contractLinked?.acceptanceId ?? null) : null,
     };
   }
 
@@ -171,7 +218,13 @@ export async function buildBuyoutQuote(organizationId: string, periodId: string,
     throw new PtaError("PTA_VALIDATION_ERROR", `You can purchase at most ${(maxPurchase / 60).toString()} hours for this period.`);
   }
 
-  const window = await resolveVolunteerBuyoutRate(organizationId, periodId, "PER_HOUR", now);
+  const window = await resolveVolunteerBuyoutRate(
+    organizationId,
+    periodId,
+    "PER_HOUR",
+    now,
+    contractLinked ? { contractLinkedResolutionInstant: contractLinked.instant } : undefined
+  );
   if (!window) throw new PtaError("PTA_VOLUNTEER_NO_APPLICABLE_RATE", "No per-hour buyout rate is currently active for this period.");
 
   const totalCents = Math.round((requested / 60) * window.amountCents);
@@ -182,6 +235,7 @@ export async function buildBuyoutQuote(organizationId: string, periodId: string,
     totalCents,
     pricingWindowId: window.id,
     remainingAfterMinutes: Math.max(0, remainingMinutes - requested),
+    contractAcceptanceId: window.contractSigningOnly ? (contractLinked?.acceptanceId ?? null) : null,
   };
 }
 
@@ -223,6 +277,7 @@ export async function recordElection(
       acknowledgedByUserId: actor.userId,
       ackVersion: VOLUNTEER_HOURS_ACK_VERSION,
       ipAddress: actor.ipAddress ?? null,
+      contractAcceptanceId: quote.contractAcceptanceId,
     },
   });
 
@@ -299,6 +354,13 @@ export async function resolveLockedOrFreshQuote(
             totalCents: election.quotedTotalCents,
             pricingWindowId: election.pricingWindowId,
             remainingAfterMinutes: Math.max(0, remainingMinutes - election.hoursElectedMinutes),
+            // The lock reuses the price already frozen on the election at
+            // the moment it was made -- contractAcceptanceId travels with
+            // it unchanged, never re-derived (re-deriving here could
+            // theoretically find a DIFFERENT acceptance if the household
+            // later accepted an amended version, which must never silently
+            // reprice an already-locked election).
+            contractAcceptanceId: election.contractAcceptanceId,
           };
         }
       }

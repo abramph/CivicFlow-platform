@@ -7,6 +7,11 @@ const updateHousehold = vi.fn();
 const deleteHousehold = vi.fn();
 const createOrgMember = vi.fn();
 const countDuesCharge = vi.fn();
+const countAgreementAcceptance = vi.fn();
+const countBuyoutElection = vi.fn();
+const countBuyoutPurchase = vi.fn();
+const countAssessmentCharge = vi.fn();
+const countHourDispute = vi.fn();
 const findFirstAdult = vi.fn();
 const createAdult = vi.fn();
 const updateHouseholdAdult = vi.fn();
@@ -22,6 +27,11 @@ vi.mock("@/lib/prisma", () => ({
     ptaHousehold: { findFirst: (...a: unknown[]) => findFirstHousehold(...a), findMany: (...a: unknown[]) => findManyHousehold(...a), create: (...a: unknown[]) => createHousehold(...a), update: (...a: unknown[]) => updateHousehold(...a), delete: (...a: unknown[]) => deleteHousehold(...a) },
     orgMember: { create: (...a: unknown[]) => createOrgMember(...a), findUnique: (...a: unknown[]) => findUniqueOrgMember(...a), update: (...a: unknown[]) => updateOrgMember(...a) },
     duesCharge: { count: (...a: unknown[]) => countDuesCharge(...a) },
+    ptaVolunteerAgreementAcceptance: { count: (...a: unknown[]) => countAgreementAcceptance(...a) },
+    ptaVolunteerBuyoutElection: { count: (...a: unknown[]) => countBuyoutElection(...a) },
+    ptaVolunteerBuyoutPurchase: { count: (...a: unknown[]) => countBuyoutPurchase(...a) },
+    ptaVolunteerAssessmentCharge: { count: (...a: unknown[]) => countAssessmentCharge(...a) },
+    ptaVolunteerHourDispute: { count: (...a: unknown[]) => countHourDispute(...a) },
     ptaHouseholdAdult: { findFirst: (...a: unknown[]) => findFirstAdult(...a), create: (...a: unknown[]) => createAdult(...a), update: (...a: unknown[]) => updateHouseholdAdult(...a), delete: (...a: unknown[]) => deleteAdult(...a) },
     ptaStudent: { findFirst: (...a: unknown[]) => findFirstStudent(...a), create: (...a: unknown[]) => createStudent(...a), update: (...a: unknown[]) => updateStudent(...a) },
     // PTA-A dual-write: create paths resolve the schoolYearId FK twin of the label.
@@ -98,14 +108,104 @@ describe("deletePtaHousehold — payment-history preservation", () => {
     expect(deleteHousehold).not.toHaveBeenCalled();
   });
 
-  it("allows a hard delete when there is no dues history at all", async () => {
+  it("allows a hard delete when there is no dues or volunteer-hours history at all", async () => {
     findFirstHousehold.mockResolvedValueOnce({ id: "household-1", organizationId: "org-a", orgMemberId: "member-1" });
     countDuesCharge.mockResolvedValueOnce(0);
+    countAgreementAcceptance.mockResolvedValueOnce(0);
+    countBuyoutElection.mockResolvedValueOnce(0);
+    countBuyoutPurchase.mockResolvedValueOnce(0);
+    countAssessmentCharge.mockResolvedValueOnce(0);
+    countHourDispute.mockResolvedValueOnce(0);
     deleteHousehold.mockResolvedValueOnce({ id: "household-1" });
 
     const { deletePtaHousehold } = await import("../households");
     await expect(deletePtaHousehold("org-a", "household-1", "u1")).resolves.toBeUndefined();
     expect(deleteHousehold).toHaveBeenCalledWith({ where: { id: "household-1" } });
+  });
+
+  // FA2 §7, hardened FA3 §1/§2: PtaVolunteerAgreementAcceptance.householdId
+  // is now a database-level ON DELETE RESTRICT (the FA3 retention-hardening
+  // migration moved it off Cascade), so this guard is defense in depth in
+  // front of that DB constraint, not the only thing preventing the loss —
+  // mirrors the DuesCharge guard immediately above.
+  it("refuses a hard delete once any agreement acceptance exists, preserving that history", async () => {
+    findFirstHousehold.mockResolvedValueOnce({ id: "household-1", organizationId: "org-a", orgMemberId: "member-1" });
+    countDuesCharge.mockResolvedValueOnce(0);
+    countAgreementAcceptance.mockResolvedValueOnce(1);
+
+    const { deletePtaHousehold } = await import("../households");
+    await expect(deletePtaHousehold("org-a", "household-1", "u1")).rejects.toMatchObject({ code: "PTA_HOUSEHOLD_HAS_AGREEMENT_HISTORY" });
+    expect(deleteHousehold).not.toHaveBeenCalled();
+  });
+
+  it("checks agreement history even for a household with no orgMemberId (never had dues billing)", async () => {
+    findFirstHousehold.mockResolvedValueOnce({ id: "household-1", organizationId: "org-a", orgMemberId: null });
+    countAgreementAcceptance.mockResolvedValueOnce(1);
+
+    const { deletePtaHousehold } = await import("../households");
+    await expect(deletePtaHousehold("org-a", "household-1", "u1")).rejects.toMatchObject({ code: "PTA_HOUSEHOLD_HAS_AGREEMENT_HISTORY" });
+    expect(countDuesCharge).not.toHaveBeenCalled(); // no orgMemberId -> dues check is skipped entirely
+    expect(deleteHousehold).not.toHaveBeenCalled();
+  });
+
+  // FA3 §2: the same retention-hardening migration moved buyout election,
+  // buyout purchase, assessment charge, and hour dispute householdId FKs to
+  // RESTRICT too. One test per model, each isolating that single count so a
+  // failure pinpoints exactly which history type is being checked.
+  it("refuses a hard delete once any buyout election exists", async () => {
+    findFirstHousehold.mockResolvedValueOnce({ id: "household-1", organizationId: "org-a", orgMemberId: "member-1" });
+    countDuesCharge.mockResolvedValueOnce(0);
+    countAgreementAcceptance.mockResolvedValueOnce(0);
+    countBuyoutElection.mockResolvedValueOnce(1);
+    countBuyoutPurchase.mockResolvedValueOnce(0);
+    countAssessmentCharge.mockResolvedValueOnce(0);
+    countHourDispute.mockResolvedValueOnce(0);
+
+    const { deletePtaHousehold } = await import("../households");
+    await expect(deletePtaHousehold("org-a", "household-1", "u1")).rejects.toMatchObject({ code: "PTA_HOUSEHOLD_HAS_VOLUNTEER_FINANCIAL_HISTORY" });
+    expect(deleteHousehold).not.toHaveBeenCalled();
+  });
+
+  it("refuses a hard delete once any buyout purchase exists", async () => {
+    findFirstHousehold.mockResolvedValueOnce({ id: "household-1", organizationId: "org-a", orgMemberId: "member-1" });
+    countDuesCharge.mockResolvedValueOnce(0);
+    countAgreementAcceptance.mockResolvedValueOnce(0);
+    countBuyoutElection.mockResolvedValueOnce(0);
+    countBuyoutPurchase.mockResolvedValueOnce(1);
+    countAssessmentCharge.mockResolvedValueOnce(0);
+    countHourDispute.mockResolvedValueOnce(0);
+
+    const { deletePtaHousehold } = await import("../households");
+    await expect(deletePtaHousehold("org-a", "household-1", "u1")).rejects.toMatchObject({ code: "PTA_HOUSEHOLD_HAS_VOLUNTEER_FINANCIAL_HISTORY" });
+    expect(deleteHousehold).not.toHaveBeenCalled();
+  });
+
+  it("refuses a hard delete once any assessment charge exists", async () => {
+    findFirstHousehold.mockResolvedValueOnce({ id: "household-1", organizationId: "org-a", orgMemberId: "member-1" });
+    countDuesCharge.mockResolvedValueOnce(0);
+    countAgreementAcceptance.mockResolvedValueOnce(0);
+    countBuyoutElection.mockResolvedValueOnce(0);
+    countBuyoutPurchase.mockResolvedValueOnce(0);
+    countAssessmentCharge.mockResolvedValueOnce(1);
+    countHourDispute.mockResolvedValueOnce(0);
+
+    const { deletePtaHousehold } = await import("../households");
+    await expect(deletePtaHousehold("org-a", "household-1", "u1")).rejects.toMatchObject({ code: "PTA_HOUSEHOLD_HAS_VOLUNTEER_FINANCIAL_HISTORY" });
+    expect(deleteHousehold).not.toHaveBeenCalled();
+  });
+
+  it("refuses a hard delete once any hour dispute exists", async () => {
+    findFirstHousehold.mockResolvedValueOnce({ id: "household-1", organizationId: "org-a", orgMemberId: "member-1" });
+    countDuesCharge.mockResolvedValueOnce(0);
+    countAgreementAcceptance.mockResolvedValueOnce(0);
+    countBuyoutElection.mockResolvedValueOnce(0);
+    countBuyoutPurchase.mockResolvedValueOnce(0);
+    countAssessmentCharge.mockResolvedValueOnce(0);
+    countHourDispute.mockResolvedValueOnce(1);
+
+    const { deletePtaHousehold } = await import("../households");
+    await expect(deletePtaHousehold("org-a", "household-1", "u1")).rejects.toMatchObject({ code: "PTA_HOUSEHOLD_HAS_VOLUNTEER_FINANCIAL_HISTORY" });
+    expect(deleteHousehold).not.toHaveBeenCalled();
   });
 });
 

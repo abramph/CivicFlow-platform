@@ -2,6 +2,7 @@ import { PERMISSIONS, type Permission } from "@/lib/rbac";
 import { buildComplianceReportData, getComplianceColumns, type ComplianceFilter } from "./compliance";
 import { buildDetailActivityReportData, DETAIL_ACTIVITY_COLUMNS } from "./detail-activity";
 import { buildEventHoursReportData, EVENT_HOURS_COLUMNS } from "./event-hours";
+import { buildFamilyAgreementStatusReportData, FAMILY_AGREEMENT_STATUS_COLUMNS } from "./family-agreement-status";
 import { buildFamilySummaryReportData, getFamilySummaryColumns } from "./family-summary";
 import { buildFinancialReportData, FINANCIAL_COLUMNS } from "./financial";
 import { buildIndividualVolunteerReportData, INDIVIDUAL_VOLUNTEER_COLUMNS } from "./individual-volunteer";
@@ -17,6 +18,13 @@ export const VOLUNTEER_REPORT_TYPES = [
   "PTA_VOLUNTEER_FINANCIAL",
   "PTA_VOLUNTEER_INDIVIDUAL",
   "PTA_VOLUNTEER_CATEGORY",
+  // feature/pta-family-agreement-buyout follow-up (FA2 §2), Report H.
+  // ReportExport.reportType is a plain `String` column in schema.prisma
+  // (no Prisma enum backs it — confirmed before adding this), so this new
+  // value needs no migration; type safety is enforced entirely by this
+  // const array + the VolunteerReportType union derived from it, exactly
+  // as it already was for every prior report type.
+  "PTA_VOLUNTEER_FAMILY_AGREEMENT_STATUS",
 ] as const;
 
 export type VolunteerReportType = (typeof VOLUNTEER_REPORT_TYPES)[number];
@@ -108,6 +116,12 @@ export async function buildVolunteerReportExportFile(
     case "PTA_VOLUNTEER_CATEGORY": {
       const data = await buildVolunteerCategoryReportData(organizationId, filters, generatedByName);
       buffer = await buildVolunteerReportWorkbook(data, VOLUNTEER_CATEGORY_COLUMNS);
+      info.data = data.info;
+      break;
+    }
+    case "PTA_VOLUNTEER_FAMILY_AGREEMENT_STATUS": {
+      const data = await buildFamilyAgreementStatusReportData(organizationId, filters, generatedByName);
+      buffer = await buildVolunteerReportWorkbook(data, FAMILY_AGREEMENT_STATUS_COLUMNS);
       info.data = data.info;
       break;
     }

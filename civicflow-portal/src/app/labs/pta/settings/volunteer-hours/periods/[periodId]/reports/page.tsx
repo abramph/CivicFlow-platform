@@ -29,7 +29,7 @@ export default async function PtaVolunteerReportsPage({ params }: { params: Prom
       />
       <SectionCard
         title="Volunteer Hours Reports"
-        description="Family Summary, Detailed Activity, Event Hours, Compliance, Purchased-Hours & Financial, Individual Volunteer, and Volunteer Category reports."
+        description="Family Summary, Detailed Activity, Event Hours, Compliance, Purchased-Hours & Financial, Individual Volunteer, Volunteer Category, and Family Agreement Status reports."
       >
         <PtaVolunteerReportsCenter
           periodId={periodId}
