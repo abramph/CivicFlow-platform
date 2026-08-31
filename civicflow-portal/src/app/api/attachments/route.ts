@@ -1,5 +1,13 @@
 import { createAuditEvent } from "@/lib/audit";
-import { attachmentPermission, attachmentPrefix, isAttachmentEntityType, maxAttachmentBytes, verifyAttachmentEntity } from "@/lib/attachments";
+import {
+  attachmentPermission,
+  attachmentPrefix,
+  isAllowedAttachmentContentType,
+  isAttachmentEntityType,
+  maxAttachmentBytes,
+  verifyAttachmentEntity,
+  verifyAttachmentOwnership,
+} from "@/lib/attachments";
 import { requirePermission, withForbiddenHandler } from "@/lib/auth-guards";
 import { prisma } from "@/lib/prisma";
 import { buildSafeObjectKey, uploadBufferToSpaces } from "@/lib/storage";
@@ -17,8 +25,11 @@ export async function GET(request: Request) {
       return Response.json({ ok: false, error: "Invalid attachment entity type." }, { status: 400 });
     }
 
-    const { organizationId } = await requirePermission(attachmentPermission(entityType, "read"), "throw");
+    const { organizationId, session, can } = await requirePermission(attachmentPermission(entityType, "read"), "throw");
     if (!(await verifyAttachmentEntity(organizationId, entityType, entityId))) {
+      return Response.json({ ok: false, error: "Attachment entity not found in organization." }, { status: 404 });
+    }
+    if (!(await verifyAttachmentOwnership(organizationId, entityType, entityId, { userId: session.userId, canManage: can("reimbursements:manage") }))) {
       return Response.json({ ok: false, error: "Attachment entity not found in organization." }, { status: 404 });
     }
 
@@ -59,9 +70,15 @@ export async function POST(request: Request) {
     if (file.size > maxAttachmentBytes) {
       return Response.json({ ok: false, error: "Attachment exceeds the 15 MB upload limit." }, { status: 413 });
     }
+    if (!isAllowedAttachmentContentType(entityType, file.type || "application/octet-stream")) {
+      return Response.json({ ok: false, error: "That file type isn't accepted here. Upload a PDF, JPEG, PNG, or HEIC/HEIF file." }, { status: 415 });
+    }
 
-    const { session, organizationId } = await requirePermission(attachmentPermission(entityType, "write"), "throw");
+    const { session, organizationId, can } = await requirePermission(attachmentPermission(entityType, "write"), "throw");
     if (!(await verifyAttachmentEntity(organizationId, entityType, entityId))) {
+      return Response.json({ ok: false, error: "Attachment entity not found in organization." }, { status: 404 });
+    }
+    if (!(await verifyAttachmentOwnership(organizationId, entityType, entityId, { userId: session.userId, canManage: can("reimbursements:manage") }))) {
       return Response.json({ ok: false, error: "Attachment entity not found in organization." }, { status: 404 });
     }
 

@@ -3,23 +3,29 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const findUniqueSettings = vi.fn();
 const findManyLines = vi.fn();
 const groupByExpenditures = vi.fn();
-const createLine = vi.fn();
 const findFirstLine = vi.fn();
-const updateLine = vi.fn();
 const findFirstCategory = vi.fn();
 const createAuditEvent = vi.fn().mockResolvedValue(undefined);
+const transaction = vi.fn();
+
+// budget.ts wraps createBudgetLine/updateBudgetLine's write + audit event in
+// one prisma.$transaction (fix/pta-treasurer-financial-controls §9) --
+// these tx-scoped mocks are what the real create/update calls now route
+// through; createLine/updateLine below are kept as the same names tests
+// already assert against.
+const createLine = vi.fn();
+const updateLine = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     orgSettings: { findUnique: (...a: unknown[]) => findUniqueSettings(...a) },
     budgetLine: {
       findMany: (...a: unknown[]) => findManyLines(...a),
-      create: (...a: unknown[]) => createLine(...a),
       findFirst: (...a: unknown[]) => findFirstLine(...a),
-      update: (...a: unknown[]) => updateLine(...a),
     },
     expenditure: { groupBy: (...a: unknown[]) => groupByExpenditures(...a) },
     category: { findFirst: (...a: unknown[]) => findFirstCategory(...a) },
+    $transaction: (...a: unknown[]) => transaction(...a),
   },
 }));
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...args: unknown[]) => createAuditEvent(...args) }));
@@ -29,6 +35,14 @@ import { createBudgetLine, fiscalYearWindow, getBudgetWithActuals } from "@/lib/
 beforeEach(() => {
   vi.clearAllMocks();
   findUniqueSettings.mockResolvedValue({ fiscalYearStart: 7 });
+  transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) =>
+    callback({
+      budgetLine: {
+        create: (...a: unknown[]) => createLine(...a),
+        update: (...a: unknown[]) => updateLine(...a),
+      },
+    })
+  );
 });
 
 describe("fiscalYearWindow", () => {
@@ -77,5 +91,12 @@ describe("createBudgetLine", () => {
     await expect(
       createBudgetLine({ organizationId: "org-1", fiscalYear: "2026-2027", name: "Events", plannedAmount: 100, categoryId: "foreign", actorUserId: "u1" })
     ).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("create and its audit event commit in the same transaction", async () => {
+    createLine.mockResolvedValueOnce({ id: "bl-1", name: "Events" });
+    await createBudgetLine({ organizationId: "org-1", fiscalYear: "2026-2027", name: "Events", plannedAmount: 100, actorUserId: "u1" });
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(createAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "budget.line_created", tx: expect.anything() }));
   });
 });

@@ -908,6 +908,7 @@ model User {
   reimbursementsApproved            ReimbursementRequest[]             @relation("ReimbursementApprovedBy")
   reimbursementsPaid                ReimbursementRequest[]             @relation("ReimbursementPaidBy")
   reimbursementsRejected            ReimbursementRequest[]             @relation("ReimbursementRejectedBy")
+  reimbursementsCorrected           ReimbursementRequest[]             @relation("ReimbursementCorrectedBy")
   mobileDeviceTokens                MobileDeviceToken[]
   reviewedPaymentReports            PaymentReport[]                    @relation("PaymentReportReviewedBy")
   reviewedPaymentLinkOfflineReports PaymentLinkOfflineReport[]         @relation("PaymentLinkOfflineReportReviewedBy")
@@ -1539,6 +1540,23 @@ enum ReimbursementStatus {
   APPROVED
   PAID
   REJECTED
+  /// fix/pta-treasurer-financial-controls — a PAID reimbursement that was
+  /// marked paid in Unestra by mistake; the external payment never actually
+  /// happened. See ReimbursementRequest.correctionType.
+  VOIDED
+  /// fix/pta-treasurer-financial-controls — a PAID reimbursement whose real
+  /// external payment was later cancelled, returned, or recovered outside
+  /// Unestra. Distinct from VOIDED: Unestra never claims to have recovered
+  /// the money itself, only that the payer reported it recovered.
+  REVERSED
+}
+
+/// fix/pta-treasurer-financial-controls — which correction shape a
+/// VOIDED/REVERSED ReimbursementRequest went through. See the status enum's
+/// own doc comments for the VOID vs. REVERSAL distinction.
+enum ReimbursementCorrectionType {
+  VOID
+  REVERSAL
 }
 
 /// A request to be paid back for out-of-pocket spend. PAID transactionally
@@ -1546,42 +1564,67 @@ enum ReimbursementStatus {
 /// into budget actuals and the expenditure ledger with no double entry.
 /// Approver must differ from submitter (enforced in lib/reimbursements.ts).
 model ReimbursementRequest {
-  id                String              @id @default(cuid())
+  id                String                       @id @default(cuid())
   organizationId    String
   submittedByUserId String?
   payeeName         String
   description       String
-  amount            Decimal             @db.Decimal(12, 2)
+  amount            Decimal                      @db.Decimal(12, 2)
   categoryId        String?
   eventId           String?
   committeeId       String?
-  status            ReimbursementStatus @default(SUBMITTED)
+  status            ReimbursementStatus          @default(SUBMITTED)
   reviewNotes       String?
   approvedByUserId  String?
   approvedAt        DateTime?
   paidByUserId      String?
   paidAt            DateTime?
   paymentReference  String?
+  /// fix/pta-treasurer-financial-controls — structured external-payment
+  /// method, required (service-layer, not a DB NOT NULL -- see the
+  /// migration's own note) for every PAID transition from this branch
+  /// onward. Historical PAID rows from before this migration keep this
+  /// null; they remain readable, just without a structured method.
+  paymentMethodId   String?
   rejectedByUserId  String?
   rejectedAt        DateTime?
   rejectionReason   String?
-  expenditureId     String?             @unique
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
+  expenditureId     String?                      @unique
+  /// fix/pta-treasurer-financial-controls — set together with correctedAt/
+  /// correctedByUserId/correctionReason when a PAID request moves to
+  /// VOIDED or REVERSED. Null for every other status.
+  correctionType    ReimbursementCorrectionType?
+  correctedAt       DateTime?
+  correctedByUserId String?
+  correctionReason  String?
+  createdAt         DateTime                     @default(now())
+  updatedAt         DateTime                     @updatedAt
 
-  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  submittedBy  User?         @relation("ReimbursementSubmittedBy", fields: [submittedByUserId], references: [id], onDelete: SetNull)
-  category     Category?     @relation("ReimbursementCategory", fields: [categoryId], references: [id], onDelete: SetNull)
-  event        Event?        @relation(fields: [eventId], references: [id], onDelete: SetNull)
-  committee    PtaCommittee? @relation(fields: [committeeId], references: [id], onDelete: SetNull)
-  approvedBy   User?         @relation("ReimbursementApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
-  paidBy       User?         @relation("ReimbursementPaidBy", fields: [paidByUserId], references: [id], onDelete: SetNull)
-  rejectedBy   User?         @relation("ReimbursementRejectedBy", fields: [rejectedByUserId], references: [id], onDelete: SetNull)
-  expenditure  Expenditure?  @relation(fields: [expenditureId], references: [id], onDelete: SetNull)
+  organization        Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  submittedBy         User?                @relation("ReimbursementSubmittedBy", fields: [submittedByUserId], references: [id], onDelete: SetNull)
+  category            Category?            @relation("ReimbursementCategory", fields: [categoryId], references: [id], onDelete: SetNull)
+  event               Event?               @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  committee           PtaCommittee?        @relation(fields: [committeeId], references: [id], onDelete: SetNull)
+  approvedBy          User?                @relation("ReimbursementApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  paidBy              User?                @relation("ReimbursementPaidBy", fields: [paidByUserId], references: [id], onDelete: SetNull)
+  rejectedBy          User?                @relation("ReimbursementRejectedBy", fields: [rejectedByUserId], references: [id], onDelete: SetNull)
+  correctedBy         User?                @relation("ReimbursementCorrectedBy", fields: [correctedByUserId], references: [id], onDelete: SetNull)
+  expenditure         Expenditure?         @relation(fields: [expenditureId], references: [id], onDelete: SetNull)
+  paymentMethodConfig PaymentMethodConfig? @relation(fields: [paymentMethodId], references: [id], onDelete: SetNull)
 
+  /// fix/pta-treasurer-financial-controls — the migration also adds a raw
+  /// CHECK constraint (status != 'PAID' OR "expenditureId" IS NOT NULL),
+  /// which Prisma's DSL cannot express. **Schema-drift warning**: a future
+  /// `prisma migrate reset`/db-push-from-schema on a fresh database will
+  /// create this table WITHOUT that CHECK unless the migration is re-run —
+  /// same caveat already documented on PtaVolunteerAgreementAcceptance's
+  /// signer-nonblank check and PtaVolunteerBuyoutPurchase's partial unique
+  /// index.
   @@index([organizationId])
   @@index([organizationId, status])
   @@index([submittedByUserId])
+  @@index([paymentMethodId])
+  @@index([correctedByUserId])
 }
 
 model PaymentMethodConfig {
@@ -1597,10 +1640,11 @@ model PaymentMethodConfig {
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
 
-  organization       Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  expenditures       Expenditure[]
-  paymentLinkMethods PaymentLinkMethod[]
-  offlineReports     PaymentLinkOfflineReport[]
+  organization          Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  expenditures          Expenditure[]
+  paymentLinkMethods    PaymentLinkMethod[]
+  offlineReports        PaymentLinkOfflineReport[]
+  reimbursementRequests ReimbursementRequest[]
 
   @@unique([organizationId, method])
   @@index([organizationId])
@@ -4789,21 +4833,21 @@ model PtaHouseholdAdult {
   createdAt             DateTime                 @default(now())
   updatedAt             DateTime                 @updatedAt
 
-  organization           Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  household              PtaHousehold              @relation("PtaHouseholdAdults", fields: [householdId], references: [id], onDelete: Cascade)
-  user                   User?                     @relation(fields: [userId], references: [id], onDelete: SetNull)
-  primaryContactFor      PtaHousehold[]            @relation("PtaHouseholdPrimaryContact")
-  secondaryContactFor    PtaHousehold[]            @relation("PtaHouseholdSecondaryContact")
-  volunteerSignups       PtaVolunteerSignup[]
-  chairOfCommittees      PtaCommittee[]            @relation("PtaCommitteeChair")
-  coChairOfCommittees    PtaCommittee[]            @relation("PtaCommitteeCoChair")
-  liaisonOfCommittees    PtaCommittee[]            @relation("PtaCommitteeBoardLiaison")
-  committeeMemberships   PtaCommitteeMember[]
-  invites                PtaHouseholdAdultInvite[]
-  officerAssignments     PtaOfficerAssignment[]
-  electionCandidacies    PtaElectionCandidate[]
-  electionVoterRows      PtaElectionVoter[]
-  volunteerLedgerEntries PtaVolunteerLedgerEntry[]
+  organization                  Organization                      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  household                     PtaHousehold                      @relation("PtaHouseholdAdults", fields: [householdId], references: [id], onDelete: Cascade)
+  user                          User?                             @relation(fields: [userId], references: [id], onDelete: SetNull)
+  primaryContactFor             PtaHousehold[]                    @relation("PtaHouseholdPrimaryContact")
+  secondaryContactFor           PtaHousehold[]                    @relation("PtaHouseholdSecondaryContact")
+  volunteerSignups              PtaVolunteerSignup[]
+  chairOfCommittees             PtaCommittee[]                    @relation("PtaCommitteeChair")
+  coChairOfCommittees           PtaCommittee[]                    @relation("PtaCommitteeCoChair")
+  liaisonOfCommittees           PtaCommittee[]                    @relation("PtaCommitteeBoardLiaison")
+  committeeMemberships          PtaCommitteeMember[]
+  invites                       PtaHouseholdAdultInvite[]
+  officerAssignments            PtaOfficerAssignment[]
+  electionCandidacies           PtaElectionCandidate[]
+  electionVoterRows             PtaElectionVoter[]
+  volunteerLedgerEntries        PtaVolunteerLedgerEntry[]
   volunteerAgreementAcceptances PtaVolunteerAgreementAcceptance[]
 
   @@unique([organizationId, userId])
@@ -5260,29 +5304,29 @@ enum PtaVolunteerPeriodStatus {
 }
 
 model PtaVolunteerRequirementPeriod {
-  id                       String                   @id @default(cuid())
-  organizationId           String
-  name                     String
-  periodType               PtaVolunteerPeriodType
-  startsOn                 DateTime
-  endsOn                   DateTime
+  id                               String                   @id @default(cuid())
+  organizationId                   String
+  name                             String
+  periodType                       PtaVolunteerPeriodType
+  startsOn                         DateTime
+  endsOn                           DateTime
   /// Snapshotted from OrgSettings.timezone at creation time, following this
   /// codebase's snapshot-on-transaction discipline — a later org timezone
   /// change must never silently reinterpret an already-configured period's
   /// dates. Admin-editable if a genuine correction is needed.
-  timezone                 String
+  timezone                         String
   /// Org-wide default hours per family for this period. VH-B assignment
   /// overrides (per-child/per-adult/custom/reduced/exempt/waiver) layer on
   /// top of this — never multiplied implicitly.
-  requiredMinutesDefault   Int
-  volunteerDeadline        DateTime?
-  buyoutWindowStart        DateTime?
-  buyoutWindowEnd          DateTime?
-  assessmentDate           DateTime?
-  assessmentPaymentDueDate DateTime?
-  status                   PtaVolunteerPeriodStatus @default(DRAFT)
-  adminNotes               String?
-  familyPolicyText         String?
+  requiredMinutesDefault           Int
+  volunteerDeadline                DateTime?
+  buyoutWindowStart                DateTime?
+  buyoutWindowEnd                  DateTime?
+  assessmentDate                   DateTime?
+  assessmentPaymentDueDate         DateTime?
+  status                           PtaVolunteerPeriodStatus @default(DRAFT)
+  adminNotes                       String?
+  familyPolicyText                 String?
   /// Free-text admin-defined grouping (e.g. "Elementary Campus", "Program X").
   /// Two ACTIVE periods with overlapping date ranges are only a conflict when
   /// they share the same scopeLabel (or both leave it null) — this is how an
@@ -5291,7 +5335,7 @@ model PtaVolunteerRequirementPeriod {
   /// existing single-school-per-org assumption (no formal campus/program
   /// entity exists to key off instead). Validated in periods.ts, not the DB,
   /// since date-range overlap isn't expressible as a Prisma unique index.
-  scopeLabel               String?
+  scopeLabel                       String?
   /// VH-E buyout POLICY LIMITS — deliberately separate from VH-C's pricing
   /// windows, which capture RATES (how much) not limits (how much is
   /// allowed). All nullable/default-permissive so existing periods (created
@@ -5303,26 +5347,26 @@ model PtaVolunteerRequirementPeriod {
   /// a stored true here is always actually honorable. elections.ts's
   /// buildBuyoutQuote independently re-checks the same condition at
   /// checkout time as defense in depth.
-  buyoutFullAllowed        Boolean                  @default(true)
+  buyoutFullAllowed                Boolean                  @default(true)
   /// Minimum hours a family must purchase if choosing a partial per-hour
   /// buyout at all. Null = no minimum beyond one increment.
-  buyoutMinPurchaseMinutes Int?
+  buyoutMinPurchaseMinutes         Int?
   /// Maximum hours purchasable via the per-hour path. Null = up to the full
   /// requirement (subject to buyoutMinServiceMinutes below).
-  buyoutMaxPurchaseMinutes Int?
+  buyoutMaxPurchaseMinutes         Int?
   /// Hours that must come from actual service no matter how much is bought
   /// out — caps every buyout path at (requiredMinutes - this value). Null
   /// or 0 = no mandatory-service floor.
-  buyoutMinServiceMinutes  Int?
+  buyoutMinServiceMinutes          Int?
   /// Purchase increment: 60 = whole hours, 30 = half hours, 15 = quarter
   /// hours. Every buyout request must be an exact multiple of this.
-  buyoutIncrementMinutes   Int                      @default(60)
+  buyoutIncrementMinutes           Int                      @default(60)
   /// feature/pta-family-agreement-buyout: whether a household must accept
   /// `assignedAgreementVersion` before making ANY election (VOLUNTEER
   /// included, not just buyout) or getting buyout access for this period.
   /// Default false so every existing period (and every org that never
   /// touches this feature) is completely unaffected.
-  agreementRequired               Boolean  @default(false)
+  agreementRequired                Boolean                  @default(false)
   /// Which PUBLISHED version of this period's own agreement is currently
   /// recognized — see PtaVolunteerAgreementVersion's own doc comment for why
   /// this is a separate FK from that model's own `requirementPeriodId`
@@ -5331,12 +5375,12 @@ model PtaVolunteerRequirementPeriod {
   /// this pointer — an admin must explicitly reassign it (docs
   /// section 10's amendment policy), so existing acceptances of the
   /// previously-assigned version are never silently invalidated.
-  agreementVersionId              String?
+  agreementVersionId               String?
   /// Whether a contract-linked (`contractSigningOnly=true`) pricing window
   /// may be resolved for a household that has accepted the assigned
   /// agreement version. Independent of `agreementRequired` — a period could
   /// require acceptance without offering contract-linked pricing at all.
-  contractLinkedBuyoutEnabled     Boolean  @default(false)
+  contractLinkedBuyoutEnabled      Boolean                  @default(false)
   /// Calendar days after `PtaVolunteerAgreementAcceptance.acceptedAt` during
   /// which a contract-linked election may still be made, resolved in this
   /// period's own `timezone` (see timezone.ts's day-boundary helpers — same
@@ -5344,31 +5388,31 @@ model PtaVolunteerRequirementPeriod {
   /// buyout not offered even if `contractLinkedBuyoutEnabled` is somehow
   /// true (belt-and-suspenders; the admin service also refuses to enable
   /// one without the other).
-  contractLinkedEligibilityDays   Int?
+  contractLinkedEligibilityDays    Int?
   /// True (default): the rate applicable AT ACCEPTANCE TIME is frozen for
   /// the household's contract-linked eligibility window (resolveVolunteerBuyoutRate
   /// is called with `acceptedAt`, not "now"). False: contract-linked pricing
   /// is still gated on acceptance + the eligibility window, but resolves at
   /// the CURRENT instant like a normal quote — for a PTA that wants
   /// contract-signing to unlock early access without also rate-locking it.
-  contractLinkedUsesAcceptanceRate Boolean @default(true)
-  createdAt                DateTime                 @default(now())
-  updatedAt                DateTime                 @updatedAt
+  contractLinkedUsesAcceptanceRate Boolean                  @default(true)
+  createdAt                        DateTime                 @default(now())
+  updatedAt                        DateTime                 @updatedAt
 
-  organization      Organization                        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  assignments       PtaVolunteerRequirementAssignment[]
-  pricingWindows    PtaVolunteerPricingWindow[]
-  ledgerEntries     PtaVolunteerLedgerEntry[]
-  buyoutElections   PtaVolunteerBuyoutElection[]
-  hourDisputes      PtaVolunteerHourDispute[]
-  buyoutPurchases   PtaVolunteerBuyoutPurchase[]
-  assessmentBatches PtaVolunteerAssessmentBatch[]
-  assessmentLines   PtaVolunteerAssessmentLine[]
-  assessmentCharges PtaVolunteerAssessmentCharge[]
-  reviewFlags       PtaVolunteerReviewFlag[]
-  notificationLogs  PtaVolunteerNotificationLog[]
-  assignedAgreementVersion PtaVolunteerAgreementVersion?     @relation("PtaVolunteerPeriodAssignedAgreement", fields: [agreementVersionId], references: [id], onDelete: SetNull)
-  agreementVersions        PtaVolunteerAgreementVersion[]    @relation("PtaVolunteerAgreementVersionPeriod")
+  organization             Organization                        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assignments              PtaVolunteerRequirementAssignment[]
+  pricingWindows           PtaVolunteerPricingWindow[]
+  ledgerEntries            PtaVolunteerLedgerEntry[]
+  buyoutElections          PtaVolunteerBuyoutElection[]
+  hourDisputes             PtaVolunteerHourDispute[]
+  buyoutPurchases          PtaVolunteerBuyoutPurchase[]
+  assessmentBatches        PtaVolunteerAssessmentBatch[]
+  assessmentLines          PtaVolunteerAssessmentLine[]
+  assessmentCharges        PtaVolunteerAssessmentCharge[]
+  reviewFlags              PtaVolunteerReviewFlag[]
+  notificationLogs         PtaVolunteerNotificationLog[]
+  assignedAgreementVersion PtaVolunteerAgreementVersion?       @relation("PtaVolunteerPeriodAssignedAgreement", fields: [agreementVersionId], references: [id], onDelete: SetNull)
+  agreementVersions        PtaVolunteerAgreementVersion[]      @relation("PtaVolunteerAgreementVersionPeriod")
   agreementAcceptances     PtaVolunteerAgreementAcceptance[]
 
   @@index([organizationId, status])
@@ -5684,16 +5728,16 @@ model PtaVolunteerBuyoutElection {
   contractAcceptanceId String?
   createdAt            DateTime                 @default(now())
 
-  organization Organization                  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization       Organization                     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   /// feature/pta-family-agreement-buyout follow-up (FA3 §2): Restrict, not
   /// Cascade — a household's stated election is real financial history
   /// (it drives what they were quoted/charged) and must not disappear
   /// because a period or household row is deleted. Production tables for
   /// this model were confirmed empty before this change (read-only count,
   /// FA3 §1), so this is a pure safety hardening, not a data migration.
-  period       PtaVolunteerRequirementPeriod @relation(fields: [requirementPeriodId], references: [id], onDelete: Restrict)
-  household    PtaHousehold                  @relation(fields: [householdId], references: [id], onDelete: Restrict)
-  purchases    PtaVolunteerBuyoutPurchase[]
+  period             PtaVolunteerRequirementPeriod    @relation(fields: [requirementPeriodId], references: [id], onDelete: Restrict)
+  household          PtaHousehold                     @relation(fields: [householdId], references: [id], onDelete: Restrict)
+  purchases          PtaVolunteerBuyoutPurchase[]
   contractAcceptance PtaVolunteerAgreementAcceptance? @relation(fields: [contractAcceptanceId], references: [id], onDelete: SetNull)
 
   @@index([organizationId, requirementPeriodId, householdId])
@@ -5723,19 +5767,19 @@ model PtaVolunteerAgreementVersion {
   /// Plain text only (see PTA_FAMILY_AGREEMENT constants for the
   /// sanitization boundary enforced at write time) — no executable HTML,
   /// no script/style injection surface.
-  content              String
+  content             String
   /// sha256(content), computed server-side at PUBLISH time (not draft-save
   /// time, since content can still change while DRAFT) — the acceptance
   /// record snapshots this same hash, so a later (impossible, but
   /// defense-in-depth) content mutation would be detectable.
-  contentHash          String
-  status               PtaVolunteerAgreementStatus @default(DRAFT)
+  contentHash         String
+  status              PtaVolunteerAgreementStatus @default(DRAFT)
   /// Both null while DRAFT; set together, once, when published — a
   /// published version's `content`/`contentHash`/`title` are never
   /// updated again (enforced in the service layer, not just this comment;
   /// see publishAgreementVersion's own guard).
-  publishedAt          DateTime?
-  publishedByUserId    String?
+  publishedAt         DateTime?
+  publishedByUserId   String?
   /// Optional — "in effect starting X" if a PTA wants to publish ahead of
   /// when it should actually start being recognized. Purely informational
   /// today (nothing gates on it) unless a later phase wires it in; a
@@ -5743,12 +5787,12 @@ model PtaVolunteerAgreementVersion {
   /// itself (not this field) is what actually turns enforcement on for a
   /// period. Documented here rather than silently omitted, since the spec
   /// explicitly asks for the field.
-  effectiveDate        DateTime?
-  archivedAt           DateTime?
-  archivedByUserId     String?
-  createdByUserId      String
-  createdAt            DateTime                    @default(now())
-  updatedAt            DateTime                    @updatedAt
+  effectiveDate       DateTime?
+  archivedAt          DateTime?
+  archivedByUserId    String?
+  createdByUserId     String
+  createdAt           DateTime                    @default(now())
+  updatedAt           DateTime                    @updatedAt
 
   organization      Organization                      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   /// feature/pta-family-agreement-buyout follow-up (FA3 §1): Restrict, not
@@ -5787,35 +5831,35 @@ enum PtaVolunteerAgreementStatus {
 /// explicitly asks to omit device metadata unless a genuine need is
 /// justified first. None was.
 model PtaVolunteerAgreementAcceptance {
-  id                     String   @id @default(cuid())
-  organizationId         String
-  requirementPeriodId    String
-  agreementVersionId     String
-  householdId            String
-  acceptedByUserId       String
+  id                             String   @id @default(cuid())
+  organizationId                 String
+  requirementPeriodId            String
+  agreementVersionId             String
+  householdId                    String
+  acceptedByUserId               String
   /// The specific household-adult identity, when resolvable (it always is
   /// for this program's own accept route, which resolves it the same way
   /// every other household-self-service route does — nullable only for
   /// schema-level defensiveness, never actually null in practice).
-  acceptedByAdultId      String?
+  acceptedByAdultId              String?
   /// Server-generated at the exact moment the write happens — `new Date()`
   /// in the service layer (this program's established convention; see
   /// elections.ts's `acknowledgedAt`), never a DB default and never
   /// accepted from the request body, so it can neither be spoofed nor
   /// backdated by a client or an administrator.
-  acceptedAt             DateTime
+  acceptedAt                     DateTime
   /// Redundant snapshot of the version's contentHash at the moment of
   /// acceptance — defense in depth against the (structurally prevented,
   /// but this is belt-and-suspenders) scenario of a published version's
   /// content ever changing after the fact.
-  contentHashAtAcceptance String
+  contentHashAtAcceptance        String
   /// Versioned checkbox/acknowledgment COPY (distinct from the agreement
   /// CONTENT's own version) — bumped only if the "I acknowledge..." framing
   /// text itself materially changes, mirroring VOLUNTEER_HOURS_ACK_VERSION's
   /// exact pattern one layer up.
-  ackVersion             String
+  ackVersion                     String
   /// Optional typed full name, shown back to the family as "Accepted by."
-  typedName              String?
+  typedName                      String?
   /// feature/pta-family-agreement-buyout follow-up (FA3 §1/§4, hardened
   /// FA4 §2): the signer's display name, resolved server-side and
   /// snapshotted PERMANENTLY at the moment of acceptance — NOT a live join
@@ -5843,27 +5887,27 @@ model PtaVolunteerAgreementAcceptance {
   /// migration must manually re-add that CHECK constraint, mirroring the
   /// existing warning on PtaVolunteerBuyoutPurchase's own hand-written
   /// partial unique index.
-  signerDisplayNameAtAcceptance String
+  signerDisplayNameAtAcceptance  String
   /// The accepting adult's PtaHouseholdAdult.relationshipLabel at the
   /// moment of acceptance, if one was on file — nullable, since this was
   /// already an optional field upstream and not every household fills it
   /// in. Never re-derived later, same reasoning as the name snapshot above.
   signerRelationshipAtAcceptance String?
-  createdAt              DateTime @default(now())
+  createdAt                      DateTime @default(now())
 
-  organization     Organization                   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization     Organization                  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   /// feature/pta-family-agreement-buyout follow-up (FA3 §1): Restrict, not
   /// Cascade — an accepted agreement is immutable historical evidence and
   /// must not disappear merely because a period row is deleted. This is
   /// what actually makes "requirement periods with acceptance history
   /// cannot be hard-deleted" true at the database level, independent of
   /// any application-layer guard.
-  period           PtaVolunteerRequirementPeriod   @relation(fields: [requirementPeriodId], references: [id], onDelete: Restrict)
+  period           PtaVolunteerRequirementPeriod @relation(fields: [requirementPeriodId], references: [id], onDelete: Restrict)
   /// Restrict, not Cascade: a version with at least one acceptance can
   /// never be deleted out from under the households that accepted it —
   /// "agreement deletion must not destroy acceptance history" is enforced
   /// at the database level, not just documented as a service-layer promise.
-  agreementVersion PtaVolunteerAgreementVersion    @relation(fields: [agreementVersionId], references: [id], onDelete: Restrict)
+  agreementVersion PtaVolunteerAgreementVersion  @relation(fields: [agreementVersionId], references: [id], onDelete: Restrict)
   /// feature/pta-family-agreement-buyout follow-up (FA3 §1): Restrict, not
   /// Cascade — a household with acceptance history can never be hard-deleted
   /// out from under that history. deletePtaHousehold's existing
@@ -5871,8 +5915,8 @@ model PtaVolunteerAgreementAcceptance {
   /// ever reaching the database; this FK is the backstop for any OTHER
   /// write path (a future service, a migration, a raw admin command) that
   /// might attempt the same delete without going through that guard.
-  household        PtaHousehold                    @relation(fields: [householdId], references: [id], onDelete: Restrict)
-  acceptedByAdult  PtaHouseholdAdult?              @relation(fields: [acceptedByAdultId], references: [id], onDelete: SetNull)
+  household        PtaHousehold                  @relation(fields: [householdId], references: [id], onDelete: Restrict)
+  acceptedByAdult  PtaHouseholdAdult?            @relation(fields: [acceptedByAdultId], references: [id], onDelete: SetNull)
   elections        PtaVolunteerBuyoutElection[]
 
   /// The database-level idempotency guard section 5 requires: at most one
