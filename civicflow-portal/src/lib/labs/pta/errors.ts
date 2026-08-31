@@ -173,6 +173,15 @@ export const PTA_ERROR_CODES = [
    * this loudly rather than silently proceeding is the "fails closed"
    * behavior FA2 §5 requires. */
   "PTA_VOLUNTEER_AGREEMENT_CONTENT_HASH_MISMATCH",
+  // feature/pta-family-agreement-buyout follow-up (FA4 §2)
+  /** acceptAgreement: neither the accepting adult's PtaHouseholdAdult.name
+   * nor the authenticated user's own displayName/email yielded a
+   * non-blank signer identity. signerDisplayNameAtAcceptance is permanent
+   * historical evidence of who acknowledged the agreement, so this fails
+   * the acceptance rather than falling back to a placeholder string —
+   * the remedy is for an admin to add a name to the household adult
+   * record, not for the system to invent one. */
+  "PTA_VOLUNTEER_AGREEMENT_SIGNER_UNRESOLVED",
 ] as const;
 
 export type PtaErrorCode = (typeof PTA_ERROR_CODES)[number];
@@ -248,6 +257,7 @@ const STATUS_FOR_CODE: Record<PtaErrorCode, number> = {
   PTA_HOUSEHOLD_HAS_VOLUNTEER_FINANCIAL_HISTORY: 409,
   PTA_VOLUNTEER_AGREEMENT_ACTIVELY_REQUIRED: 409,
   PTA_VOLUNTEER_AGREEMENT_CONTENT_HASH_MISMATCH: 500,
+  PTA_VOLUNTEER_AGREEMENT_SIGNER_UNRESOLVED: 400,
 };
 
 export class PtaError extends Error {

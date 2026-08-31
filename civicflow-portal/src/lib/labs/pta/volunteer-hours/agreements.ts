@@ -498,18 +498,24 @@ export async function acceptAgreement(
   const existing = await findHouseholdAcceptance(organizationId, householdId, version.id);
   if (existing) return existing;
 
-  // FA3 §1/§4: resolved and snapshotted BEFORE the write, permanently —
-  // never re-derived on read. This is what actually makes historical
-  // display survive the accepting adult's household-membership being
-  // removed (acceptedByAdultId SetNulls) or their user account being
+  // FA3 §1/§4, hardened FA4 §2: resolved and snapshotted BEFORE the write,
+  // permanently — never re-derived on read. This is what actually makes
+  // historical display survive the accepting adult's household-membership
+  // being removed (acceptedByAdultId SetNulls) or their user account being
   // deleted (acceptedByUserId is a plain, non-FK string that simply goes
   // stale, same convention as audit events' actorId). The adult lookup is
   // expected to always succeed here — the accept route resolves adultId
   // via the same requireVolunteerHoursHouseholdAccess guard that created
-  // it — but a defensive fallback to the authenticated user's own
-  // displayName/email exists so this column is never left blank by a
-  // future caller that somehow reaches this function without a resolvable
-  // adult.
+  // it — a defensive fallback to the authenticated user's own
+  // displayName/email exists for the case where the adult record is
+  // somehow unresolvable, but there is deliberately NO further fallback
+  // to a placeholder string beyond that: signerDisplayNameAtAcceptance is
+  // historical evidence of who acknowledged the agreement, so if NEITHER
+  // the adult record NOR the authenticated user yields a usable non-blank
+  // name, the acceptance itself must fail rather than record a fabricated
+  // or empty identity. Entirely server-derived — the client-supplied
+  // AcceptAgreementInput has no field that could ever reach this column
+  // (only typedName, a SEPARATE optional display field, is client-input).
   const signerAdult = await prisma.ptaHouseholdAdult.findUnique({
     where: { id: actor.adultId },
     select: { name: true, relationshipLabel: true },
@@ -517,7 +523,13 @@ export async function acceptAgreement(
   let signerDisplayNameAtAcceptance = signerAdult?.name?.trim() || "";
   if (!signerDisplayNameAtAcceptance) {
     const fallbackUser = await prisma.user.findUnique({ where: { id: actor.userId }, select: { displayName: true, email: true } });
-    signerDisplayNameAtAcceptance = fallbackUser?.displayName?.trim() || fallbackUser?.email || "Unknown signer";
+    signerDisplayNameAtAcceptance = fallbackUser?.displayName?.trim() || fallbackUser?.email?.trim() || "";
+  }
+  if (!signerDisplayNameAtAcceptance) {
+    throw new PtaError(
+      "PTA_VOLUNTEER_AGREEMENT_SIGNER_UNRESOLVED",
+      "We couldn't identify who is accepting this agreement. Please add a name for this household adult before continuing."
+    );
   }
   const signerRelationshipAtAcceptance = signerAdult?.relationshipLabel?.trim() || null;
 

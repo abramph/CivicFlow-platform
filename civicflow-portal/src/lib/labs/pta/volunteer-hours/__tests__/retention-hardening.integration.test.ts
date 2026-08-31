@@ -446,4 +446,116 @@ describe.skipIf(!RUN_INTEGRATION)("FA3 retention hardening — real-Postgres lif
     const assessmentChargeBatchAndLine = rows.filter((r) => r.table_name === "PtaVolunteerAssessmentCharge");
     expect(assessmentChargeBatchAndLine.length).toBe(2); // requirementPeriodId + householdId only, not batchId/lineId
   });
+
+  it("FA4 §2: the CHECK constraint on signerDisplayNameAtAcceptance exists and is exactly btrim(...) <> ''", async () => {
+    const rows: Array<{ conname: string; definition: string }> = await prisma.$queryRaw`
+      SELECT conname, pg_get_constraintdef(oid) AS definition
+      FROM pg_constraint
+      WHERE conrelid = '"PtaVolunteerAgreementAcceptance"'::regclass AND contype = 'c'
+    `;
+    const check = rows.find((r) => r.conname === "PtaVolunteerAgreementAcceptance_signer_nonblank_check");
+    expect(check).toBeDefined();
+    // Deliberately NOT btrim(...) <> '' -- Postgres's single-argument
+    // btrim() only strips the SPACE character, so a tab-only value like
+    // '\t' would satisfy that check while still being exactly the
+    // "whitespace-only, not a real name" case this constraint exists to
+    // reject. `~ '\S'` (contains at least one non-whitespace character)
+    // correctly rejects spaces, tabs, newlines, etc.
+    expect(check!.definition.replace(/\s+/g, "")).toBe(`CHECK(("signerDisplayNameAtAcceptance"~'\\S'::text))`);
+
+    const col: Array<{ column_default: string | null }> = await prisma.$queryRaw`
+      SELECT column_default FROM information_schema.columns
+      WHERE table_name = 'PtaVolunteerAgreementAcceptance' AND column_name = 'signerDisplayNameAtAcceptance'
+    `;
+    expect(col[0].column_default).toBeNull(); // the empty-string default was dropped
+  });
+
+  it("FA4 §2: a direct Prisma insert (create()) with a blank signerDisplayNameAtAcceptance is rejected by the database itself, not by any application-level validation", async () => {
+    const householdId = await makeHousehold(orgId, "Household For Blank Signer Insert Test");
+    const adultId = await makeAdult(orgId, householdId, "Parent With A Name");
+    const versionId = await makePublishedVersion(orgId, periodId);
+
+    await expect(
+      prisma.ptaVolunteerAgreementAcceptance.create({
+        data: {
+          organizationId: orgId,
+          requirementPeriodId: periodId,
+          agreementVersionId: versionId,
+          householdId,
+          acceptedByUserId: userId,
+          acceptedByAdultId: adultId,
+          acceptedAt: new Date(),
+          contentHashAtAcceptance: "retention-test-hash",
+          ackVersion: "test",
+          signerDisplayNameAtAcceptance: "", // deliberately blank -- Prisma itself has no field-level validation stopping this
+          signerRelationshipAtAcceptance: null,
+        },
+      })
+    ).rejects.toThrow();
+
+    const count = await prisma.ptaVolunteerAgreementAcceptance.count({ where: { householdId } });
+    expect(count).toBe(0); // nothing was inserted
+
+    await prisma.ptaVolunteerAgreementVersion.delete({ where: { id: versionId } });
+    await prisma.ptaHouseholdAdult.delete({ where: { id: adultId } });
+    await prisma.ptaHousehold.delete({ where: { id: householdId } });
+  });
+
+  it("FA4 §2: a direct Prisma insert with a whitespace-only signerDisplayNameAtAcceptance is ALSO rejected -- the constraint uses btrim(), not a plain empty-string check", async () => {
+    const householdId = await makeHousehold(orgId, "Household For Whitespace Signer Insert Test");
+    const adultId = await makeAdult(orgId, householdId, "Parent With A Name");
+    const versionId = await makePublishedVersion(orgId, periodId);
+
+    await expect(
+      prisma.ptaVolunteerAgreementAcceptance.create({
+        data: {
+          organizationId: orgId,
+          requirementPeriodId: periodId,
+          agreementVersionId: versionId,
+          householdId,
+          acceptedByUserId: userId,
+          acceptedByAdultId: adultId,
+          acceptedAt: new Date(),
+          contentHashAtAcceptance: "retention-test-hash",
+          ackVersion: "test",
+          signerDisplayNameAtAcceptance: "   \t  ", // whitespace-only, never trimmed by Prisma itself
+          signerRelationshipAtAcceptance: null,
+        },
+      })
+    ).rejects.toThrow();
+
+    const count = await prisma.ptaVolunteerAgreementAcceptance.count({ where: { householdId } });
+    expect(count).toBe(0);
+
+    await prisma.ptaVolunteerAgreementVersion.delete({ where: { id: versionId } });
+    await prisma.ptaHouseholdAdult.delete({ where: { id: adultId } });
+    await prisma.ptaHousehold.delete({ where: { id: householdId } });
+  });
+
+  it("FA4 §2: a raw SQL INSERT (bypassing Prisma's client entirely) with a blank signer name is rejected by Postgres itself", async () => {
+    const householdId = await makeHousehold(orgId, "Household For Raw SQL Blank Signer Test");
+    const adultId = await makeAdult(orgId, householdId, "Parent With A Name");
+    const versionId = await makePublishedVersion(orgId, periodId);
+    const rawId = `raw-insert-test-${Date.now()}`;
+
+    await expect(
+      prisma.$executeRaw`
+        INSERT INTO "PtaVolunteerAgreementAcceptance"
+          (id, "organizationId", "requirementPeriodId", "agreementVersionId", "householdId",
+           "acceptedByUserId", "acceptedByAdultId", "acceptedAt", "contentHashAtAcceptance",
+           "ackVersion", "signerDisplayNameAtAcceptance", "signerRelationshipAtAcceptance", "createdAt")
+        VALUES
+          (${rawId}, ${orgId}, ${periodId}, ${versionId}, ${householdId},
+           ${userId}, ${adultId}, NOW(), 'retention-test-hash',
+           'test', '', NULL, NOW())
+      `
+    ).rejects.toThrow();
+
+    const count = await prisma.ptaVolunteerAgreementAcceptance.count({ where: { id: rawId } });
+    expect(count).toBe(0);
+
+    await prisma.ptaVolunteerAgreementVersion.delete({ where: { id: versionId } });
+    await prisma.ptaHouseholdAdult.delete({ where: { id: adultId } });
+    await prisma.ptaHousehold.delete({ where: { id: householdId } });
+  });
 });

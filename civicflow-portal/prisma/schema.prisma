@@ -5816,19 +5816,34 @@ model PtaVolunteerAgreementAcceptance {
   ackVersion             String
   /// Optional typed full name, shown back to the family as "Accepted by."
   typedName              String?
-  /// feature/pta-family-agreement-buyout follow-up (FA3 §1/§4): the signer's
-  /// display name, resolved server-side and snapshotted PERMANENTLY at the
-  /// moment of acceptance — NOT a live join to acceptedByAdult/typedName,
-  /// both of which can become null/absent later (a removed household
-  /// member SetNulls acceptedByAdultId; typedName was always optional).
-  /// This is what actually satisfies "retains a non-sensitive signer
-  /// display snapshot sufficient for historical display" — every other
-  /// signer field can go missing over time, this one cannot, because it is
-  /// never re-derived after the write. Resolution order at write time:
-  /// the accepting adult's PtaHouseholdAdult.name, falling back to the
-  /// authenticated user's own display name/email only in the defensive
-  /// case where the adult record is somehow unresolvable.
-  signerDisplayNameAtAcceptance String @default("")
+  /// feature/pta-family-agreement-buyout follow-up (FA3 §1/§4, hardened
+  /// FA4 §2): the signer's display name, resolved server-side and
+  /// snapshotted PERMANENTLY at the moment of acceptance — NOT a live join
+  /// to acceptedByAdult/typedName, both of which can become null/absent
+  /// later (a removed household member SetNulls acceptedByAdultId;
+  /// typedName was always optional). This is what actually satisfies
+  /// "retains a non-sensitive signer display snapshot sufficient for
+  /// historical display" — every other signer field can go missing over
+  /// time, this one cannot, because it is never re-derived after the
+  /// write. Resolution order at write time: the accepting adult's
+  /// PtaHouseholdAdult.name, falling back to the authenticated user's own
+  /// display name/email only in the defensive case where the adult record
+  /// is somehow unresolvable — acceptAgreement() throws
+  /// PTA_VOLUNTEER_AGREEMENT_SIGNER_UNRESOLVED rather than writing a
+  /// blank value if NEITHER resolves to a non-blank name. No default
+  /// (removed by the FA4 §2 migration, which also adds a DB-level CHECK
+  /// requiring btrim(signerDisplayNameAtAcceptance) <> '') — every row
+  /// must supply a real value at insert time.
+  /// **Schema-drift warning**: Prisma's DSL has no CHECK-constraint
+  /// attribute, so PtaVolunteerAgreementAcceptance_signer_nonblank_check
+  /// (added by hand in
+  /// 20260831130000_pta_family_agreement_signer_name_required/migration.sql)
+  /// is invisible here and would be silently dropped by any future
+  /// migrate-dev regeneration of this table's DDL from scratch — any such
+  /// migration must manually re-add that CHECK constraint, mirroring the
+  /// existing warning on PtaVolunteerBuyoutPurchase's own hand-written
+  /// partial unique index.
+  signerDisplayNameAtAcceptance String
   /// The accepting adult's PtaHouseholdAdult.relationshipLabel at the
   /// moment of acceptance, if one was on file — nullable, since this was
   /// already an optional field upstream and not every household fills it

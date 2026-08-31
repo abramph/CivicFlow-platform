@@ -441,7 +441,7 @@ describe("acceptAgreement", () => {
     expect(findUniqueUser).not.toHaveBeenCalled(); // adult lookup succeeded -- no need for the fallback path
   });
 
-  it("FA3 signer snapshot fallback: falls back to the authenticated user's displayName, then email, then a literal placeholder when the household adult has no usable name", async () => {
+  it("FA4 §2 signer snapshot fallback: falls back to the authenticated user's displayName, then email, when the household adult has no usable name", async () => {
     findFirstPeriod.mockResolvedValue({ ...BASE_PERIOD, agreementVersionId: "v1" });
     findFirstVersion.mockResolvedValue({ id: "v1", status: "PUBLISHED", contentHash: "hash-abc" });
     findUniqueAcceptance.mockResolvedValue(null);
@@ -460,13 +460,56 @@ describe("acceptAgreement", () => {
     findUniqueUser.mockResolvedValueOnce({ displayName: null, email: "no-name@example.com" });
     const withEmailOnly = await acceptAgreement("org-1", "period-1", "hh-1", { acknowledged: true }, { userId: "u1", adultId: "adult-1" });
     expect(withEmailOnly.signerDisplayNameAtAcceptance).toBe("no-name@example.com");
+  });
 
-    // Adult lookup itself comes back null (defensive edge case) -- falls all the way to the literal placeholder.
+  it("FA4 §2: fails the acceptance (does not fabricate a placeholder) when neither the adult's name nor the authenticated user's displayName/email resolve to anything usable", async () => {
+    findFirstPeriod.mockResolvedValue({ ...BASE_PERIOD, agreementVersionId: "v1" });
+    findFirstVersion.mockResolvedValue({ id: "v1", status: "PUBLISHED", contentHash: "hash-abc" });
     findUniqueAcceptance.mockResolvedValue(null);
+    createAcceptance.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ id: "acc-1", ...data }));
+
+    // Adult lookup itself comes back null (defensive edge case) and the fallback user has no displayName/email either.
     findUniqueHouseholdAdult.mockResolvedValueOnce(null);
     findUniqueUser.mockResolvedValueOnce({ displayName: null, email: "" });
-    const withNoIdentity = await acceptAgreement("org-1", "period-1", "hh-1", { acknowledged: true }, { userId: "u1", adultId: "adult-1" });
-    expect(withNoIdentity.signerDisplayNameAtAcceptance).toBe("Unknown signer");
+    const { acceptAgreement } = await import("../agreements");
+    await expect(
+      acceptAgreement("org-1", "period-1", "hh-1", { acknowledged: true }, { userId: "u1", adultId: "adult-1" })
+    ).rejects.toMatchObject({ code: "PTA_VOLUNTEER_AGREEMENT_SIGNER_UNRESOLVED" });
+    expect(createAcceptance).not.toHaveBeenCalled(); // never reaches the transaction at all
+  });
+
+  it("FA4 §2: fails the acceptance when the adult's name AND the fallback user's displayName/email are all whitespace-only, not just empty", async () => {
+    findFirstPeriod.mockResolvedValue({ ...BASE_PERIOD, agreementVersionId: "v1" });
+    findFirstVersion.mockResolvedValue({ id: "v1", status: "PUBLISHED", contentHash: "hash-abc" });
+    findUniqueAcceptance.mockResolvedValue(null);
+    createAcceptance.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ id: "acc-1", ...data }));
+
+    findUniqueHouseholdAdult.mockResolvedValueOnce({ name: "   ", relationshipLabel: null });
+    findUniqueUser.mockResolvedValueOnce({ displayName: "   ", email: "   " });
+    const { acceptAgreement } = await import("../agreements");
+    await expect(
+      acceptAgreement("org-1", "period-1", "hh-1", { acknowledged: true }, { userId: "u1", adultId: "adult-1" })
+    ).rejects.toMatchObject({ code: "PTA_VOLUNTEER_AGREEMENT_SIGNER_UNRESOLVED" });
+    expect(createAcceptance).not.toHaveBeenCalled();
+  });
+
+  it("FA4 §2: a client cannot supply or override the signer display name -- it is never read from AcceptAgreementInput at all, only typedName (a separate, optional display field) is client-input", async () => {
+    findFirstPeriod.mockResolvedValue({ ...BASE_PERIOD, agreementVersionId: "v1" });
+    findFirstVersion.mockResolvedValue({ id: "v1", status: "PUBLISHED", contentHash: "hash-abc" });
+    findUniqueAcceptance.mockResolvedValue(null);
+    findUniqueHouseholdAdult.mockResolvedValue({ name: "Real Adult Name", relationshipLabel: "Parent" });
+    createAcceptance.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ id: "acc-1", ...data }));
+
+    const { acceptAgreement } = await import("../agreements");
+    const acceptance = await acceptAgreement(
+      "org-1",
+      "period-1",
+      "hh-1",
+      // @ts-expect-error -- intentionally smuggling an attacker-controlled field the input type doesn't declare
+      { acknowledged: true, signerDisplayNameAtAcceptance: "Attacker-Supplied Name" },
+      { userId: "u1", adultId: "adult-1" }
+    );
+    expect(acceptance.signerDisplayNameAtAcceptance).toBe("Real Adult Name"); // the server-resolved value, never the smuggled one
   });
 
   it("audit-failure rollback: if createAuditEvent throws inside the transaction, acceptAgreement rejects rather than returning a 'successful' acceptance -- the write and its audit event commit or fail together, never one without the other", async () => {
