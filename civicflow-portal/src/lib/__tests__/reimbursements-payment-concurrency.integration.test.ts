@@ -49,13 +49,21 @@ const RUN_INTEGRATION = target !== null && process.env.PTA_TREASURER_REIMBURSEME
 // disposable-test-named; never set from an unvalidated/ambient value.
 if (RUN_INTEGRATION && target) process.env.DATABASE_URL = target.url;
 
-const createAuditEventMock = vi.fn();
-vi.mock("@/lib/audit", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/audit")>("@/lib/audit");
-  return {
-    ...actual,
-    createAuditEvent: (...args: Parameters<typeof actual.createAuditEvent>) => createAuditEventMock(...args),
-  };
+// Root-cause note (found via real-Postgres diagnosis): resolving the real
+// module via vi.importActual() INSIDE the mock implementation -- i.e. on
+// every single call -- is slow enough under 10-way real concurrency to
+// interact badly with Prisma's interactive-transaction timeout, producing
+// spurious extra "winners" that have nothing to do with application logic
+// (confirmed by calling the real transitionReimbursement() directly under
+// the same concurrent load with no mock at all: exactly one winner, every
+// time). Fixed with the standard Vitest pattern below -- importOriginal()
+// resolves ONCE at mock-setup time, and the mock defaults to the real
+// implementation via vi.fn(actual.createAuditEvent), so most tests pay zero
+// overhead; only the one test that needs to simulate an audit failure
+// overrides it, per-test, with mockRejectedValueOnce.
+vi.mock("@/lib/audit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/audit")>();
+  return { ...actual, createAuditEvent: vi.fn(actual.createAuditEvent) };
 });
 
 describe.skipIf(!RUN_INTEGRATION)("transitionReimbursement — real concurrency", () => {
@@ -109,18 +117,28 @@ describe.skipIf(!RUN_INTEGRATION)("transitionReimbursement — real concurrency"
     return request.id as string;
   }
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    // vi.clearAllMocks() clears call history only, not the implementation
+    // vi.fn(actual.createAuditEvent) was constructed with above -- so the
+    // mock keeps calling straight through to the real function by default
+    // after this, with zero per-call overhead. Only the one test that needs
+    // to simulate an audit failure overrides it, per-test, further below.
     vi.clearAllMocks();
-    createAuditEventMock.mockImplementation(async (input: Parameters<typeof import("@/lib/audit").createAuditEvent>[0]) => {
-      const actual = await vi.importActual<typeof import("@/lib/audit")>("@/lib/audit");
-      return actual.createAuditEvent(input);
-    });
   });
 
   afterEach(async () => {
-    await prisma?.expenditure.deleteMany({ where: { organizationId: orgId } }).catch(() => {});
-    await prisma?.reimbursementRequest.deleteMany({ where: { organizationId: orgId } }).catch(() => {});
-    await prisma?.auditEvent.deleteMany({ where: { organizationId: orgId } }).catch(() => {});
+    // Order matters: a PAID ReimbursementRequest still points at its
+    // Expenditure via a FK with onDelete: SetNull. Deleting the Expenditure
+    // FIRST would null out that FK while status is still 'PAID', which
+    // would violate ReimbursementRequest_paid_requires_expenditure_check --
+    // exactly the class of thing that constraint exists to prevent. Delete
+    // the referencing ReimbursementRequest row first, then the Expenditure
+    // it's no longer pointing to. (Never reachable from real application
+    // code, which only ever soft-voids an Expenditure -- this ordering
+    // requirement is specific to hard-deleting test fixtures.)
+    await prisma?.reimbursementRequest.deleteMany({ where: { organizationId: orgId } });
+    await prisma?.expenditure.deleteMany({ where: { organizationId: orgId } });
+    await prisma?.auditEvent.deleteMany({ where: { organizationId: orgId } });
   });
 
   it("two simultaneous mark-paid requests produce exactly one PAID transition, one Expenditure, and one audit event", async () => {
@@ -181,7 +199,8 @@ describe.skipIf(!RUN_INTEGRATION)("transitionReimbursement — real concurrency"
 
   it("an audit failure rolls back the PAID transition and the Expenditure — zero of all three persist", async () => {
     const requestId = await createApproved("20.00");
-    createAuditEventMock.mockRejectedValueOnce(new Error("simulated audit outage"));
+    const { createAuditEvent } = await import("@/lib/audit");
+    vi.mocked(createAuditEvent).mockRejectedValueOnce(new Error("simulated audit outage"));
 
     await expect(
       transitionReimbursement({ organizationId: orgId, requestId, status: "PAID", paymentMethodId, actorUserId: managerId })
@@ -216,5 +235,47 @@ describe.skipIf(!RUN_INTEGRATION)("transitionReimbursement — real concurrency"
 
     const expenditure = await prisma.expenditure.findUniqueOrThrow({ where: { id: final.expenditureId! } });
     expect(expenditure.voidedAt).not.toBeNull();
+  });
+
+  it("the submitter cannot mark their own approved request paid, against a real database", async () => {
+    const requestId = await createApproved("11.00");
+    await expect(
+      transitionReimbursement({ organizationId: orgId, requestId, status: "PAID", paymentMethodId, actorUserId: submitterId })
+    ).rejects.toMatchObject({ status: 403 });
+    const row = await prisma.reimbursementRequest.findUniqueOrThrow({ where: { id: requestId } });
+    expect(row.status).toBe("APPROVED");
+    expect(await prisma.expenditure.findMany({ where: { organizationId: orgId } })).toHaveLength(0);
+  });
+
+  it("the database CHECK constraint itself rejects PAID with a null expenditureId -- not just the application layer", async () => {
+    const requestId = await createApproved("12.00");
+    await expect(
+      prisma.$executeRawUnsafe(`UPDATE "ReimbursementRequest" SET status = 'PAID' WHERE id = $1`, requestId)
+    ).rejects.toMatchObject({ message: expect.stringContaining("ReimbursementRequest_paid_requires_expenditure_check") });
+    const row = await prisma.reimbursementRequest.findUniqueOrThrow({ where: { id: requestId } });
+    expect(row.status).toBe("APPROVED"); // the rejected statement never committed
+  });
+
+  it("a cross-organization requestId cannot be paid, voided, or reversed", async () => {
+    const otherOrg = await prisma.organization.create({ data: { slug: `pta-reimb-other-${Date.now()}`, name: "Other Org", primaryVertical: "PTA" } });
+    const requestId = await createApproved("13.00"); // belongs to orgId, not otherOrg
+
+    await expect(
+      transitionReimbursement({ organizationId: otherOrg.id, requestId, status: "PAID", paymentMethodId, actorUserId: managerId })
+    ).rejects.toMatchObject({ status: 404 });
+
+    // Pay it for real under its actual org, then confirm the other org still can't void/reverse it.
+    await transitionReimbursement({ organizationId: orgId, requestId, status: "PAID", paymentMethodId, actorUserId: managerId });
+    await expect(
+      transitionReimbursement({ organizationId: otherOrg.id, requestId, status: "VOIDED", correctionReason: "x", confirmText: "VOID", actorUserId: managerId })
+    ).rejects.toMatchObject({ status: 404 });
+    await expect(
+      transitionReimbursement({ organizationId: otherOrg.id, requestId, status: "REVERSED", correctionReason: "x", confirmText: "REVERSE", actorUserId: managerId })
+    ).rejects.toMatchObject({ status: 404 });
+
+    const row = await prisma.reimbursementRequest.findUniqueOrThrow({ where: { id: requestId } });
+    expect(row.status).toBe("PAID"); // untouched by the other org's attempts
+
+    await prisma.organization.delete({ where: { id: otherOrg.id } });
   });
 });
