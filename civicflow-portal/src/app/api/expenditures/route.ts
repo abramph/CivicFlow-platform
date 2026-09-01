@@ -3,6 +3,7 @@ import { withApiErrorHandling } from "@/lib/api-route";
 import { createAuditEvent } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 import { parseJsonBody, z } from "@/lib/validation";
+import { assertCommitteeInOrganization, listExpenditures, type ExpenditureListFilters } from "@/lib/expenditures";
 
 const optionalId = z.union([z.string().min(1), z.literal(""), z.null()]).optional();
 const optionalText = (max: number) => z.union([z.string().trim().max(max), z.literal(""), z.null()]).optional();
@@ -21,6 +22,9 @@ const expenditureSchema = z.object({
   receiptUrl: optionalText(500),
   campaignId: optionalId,
   eventId: optionalId,
+  /// feature/pta-treasurer-expenditure-experience (E3) — see the matching
+  /// note on updateExpenditureSchema in [id]/route.ts.
+  committeeId: optionalId,
 });
 
 function text(value: string | null | undefined) {
@@ -44,15 +48,27 @@ async function ensureReference(model: "category" | "paymentMethod" | "campaign" 
   return found;
 }
 
-export async function GET() {
+function readFilters(url: URL): ExpenditureListFilters {
+  const params = url.searchParams;
+  const status = params.get("status");
+  const origin = params.get("origin");
+  return {
+    dateFrom: params.get("dateFrom") ?? undefined,
+    dateTo: params.get("dateTo") ?? undefined,
+    categoryId: params.get("categoryId") ?? undefined,
+    paymentMethodId: params.get("paymentMethodId") ?? undefined,
+    committeeId: params.get("committeeId") ?? undefined,
+    vendor: params.get("vendor") ?? undefined,
+    status: status === "ACTIVE" || status === "VOIDED" ? status : undefined,
+    origin: origin === "DIRECT" || origin === "REIMBURSEMENT" ? origin : undefined,
+  };
+}
+
+export async function GET(request: Request) {
   return withApiErrorHandling(async () => {
     const { session, organizationId } = await requirePermission("expenditures:read", "throw");
-    const rows = await prisma.expenditure.findMany({
-      where: { organizationId },
-      orderBy: [{ date: "desc" }, { createdAt: "desc" }],
-      include: { categoryRef: true, paymentMethodConfig: true, campaign: true, event: true },
-      take: 200,
-    });
+    const filters = readFilters(new URL(request.url));
+    const rows = await listExpenditures(organizationId, filters);
     await createAuditEvent({ organizationId, actorUserId: session.userId, actorEmail: session.userEmail, action: "list", entityType: "expenditure", metadata: { count: rows.length } });
     return Response.json({ ok: true, data: rows });
   });
@@ -66,11 +82,13 @@ export async function POST(request: Request) {
     const paymentMethodId = text(input.paymentMethodId);
     const campaignId = text(input.campaignId);
     const eventId = text(input.eventId);
+    const committeeIdInput = text(input.committeeId);
 
     const category = await ensureReference("category", categoryId, organizationId) as { name?: string } | undefined;
     const paymentMethod = await ensureReference("paymentMethod", paymentMethodId, organizationId) as { label?: string } | undefined;
     await ensureReference("campaign", campaignId, organizationId);
     await ensureReference("event", eventId, organizationId);
+    const committee = committeeIdInput ? await assertCommitteeInOrganization(organizationId, committeeIdInput) : null;
 
     // State change and audit event commit together (fix/pta-treasurer-financial-controls
     // §6/§9): a direct expenditure is real ledger state the moment it
@@ -93,6 +111,14 @@ export async function POST(request: Request) {
           receiptUrl: text(input.receiptUrl),
           campaignId,
           eventId,
+          // feature/pta-treasurer-expenditure-experience (E3) — the
+          // snapshot is taken here, server-side, from the just-validated
+          // committee row. A client-supplied committeeNameAtPosting is
+          // never accepted (the field isn't even in expenditureSchema),
+          // so the snapshot can't be spoofed independently of a real,
+          // same-organization committeeId.
+          committeeId: committee?.id ?? null,
+          committeeNameAtPosting: committee?.name ?? null,
         },
       });
 
@@ -112,4 +138,3 @@ export async function POST(request: Request) {
     return Response.json({ ok: true, data: row }, { status: 201 });
   });
 }
-

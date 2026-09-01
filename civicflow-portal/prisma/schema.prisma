@@ -1425,38 +1425,55 @@ model EventRsvp {
 
 /// Expenditure record, scoped to an org.
 model Expenditure {
-  id              String    @id @default(cuid())
-  organizationId  String
-  description     String
-  amount          Decimal   @db.Decimal(12, 2)
-  category        String?
-  categoryId      String?
-  date            DateTime
-  vendor          String?
-  receiptUrl      String?
-  reference       String?
-  paymentMethodId String?
-  paymentMethod   String?
-  campaignId      String?
-  eventId         String?
-  notes           String?
-  lockedAt        DateTime?
-  lockedByUserId  String?
-  voidedAt        DateTime?
-  voidedByUserId  String?
-  voidReason      String?
-  correctionOfId  String?
-  correctedById   String?
-  revisionNumber  Int       @default(1)
-  editReason      String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id                     String    @id @default(cuid())
+  organizationId         String
+  description            String
+  amount                 Decimal   @db.Decimal(12, 2)
+  category               String?
+  categoryId             String?
+  date                   DateTime
+  vendor                 String?
+  receiptUrl             String?
+  reference              String?
+  paymentMethodId        String?
+  paymentMethod          String?
+  campaignId             String?
+  eventId                String?
+  /// feature/pta-treasurer-expenditure-experience (E3) — PTA-only committee
+  /// attribution. committeeId is a live FK for relational filtering;
+  /// committeeNameAtPosting is an immutable snapshot taken the moment the
+  /// Expenditure is created (direct entry or reimbursement mark-paid) so a
+  /// later committee rename/archive/deletion never changes what a historical
+  /// financial record is understood to say. Both are always set together and
+  /// never re-derived afterward -- see docs/pta-treasurer-financial-controls.md.
+  committeeId            String?
+  committeeNameAtPosting String?
+  notes                  String?
+  lockedAt               DateTime?
+  lockedByUserId         String?
+  voidedAt               DateTime?
+  voidedByUserId         String?
+  voidReason             String?
+  correctionOfId         String?
+  correctedById          String?
+  revisionNumber         Int       @default(1)
+  editReason             String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
   organization        Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   categoryRef         Category?             @relation("ExpenditureCategory", fields: [categoryId], references: [id], onDelete: SetNull)
   paymentMethodConfig PaymentMethodConfig?  @relation(fields: [paymentMethodId], references: [id], onDelete: SetNull)
   campaign            Campaign?             @relation(fields: [campaignId], references: [id], onDelete: SetNull)
   event               Event?                @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  /// feature/pta-treasurer-expenditure-experience (E3) — SetNull, not
+  /// Restrict: committeeNameAtPosting already preserves the historical
+  /// record's meaning independent of whether the live PtaCommittee row
+  /// survives, so there is no accounting reason to block a committee from
+  /// being cleaned up (archived/removed) just because it once posted an
+  /// expense. This mirrors every other optional attribution FK on this model
+  /// (category/paymentMethod/campaign/event), all of which are SetNull.
+  committee           PtaCommittee?         @relation(fields: [committeeId], references: [id], onDelete: SetNull)
   reimbursement       ReimbursementRequest?
 
   @@index([organizationId])
@@ -1465,6 +1482,7 @@ model Expenditure {
   @@index([paymentMethodId])
   @@index([campaignId])
   @@index([eventId])
+  @@index([committeeId])
 }
 
 /// Category lookup table, scoped to an org.
@@ -6373,6 +6391,8 @@ model PtaCommittee {
   actionItems            MeetingActionItem[]
   concerns               PtaConcern[]
   reimbursements         ReimbursementRequest[]
+  /// feature/pta-treasurer-expenditure-experience (E3)
+  expenditures           Expenditure[]
 
   @@unique([organizationId, name])
   @@index([organizationId])

@@ -215,7 +215,15 @@ export function PortalShell({ children }: { children: ReactNode }) {
           </nav>
         </aside>
 
-        <div className="flex min-h-screen flex-1 flex-col">
+        {/* min-w-0 on this flex item (and on <main> below) is required, not
+         * decorative: flex items default to min-width:auto, which floors
+         * their width at their content's min-content size. Any page that
+         * renders wide content (e.g. a data table) can silently force this
+         * whole column -- and everything in it -- wider than the viewport,
+         * defeating any overflow-x-auto container further down the tree.
+         * min-w-0 lets the flex item shrink to its allocated space so inner
+         * scroll containers can do their job instead. */}
+        <div className="flex min-h-screen min-w-0 flex-1 flex-col">
           <header className="border-b border-slate-200 bg-white">
             <div className="flex flex-col gap-4 px-6 py-4 md:flex-row md:items-center md:justify-between">
               <div>
@@ -262,7 +270,7 @@ export function PortalShell({ children }: { children: ReactNode }) {
             </div>
           </header>
 
-          <main id="main-content" className="flex-1 px-4 py-6 md:px-6">{children}</main>
+          <main id="main-content" className="min-w-0 flex-1 px-4 py-6 md:px-6">{children}</main>
         </div>
       </div>
     </div>

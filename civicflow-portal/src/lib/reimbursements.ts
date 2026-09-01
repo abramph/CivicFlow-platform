@@ -259,6 +259,30 @@ async function markPaid(input: TransitionReimbursementInput, existing: ExistingR
 
   try {
     return await prisma.$transaction(async (tx) => {
+      // feature/pta-treasurer-expenditure-experience (E3) — inherit the
+      // reimbursement's committee attribution onto the Expenditure it
+      // produces, snapshotting the committee's current display name at the
+      // moment of posting. Re-validated against this organization here
+      // (not just trusted from submission time) even though it's extremely
+      // unlikely to have changed between submit and pay. If the committee
+      // is no longer found (e.g. removed after submission — not something
+      // any current UI does, but not structurally impossible), the payment
+      // still proceeds; the Expenditure simply carries no committee
+      // attribution rather than blocking a real payment over a stale
+      // reference.
+      let committeeId: string | null = null;
+      let committeeNameAtPosting: string | null = null;
+      if (existing.committeeId) {
+        const committee = await tx.ptaCommittee.findFirst({
+          where: { id: existing.committeeId, organizationId: input.organizationId },
+          select: { id: true, name: true },
+        });
+        if (committee) {
+          committeeId = committee.id;
+          committeeNameAtPosting = committee.name;
+        }
+      }
+
       // Create-then-claim (corrected ordering — see docs/pta-treasurer-financial-controls.md
       // "Constraint-ordering correction"): the database CHECK constraint
       // (`ReimbursementRequest_paid_requires_expenditure_check`) requires
@@ -280,6 +304,8 @@ async function markPaid(input: TransitionReimbursementInput, existing: ExistingR
           date: now,
           vendor: existing.payeeName,
           eventId: existing.eventId,
+          committeeId,
+          committeeNameAtPosting,
           paymentMethodId: method.id,
           reference: input.paymentReference?.trim() || `REIMB-${existing.id.slice(-8)}`,
           notes: "Booked automatically when the reimbursement request was marked paid.",

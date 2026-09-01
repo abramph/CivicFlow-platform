@@ -161,6 +161,20 @@ describe("getNavigationProfile", () => {
     expect(church.find((n) => n.href === "/dashboard")?.label).toBe("Church Dashboard");
     expect(church.find((n) => n.href === "/settings/giving")?.label).toBe("Giving Setup");
   });
+
+  // feature/pta-treasurer-expenditure-experience (E1) — the Expenditures
+  // ledger is surfaced as an internal Treasurer section (nested routes
+  // under /labs/pta/finance), not a 20th top-level PTA nav item. This test
+  // is the guardrail against ever adding one by accident.
+  it("keeps exactly one Treasurer nav item for PTA and never a top-level Expenditures item", () => {
+    const pta = getNavigationProfile("PTA");
+    const treasurerItems = pta.filter((n) => n.label === "Treasurer");
+    expect(treasurerItems).toHaveLength(1);
+    expect(treasurerItems[0].href).toBe("/labs/pta/finance");
+    expect(treasurerItems[0].permission).toBe("budget:read");
+    expect(pta.some((n) => n.href === "/expenditures")).toBe(false);
+    expect(pta.some((n) => n.label === "Expenditures")).toBe(false);
+  });
 });
 
 describe("getLandingRoute", () => {

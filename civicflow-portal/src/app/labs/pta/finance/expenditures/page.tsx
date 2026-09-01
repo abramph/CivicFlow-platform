@@ -1,12 +1,15 @@
-import { requirePermission } from "@/lib/auth-guards";
+import { getPtaPageGate } from "@/lib/labs/pta/guard";
 import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { formatCurrency } from "@/lib/formatting";
 import { listExpenditures, getOrganizationCommitteeOptions, type ExpenditureListFilters } from "@/lib/expenditures";
 import { ExpenditureFilterForm, ExpenditureLedgerTable } from "@/components/expenditures/ExpenditureLedgerTable";
 import { prisma } from "@/lib/prisma";
 
-export default async function ExpendituresPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
-  const { organizationId, session } = await requirePermission("expenditures:read");
+const BASE_PATH = "/labs/pta/finance/expenditures";
+
+export default async function TreasurerExpendituresPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
+  const { organizationId, access, can } = await getPtaPageGate("expenditures:read");
+  if (!access.available) return null;
   const params = await searchParams;
 
   const filters: ExpenditureListFilters = {
@@ -24,7 +27,7 @@ export default async function ExpendituresPage({ searchParams }: { searchParams:
     listExpenditures(organizationId, filters),
     prisma.category.findMany({ where: { organizationId, type: "EXPENDITURE", isActive: true }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
     prisma.paymentMethodConfig.findMany({ where: { organizationId, isActive: true }, orderBy: [{ sortOrder: "asc" }, { label: "asc" }], select: { id: true, label: true } }),
-    getOrganizationCommitteeOptions(organizationId, session.primaryVertical ?? "COMMUNITY"),
+    getOrganizationCommitteeOptions(organizationId, "PTA"),
   ]);
 
   const activeRows = rows.filter((row) => !row.voidedAt);
@@ -32,35 +35,29 @@ export default async function ExpendituresPage({ searchParams }: { searchParams:
   const categoryCount = new Set(rows.map((row) => row.category).filter(Boolean)).size;
 
   return (
-    <main className="space-y-6">
+    <div className="space-y-6">
       <PageHeader
         title="Expenditures"
-        description="Outgoing spending records scoped to the active organization."
-        actions={[
-          { href: "/expenditures/new", label: "Add Expenditure", tone: "primary" },
-          { href: "/dashboard", label: "Back to Dashboard" },
-        ]}
+        description="The same expenditure ledger the Treasurer overview and budget actuals read from."
+        actions={can("expenditures:write") ? [{ href: `${BASE_PATH}/new`, label: "Add Expenditure", tone: "primary" }] : []}
       />
-
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <StatCard label="Expenditures" value={rows.length} />
         <StatCard label="Total Spent (active)" value={formatCurrency(totalSpent)} />
         <StatCard label="Expense Categories" value={categoryCount} />
       </div>
-
       <SectionCard title="Filters" description="Every filter is reflected in the URL, so a filtered view can be bookmarked, refreshed, or shared.">
         <ExpenditureFilterForm
-          basePath="/expenditures"
+          basePath={BASE_PATH}
           categories={categories.map((c) => ({ id: c.id, label: c.name }))}
           paymentMethods={paymentMethods.map((p) => ({ id: p.id, label: p.label }))}
           committees={committees}
           current={params}
         />
       </SectionCard>
-
-      <SectionCard title="Expense Ledger" description="Vendor, category, amount, and supporting detail for recent expenditures.">
-        <ExpenditureLedgerTable rows={rows} basePath="/expenditures" showCommitteeColumn={committees.length > 0} />
+      <SectionCard title="Expense Ledger" description="Vendor, category, committee, amount, and supporting detail for recent expenditures.">
+        <ExpenditureLedgerTable rows={rows} basePath={BASE_PATH} reimbursementsBasePath="/labs/pta/finance/reimbursements" showCommitteeColumn={committees.length > 0} />
       </SectionCard>
-    </main>
+    </div>
   );
 }

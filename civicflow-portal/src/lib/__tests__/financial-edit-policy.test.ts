@@ -116,6 +116,73 @@ describe("canEditFinancialRecord — time-window boundaries", () => {
   });
 });
 
+// feature/pta-treasurer-expenditure-experience (E2) — requiresReason lets a
+// page compute, before the user has typed anything, whether the edit form
+// should show/require a reason field -- without re-deriving the
+// window/lock/policy branching above itself (see ExpenditureForm's
+// editability prop and the two edit pages that compute it).
+describe("canEditFinancialRecord — requiresReason", () => {
+  it("is false when the record is inside the normal edit window", () => {
+    const result = canEditFinancialRecord({
+      record: { createdAt: anchor },
+      role: "STAFF",
+      policy,
+      now: anchor,
+    });
+    expect(result.allowed).toBe(true);
+    expect(result.requiresReason).toBe(false);
+  });
+
+  it("is true (and allowed is false) when a privileged role hits the locked window without a reason yet", () => {
+    const result = canEditFinancialRecord({
+      record: { createdAt: new Date("2026-01-01T00:00:00.000Z") },
+      role: "FINANCE",
+      policy,
+      now: anchor,
+    });
+    expect(result.allowed).toBe(false);
+    expect(result.requiresReason).toBe(true);
+  });
+
+  it("stays true once a reason has been supplied and the edit is allowed, if the org policy requires one", () => {
+    const result = canEditFinancialRecord({
+      record: { createdAt: new Date("2026-01-01T00:00:00.000Z") },
+      role: "FINANCE",
+      policy,
+      now: anchor,
+      editReason: "Correcting a transposed digit",
+    });
+    expect(result.allowed).toBe(true);
+    expect(result.requiresReason).toBe(true);
+  });
+
+  it("is false for every hard-blocked case (voided, unprivileged-locked, corrections-disabled) -- those need a different remedy, not a reason", () => {
+    expect(canEditFinancialRecord({ record: { createdAt: anchor, voidedAt: anchor }, role: "SUPER_ADMIN", policy, now: anchor }).requiresReason).toBe(false);
+    expect(
+      canEditFinancialRecord({ record: { createdAt: new Date("2020-01-01") }, role: "STAFF", policy, now: anchor }).requiresReason
+    ).toBe(false);
+    expect(
+      canEditFinancialRecord({
+        record: { createdAt: new Date("2020-01-01") },
+        role: "FINANCE",
+        policy: { ...policy, allowFinanceCorrections: false },
+        now: anchor,
+      }).requiresReason
+    ).toBe(false);
+  });
+
+  it("is false when the org policy does not require a reason at all, even outside the window", () => {
+    const result = canEditFinancialRecord({
+      record: { createdAt: new Date("2020-01-01") },
+      role: "FINANCE",
+      policy: { ...policy, requireReasonForFinancialEdits: false },
+      now: anchor,
+    });
+    expect(result.allowed).toBe(true);
+    expect(result.requiresReason).toBe(false);
+  });
+});
+
 describe("canVoidFinancialRecord — role gate", () => {
   it("privileged finance roles may void", () => {
     for (const role of ["SUPER_ADMIN", "ORG_OWNER", "ORG_ADMIN", "FINANCE"] as const) {

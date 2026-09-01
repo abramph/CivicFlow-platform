@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requirePermission } from "@/lib/auth-guards";
+import { getPtaPageGate } from "@/lib/labs/pta/guard";
 import { prisma } from "@/lib/prisma";
 import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { AttachmentManager } from "@/components/forms/AttachmentManager";
@@ -8,8 +8,11 @@ import { canVoidFinancialRecord } from "@/lib/financial-edit-policy";
 import { describeCommitteeAttribution } from "@/lib/expenditures";
 import { formatCurrency, formatDate, formatText } from "@/lib/formatting";
 
-export default async function ExpenditureDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { organizationId, can, role } = await requirePermission("expenditures:read");
+const BASE_PATH = "/labs/pta/finance/expenditures";
+
+export default async function TreasurerExpenditureDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { organizationId, access, can, role } = await getPtaPageGate("expenditures:read");
+  if (!access.available) return null;
   const { id } = await params;
   const row = await prisma.expenditure.findFirst({
     where: { id, organizationId },
@@ -17,18 +20,17 @@ export default async function ExpenditureDetailPage({ params }: { params: Promis
   });
 
   if (!row) {
-    return <main className="space-y-6"><PageHeader title="Expenditure not found" description="The requested expenditure is unavailable." actions={[{ href: "/expenditures", label: "Back to Expenditures" }]} /></main>;
+    return <PageHeader title="Expenditure not found" description="The requested expenditure is unavailable." actions={[{ href: BASE_PATH, label: "Back to Expenditures" }]} />;
   }
 
   return (
-    <main className="space-y-6">
+    <div className="space-y-6">
       <PageHeader
         title={row.description}
         description="Expenditure details and supporting context."
         actions={[
-          ...(can("expenditures:write") && !row.voidedAt ? [{ href: `/expenditures/${row.id}/edit`, label: "Edit Expenditure", tone: "primary" as const }] : []),
-          { href: "/expenditures", label: "Back to Expenditures" },
-          { href: "/dashboard", label: "Back to Dashboard" },
+          ...(can("expenditures:write") && !row.voidedAt ? [{ href: `${BASE_PATH}/${row.id}/edit`, label: "Edit Expenditure", tone: "primary" as const }] : []),
+          { href: BASE_PATH, label: "Back to Expenditures" },
         ]}
       />
       {row.voidedAt ? (
@@ -40,7 +42,11 @@ export default async function ExpenditureDetailPage({ params }: { params: Promis
       {row.reimbursement ? (
         <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
           Created from reimbursement to <span className="font-semibold">{row.reimbursement.payeeName}</span>. This linkage is set automatically when a
-          reimbursement is marked paid and cannot be reassigned.
+          reimbursement is marked paid and cannot be reassigned. See it in{" "}
+          <Link href={`/labs/pta/finance/reimbursements?highlight=${row.reimbursement.id}`} className="font-semibold hover:underline">
+            Reimbursements
+          </Link>
+          .
         </div>
       ) : null}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -68,6 +74,6 @@ export default async function ExpenditureDetailPage({ params }: { params: Promis
           <ExpenditureVoidControl expenditureId={row.id} canVoid={canVoidFinancialRecord(role)} alreadyVoided={Boolean(row.voidedAt)} />
         </SectionCard>
       ) : null}
-    </main>
+    </div>
   );
 }

@@ -139,3 +139,30 @@ describe("rbac: meetingIntelligence:* (internal APH pilot)", () => {
     }
   });
 });
+
+// feature/pta-treasurer-expenditure-experience (E1) — the investigation that
+// preceded this feature found the expenditure ledger's RBAC grant was
+// already correct; the bug was a missing nav link, not a missing
+// permission. This is the authoritative role x permission matrix the new
+// Treasurer Expenditures section, its route guards, and its void control
+// all depend on being accurate.
+describe("rbac: expenditures:read / expenditures:write", () => {
+  it("SUPER_ADMIN, ORG_OWNER, ORG_ADMIN, and FINANCE (the Treasurer role) hold both read and write", () => {
+    for (const role of ["SUPER_ADMIN", "ORG_OWNER", "ORG_ADMIN", "FINANCE"] as const) {
+      expect(canDo(role, "expenditures:read")).toBe(true);
+      expect(canDo(role, "expenditures:write")).toBe(true);
+    }
+  });
+
+  it("READ_ONLY holds read but never write", () => {
+    expect(canDo("READ_ONLY", "expenditures:read")).toBe(true);
+    expect(canDo("READ_ONLY", "expenditures:write")).toBe(false);
+  });
+
+  it("STAFF and MEMBER hold neither", () => {
+    expect(canDo("STAFF", "expenditures:read")).toBe(false);
+    expect(canDo("STAFF", "expenditures:write")).toBe(false);
+    expect(canDo("MEMBER", "expenditures:read")).toBe(false);
+    expect(canDo("MEMBER", "expenditures:write")).toBe(false);
+  });
+});
