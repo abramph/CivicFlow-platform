@@ -1,20 +1,34 @@
-import Link from "next/link";
 import { requirePermission } from "@/lib/auth-guards";
 import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
+import { formatCurrency } from "@/lib/formatting";
+import { listExpenditures, getOrganizationCommitteeOptions, type ExpenditureListFilters } from "@/lib/expenditures";
+import { ExpenditureFilterForm, ExpenditureLedgerTable } from "@/components/expenditures/ExpenditureLedgerTable";
 import { prisma } from "@/lib/prisma";
-import { formatCurrency, formatDate, formatText } from "@/lib/formatting";
 
-export default async function ExpendituresPage() {
-  const { organizationId } = await requirePermission("expenditures:read");
+export default async function ExpendituresPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
+  const { organizationId, session } = await requirePermission("expenditures:read");
+  const params = await searchParams;
 
-  const rows = await prisma.expenditure.findMany({
-    where: { organizationId },
-    orderBy: [{ date: "desc" }, { createdAt: "desc" }],
-    include: { categoryRef: true, paymentMethodConfig: true, campaign: true, event: true },
-    take: 100,
-  });
+  const filters: ExpenditureListFilters = {
+    dateFrom: params.dateFrom,
+    dateTo: params.dateTo,
+    categoryId: params.categoryId,
+    paymentMethodId: params.paymentMethodId,
+    committeeId: params.committeeId,
+    vendor: params.vendor,
+    status: params.status === "ACTIVE" || params.status === "VOIDED" ? params.status : undefined,
+    origin: params.origin === "DIRECT" || params.origin === "REIMBURSEMENT" ? params.origin : undefined,
+  };
 
-  const totalSpent = rows.reduce((sum, row) => sum + Number(row.amount ?? 0), 0);
+  const [rows, categories, paymentMethods, committees] = await Promise.all([
+    listExpenditures(organizationId, filters),
+    prisma.category.findMany({ where: { organizationId, type: "EXPENDITURE", isActive: true }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
+    prisma.paymentMethodConfig.findMany({ where: { organizationId, isActive: true }, orderBy: [{ sortOrder: "asc" }, { label: "asc" }], select: { id: true, label: true } }),
+    getOrganizationCommitteeOptions(organizationId, session.primaryVertical ?? "COMMUNITY"),
+  ]);
+
+  const activeRows = rows.filter((row) => !row.voidedAt);
+  const totalSpent = activeRows.reduce((sum, row) => sum + Number(row.amount ?? 0), 0);
   const categoryCount = new Set(rows.map((row) => row.category).filter(Boolean)).size;
 
   return (
@@ -30,57 +44,22 @@ export default async function ExpendituresPage() {
 
       <div className="grid gap-4 md:grid-cols-3">
         <StatCard label="Expenditures" value={rows.length} />
-        <StatCard label="Total Spent" value={formatCurrency(totalSpent)} />
+        <StatCard label="Total Spent (active)" value={formatCurrency(totalSpent)} />
         <StatCard label="Expense Categories" value={categoryCount} />
       </div>
 
+      <SectionCard title="Filters" description="Every filter is reflected in the URL, so a filtered view can be bookmarked, refreshed, or shared.">
+        <ExpenditureFilterForm
+          basePath="/expenditures"
+          categories={categories.map((c) => ({ id: c.id, label: c.name }))}
+          paymentMethods={paymentMethods.map((p) => ({ id: p.id, label: p.label }))}
+          committees={committees}
+          current={params}
+        />
+      </SectionCard>
+
       <SectionCard title="Expense Ledger" description="Vendor, category, amount, and supporting detail for recent expenditures.">
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="bg-slate-50 text-left text-slate-700">
-              <tr>
-                <th className="px-4 py-3">Date</th>
-                <th className="px-4 py-3">Vendor / Payee</th>
-                <th className="px-4 py-3">Description</th>
-                <th className="px-4 py-3">Category</th>
-                <th className="px-4 py-3">Amount</th>
-                <th className="px-4 py-3">Supporting Record</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="px-4 py-6 text-center text-slate-600">
-                    No expenditures have been recorded yet.
-                  </td>
-                </tr>
-              ) : (
-                rows.map((row) => (
-                  <tr key={row.id} className="border-t border-slate-100">
-                    <td className="px-4 py-3 text-slate-900">{formatDate(row.date)}</td>
-                    <td className="px-4 py-3 text-slate-900">
-                      <Link href={`/expenditures/${row.id}`} className="font-semibold text-emerald-700 hover:underline">
-                        {formatText(row.vendor, "Direct expense")}
-                      </Link>
-                    </td>
-                    <td className="px-4 py-3 text-slate-900">{row.description}</td>
-                    <td className="px-4 py-3 text-slate-900">{formatText(row.categoryRef?.name ?? row.category, "Uncategorized")}</td>
-                    <td className="px-4 py-3 text-slate-900">{formatCurrency(row.amount)}</td>
-                    <td className="px-4 py-3 text-slate-900">
-                      {row.receiptUrl ? (
-                        <Link href={row.receiptUrl} className="text-emerald-700 hover:underline">
-                          View receipt
-                        </Link>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+        <ExpenditureLedgerTable rows={rows} basePath="/expenditures" />
       </SectionCard>
     </main>
   );

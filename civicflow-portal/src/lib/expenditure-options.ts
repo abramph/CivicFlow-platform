@@ -1,7 +1,8 @@
 import { prisma } from "@/lib/prisma";
+import { getOrganizationCommitteeOptions } from "@/lib/expenditures";
 
-export async function getExpenditureFormOptions(organizationId: string) {
-  const [categories, paymentMethods, campaigns, events] = await Promise.all([
+export async function getExpenditureFormOptions(organizationId: string, vertical: string) {
+  const [categories, paymentMethods, campaigns, events, committees] = await Promise.all([
     prisma.category.findMany({
       where: { organizationId, type: "EXPENDITURE", isActive: true },
       orderBy: { name: "asc" },
@@ -24,12 +25,14 @@ export async function getExpenditureFormOptions(organizationId: string) {
       select: { id: true, title: true },
       take: 150,
     }),
+    getOrganizationCommitteeOptions(organizationId, vertical),
   ]);
   return {
     categories: categories.map((row) => ({ id: row.id, label: row.name })),
     paymentMethods: paymentMethods.map((row) => ({ id: row.id, label: row.label })),
     campaigns: campaigns.map((row) => ({ id: row.id, label: row.name })),
     events: events.map((row) => ({ id: row.id, label: row.title })),
+    committees,
   };
 }
 

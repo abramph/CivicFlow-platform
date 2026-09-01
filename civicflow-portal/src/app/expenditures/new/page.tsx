@@ -4,8 +4,8 @@ import { ExpenditureForm } from "@/components/forms/ExpenditureForm";
 import { getExpenditureFormOptions } from "@/lib/expenditure-options";
 
 export default async function NewExpenditurePage() {
-  const { organizationId } = await requirePermission("expenditures:write");
-  const options = await getExpenditureFormOptions(organizationId);
+  const { organizationId, session } = await requirePermission("expenditures:write");
+  const options = await getExpenditureFormOptions(organizationId, session.primaryVertical ?? "COMMUNITY");
 
   return (
     <main className="space-y-6">
@@ -18,9 +18,8 @@ export default async function NewExpenditurePage() {
         ]}
       />
       <SectionCard title="Expenditure Entry" description="Saved through the protected expenditure API.">
-        <ExpenditureForm mode="create" {...options} />
+        <ExpenditureForm mode="create" basePath="/expenditures" {...options} />
       </SectionCard>
     </main>
   );
 }
-
