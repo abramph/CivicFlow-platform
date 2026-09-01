@@ -1,27 +1,53 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { resolveSafeTestDatabaseUrl } from "./test-db-safety";
 
 /**
  * fix/pta-treasurer-financial-controls §3/§5/§12 — real-database proof that
  * the CAS-guarded PAID/VOIDED/REVERSED transitions in
  * src/lib/reimbursements.ts hold under genuine concurrent load. Mirrors
  * buyout-purchase-dedupe-concurrency.integration.test.ts's structure and
- * skip convention exactly — real Postgres, the real `transitionReimbursement`
- * function, real Organization/User/Category/PaymentMethodConfig/
- * ReimbursementRequest rows. `createAuditEvent` is mocked ONLY for the
- * "audit failure rolls back everything" case below (real Postgres, fake
- * audit failure) — every other test uses the real audit writer against the
- * real database.
+ * skip convention, plus an additional safety gate (test-db-safety.ts) that
+ * this program's own credential incident made necessary: this file reads
+ * ONLY a dedicated `PTA_TREASURER_TEST_DATABASE_URL` var — never the
+ * ambient `DATABASE_URL`, which has pointed at production in this repo's
+ * own `.env`/`.env.local` before — and refuses to run at all against
+ * anything that isn't an obviously-disposable loopback database.
  *
- * Skipped by default (no live DB in a normal `vitest run`) — run with
- * DATABASE_URL pointed at a disposable/local Postgres BEFORE starting vitest:
- *   DATABASE_URL="postgresql://postgres@localhost:5433/civicflow_dev" \
- *   PTA_TREASURER_REIMBURSEMENT_CONCURRENCY_RUN_DB_INTEGRATION_TEST=1 \
- *     npx vitest run src/lib/__tests__/reimbursements-payment-concurrency.integration.test.ts
+ * `createAuditEvent` is mocked ONLY for the "audit failure rolls back
+ * everything" case below (real Postgres, fake audit failure) — every other
+ * test uses the real audit writer against the real database.
+ *
+ * One-time local setup required before this can run (no credential of any
+ * kind is embedded here or guessed):
+ *   1. Create a dedicated local Postgres role and database whose name makes
+ *      it unambiguously disposable, e.g.:
+ *        createuser --pwprompt civicflow_treasurer_test
+ *        createdb --owner=civicflow_treasurer_test civicflow_treasurer_integration_test
+ *   2. Run with that connection string in the dedicated variable:
+ *        PTA_TREASURER_TEST_DATABASE_URL="postgresql://civicflow_treasurer_test:PASSWORD@localhost:5432/civicflow_treasurer_integration_test" \
+ *        PTA_TREASURER_REIMBURSEMENT_CONCURRENCY_RUN_DB_INTEGRATION_TEST=1 \
+ *          npx vitest run src/lib/__tests__/reimbursements-payment-concurrency.integration.test.ts
  * Never point this at a shared or production database; it creates and
- * deletes real rows.
+ * deletes real rows. This file never prints the connection string.
  */
-const DATABASE_URL = process.env.DATABASE_URL;
-const RUN_INTEGRATION = Boolean(DATABASE_URL) && process.env.PTA_TREASURER_REIMBURSEMENT_CONCURRENCY_RUN_DB_INTEGRATION_TEST === "1";
+const target = (() => {
+  try {
+    return resolveSafeTestDatabaseUrl("PTA_TREASURER_TEST_DATABASE_URL", "treasurer_integration_test");
+  } catch (error) {
+    // Fail loudly at collection time rather than silently skipping if the
+    // variable was set but points somewhere unsafe -- an unsafe value is a
+    // configuration mistake worth surfacing, not swallowing.
+    throw error;
+  }
+})();
+const RUN_INTEGRATION = target !== null && process.env.PTA_TREASURER_REIMBURSEMENT_CONCURRENCY_RUN_DB_INTEGRATION_TEST === "1";
+// The code under test (transitionReimbursement) uses the app's own
+// `@/lib/prisma` singleton, which reads `process.env.DATABASE_URL` at
+// construction -- so the SUT and this file's own setup/teardown queries
+// must agree on the same connection. Only ever set here AFTER
+// resolveSafeTestDatabaseUrl has already validated it as loopback +
+// disposable-test-named; never set from an unvalidated/ambient value.
+if (RUN_INTEGRATION && target) process.env.DATABASE_URL = target.url;
 
 const createAuditEventMock = vi.fn();
 vi.mock("@/lib/audit", async () => {

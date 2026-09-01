@@ -259,24 +259,18 @@ async function markPaid(input: TransitionReimbursementInput, existing: ExistingR
 
   try {
     return await prisma.$transaction(async (tx) => {
-      // Atomic claim: matches (and only one concurrent caller can ever
-      // match) a row that is still APPROVED at the moment this UPDATE
-      // actually runs, not at the moment we read it above. A losing
-      // concurrent request sees count 0 and never reaches the Expenditure
-      // create below — no orphaned Expenditure, no double posting.
-      const claim = await tx.reimbursementRequest.updateMany({
-        where: { id: existing.id, organizationId: input.organizationId, status: "APPROVED" },
-        data: {
-          status: "PAID",
-          paidByUserId: input.actorUserId,
-          paidAt: now,
-          paymentReference: input.paymentReference?.trim() || null,
-          paymentMethodId: method.id,
-          ...(input.reviewNotes !== undefined ? { reviewNotes: input.reviewNotes?.trim() || null } : {}),
-        },
-      });
-      if (claim.count === 0) throw new ClaimLostError();
-
+      // Create-then-claim (corrected ordering — see docs/pta-treasurer-financial-controls.md
+      // "Constraint-ordering correction"): the database CHECK constraint
+      // (`ReimbursementRequest_paid_requires_expenditure_check`) requires
+      // status='PAID' to always carry a non-null expenditureId, and
+      // PostgreSQL CHECK constraints are evaluated immediately, per
+      // statement — never deferred to commit. Setting status='PAID' in one
+      // UPDATE and expenditureId in a second, separate UPDATE (the original
+      // ordering) would violate that constraint the instant the first
+      // UPDATE runs, before the second ever executes. The fix: create the
+      // candidate Expenditure first (a table the constraint doesn't touch),
+      // then set status and expenditureId together in ONE statement, so the
+      // constraint only ever sees the fully-consistent new row state.
       const expenditure = await tx.expenditure.create({
         data: {
           organizationId: input.organizationId,
@@ -291,10 +285,30 @@ async function markPaid(input: TransitionReimbursementInput, existing: ExistingR
           notes: "Booked automatically when the reimbursement request was marked paid.",
         },
       });
-      const updated = await tx.reimbursementRequest.update({
-        where: { id: existing.id },
-        data: { expenditureId: expenditure.id },
+
+      // Atomic claim: matches (and only one concurrent caller can ever
+      // match) a row that is still APPROVED at the moment this UPDATE
+      // actually runs, not at the moment we read it above. A losing
+      // concurrent request sees count 0, throws below, and the whole
+      // transaction — including the candidate Expenditure just created —
+      // rolls back. No orphaned Expenditure, no double posting, and no
+      // committed (or even statement-boundary-checked) row can ever have
+      // status='PAID' with a null expenditureId.
+      const claim = await tx.reimbursementRequest.updateMany({
+        where: { id: existing.id, organizationId: input.organizationId, status: "APPROVED" },
+        data: {
+          status: "PAID",
+          expenditureId: expenditure.id,
+          paidByUserId: input.actorUserId,
+          paidAt: now,
+          paymentReference: input.paymentReference?.trim() || null,
+          paymentMethodId: method.id,
+          ...(input.reviewNotes !== undefined ? { reviewNotes: input.reviewNotes?.trim() || null } : {}),
+        },
       });
+      if (claim.count === 0) throw new ClaimLostError();
+
+      const updated = await tx.reimbursementRequest.findFirst({ where: { id: existing.id } });
 
       // Same `tx` as the writes above: if this insert fails, the whole
       // transaction — the PAID status flip and the Expenditure — rolls
@@ -309,7 +323,7 @@ async function markPaid(input: TransitionReimbursementInput, existing: ExistingR
         metadata: { amount: Number(existing.amount), expenditureId: expenditure.id, paymentMethodId: method.id },
         tx,
       });
-      return updated;
+      return updated!;
     });
   } catch (error) {
     if (error instanceof ClaimLostError) {

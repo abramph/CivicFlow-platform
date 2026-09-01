@@ -156,12 +156,19 @@ describe("transitions — mark paid", () => {
     expect(transaction).not.toHaveBeenCalled();
   });
 
-  it("PAID atomically claims the row, books the Expenditure with the payment method, links it, and audits inside the same transaction", async () => {
+  it("PAID creates the candidate Expenditure BEFORE the claim, then sets status and expenditureId together in the same statement, and audits inside the same transaction", async () => {
     findFirstRequest.mockResolvedValueOnce(approved);
+    txFindFirstRequest.mockResolvedValueOnce({ ...approved, status: "PAID", expenditureId: "exp-1" });
 
     const result = await transitionReimbursement({ organizationId: "org-1", requestId: "r-9", status: "PAID", paymentMethodId: "pm-1", ...actor });
 
-    expect(txUpdateManyRequest.mock.calls[0][0].where).toMatchObject({ id: "r-9", organizationId: "org-1", status: "APPROVED" });
+    // Create-then-claim ordering (constraint-ordering correction): the
+    // candidate Expenditure must exist before the conditional update runs,
+    // because the update sets status='PAID' and expenditureId in the SAME
+    // statement -- the only way to satisfy an immediate CHECK constraint
+    // that ties the two together. Asserting call order, not just that both
+    // happened, is the whole point of this test.
+    expect(txCreateExpenditure.mock.invocationCallOrder[0]).toBeLessThan(txUpdateManyRequest.mock.invocationCallOrder[0]);
     expect(txCreateExpenditure.mock.calls[0][0].data).toMatchObject({
       organizationId: "org-1",
       vendor: "Casey Chair",
@@ -170,12 +177,18 @@ describe("transitions — mark paid", () => {
       paymentMethodId: "pm-1",
     });
     expect(txCreateExpenditure.mock.calls[0][0].data.reference).toBe("REIMB-r-9");
-    expect(txUpdateRequest.mock.calls[0][0].data).toMatchObject({ expenditureId: "exp-1" });
+
+    // Status AND expenditureId land in the one updateMany call -- never a
+    // separate follow-up update, which is exactly the bug this fixes.
+    expect(txUpdateManyRequest.mock.calls[0][0].where).toMatchObject({ id: "r-9", organizationId: "org-1", status: "APPROVED" });
+    expect(txUpdateManyRequest.mock.calls[0][0].data).toMatchObject({ status: "PAID", expenditureId: "exp-1" });
+    expect(txUpdateRequest).not.toHaveBeenCalled();
+
     expect(result.expenditureId).toBe("exp-1");
     expect(createAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "reimbursement.paid", tx: expect.anything() }));
   });
 
-  it("a losing concurrent claim (updateMany count 0) never creates an Expenditure and returns a stable conflict", async () => {
+  it("a losing concurrent claim (updateMany count 0) rolls back its candidate Expenditure and returns a stable conflict", async () => {
     findFirstRequest.mockResolvedValueOnce(approved);
     txUpdateManyRequest.mockResolvedValueOnce({ count: 0 });
     findFirstRequest.mockResolvedValueOnce({ ...approved, status: "PAID" }); // re-read after the lost claim
@@ -183,7 +196,15 @@ describe("transitions — mark paid", () => {
     await expect(
       transitionReimbursement({ organizationId: "org-1", requestId: "r-9", status: "PAID", paymentMethodId: "pm-1", ...actor })
     ).rejects.toMatchObject({ status: 409, message: expect.stringContaining("already been marked paid") });
-    expect(txCreateExpenditure).not.toHaveBeenCalled();
+
+    // The candidate Expenditure creation call itself still happens (it has
+    // to, for the constraint to be satisfiable at all) -- what matters is
+    // that it's inside the same $transaction as the failed claim, so a real
+    // Postgres transaction rolls it back atomically. This mock can't
+    // simulate rollback (it just invokes the callback directly); the
+    // real-Postgres integration test proves zero rows persist.
+    expect(txCreateExpenditure).toHaveBeenCalledTimes(1);
+    expect(createAuditEvent).not.toHaveBeenCalled();
   });
 
   it("an audit failure rolls back — the transaction callback throws before returning, so nothing commits", async () => {
