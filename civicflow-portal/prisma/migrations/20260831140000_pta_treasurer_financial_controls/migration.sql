@@ -52,16 +52,39 @@ ALTER TABLE "ReimbursementRequest"
 CREATE INDEX "ReimbursementRequest_paymentMethodId_idx" ON "ReimbursementRequest"("paymentMethodId");
 CREATE INDEX "ReimbursementRequest_correctedByUserId_idx" ON "ReimbursementRequest"("correctedByUserId");
 
--- ── AddForeignKey ────────────────────────────────────────────────────────
+-- ── AddForeignKey (NOT VALID -- validated explicitly below) ────────────
+-- fix/pta-treasurer-financial-controls, lock-hardening follow-up: adding a
+-- FOREIGN KEY without NOT VALID forces Postgres to scan and lock the
+-- referencing table for the full duration of validating every existing
+-- row against it before the ADD can complete. NOT VALID splits that into
+-- two steps -- register the constraint definition (fast, no scan), then
+-- validate it as its own explicit statement. Delete/update actions
+-- (SET NULL / CASCADE) are unchanged from the original migration; only
+-- the *mechanism* of adding+validating each constraint changed.
 
-ALTER TABLE "ReimbursementRequest" ADD CONSTRAINT "ReimbursementRequest_paymentMethodId_fkey" FOREIGN KEY ("paymentMethodId") REFERENCES "PaymentMethodConfig"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-ALTER TABLE "ReimbursementRequest" ADD CONSTRAINT "ReimbursementRequest_correctedByUserId_fkey" FOREIGN KEY ("correctedByUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "ReimbursementRequest" ADD CONSTRAINT "ReimbursementRequest_paymentMethodId_fkey" FOREIGN KEY ("paymentMethodId") REFERENCES "PaymentMethodConfig"("id") ON DELETE SET NULL ON UPDATE CASCADE NOT VALID;
+ALTER TABLE "ReimbursementRequest" ADD CONSTRAINT "ReimbursementRequest_correctedByUserId_fkey" FOREIGN KEY ("correctedByUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE NOT VALID;
+
+-- ── ValidateConstraint ───────────────────────────────────────────────────
+-- Neither FK's referencing column (paymentMethodId, correctedByUserId) can
+-- hold a non-null value yet -- both columns were just created by this same
+-- migration, so no pre-existing row can violate either constraint. This
+-- validation is expected to be fast regardless of table size for that
+-- reason, though it still performs a real scan and takes a real
+-- (SHARE UPDATE EXCLUSIVE) lock rather than assuming the outcome.
+
+ALTER TABLE "ReimbursementRequest" VALIDATE CONSTRAINT "ReimbursementRequest_paymentMethodId_fkey";
+ALTER TABLE "ReimbursementRequest" VALIDATE CONSTRAINT "ReimbursementRequest_correctedByUserId_fkey";
 
 -- ── 4. Verify no existing PAID row is missing its Expenditure link ─────
 -- Expected to be a no-op in every environment (the pre-existing code path
 -- always set expenditureId and status="PAID" together), but abort loudly
--- rather than let a bare ADD CONSTRAINT fail with a less specific error if
--- one somehow exists.
+-- with a specific, actionable message rather than let a generic
+-- "constraint is violated by some row" error surface later, if one
+-- somehow exists. This check is independent of, and precedes, the
+-- NOT VALID/VALIDATE CONSTRAINT split below -- it exists so a real
+-- problem is caught before the constraint is even registered, not only
+-- once it's validated.
 
 DO $$
 BEGIN
@@ -73,6 +96,19 @@ BEGIN
   END IF;
 END $$;
 
+-- fix/pta-treasurer-financial-controls, lock-hardening follow-up: same
+-- NOT VALID + VALIDATE CONSTRAINT split as the two foreign keys above.
+-- The final, committed, enforced schema is identical in strength to a
+-- plain ADD CONSTRAINT -- by the time this migration's transaction
+-- commits, VALIDATE CONSTRAINT has already run and the constraint is
+-- fully validated (pg_constraint.convalidated = true). The invariant
+-- itself (no PAID row may ever have a null expenditureId) is not
+-- weakened in any way; only the mechanism used to reach full validation
+-- within this migration changed.
+
 ALTER TABLE "ReimbursementRequest"
   ADD CONSTRAINT "ReimbursementRequest_paid_requires_expenditure_check"
-  CHECK ("status" != 'PAID' OR "expenditureId" IS NOT NULL);
+  CHECK ("status" != 'PAID' OR "expenditureId" IS NOT NULL) NOT VALID;
+
+ALTER TABLE "ReimbursementRequest"
+  VALIDATE CONSTRAINT "ReimbursementRequest_paid_requires_expenditure_check";
