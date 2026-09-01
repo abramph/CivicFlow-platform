@@ -62,6 +62,12 @@ beforeEach(() => {
         create: (...a: unknown[]) => txCreateExpenditure(...a),
         update: (...a: unknown[]) => txUpdateExpenditure(...a),
       },
+      // feature/pta-treasurer-expenditure-experience (E3) — markPaid()'s
+      // committee-inheritance lookup runs inside the same transaction, via
+      // this tx handle (not the top-level prisma.ptaCommittee mock above,
+      // which stays reserved for createReimbursement's submission-time
+      // validation outside any transaction).
+      ptaCommittee: { findFirst: (...a: unknown[]) => findFirstCommittee(...a) },
     })
   );
 });
@@ -188,6 +194,32 @@ describe("transitions — mark paid", () => {
     expect(createAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "reimbursement.paid", tx: expect.anything() }));
   });
 
+  it("inherits committeeId and snapshots the committee's current name onto the new Expenditure", async () => {
+    findFirstRequest.mockResolvedValueOnce({ ...approved, committeeId: "committee-1" });
+    findFirstCommittee.mockResolvedValueOnce({ id: "committee-1", name: "Fundraising" });
+    txFindFirstRequest.mockResolvedValueOnce({ ...approved, status: "PAID", expenditureId: "exp-1" });
+
+    await transitionReimbursement({ organizationId: "org-1", requestId: "r-9", status: "PAID", paymentMethodId: "pm-1", ...actor });
+
+    expect(findFirstCommittee).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "committee-1", organizationId: "org-1" } }));
+    expect(txCreateExpenditure.mock.calls[0][0].data).toMatchObject({ committeeId: "committee-1", committeeNameAtPosting: "Fundraising" });
+    // Re-validated against this organization at pay time, not just trusted
+    // from submission time -- the lookup must happen before the Expenditure
+    // is created.
+    expect(findFirstCommittee.mock.invocationCallOrder[0]).toBeLessThan(txCreateExpenditure.mock.invocationCallOrder[0]);
+  });
+
+  it("still pays and books the Expenditure, with no committee attribution, if the referenced committee is no longer found", async () => {
+    findFirstRequest.mockResolvedValueOnce({ ...approved, committeeId: "deleted-committee" });
+    findFirstCommittee.mockResolvedValueOnce(null);
+    txFindFirstRequest.mockResolvedValueOnce({ ...approved, status: "PAID", expenditureId: "exp-1" });
+
+    const result = await transitionReimbursement({ organizationId: "org-1", requestId: "r-9", status: "PAID", paymentMethodId: "pm-1", ...actor });
+
+    expect(result.expenditureId).toBe("exp-1");
+    expect(txCreateExpenditure.mock.calls[0][0].data).toMatchObject({ committeeId: null, committeeNameAtPosting: null });
+  });
+
   it("a losing concurrent claim (updateMany count 0) rolls back its candidate Expenditure and returns a stable conflict", async () => {
     findFirstRequest.mockResolvedValueOnce(approved);
     txUpdateManyRequest.mockResolvedValueOnce({ count: 0 });
@@ -267,6 +299,14 @@ describe("transitions — void and reversal", () => {
     expect(txUpdateExpenditure.mock.calls[0][0]).toMatchObject({ where: { id: "exp-1" }, data: expect.objectContaining({ voidedByUserId: "treasurer-1" }) });
     expect(result.status).toBe("VOIDED");
     expect(createAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "reimbursement.voided", tx: expect.anything() }));
+
+    // feature/pta-treasurer-expenditure-experience (E3) — the correction
+    // only ever sets voidedAt/voidedByUserId/voidReason; it must never touch
+    // committeeId/committeeNameAtPosting, so whatever committee attribution
+    // the Expenditure was created with is preserved through a void exactly
+    // as it is through any other field it doesn't mention.
+    expect(txUpdateExpenditure.mock.calls[0][0].data).not.toHaveProperty("committeeId");
+    expect(txUpdateExpenditure.mock.calls[0][0].data).not.toHaveProperty("committeeNameAtPosting");
   });
 
   it("REVERSED behaves the same way with its own audit action", async () => {
