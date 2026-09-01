@@ -128,30 +128,34 @@ export async function createBudgetLine(input: UpsertBudgetLineInput) {
   if (input.plannedAmount === undefined || !Number.isFinite(input.plannedAmount) || input.plannedAmount < 0) {
     throw new FinanceError("Planned amount must be zero or more.");
   }
+  const plannedAmount = input.plannedAmount;
   if (input.categoryId) await assertCategory(input.organizationId, input.categoryId);
 
   try {
-    const line = await prisma.budgetLine.create({
-      data: {
+    return await prisma.$transaction(async (tx) => {
+      const line = await tx.budgetLine.create({
+        data: {
+          organizationId: input.organizationId,
+          fiscalYear,
+          name,
+          categoryId: input.categoryId ?? null,
+          plannedAmount: new Prisma.Decimal(plannedAmount.toFixed(2)),
+          notes: input.notes?.trim() || null,
+          sortOrder: input.sortOrder ?? 0,
+        },
+      });
+      await createAuditEvent({
         organizationId: input.organizationId,
-        fiscalYear,
-        name,
-        categoryId: input.categoryId ?? null,
-        plannedAmount: new Prisma.Decimal(input.plannedAmount.toFixed(2)),
-        notes: input.notes?.trim() || null,
-        sortOrder: input.sortOrder ?? 0,
-      },
+        actorUserId: input.actorUserId,
+        actorEmail: input.actorEmail ?? null,
+        action: "budget.line_created",
+        entityType: "budget_line",
+        entityId: line.id,
+        metadata: { fiscalYear, name, plannedAmount },
+        tx,
+      });
+      return line;
     });
-    await createAuditEvent({
-      organizationId: input.organizationId,
-      actorUserId: input.actorUserId,
-      actorEmail: input.actorEmail ?? null,
-      action: "budget.line_created",
-      entityType: "budget_line",
-      entityId: line.id,
-      metadata: { fiscalYear, name, plannedAmount: input.plannedAmount },
-    });
-    return line;
   } catch (error) {
     if (typeof error === "object" && error !== null && (error as { code?: string }).code === "P2002") {
       throw new FinanceError(`A budget line named "${name}" already exists for ${fiscalYear}.`, 409);
@@ -168,25 +172,28 @@ export async function updateBudgetLine(input: UpsertBudgetLineInput & { lineId: 
   }
   if (input.categoryId) await assertCategory(input.organizationId, input.categoryId);
 
-  const line = await prisma.budgetLine.update({
-    where: { id: existing.id },
-    data: {
-      ...(input.name !== undefined ? { name: input.name.trim() } : {}),
-      ...(input.categoryId !== undefined ? { categoryId: input.categoryId } : {}),
-      ...(input.plannedAmount !== undefined ? { plannedAmount: new Prisma.Decimal(input.plannedAmount.toFixed(2)) } : {}),
-      ...(input.notes !== undefined ? { notes: input.notes?.trim() || null } : {}),
-      ...(input.sortOrder !== undefined ? { sortOrder: input.sortOrder } : {}),
-      ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
-    },
+  return prisma.$transaction(async (tx) => {
+    const line = await tx.budgetLine.update({
+      where: { id: existing.id },
+      data: {
+        ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+        ...(input.categoryId !== undefined ? { categoryId: input.categoryId } : {}),
+        ...(input.plannedAmount !== undefined ? { plannedAmount: new Prisma.Decimal(input.plannedAmount.toFixed(2)) } : {}),
+        ...(input.notes !== undefined ? { notes: input.notes?.trim() || null } : {}),
+        ...(input.sortOrder !== undefined ? { sortOrder: input.sortOrder } : {}),
+        ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+      },
+    });
+    await createAuditEvent({
+      organizationId: input.organizationId,
+      actorUserId: input.actorUserId,
+      actorEmail: input.actorEmail ?? null,
+      action: "budget.line_updated",
+      entityType: "budget_line",
+      entityId: line.id,
+      metadata: { name: line.name },
+      tx,
+    });
+    return line;
   });
-  await createAuditEvent({
-    organizationId: input.organizationId,
-    actorUserId: input.actorUserId,
-    actorEmail: input.actorEmail ?? null,
-    action: "budget.line_updated",
-    entityType: "budget_line",
-    entityId: line.id,
-    metadata: { name: line.name },
-  });
-  return line;
 }

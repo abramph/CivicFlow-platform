@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { AttachmentManager } from "@/components/forms/AttachmentManager";
 
 const STATUS_LABELS: Record<string, string> = {
   SUBMITTED: "Submitted",
@@ -9,6 +10,8 @@ const STATUS_LABELS: Record<string, string> = {
   APPROVED: "Approved",
   PAID: "Paid",
   REJECTED: "Rejected",
+  VOIDED: "Voided",
+  REVERSED: "Reversed",
 };
 
 function money(value: number): string {
@@ -18,7 +21,8 @@ function money(value: number): string {
 function statusBadgeClass(status: string): string {
   if (status === "PAID") return "bg-emerald-100 text-emerald-800";
   if (status === "APPROVED") return "bg-sky-100 text-sky-800";
-  if (status === "REJECTED") return "bg-red-100 text-red-800";
+  if (status === "REJECTED" || status === "REVERSED") return "bg-red-100 text-red-800";
+  if (status === "VOIDED") return "bg-slate-200 text-slate-600";
   if (status === "UNDER_REVIEW") return "bg-amber-100 text-amber-800";
   return "bg-slate-100 text-slate-700";
 }
@@ -47,9 +51,17 @@ interface ReimbursementView {
   rejectionReason: string | null;
 }
 
+interface PaymentMethodOption {
+  id: string;
+  method: string;
+  label: string;
+}
+
 /** PTA-H — treasurer dashboard. The server enforces every workflow rule
- * (transitions, self-approval ban, PAID booking); this component only hides
- * controls the caller cannot use. */
+ * (transitions, self-approval/self-payment/self-correction ban, the PAID
+ * booking's required payment method, and the VOIDED/REVERSED correction's
+ * reason + typed confirmation); this component only hides controls the
+ * caller cannot use. */
 export function PtaFinanceDashboard({
   fiscalYear,
   summary,
@@ -58,6 +70,7 @@ export function PtaFinanceDashboard({
   categories,
   committees,
   events,
+  paymentMethods,
   viewer,
 }: {
   fiscalYear: string;
@@ -72,6 +85,7 @@ export function PtaFinanceDashboard({
   categories: { id: string; name: string }[];
   committees: { id: string; name: string }[];
   events: { id: string; title: string }[];
+  paymentMethods: PaymentMethodOption[];
   viewer: { canManageBudget: boolean; canSubmit: boolean; canManageReimbursements: boolean };
 }) {
   const router = useRouter();
@@ -97,6 +111,12 @@ export function PtaFinanceDashboard({
   const [rejectReason, setRejectReason] = useState("");
   const [payingId, setPayingId] = useState<string | null>(null);
   const [paymentReference, setPaymentReference] = useState("");
+  const [paymentMethodId, setPaymentMethodId] = useState("");
+  const [correctingId, setCorrectingId] = useState<string | null>(null);
+  const [correctionAction, setCorrectionAction] = useState<"VOIDED" | "REVERSED">("VOIDED");
+  const [correctionReason, setCorrectionReason] = useState("");
+  const [confirmText, setConfirmText] = useState("");
+  const [receiptsOpenId, setReceiptsOpenId] = useState<string | null>(null);
 
   async function call(path: string, init?: RequestInit): Promise<boolean> {
     setPending(true);
@@ -167,6 +187,10 @@ export function PtaFinanceDashboard({
       setRejectReason("");
       setPayingId(null);
       setPaymentReference("");
+      setPaymentMethodId("");
+      setCorrectingId(null);
+      setCorrectionReason("");
+      setConfirmText("");
       router.refresh();
     }
   }
@@ -367,7 +391,7 @@ export function PtaFinanceDashboard({
               </button>
             </div>
             <p className="text-xs text-slate-500 sm:col-span-2">
-              Attach receipts after submitting (from the request row). Approval is always by a different officer than the submitter.
+              After submitting, use the &ldquo;Receipts&rdquo; button on your request to attach a receipt or invoice (PDF, JPEG, PNG, or HEIC). Approval is always by a different officer than the submitter.
             </p>
           </div>
         ) : null}
@@ -412,7 +436,13 @@ export function PtaFinanceDashboard({
                           Approve
                         </button>
                       ) : (
-                        <button type="button" disabled={pending} onClick={() => setPayingId(payingId === row.id ? null : row.id)} className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800 disabled:opacity-50">
+                        <button
+                          type="button"
+                          disabled={pending || row.submittedByIsViewer}
+                          title={row.submittedByIsViewer ? "You cannot mark your own request paid." : undefined}
+                          onClick={() => setPayingId(payingId === row.id ? null : row.id)}
+                          className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
+                        >
                           Mark paid
                         </button>
                       )}
@@ -420,6 +450,43 @@ export function PtaFinanceDashboard({
                         Reject
                       </button>
                     </div>
+                  ) : null}
+                  {viewer.canManageReimbursements && row.status === "PAID" ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={pending || row.submittedByIsViewer}
+                        title={row.submittedByIsViewer ? "You cannot correct your own request." : undefined}
+                        onClick={() => {
+                          setCorrectionAction("VOIDED");
+                          setCorrectingId(correctingId === row.id && correctionAction === "VOIDED" ? null : row.id);
+                        }}
+                        className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        Void
+                      </button>
+                      <button
+                        type="button"
+                        disabled={pending || row.submittedByIsViewer}
+                        title={row.submittedByIsViewer ? "You cannot correct your own request." : undefined}
+                        onClick={() => {
+                          setCorrectionAction("REVERSED");
+                          setCorrectingId(correctingId === row.id && correctionAction === "REVERSED" ? null : row.id);
+                        }}
+                        className="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                      >
+                        Reverse
+                      </button>
+                    </div>
+                  ) : null}
+                  {row.submittedByIsViewer || viewer.canManageReimbursements ? (
+                    <button
+                      type="button"
+                      onClick={() => setReceiptsOpenId(receiptsOpenId === row.id ? null : row.id)}
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      {receiptsOpenId === row.id ? "Hide receipts" : "Receipts"}
+                    </button>
                   ) : null}
                 </div>
                 <p className="mt-1 text-sm text-slate-700">{row.description}</p>
@@ -441,15 +508,66 @@ export function PtaFinanceDashboard({
                 ) : null}
                 {payingId === row.id ? (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <input value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} placeholder="Check # / reference (optional)" className={inputClass + " w-80"} />
+                    <select value={paymentMethodId} onChange={(event) => setPaymentMethodId(event.target.value)} className={inputClass + " w-56"}>
+                      <option value="">How was this paid?</option>
+                      {paymentMethods.map((methodOption) => (
+                        <option key={methodOption.id} value={methodOption.id}>
+                          {methodOption.label}
+                        </option>
+                      ))}
+                    </select>
+                    <input value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} placeholder="Check # / reference (optional)" className={inputClass + " w-64"} />
                     <button
                       type="button"
-                      disabled={pending}
-                      onClick={() => transition(row.id, { status: "PAID", paymentReference: paymentReference.trim() || null })}
+                      disabled={pending || !paymentMethodId}
+                      onClick={() => transition(row.id, { status: "PAID", paymentMethodId, paymentReference: paymentReference.trim() || null })}
                       className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
                     >
                       Confirm paid — books the expense
                     </button>
+                    {paymentMethods.length === 0 ? (
+                      <p className="w-full text-xs text-red-700">No active payment methods are configured for this organization yet — add one under Settings before marking reimbursements paid.</p>
+                    ) : null}
+                    <p className="w-full text-xs text-slate-500">Unestra does not process this payment — this records that it was paid outside Unestra.</p>
+                  </div>
+                ) : null}
+                {correctingId === row.id ? (
+                  <div className="mt-2 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <p className="text-xs text-slate-600">
+                      {correctionAction === "VOIDED"
+                        ? "Use Void when this was marked paid by mistake and the external payment never happened."
+                        : "Use Reverse when the external payment happened but was later cancelled, returned, or recovered outside Unestra. Unestra does not claim to have recovered the money itself."}
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input value={correctionReason} onChange={(event) => setCorrectionReason(event.target.value)} placeholder="Reason (required)" className={inputClass + " w-72"} />
+                      <input
+                        value={confirmText}
+                        onChange={(event) => setConfirmText(event.target.value)}
+                        placeholder={`Type ${correctionAction === "VOIDED" ? "VOID" : "REVERSE"} to confirm`}
+                        className={inputClass + " w-56"}
+                      />
+                      <button
+                        type="button"
+                        disabled={pending || !correctionReason.trim() || confirmText !== (correctionAction === "VOIDED" ? "VOID" : "REVERSE")}
+                        onClick={() => transition(row.id, { status: correctionAction, correctionReason: correctionReason.trim(), confirmText })}
+                        className="rounded-lg bg-red-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-800 disabled:opacity-50"
+                      >
+                        {correctionAction === "VOIDED" ? "Confirm void" : "Confirm reversal"}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+                {row.status === "VOIDED" || row.status === "REVERSED" ? (
+                  <p className="mt-1 text-xs font-medium text-slate-600">{STATUS_LABELS[row.status]} — see audit history for who and when.</p>
+                ) : null}
+                {receiptsOpenId === row.id ? (
+                  <div className="mt-3 rounded-lg border border-slate-200 p-3">
+                    <AttachmentManager
+                      entityType="REIMBURSEMENT"
+                      entityId={row.id}
+                      canWrite={row.submittedByIsViewer || viewer.canManageReimbursements}
+                      titleLabel="Receipt title"
+                    />
                   </div>
                 ) : null}
               </li>

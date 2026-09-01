@@ -72,33 +72,41 @@ export async function POST(request: Request) {
     await ensureReference("campaign", campaignId, organizationId);
     await ensureReference("event", eventId, organizationId);
 
-    const row = await prisma.expenditure.create({
-      data: {
-        organizationId,
-        date: new Date(input.date),
-        vendor: text(input.vendor),
-        categoryId,
-        category: category?.name ?? text(input.category),
-        amount: input.amount,
-        paymentMethodId,
-        paymentMethod: paymentMethod?.label ?? text(input.paymentMethod),
-        description: input.description.trim(),
-        notes: text(input.notes),
-        reference: text(input.reference),
-        receiptUrl: text(input.receiptUrl),
-        campaignId,
-        eventId,
-      },
-    });
+    // State change and audit event commit together (fix/pta-treasurer-financial-controls
+    // §6/§9): a direct expenditure is real ledger state the moment it
+    // exists, exactly like a paid reimbursement -- an audit-insert failure
+    // must not leave a financial record with no audit trail.
+    const row = await prisma.$transaction(async (tx) => {
+      const created = await tx.expenditure.create({
+        data: {
+          organizationId,
+          date: new Date(input.date),
+          vendor: text(input.vendor),
+          categoryId,
+          category: category?.name ?? text(input.category),
+          amount: input.amount,
+          paymentMethodId,
+          paymentMethod: paymentMethod?.label ?? text(input.paymentMethod),
+          description: input.description.trim(),
+          notes: text(input.notes),
+          reference: text(input.reference),
+          receiptUrl: text(input.receiptUrl),
+          campaignId,
+          eventId,
+        },
+      });
 
-    await createAuditEvent({
-      organizationId,
-      actorUserId: session.userId,
-      actorEmail: session.userEmail,
-      action: "create",
-      entityType: "expenditure",
-      entityId: row.id,
-      metadata: { amount: row.amount.toString(), date: row.date.toISOString(), vendor: row.vendor },
+      await createAuditEvent({
+        organizationId,
+        actorUserId: session.userId,
+        actorEmail: session.userEmail,
+        action: "create",
+        entityType: "expenditure",
+        entityId: created.id,
+        metadata: { amount: created.amount.toString(), date: created.date.toISOString(), vendor: created.vendor },
+        tx,
+      });
+      return created;
     });
 
     return Response.json({ ok: true, data: row }, { status: 201 });

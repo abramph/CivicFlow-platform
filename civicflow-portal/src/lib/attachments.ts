@@ -95,6 +95,54 @@ export function attachmentPermission(entityType: AttachmentEntityType, mode: "re
   return mode === "read" ? readPermissions[entityType] : writePermissions[entityType];
 }
 
+/** fix/pta-treasurer-financial-controls — reimbursement receipts are the
+ * only attachment surface with an ownership boundary narrower than "any
+ * user holding the base entity permission": a submitter without
+ * reimbursements:manage may read/attach only their own request's receipts.
+ * Every other entity type's contract is unchanged by this function — it
+ * returns true immediately for them, same as before this existed. */
+const OWNERSHIP_SCOPED_ENTITY_TYPES: readonly AttachmentEntityType[] = ["REIMBURSEMENT"];
+
+export interface AttachmentOwnershipViewer {
+  userId: string;
+  canManage: boolean;
+}
+
+export async function verifyAttachmentOwnership(
+  organizationId: string,
+  entityType: AttachmentEntityType,
+  entityId: string,
+  viewer: AttachmentOwnershipViewer
+): Promise<boolean> {
+  if (!OWNERSHIP_SCOPED_ENTITY_TYPES.includes(entityType)) return true;
+  if (viewer.canManage) return true;
+  if (entityType === "REIMBURSEMENT") {
+    const row = await prisma.reimbursementRequest.findFirst({
+      where: { id: entityId, organizationId },
+      select: { submittedByUserId: true },
+    });
+    return row?.submittedByUserId === viewer.userId;
+  }
+  return false;
+}
+
+/** fix/pta-treasurer-financial-controls — per-entity-type MIME allowlist.
+ * Entity types with no entry here keep the pre-existing, unrestricted
+ * contract (any content-type accepted) — only REIMBURSEMENT gains a
+ * restriction, since receipts/invoices are the specific case this program
+ * was asked to harden. Extend this map rather than change the "no entry =
+ * unrestricted" default if another entity type needs the same treatment
+ * later. */
+const ALLOWED_CONTENT_TYPES: Partial<Record<AttachmentEntityType, readonly string[]>> = {
+  REIMBURSEMENT: ["application/pdf", "image/jpeg", "image/png", "image/heic", "image/heif"],
+};
+
+export function isAllowedAttachmentContentType(entityType: AttachmentEntityType, contentType: string): boolean {
+  const allowed = ALLOWED_CONTENT_TYPES[entityType];
+  if (!allowed) return true;
+  return allowed.includes(contentType.toLowerCase());
+}
+
 export async function verifyAttachmentEntity(organizationId: string, entityType: AttachmentEntityType, entityId: string) {
   if (!entityId) return false;
   switch (entityType) {

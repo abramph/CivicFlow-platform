@@ -29,7 +29,7 @@ export default async function PtaFinancePage() {
   const settings = await prisma.orgSettings.findUnique({ where: { organizationId }, select: { fiscalYearStart: true } });
   const window = fiscalYearWindow(fiscalYear, settings?.fiscalYearStart ?? 1);
 
-  const [budget, summary, reimbursements, categories, committees, events] = await Promise.all([
+  const [budget, summary, reimbursements, categories, committees, events, paymentMethods] = await Promise.all([
     getBudgetWithActuals(organizationId, fiscalYear),
     getFinanceSummary(organizationId, window),
     listReimbursements(organizationId, { userId: session.userId, canManage: can("reimbursements:manage") }),
@@ -44,6 +44,11 @@ export default async function PtaFinancePage() {
       select: { id: true, title: true },
       orderBy: { createdAt: "desc" },
       take: 30,
+    }),
+    prisma.paymentMethodConfig.findMany({
+      where: { organizationId, isActive: true },
+      select: { id: true, method: true, label: true },
+      orderBy: { sortOrder: "asc" },
     }),
   ]);
 
@@ -86,6 +91,7 @@ export default async function PtaFinancePage() {
           categories={categories}
           committees={committees}
           events={events}
+          paymentMethods={paymentMethods}
           viewer={{
             canManageBudget: can("budget:manage"),
             canSubmit: can("reimbursements:submit"),
