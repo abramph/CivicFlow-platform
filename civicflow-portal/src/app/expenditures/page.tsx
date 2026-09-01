@@ -42,7 +42,7 @@ export default async function ExpendituresPage({ searchParams }: { searchParams:
         ]}
       />
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <StatCard label="Expenditures" value={rows.length} />
         <StatCard label="Total Spent (active)" value={formatCurrency(totalSpent)} />
         <StatCard label="Expense Categories" value={categoryCount} />
@@ -59,7 +59,7 @@ export default async function ExpendituresPage({ searchParams }: { searchParams:
       </SectionCard>
 
       <SectionCard title="Expense Ledger" description="Vendor, category, amount, and supporting detail for recent expenditures.">
-        <ExpenditureLedgerTable rows={rows} basePath="/expenditures" />
+        <ExpenditureLedgerTable rows={rows} basePath="/expenditures" showCommitteeColumn={committees.length > 0} />
       </SectionCard>
     </main>
   );

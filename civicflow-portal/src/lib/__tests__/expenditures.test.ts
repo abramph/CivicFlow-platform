@@ -19,7 +19,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...a: unknown[]) => createAuditEvent(...a) }));
 
-import { listExpenditures, assertCommitteeInOrganization, getOrganizationCommitteeOptions, voidExpenditure } from "@/lib/expenditures";
+import { listExpenditures, assertCommitteeInOrganization, getOrganizationCommitteeOptions, voidExpenditure, describeCommitteeAttribution } from "@/lib/expenditures";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -146,5 +146,38 @@ describe("voidExpenditure", () => {
     const metadata = createAuditEvent.mock.calls[0][0].metadata as { before: Record<string, unknown>; after: Record<string, unknown> };
     expect(metadata.before).not.toHaveProperty("receiptUrl");
     expect(metadata.after).not.toHaveProperty("receiptUrl");
+  });
+});
+
+// feature/pta-treasurer-expenditure-experience (E3 defect found + fixed
+// during browser verification) -- the snapshot column was correctly
+// written and preserved in the database all along; the bug was purely in
+// display precedence (ledger table + both detail pages originally showed
+// the LIVE committee.name whenever the FK still resolved, falling back to
+// committeeNameAtPosting only once the committee was deleted). That makes
+// a rename NOT harmless to historical reporting, contradicting the
+// migration's own documented intent. These pin the corrected precedence.
+describe("describeCommitteeAttribution", () => {
+  it("shows the snapshot, not the live name, when the committee still exists but was renamed since posting", () => {
+    const result = describeCommitteeAttribution({ committee: { name: "Fundraising & Development" }, committeeNameAtPosting: "Fundraising" });
+    expect(result.display).toBe("Fundraising");
+    expect(result.helper).toMatch(/now named "Fundraising & Development"/);
+  });
+
+  it("shows the snapshot with an archived/removed helper when the committee no longer exists", () => {
+    const result = describeCommitteeAttribution({ committee: null, committeeNameAtPosting: "Fundraising" });
+    expect(result.display).toBe("Fundraising");
+    expect(result.helper).toMatch(/archived or removed/);
+  });
+
+  it("shows the name with no helper when the live committee and the snapshot agree", () => {
+    const result = describeCommitteeAttribution({ committee: { name: "Fundraising" }, committeeNameAtPosting: "Fundraising" });
+    expect(result.display).toBe("Fundraising");
+    expect(result.helper).toBeUndefined();
+  });
+
+  it("shows 'No committee' with no helper when neither exists", () => {
+    const result = describeCommitteeAttribution({ committee: null, committeeNameAtPosting: null });
+    expect(result).toEqual({ display: "No committee" });
   });
 });

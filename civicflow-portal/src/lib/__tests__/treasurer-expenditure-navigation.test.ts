@@ -56,11 +56,14 @@ vi.mock("@/lib/financial-edit-policy", async () => {
   return { ...actual, getFinancialEditPolicy: (...a: unknown[]) => getFinancialEditPolicy(...a) };
 });
 
+vi.mock("next/navigation", () => ({ usePathname: () => "/labs/pta/finance/overview" }));
+
 import TreasurerExpendituresPage from "@/app/labs/pta/finance/expenditures/page";
 import TreasurerNewExpenditurePage from "@/app/labs/pta/finance/expenditures/new/page";
 import TreasurerExpenditureDetailPage from "@/app/labs/pta/finance/expenditures/[id]/page";
 import TreasurerEditExpenditurePage from "@/app/labs/pta/finance/expenditures/[id]/edit/page";
-import { TREASURER_TABS } from "@/components/labs/pta/TreasurerTabs";
+import { TREASURER_TABS, TreasurerTabs } from "@/components/labs/pta/TreasurerTabs";
+import type { ReactElement } from "react";
 
 const denied = { organizationId: "org-1", session: { userId: "u-1" }, role: "STAFF", can: () => false, access: { available: false } };
 const granted = { organizationId: "org-1", session: { userId: "u-1" }, role: "FINANCE", can: () => true, access: { available: true } };
@@ -153,5 +156,42 @@ describe("TREASURER_TABS", () => {
     for (const tab of TREASURER_TABS) {
       expect(tab.href.startsWith("/labs/pta/finance/")).toBe(true);
     }
+  });
+});
+
+/**
+ * Real defect found in local browser verification: TreasurerLayout only
+ * gates on budget:read (deliberately, so STAFF/READ_ONLY viewers who lack
+ * expenditures:read can still reach Overview/Budget/Reimbursements), but
+ * TreasurerTabs rendered all four tabs unconditionally -- so a STAFF viewer
+ * (budget:read + reimbursements:submit, but no expenditures:read) saw a
+ * clickable "Expenditures" tab that dead-ended at /dashboard?error=forbidden
+ * the moment they clicked it. Fixed by threading the real
+ * expenditures:read check down as canReadExpenditures. These tests call the
+ * component function directly (same no-DOM-renderer approach as the rest of
+ * this file) and inspect the returned element tree's tab hrefs/labels.
+ */
+describe("TreasurerTabs (canReadExpenditures gating)", () => {
+  function renderedHrefs(element: ReactElement): string[] {
+    const children = (element.props as { children: ReactElement | ReactElement[] }).children;
+    const list = Array.isArray(children) ? children : [children];
+    return list.map((child) => (child.props as { href: string }).href);
+  }
+
+  it("shows all four tabs when the viewer can read expenditures", () => {
+    const element = TreasurerTabs({ canReadExpenditures: true }) as ReactElement;
+    expect(renderedHrefs(element)).toEqual(TREASURER_TABS.map((t) => t.href));
+  });
+
+  it("omits Expenditures -- and only Expenditures -- when the viewer cannot read expenditures", () => {
+    const element = TreasurerTabs({ canReadExpenditures: false }) as ReactElement;
+    const hrefs = renderedHrefs(element);
+    expect(hrefs).not.toContain("/labs/pta/finance/expenditures");
+    expect(hrefs).toEqual(["/labs/pta/finance/overview", "/labs/pta/finance/budget", "/labs/pta/finance/reimbursements"]);
+  });
+
+  it("defaults to showing Expenditures when the prop is omitted", () => {
+    const element = TreasurerTabs({}) as ReactElement;
+    expect(renderedHrefs(element)).toContain("/labs/pta/finance/expenditures");
   });
 });

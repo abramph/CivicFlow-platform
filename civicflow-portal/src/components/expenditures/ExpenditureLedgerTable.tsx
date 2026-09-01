@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { formatCurrency, formatDate, formatText } from "@/lib/formatting";
+import { describeCommitteeAttribution } from "@/lib/expenditures";
 
 type Option = { id: string; label: string };
 
@@ -48,7 +49,7 @@ export function ExpenditureFilterForm({
   current: ExpenditureFilterValues;
 }) {
   return (
-    <form method="get" action={basePath} className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2 lg:grid-cols-4">
+    <form method="get" action={basePath} className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2 lg:grid-cols-4">
       <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
         <span>From</span>
         <input type="date" name="dateFrom" defaultValue={current.dateFrom ?? ""} className={selectClassName} />
@@ -125,13 +126,33 @@ export function ExpenditureLedgerTable({
   rows,
   basePath,
   reimbursementsBasePath,
+  showCommitteeColumn,
 }: {
   rows: ExpenditureRow[];
   basePath: string;
   reimbursementsBasePath?: string;
+  /** feature/pta-treasurer-expenditure-experience -- PTA-only, same as the
+   * Committee field on ExpenditureForm and the Committee filter on
+   * ExpenditureFilterForm: a non-PTA organization never has any
+   * PtaCommittee rows, so this column would only ever render as a wall of
+   * "—" for it. Both list pages pass this from the same
+   * getOrganizationCommitteeOptions() check the filter form already uses,
+   * so the whole ledger view -- not just the filter and create/edit forms
+   * -- stays vertical-agnostic-by-default rather than leaking a PTA-only
+   * concept into every other vertical's UI. */
+  showCommitteeColumn?: boolean;
 }) {
+  const columnCount = 8 + (showCommitteeColumn ? 1 : 0);
   return (
-    <div className="overflow-x-auto">
+    // min-w-0 is required alongside overflow-x-auto here, not decorative:
+    // without it, this div (a block child inside a flex/grid ancestor chain
+    // with no explicit width constraint of its own) sizes itself to fit the
+    // table's full intrinsic width instead of its allocated space, which
+    // defeats overflow-x-auto and blows out every ancestor up to <main> at
+    // narrow viewports. With it, the div can shrink below the table's
+    // content width, so the table scrolls inside it instead of the whole
+    // page scrolling horizontally.
+    <div className="min-w-0 overflow-x-auto">
       <table className="min-w-full text-sm">
         <thead className="bg-slate-50 text-left text-slate-700">
           <tr>
@@ -139,7 +160,7 @@ export function ExpenditureLedgerTable({
             <th className="px-4 py-3">Vendor / Payee</th>
             <th className="px-4 py-3">Description</th>
             <th className="px-4 py-3">Category</th>
-            <th className="px-4 py-3">Committee</th>
+            {showCommitteeColumn ? <th className="px-4 py-3">Committee</th> : null}
             <th className="px-4 py-3">Origin</th>
             <th className="px-4 py-3">Amount</th>
             <th className="px-4 py-3">Status</th>
@@ -149,7 +170,7 @@ export function ExpenditureLedgerTable({
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={9} className="px-4 py-6 text-center text-slate-600">
+              <td colSpan={columnCount} className="px-4 py-6 text-center text-slate-600">
                 No expenditures have been recorded yet.
               </td>
             </tr>
@@ -164,7 +185,9 @@ export function ExpenditureLedgerTable({
                 </td>
                 <td className="px-4 py-3 text-slate-900">{row.description}</td>
                 <td className="px-4 py-3 text-slate-900">{formatText(row.categoryRef?.name ?? row.category, "Uncategorized")}</td>
-                <td className="px-4 py-3 text-slate-900">{formatText(row.committee?.name ?? row.committeeNameAtPosting, "—")}</td>
+                {showCommitteeColumn ? (
+                  <td className="px-4 py-3 text-slate-900" title={describeCommitteeAttribution(row).helper}>{describeCommitteeAttribution(row).display}</td>
+                ) : null}
                 <td className="px-4 py-3 text-slate-900">
                   {row.reimbursement ? (
                     <span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-semibold text-sky-800" title={`Created from reimbursement to ${row.reimbursement.payeeName}`}>

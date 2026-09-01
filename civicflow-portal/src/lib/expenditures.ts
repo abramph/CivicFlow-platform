@@ -40,6 +40,30 @@ function omit<T extends object, K extends keyof T>(value: T, key: K): Omit<T, K>
   return clone;
 }
 
+/**
+ * feature/pta-treasurer-expenditure-experience (E3 follow-up) — the
+ * snapshot exists so a committee rename or deletion is "harmless to
+ * historical reporting" (see the migration's own doc comment). That only
+ * holds if a rename actually IS harmless to what's displayed: this must
+ * prefer committeeNameAtPosting over the live committee.name whenever both
+ * exist, not just when the live row is gone. Shared by the ledger table and
+ * both detail pages (generic + PTA-nested) so this 4-way rule lives in
+ * exactly one place.
+ */
+export function describeCommitteeAttribution(row: { committee: { name: string } | null; committeeNameAtPosting: string | null }): {
+  display: string;
+  helper?: string;
+} {
+  const liveName = row.committee?.name ?? null;
+  const snapshot = row.committeeNameAtPosting;
+
+  if (!snapshot && !liveName) return { display: "No committee" };
+  if (!snapshot) return { display: liveName! };
+  if (!liveName) return { display: snapshot, helper: "Committee since archived or removed — name shown as recorded at the time." };
+  if (liveName === snapshot) return { display: snapshot };
+  return { display: snapshot, helper: `Committee is now named "${liveName}" — shown as recorded at the time of posting.` };
+}
+
 function parseDate(value: string | undefined): Date | undefined {
   if (!value) return undefined;
   const parsed = new Date(value);

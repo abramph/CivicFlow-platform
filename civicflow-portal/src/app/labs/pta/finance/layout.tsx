@@ -16,7 +16,7 @@ import { TreasurerTabs } from "@/components/labs/pta/TreasurerTabs";
  * server-side, at that section.
  */
 export default async function TreasurerLayout({ children }: { children: ReactNode }) {
-  const { access } = await getPtaPageGate("budget:read");
+  const { access, can } = await getPtaPageGate("budget:read");
 
   if (!access.available) {
     return (
@@ -33,7 +33,7 @@ export default async function TreasurerLayout({ children }: { children: ReactNod
         title="Treasurer"
         description="Your PTA's operating finances: overview, budget vs. actual, the expenditure ledger, and reimbursements. Unestra never stores bank credentials — marking a reimbursement paid, or recording a direct expenditure's payment method, records a payment made outside Unestra."
       />
-      <TreasurerTabs />
+      <TreasurerTabs canReadExpenditures={can("expenditures:read")} />
       {children}
     </main>
   );

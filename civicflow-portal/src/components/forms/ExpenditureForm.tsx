@@ -158,7 +158,7 @@ export function ExpenditureForm({
         </div>
       ) : null}
       <fieldset disabled={locked || saving} className="space-y-6">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           <label className="space-y-2 text-sm font-medium text-slate-900"><span>Date</span><input type="date" value={form.date} onChange={(e) => setField("date", e.target.value)} className={classNames(fieldClassName, fieldErrors.date && fieldErrorClassName)} />{fieldErrors.date ? <p className="text-sm font-medium text-red-700">{fieldErrors.date}</p> : null}</label>
           <label className="space-y-2 text-sm font-medium text-slate-900"><span>Vendor / payee</span><input value={form.vendor} onChange={(e) => setField("vendor", e.target.value)} className={fieldClassName} /></label>
           <label className="space-y-2 text-sm font-medium text-slate-900"><span>Amount</span><input type="number" min="0.01" step="0.01" value={form.amount} onChange={(e) => setField("amount", e.target.value)} className={classNames(fieldClassName, fieldErrors.amount && fieldErrorClassName)} />{fieldErrors.amount ? <p className="text-sm font-medium text-red-700">{fieldErrors.amount}</p> : null}</label>

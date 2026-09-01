@@ -5,6 +5,7 @@ import { PageHeader, SectionCard, StatCard } from "@/components/app/PageChrome";
 import { AttachmentManager } from "@/components/forms/AttachmentManager";
 import { ExpenditureVoidControl } from "@/components/expenditures/ExpenditureVoidControl";
 import { canVoidFinancialRecord } from "@/lib/financial-edit-policy";
+import { describeCommitteeAttribution } from "@/lib/expenditures";
 import { formatCurrency, formatDate, formatText } from "@/lib/formatting";
 
 export default async function ExpenditureDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -42,19 +43,19 @@ export default async function ExpenditureDetailPage({ params }: { params: Promis
           reimbursement is marked paid and cannot be reassigned.
         </div>
       ) : null}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Amount" value={formatCurrency(row.amount)} />
         <StatCard label="Date" value={formatDate(row.date)} />
         <StatCard label="Vendor / Payee" value={formatText(row.vendor, "Direct expense")} />
         <StatCard label="Category" value={formatText(row.categoryRef?.name ?? row.category, "Uncategorized")} />
       </div>
       <SectionCard title="Payment and Attribution" description="Payment, reference, campaign, event, and committee details.">
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <StatCard label="Payment Method" value={formatText(row.paymentMethodConfig?.label ?? row.paymentMethod, "Not recorded")} />
           <StatCard label="Reference" value={formatText(row.reference, "No reference")} />
           <StatCard label="Campaign" value={row.campaign?.name ?? "No campaign"} />
           <StatCard label="Event" value={row.event?.title ?? "No event"} />
-          <StatCard label="Committee" value={row.committee?.name ?? row.committeeNameAtPosting ?? "No committee"} helper={row.committee ? undefined : row.committeeNameAtPosting ? "Committee since renamed or archived — name shown as recorded at the time." : undefined} />
+          <StatCard label="Committee" value={describeCommitteeAttribution(row).display} helper={describeCommitteeAttribution(row).helper} />
         </div>
         {row.receiptUrl ? <p className="mt-4 text-sm"><Link href={row.receiptUrl} className="font-semibold text-emerald-700 hover:underline">View receipt</Link></p> : null}
         {row.notes ? <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4"><p className="text-sm font-medium text-slate-950">Notes</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-800">{row.notes}</p></div> : null}

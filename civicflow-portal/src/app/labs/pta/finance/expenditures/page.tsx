@@ -41,7 +41,7 @@ export default async function TreasurerExpendituresPage({ searchParams }: { sear
         description="The same expenditure ledger the Treasurer overview and budget actuals read from."
         actions={can("expenditures:write") ? [{ href: `${BASE_PATH}/new`, label: "Add Expenditure", tone: "primary" }] : []}
       />
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <StatCard label="Expenditures" value={rows.length} />
         <StatCard label="Total Spent (active)" value={formatCurrency(totalSpent)} />
         <StatCard label="Expense Categories" value={categoryCount} />
@@ -56,7 +56,7 @@ export default async function TreasurerExpendituresPage({ searchParams }: { sear
         />
       </SectionCard>
       <SectionCard title="Expense Ledger" description="Vendor, category, committee, amount, and supporting detail for recent expenditures.">
-        <ExpenditureLedgerTable rows={rows} basePath={BASE_PATH} reimbursementsBasePath="/labs/pta/finance/reimbursements" />
+        <ExpenditureLedgerTable rows={rows} basePath={BASE_PATH} reimbursementsBasePath="/labs/pta/finance/reimbursements" showCommitteeColumn={committees.length > 0} />
       </SectionCard>
     </div>
   );

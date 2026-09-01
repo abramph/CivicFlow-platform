@@ -19,12 +19,21 @@ export const TREASURER_TABS = [
  * with no custom key handling needed. Active state is both visual (styling)
  * and programmatic (aria-selected), so it's conveyed to assistive tech too.
  */
-export function TreasurerTabs() {
+export function TreasurerTabs({ canReadExpenditures = true }: { canReadExpenditures?: boolean }) {
   const pathname = usePathname();
+  // Overview/Budget/Reimbursements all gate on the same budget:read
+  // permission that gets a viewer into this shell in the first place, so
+  // reaching this component already means those three are reachable.
+  // Expenditures gates on the separate expenditures:read permission, which
+  // budget:read does not imply (see rbac.ts's STAFF grant) -- shown
+  // unconditionally, it would dead-end a STAFF viewer at
+  // /dashboard?error=forbidden. Hiding it here keeps the nav honest about
+  // what a direct link to it would actually do.
+  const tabs = TREASURER_TABS.filter((tab) => canReadExpenditures || tab.href !== "/labs/pta/finance/expenditures");
 
   return (
     <div role="tablist" aria-label="Treasurer sections" className="flex flex-wrap gap-2 border-b border-slate-200 pb-3">
-      {TREASURER_TABS.map((tab) => {
+      {tabs.map((tab) => {
         const active = pathname === tab.href || pathname.startsWith(`${tab.href}/`);
         return (
           <Link
