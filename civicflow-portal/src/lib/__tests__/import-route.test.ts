@@ -47,6 +47,8 @@ vi.mock("@/lib/vertical-import", () => ({
   importHoaProperties: (...args: unknown[]) => importHoaProperties(...args),
 }));
 
+import { existsSync, renameSync } from "node:fs";
+import { join } from "node:path";
 import { requirePermission } from "@/lib/auth-guards";
 import { POST } from "@/app/api/import/route";
 import { withParseAdmission, configureParseAdmissionForTests, resetParseAdmissionStateForTests } from "@/lib/imports/parse-admission";
@@ -325,5 +327,29 @@ describe("POST /api/import -- worker-isolation admission control (worker-isolati
     const file = new File(["First Name\nJane\n"], "members.csv", { type: "text/csv" });
     const response = await POST(makeRequest(file));
     expect(response.status).toBe(200);
+  });
+});
+
+describe("POST /api/import -- fails closed with no mutation when the compiled worker artifact is unavailable in production (production-path follow-up)", () => {
+  const artifactPath = join(process.cwd(), "dist-workers", "spreadsheet-parser-worker-entry.js");
+  const movedAsidePath = `${artifactPath}.route-test-moved-aside`;
+  const originalNodeEnv = process.env.NODE_ENV;
+
+  beforeEach(() => {
+    if (existsSync(artifactPath)) renameSync(artifactPath, movedAsidePath);
+    (process.env as { NODE_ENV?: string }).NODE_ENV = "production";
+  });
+
+  afterEach(() => {
+    if (existsSync(movedAsidePath)) renameSync(movedAsidePath, artifactPath);
+    if (originalNodeEnv === undefined) delete (process.env as { NODE_ENV?: string }).NODE_ENV;
+    else (process.env as { NODE_ENV?: string }).NODE_ENV = originalNodeEnv;
+  });
+
+  it("returns a clean rejection and never invokes the importer when the compiled worker artifact is missing under NODE_ENV=production", async () => {
+    const file = new File(["First Name\nJane\n"], "members.csv", { type: "text/csv" });
+    const response = await POST(makeRequest(file));
+    expect(response.status).toBe(400);
+    expect(importMembers).not.toHaveBeenCalled();
   });
 });

@@ -58,7 +58,11 @@ export type SpreadsheetRejectionReason =
   | "ZIP64_UNSUPPORTED"
   | "DUPLICATE_ZIP_ENTRY"
   | "UNSUPPORTED_COMPRESSION_METHOD"
-  | "EXCESSIVE_COMPRESSION_RATIO";
+  | "EXCESSIVE_COMPRESSION_RATIO"
+  // Production-path follow-up -- the compiled worker artifact is missing
+  // in a production process. Fails closed: no dev-runtime fallback, no
+  // parse attempted, no persistent mutation follows.
+  | "PARSER_UNAVAILABLE";
 
 /** Thrown for every rejection above. `reason` is a stable machine-readable
  * code for tests/metrics; `message` is already safe to show a caller (never

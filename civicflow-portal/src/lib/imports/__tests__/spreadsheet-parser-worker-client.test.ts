@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { existsSync, renameSync } from "node:fs";
+import { join } from "node:path";
 import ExcelJS from "exceljs";
 import { parseSpreadsheetBufferIsolated, __testables } from "../spreadsheet-parser-worker-client";
 
@@ -125,6 +127,23 @@ describe("parseSpreadsheetBufferIsolated -- parent-side result re-validation (__
     for (let i = 0; i < __testables.WORKER_RESULT_LIMITS.maxColumns + 1; i++) wideRow[`col${i}`] = "x";
     expect(() => __testables.rebuildRowSafely(wideRow)).toThrow();
   });
+
+  it("validateAndRebuildRows rejects a result whose total serialized size exceeds maxSerializedBytes, even though no single row/field individually exceeds its own limit (a compromised or buggy worker could otherwise smuggle an oversized total payload through many small-looking rows)", () => {
+    // Each row is well within maxFieldLength/maxColumns individually;
+    // only the TOTAL across many rows crosses maxSerializedBytes. This
+    // is the limit that was previously declared but never actually
+    // enforced anywhere -- this test fails against that prior state.
+    const fieldValue = "x".repeat(1000); // 1000 bytes/row
+    const rowsNeeded = Math.floor(__testables.WORKER_RESULT_LIMITS.maxSerializedBytes / 1000) + 100;
+    const rows = Array.from({ length: rowsNeeded }, () => ({ a: fieldValue }));
+    expect(() => __testables.validateAndRebuildRows(rows)).toThrow();
+  });
+
+  it("validateAndRebuildRows accepts a result comfortably under maxSerializedBytes", () => {
+    const rows = [{ a: "hello" }, { a: "world" }];
+    const result = __testables.validateAndRebuildRows(rows);
+    expect(result).toEqual([{ a: "hello" }, { a: "world" }]);
+  });
 });
 
 describe("parseSpreadsheetBufferIsolated -- exact ArrayBuffer transfer isolation", () => {
@@ -157,5 +176,62 @@ describe("parseSpreadsheetBufferIsolated -- exact ArrayBuffer transfer isolation
     // EXACTLY the two expected fields and nothing decoded from beyond
     // pooledBuffer's own bytes corrupting the result.
     expect(JSON.stringify(result.rows)).not.toContain("SECRET_ADJACENT_POOL_DATA");
+  }, 15000);
+});
+
+/**
+ * Production-path follow-up -- fail-closed worker resolution. Manipulates
+ * the REAL compiled artifact on disk (dist-workers/spreadsheet-parser-
+ * worker-entry.js, produced by `npm run build-worker`/the build step)
+ * rather than mocking fs, since the actual runtime existsSync() check
+ * against the actual file is exactly the behavior under test. The
+ * artifact is always restored, even if a test fails partway through.
+ */
+describe("parseSpreadsheetBufferIsolated -- fail-closed production worker resolution", () => {
+  const artifactPath = join(process.cwd(), "dist-workers", "spreadsheet-parser-worker-entry.js");
+  const movedAsidePath = `${artifactPath}.test-moved-aside`;
+  const originalNodeEnv = process.env.NODE_ENV;
+
+  function moveArtifactAside() {
+    if (existsSync(artifactPath)) renameSync(artifactPath, movedAsidePath);
+  }
+  function restoreArtifact() {
+    if (existsSync(movedAsidePath)) renameSync(movedAsidePath, artifactPath);
+  }
+
+  afterEach(() => {
+    restoreArtifact();
+    if (originalNodeEnv === undefined) delete (process.env as { NODE_ENV?: string }).NODE_ENV;
+    else (process.env as { NODE_ENV?: string }).NODE_ENV = originalNodeEnv;
+  });
+
+  it("uses the compiled artifact when present, regardless of NODE_ENV (baseline -- confirms the artifact really is there before the missing-artifact tests below)", async () => {
+    expect(existsSync(artifactPath)).toBe(true);
+    const buffer = Buffer.from("a,b\n1,2\n", "utf-8");
+    const result = await parseSpreadsheetBufferIsolated(buffer, "csv");
+    expect(result.rows).toEqual([{ a: "1", b: "2" }]);
+  }, 15000);
+
+  it("fails closed with PARSER_UNAVAILABLE when the compiled artifact is missing under NODE_ENV=production -- no dev-runtime fallback, no worker created", async () => {
+    moveArtifactAside();
+    (process.env as { NODE_ENV?: string }).NODE_ENV = "production";
+    const buffer = Buffer.from("a,b\n1,2\n", "utf-8");
+    await expect(parseSpreadsheetBufferIsolated(buffer, "csv")).rejects.toMatchObject({ reason: "PARSER_UNAVAILABLE" });
+  }, 15000);
+
+  it("still allows the source-file fallback when the compiled artifact is missing OUTSIDE production (e.g. NODE_ENV unset, matching real Vitest runs)", async () => {
+    moveArtifactAside();
+    delete (process.env as { NODE_ENV?: string }).NODE_ENV;
+    const buffer = Buffer.from("a,b\n1,2\n", "utf-8");
+    const result = await parseSpreadsheetBufferIsolated(buffer, "csv");
+    expect(result.rows).toEqual([{ a: "1", b: "2" }]);
+  }, 15000);
+
+  it("still allows the source-file fallback under NODE_ENV=test (another explicitly non-production value)", async () => {
+    moveArtifactAside();
+    (process.env as { NODE_ENV?: string }).NODE_ENV = "test";
+    const buffer = Buffer.from("a,b\n1,2\n", "utf-8");
+    const result = await parseSpreadsheetBufferIsolated(buffer, "csv");
+    expect(result.rows).toEqual([{ a: "1", b: "2" }]);
   }, 15000);
 });

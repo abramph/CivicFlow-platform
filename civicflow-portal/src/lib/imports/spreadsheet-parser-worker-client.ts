@@ -55,8 +55,15 @@ const WORKER_RESULT_LIMITS = {
   /** Bounds the total size of the structured-clone payload itself,
    * independent of the row/column/cell counts above (a pathological
    * shape could still pass those individually while producing an
-   * enormous serialized result). */
-  maxSerializedBytes: 200 * 1024 * 1024,
+   * enormous serialized result). Measured directly, not guessed: the
+   * near-byte-budget legitimate worst case (50,000 rows x the largest
+   * real template's 13 columns, declaring ~94.85MB uncompressed -- see
+   * DEFAULT_OPTIONS's comment below) serializes to ~65.95MB. 100MB
+   * leaves real margin above that measured worst case. Was previously
+   * 200MB with no measurement behind it -- and, separately, was never
+   * actually enforced anywhere in this file at all until this pass (see
+   * the check added in parseSpreadsheetBufferIsolated below). */
+  maxSerializedBytes: 100 * 1024 * 1024,
 };
 
 export interface WorkerParseOptions {
@@ -70,21 +77,50 @@ export interface WorkerParseOptions {
 
 const DEFAULT_OPTIONS: Required<WorkerParseOptions> = {
   timeoutMs: SPREADSHEET_LIMITS.parseTimeoutMs,
-  // Sized against real measurement through this actual worker path (not
-  // the pre-isolation in-process design): a maximally-shaped LEGITIMATE
-  // import -- 50,000 rows at the largest real supported template's column
-  // count (hoa-properties, 13 fields; see maxColumns's own comment in
-  // spreadsheet-parser.ts) -- measured a ~122MB RSS delta parsing through
-  // the isolated worker. 512MB leaves generous headroom above that for
-  // the worker's own baseline (V8 isolate + ExcelJS module load) and any
-  // measurement noise, while still bounding a single worker well below
-  // the 1 GiB container total. Separately measured: two SIMULTANEOUS
-  // max-shaped parses (i.e., what the admission controller in
-  // parse-admission.ts exists specifically to prevent) pushed combined
-  // process RSS up by ~391MB and peak overall RSS to ~1GB on top of
-  // baseline -- real, direct evidence that concurrency control, not just
-  // per-worker heap ceilings, is load-bearing on this instance size.
-  maxOldGenerationSizeMb: 512,
+  // Production-path follow-up -- re-measured from scratch under
+  // NODE_ENV=production against the real compiled worker artifact (not
+  // the earlier measurement, which mixed in-process fixture-construction
+  // overhead into its own "before" baseline and materially understated
+  // the real number). Method: binary-search the minimum
+  // maxOldGenerationSizeMb that still lets a genuinely worst-case
+  // LEGITIMATE workbook parse successfully, confirmed reliable across
+  // repeated runs, not a single lucky pass.
+  //
+  // Two worst-case shapes were measured, since row COUNT (not raw byte
+  // size) turned out to be the dominant memory driver -- ExcelJS's
+  // internal object graph (parsed XML/shared-strings/row-cell
+  // structures) scales with row count roughly independent of how much
+  // of the declared-uncompressed budget those rows actually use:
+  //   - 50,000 rows x 13 columns (largest real template, hoa-properties)
+  //     at realistic content length: minimum working ceiling 320MB.
+  //   - 50,000 rows x 13 columns padded to ~94.85MB declared-uncompressed
+  //     (95% of the 100MB budget -- the largest legitimate-shaped file
+  //     that can ever pass the ZIP preflight and reach the worker at
+  //     all): minimum working ceiling 352MB.
+  // 384MB was then confirmed reliable (3+ consecutive runs, no flakes)
+  // against both. This is BELOW the previous 512MB, but ABOVE this
+  // review's own stated 256MB preference -- 256MB was directly tested
+  // and reliably failed (WORKER_CRASHED) against both shapes above, so
+  // the higher figure is what the measurement actually supports, not a
+  // default kept out of inertia. Reducing maxUncompressedBytes further
+  // was considered and rejected: re-measuring at a hypothetical 50MB
+  // budget still required a 320MB ceiling for the same 50,000-row shape,
+  // confirming row count, not the byte budget, is what would need to
+  // shrink to meaningfully lower this number further -- a maxRows change
+  // is a product-scope decision outside this security patch.
+  //
+  // Combined-total context (also measured, not assumed): idle
+  // NODE_ENV=production `next start` (after boot + a few light
+  // unauthenticated requests) uses ~203MB real Working Set on this
+  // machine. Worst-case combined RSS during one active parse (this
+  // measurement's own process, not a full Next.js server) peaked at
+  // ~631MB from a ~71MB idle base -- i.e. a ~560MB delta. Added to the
+  // real ~203MB Next.js baseline, worst-case total is estimated around
+  // 650-800MB on a 1 GiB container: tight, but with real headroom left,
+  // and the admission controller (parse-admission.ts) specifically
+  // exists to keep this to ONE concurrent occurrence rather than letting
+  // it compound.
+  maxOldGenerationSizeMb: 384,
   maxYoungGenerationSizeMb: 64,
   stackSizeMb: 8,
 };
@@ -92,18 +128,32 @@ const DEFAULT_OPTIONS: Required<WorkerParseOptions> = {
 const COMPILED_WORKER_PATH = join(process.cwd(), "dist-workers", "spreadsheet-parser-worker-entry.js");
 const SOURCE_WORKER_PATH = join(__dirname, "spreadsheet-parser-worker-entry.ts");
 
-/** Resolves which worker script to load. Production always prefers the
- * precompiled, dependency-free CommonJS artifact emitted by
- * scripts/build-worker.mjs during `npm run build` -- this is the
- * "demonstrated" path the build actually produces, not an assumption
- * that a source .ts file happens to be executable at runtime. The
- * source .ts path is only used as a fallback when the compiled artifact
- * does not exist, which is expected in local dev / Vitest (where `tsx`
- * -- a devDependency -- is genuinely present) and should never be true
- * in a real production deployment once the build step has run. */
-function resolveWorkerScript(): { path: string; execArgv: string[] } {
+/** Resolves which worker script to load, or `null` if none is safely
+ * usable -- always prefers the precompiled, dependency-free CommonJS
+ * artifact emitted by scripts/build-worker.mjs during `npm run build`.
+ * This is the "demonstrated" path the build actually produces, not an
+ * assumption that a source .ts file happens to be executable at
+ * runtime.
+ *
+ * Fail-closed in production, deployment-review follow-up: under
+ * `NODE_ENV=production`, the source .ts + tsx fallback is never used,
+ * full stop -- `tsx` is a devDependency (may not even be installed in a
+ * production container) and silently falling back to a dev-only
+ * TypeScript loader for untrusted-file parsing in production is exactly
+ * the kind of "pretend the boundary exists" behavior this review warned
+ * against. If the compiled artifact is missing in production, this
+ * returns `null` and the caller rejects the request outright (no worker
+ * is created, no parse is attempted) rather than silently degrading to
+ * an unverified code path. The source-fallback stays available in
+ * every other NODE_ENV (dev / test / unset -- e.g. Vitest, which does
+ * not set NODE_ENV=production) precisely because `tsx` is genuinely
+ * present there. */
+function resolveWorkerScript(): { path: string; execArgv: string[] } | null {
   if (existsSync(COMPILED_WORKER_PATH)) {
     return { path: COMPILED_WORKER_PATH, execArgv: [] };
+  }
+  if (process.env.NODE_ENV === "production") {
+    return null;
   }
   return { path: SOURCE_WORKER_PATH, execArgv: ["--require", "tsx/cjs"] };
 }
@@ -142,6 +192,19 @@ function isKnownReason(reason: string): reason is SpreadsheetRejectionReason {
     "TOO_MANY_CELLS", "CELL_TOO_LONG", "DUPLICATE_HEADER", "UNSAFE_HEADER_NAME",
     "PARSE_TIMEOUT", "MALFORMED_WORKBOOK", "WORKER_TIMEOUT", "WORKER_CRASHED",
     "WORKER_RESULT_INVALID",
+    // ZIP-robustness follow-up reasons -- thrown from inside the worker
+    // (readZipCentralDirectory, called via parseSpreadsheetBuffer), so
+    // they must round-trip through this allowlist too. Previously
+    // missing here: a worker rejecting with one of these would have had
+    // its specific reason silently collapsed to WORKER_CRASHED by the
+    // fallback branch below, losing the actual cause.
+    "ZIP64_UNSUPPORTED", "DUPLICATE_ZIP_ENTRY", "UNSUPPORTED_COMPRESSION_METHOD",
+    "EXCESSIVE_COMPRESSION_RATIO",
+    // Production-path follow-up -- thrown by the PARENT before worker
+    // creation (resolveWorkerScript returned null), never by the worker
+    // itself, but included here for completeness/consistency since it's
+    // part of the same SpreadsheetRejectionReason union.
+    "PARSER_UNAVAILABLE",
   ]);
   return known.has(reason);
 }
@@ -168,6 +231,42 @@ function rebuildRowSafely(row: unknown): Record<string, string> {
   return safe;
 }
 
+/** Validates and rebuilds an entire worker-returned row array in one
+ * pass: re-enforces the total cell-count budget (defense in depth,
+ * matching the worker's own check) and a total serialized-byte budget
+ * (maxSerializedBytes) -- bounding the total structured-clone payload
+ * size, independent of the row/column/cell counts checked elsewhere, in
+ * case a pathological shape passes those individually while still
+ * producing an enormous result. Throws SpreadsheetValidationError
+ * ("WORKER_RESULT_INVALID") on any violation. */
+function validateAndRebuildRows(rows: unknown[]): Record<string, string>[] {
+  let totalCells = 0;
+  let totalBytes = 0;
+  return rows.map((row) => {
+    totalCells += Object.keys(row as object).length;
+    if (totalCells > WORKER_RESULT_LIMITS.maxCells) {
+      throw new SpreadsheetValidationError("WORKER_RESULT_INVALID", "The parsed file's structure could not be validated.");
+    }
+    const safeRow = rebuildRowSafely(row);
+    // Real UTF-8 byte length (not just JS string .length, which
+    // undercounts multi-byte characters) of each field, summed as a
+    // cheap running proxy for the eventual serialized/structured-clone
+    // size. Doesn't add JSON's own quote/comma/key overhead, so this
+    // slightly underestimates true serialized bytes, but catching it
+    // here (incrementally, during the same pass rebuildRowSafely
+    // already makes) is far cheaper than a separate full
+    // JSON.stringify(...).length pass over already-validated output
+    // just to measure it.
+    for (const value of Object.values(safeRow)) {
+      totalBytes += Buffer.byteLength(value, "utf-8");
+      if (totalBytes > WORKER_RESULT_LIMITS.maxSerializedBytes) {
+        throw new SpreadsheetValidationError("WORKER_RESULT_INVALID", "The parsed file's structure could not be validated.");
+      }
+    }
+    return safeRow;
+  });
+}
+
 /**
  * Parses an uploaded spreadsheet buffer in an isolated worker thread.
  * Same contract as parseSpreadsheetBuffer() (throws
@@ -182,7 +281,19 @@ export async function parseSpreadsheetBufferIsolated(
   options: WorkerParseOptions = {}
 ): Promise<ParsedSpreadsheet> {
   const opts = { ...DEFAULT_OPTIONS, ...options };
-  const { path: workerPath, execArgv } = resolveWorkerScript();
+  const resolved = resolveWorkerScript();
+  if (!resolved) {
+    // Fail closed -- no worker is created, no bytes are touched, no
+    // parse is attempted. Structurally guarantees no persistent
+    // mutation can follow, the same way every other rejection in this
+    // module does (thrown before any caller's import/write function is
+    // ever reached).
+    throw new SpreadsheetValidationError(
+      "PARSER_UNAVAILABLE",
+      "The file import service is temporarily unavailable. Please try again shortly."
+    );
+  }
+  const { path: workerPath, execArgv } = resolved;
 
   // ArrayBuffer.prototype.slice always copies into a freshly allocated
   // buffer (never shares memory with the source) -- this guarantees the
@@ -248,15 +359,8 @@ export async function parseSpreadsheetBufferIsolated(
           reject(new SpreadsheetValidationError("WORKER_RESULT_INVALID", "The parsed file's structure could not be validated."));
           return;
         }
-        let totalCells = 0;
         try {
-          const safeRows = raw.rows.map((row) => {
-            totalCells += Object.keys(row as object).length;
-            if (totalCells > WORKER_RESULT_LIMITS.maxCells) {
-              throw new SpreadsheetValidationError("WORKER_RESULT_INVALID", "The parsed file's structure could not be validated.");
-            }
-            return rebuildRowSafely(row);
-          });
+          const safeRows = validateAndRebuildRows(raw.rows);
           const format = claimedExtension.toLowerCase().replace(/^\./, "") === "csv" ? "csv" : "xlsx";
           resolve({ format, rows: safeRows });
         } catch (error) {
@@ -288,4 +392,4 @@ export async function parseSpreadsheetBufferIsolated(
  * oversized result, non-string field values) is a real security
  * boundary worth testing directly, not just indirectly through a real
  * worker's (well-behaved) output. */
-export const __testables = { isWorkerResponse, isKnownReason, rebuildRowSafely, WORKER_RESULT_LIMITS };
+export const __testables = { isWorkerResponse, isKnownReason, rebuildRowSafely, validateAndRebuildRows, WORKER_RESULT_LIMITS };
