@@ -1,6 +1,7 @@
 import nodemailer from "nodemailer";
 import { getServerEnv, isEmailSendEnabled } from "@/lib/env";
 import { SUPPORT_EMAIL } from "@/lib/brand";
+import { assertSafeEmailAddress, assertSafeHeaderValue, MailHeaderValidationError } from "@/lib/mail-header-safety";
 
 /** Never log a complete recipient address — just enough to correlate log
  * lines with a support ticket without exposing PII in shared logs/Sentry. */
@@ -43,6 +44,27 @@ function getTransporter() {
 }
 
 export async function sendEmail(input: SendEmailInput) {
+  // Security Patch A -- validated before anything else in this function
+  // touches input.* (including the "safe dev mode" log line below), so no
+  // caller can construct a message -- or even a log line -- carrying a
+  // header-injection payload. See mail-header-safety.ts's module comment
+  // for the advisories this addresses. Malicious input itself is never
+  // logged; only that validation failed.
+  try {
+    assertSafeEmailAddress("to", input.to);
+    assertSafeHeaderValue("subject", input.subject);
+    if (input.attachments) {
+      for (const attachment of input.attachments) {
+        assertSafeHeaderValue("attachment filename", attachment.filename);
+      }
+    }
+  } catch (error) {
+    if (error instanceof MailHeaderValidationError) {
+      console.error(JSON.stringify({ event: "brevo_request_rejected_invalid_header", reason: error.message }));
+    }
+    throw error;
+  }
+
   const env = getServerEnv();
   const maskedTo = maskEmail(input.to);
 

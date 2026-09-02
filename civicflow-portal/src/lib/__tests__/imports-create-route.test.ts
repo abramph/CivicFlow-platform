@@ -235,3 +235,51 @@ describe("POST /api/imports — PR C kind-based RBAC dual-gate", () => {
     expect(createImportBatch).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Security Patch A -- the preview mode added to this route so the upload
+ * form's column-mapping step never needs to parse a spreadsheet in the
+ * browser. Runs the real hardened parser (not mocked) and, critically,
+ * never creates a batch or writes to storage -- these tests exist mainly
+ * to prove that.
+ */
+describe("POST /api/imports -- preview mode (Security Patch A)", () => {
+  function makePreviewRequest(csvContent: string, filename = "members.csv"): Request {
+    const form = new FormData();
+    form.set("file", new File([csvContent], filename, { type: "text/csv" }));
+    form.set("kind", "COMMUNITY_MEMBERS");
+    form.set("preview", "1");
+    return new Request("https://portal.test/api/imports", { method: "POST", body: form });
+  }
+
+  it("returns real headers and a preview without creating a batch or writing to storage", async () => {
+    const response = await createPOST(makePreviewRequest("First Name,Last Name\nJane,Doe\nJohn,Smith\n"));
+    const payload = await response.json();
+    expect(response.status).toBe(200);
+    expect(payload.data.headers).toEqual(["First Name", "Last Name"]);
+    expect(payload.data.preview).toEqual([{ "First Name": "Jane", "Last Name": "Doe" }, { "First Name": "John", "Last Name": "Smith" }]);
+    expect(payload.data.totalRows).toBe(2);
+    expect(createImportBatch).not.toHaveBeenCalled();
+    expect(uploadImportSourceFile).not.toHaveBeenCalled();
+    expect(analyzeBatch).not.toHaveBeenCalled();
+  });
+
+  it("rejects a __proto__ header in preview mode, with no batch created", async () => {
+    const response = await createPOST(makePreviewRequest("__proto__,Last Name\nx,Doe\n"));
+    expect(response.status).toBe(400);
+    expect(createImportBatch).not.toHaveBeenCalled();
+  });
+
+  it("rejects a spoofed extension in preview mode, with no batch created", async () => {
+    const response = await createPOST(makePreviewRequest("First Name,Last Name\nJane,Doe\n", "members.xlsx"));
+    expect(response.status).toBe(400);
+    expect(createImportBatch).not.toHaveBeenCalled();
+  });
+
+  it("still requires imports:create for a preview request", async () => {
+    vi.mocked(requirePermission).mockResolvedValueOnce(permissionContext([]));
+    const response = await createPOST(makePreviewRequest("First Name\nJane\n"));
+    expect(response.status).not.toBe(200);
+    expect(createImportBatch).not.toHaveBeenCalled();
+  });
+});

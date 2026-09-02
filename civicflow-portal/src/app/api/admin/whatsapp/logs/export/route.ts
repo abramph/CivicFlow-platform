@@ -1,4 +1,4 @@
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import { requireSuperAdmin } from "@/lib/auth-guards";
 import { withApiErrorHandling } from "@/lib/api-route";
 import { createAuditEvent } from "@/lib/audit";
@@ -83,10 +83,12 @@ export async function GET(request: Request) {
     const filenameBase = `unestra-whatsapp-logs-${exportDateStamp()}`;
 
     if (format === "xlsx") {
-      const workbook = XLSX.utils.book_new();
-      const worksheet = XLSX.utils.json_to_sheet(rows);
-      XLSX.utils.book_append_sheet(workbook, worksheet, "WhatsApp Logs");
-      const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }) as Buffer;
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet("WhatsApp Logs");
+      const xlsxHeaders = Object.keys(rows[0] ?? {});
+      worksheet.columns = xlsxHeaders.map((header) => ({ header, key: header }));
+      worksheet.addRows(rows);
+      const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
       return new Response(new Uint8Array(buffer), {
         headers: {
           "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

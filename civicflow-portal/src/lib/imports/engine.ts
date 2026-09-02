@@ -1,8 +1,8 @@
-import * as XLSX from "xlsx";
 import { Prisma, type ImportKind } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { transitionImportBatch } from "@/lib/imports/batch-state-machine";
 import { getImportSourceFile } from "@/lib/imports/storage";
+import { parseSpreadsheetBuffer, SpreadsheetValidationError } from "@/lib/imports/spreadsheet-parser";
 import {
   computeRowFingerprint,
   normalizeMemberRow,
@@ -72,10 +72,22 @@ async function claimBatchForProcessing(batchId: string, expectedStatus: "UPLOADE
   return result.count === 1;
 }
 
-function parseSpreadsheet(buffer: Buffer): Record<string, string>[] {
-  const wb = XLSX.read(buffer, { type: "buffer", dateNF: "yyyy-mm-dd" });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  return XLSX.utils.sheet_to_json<Record<string, string>>(ws, { raw: false, defval: "" });
+/** Security Patch A -- routes through the hardened shared parser
+ * (spreadsheet-parser.ts) rather than the vulnerable `xlsx` package. A
+ * malformed/rejected file surfaces as a normal ImportError so the batch
+ * fails cleanly (FAILED status) instead of throwing an unhandled
+ * exception mid-analysis. */
+async function parseSpreadsheet(buffer: Buffer, fileName: string): Promise<Record<string, string>[]> {
+  const extension = fileName.toLowerCase().split(".").pop() ?? "";
+  try {
+    const { rows } = await parseSpreadsheetBuffer(buffer, extension);
+    return rows;
+  } catch (error) {
+    if (error instanceof SpreadsheetValidationError) {
+      throw new ImportError("IMPORT_VALIDATION_ERROR", error.message);
+    }
+    throw error;
+  }
 }
 
 /**
@@ -168,7 +180,20 @@ export async function analyzeBatch(batchId: string, organizationId: string): Pro
   }
 
   const buffer = await getImportSourceFile(batch.storageObjectKey);
-  const rows = parseSpreadsheet(buffer);
+  let rows: Record<string, string>[];
+  try {
+    rows = await parseSpreadsheet(buffer, batch.fileName);
+  } catch (error) {
+    if (error instanceof ImportError) {
+      // A rejected/malformed file is an expected outcome now that the
+      // parser enforces real structural limits (see spreadsheet-parser.ts)
+      // -- surfaced as a clean FAILED batch (with its own audit event, via
+      // transitionImportBatch) rather than left stuck in ANALYZING.
+      await transitionImportBatch({ batchId, organizationId, to: "FAILED" });
+      return;
+    }
+    throw error;
+  }
   const mapping = batch.columnMapping as Record<string, string>;
 
   let newCount = 0;

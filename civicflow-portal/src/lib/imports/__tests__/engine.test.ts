@@ -116,10 +116,20 @@ vi.mock("@/lib/plan-gate", () => ({
   checkMemberLimit: (...args: unknown[]) => checkMemberLimit(...args),
 }));
 
-vi.mock("xlsx", () => ({
-  read: vi.fn(() => ({ SheetNames: ["Sheet1"], Sheets: { Sheet1: {} } })),
-  utils: {
-    sheet_to_json: vi.fn(() => FIXTURE_ROWS),
+// Security Patch A -- engine.ts no longer imports "xlsx" (removed, see
+// docs/security/spreadsheet-import-hardening.md); it calls the hardened
+// spreadsheet-parser.ts module instead. This file's tests are about
+// analyzeBatch()'s row-classification/dispatch logic, not parsing
+// correctness (spreadsheet-parser.ts has its own dedicated test suite at
+// src/lib/__tests__/spreadsheet-parser.test.ts), so parsing itself stays
+// mocked here -- same role the old xlsx mock played, one layer higher.
+vi.mock("@/lib/imports/spreadsheet-parser", () => ({
+  parseSpreadsheetBuffer: vi.fn(async () => ({ format: "csv", rows: FIXTURE_ROWS })),
+  SpreadsheetValidationError: class SpreadsheetValidationError extends Error {
+    constructor(public reason: string, message: string) {
+      super(message);
+      this.name = "SpreadsheetValidationError";
+    }
   },
 }));
 
@@ -131,6 +141,7 @@ function makeBatch(overrides: Record<string, unknown> = {}) {
     organizationId: "org-a",
     importKind: "COMMUNITY_MEMBERS",
     storageObjectKey: "organizations/org-a/imports/batch-1/source/file.csv",
+    fileName: "file.csv",
     columnMapping: { "First Name": "firstName", "Last Name": "lastName", Email: "email" },
     uploadedByUserId: "user-1",
     ...overrides,

@@ -2,7 +2,6 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import * as XLSX from "xlsx";
 import type { ImportKind } from "@prisma/client";
 import { fieldClassName } from "@/components/forms/formStyles";
 import { type ImportType, FIELD_DEFS, COMMON_ALIASES } from "@/lib/imports/field-defs";
@@ -65,20 +64,25 @@ export function ImportUploadForm({ kind }: { kind: ImportKind }) {
     setFile(selected);
     setMatchedBatch(null);
     try {
-      const buffer = await selected.arrayBuffer();
-      const wb = XLSX.read(buffer, { type: "array" });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { raw: false, defval: "" });
-      if (rows.length === 0) {
-        setError("File is empty or has no data rows.");
+      // Security Patch A -- the file is parsed by the server's hardened
+      // spreadsheet pipeline (preview mode: nothing is stored), not by a
+      // parsing library running in the browser.
+      const form = new FormData();
+      form.set("file", selected);
+      form.set("kind", kind);
+      form.set("preview", "1");
+      const response = await fetch("/api/imports", { method: "POST", body: form });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.ok) {
+        setError(payload?.error || "Could not read that file. Please upload a CSV or Excel file.");
         return;
       }
-      const fileHeaders = Object.keys(rows[0]);
+      const fileHeaders: string[] = payload.data.headers;
       setHeaders(fileHeaders);
       setMapping(autoMap(fileHeaders, fieldType));
       setStep("map");
     } catch {
-      setError("Could not read that file. Please upload a CSV or Excel file.");
+      setError("Unable to connect. Please try again.");
     }
   }
 

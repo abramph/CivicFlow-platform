@@ -6,7 +6,7 @@ import { importPtaHouseholds, importHoaProperties } from "@/lib/vertical-import"
 import { requirePtaAccess } from "@/lib/labs/pta/guard";
 import { requireHoaPropertyWrite, requireHoaResidentWrite } from "@/lib/hoa/guard";
 import { PERMISSIONS } from "@/lib/rbac";
-import * as XLSX from "xlsx";
+import { parseSpreadsheetBuffer, SpreadsheetValidationError } from "@/lib/imports/spreadsheet-parser";
 import Database from "better-sqlite3";
 import { writeFileSync, unlinkSync } from "fs";
 import { tmpdir } from "os";
@@ -19,13 +19,12 @@ const MAX_BYTES = 50 * 1024 * 1024; // 50 MB (db files can be larger)
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-function parseSpreadsheet(buffer: Buffer): Record<string, string>[] {
-  const wb = XLSX.read(buffer, { type: "buffer", dateNF: "yyyy-mm-dd" });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  return XLSX.utils.sheet_to_json<Record<string, string>>(ws, {
-    raw: false,
-    defval: "",
-  });
+/** Security Patch A -- routes through the hardened shared parser
+ * (spreadsheet-parser.ts) rather than the vulnerable `xlsx` package.
+ * Rejections surface as the caller's existing plain-message convention. */
+async function parseSpreadsheet(buffer: Buffer, extension: string): Promise<Record<string, string>[]> {
+  const { rows } = await parseSpreadsheetBuffer(buffer, extension);
+  return rows;
 }
 
 function parseSqliteDb(buffer: Buffer, table: string): Record<string, string>[] {
@@ -68,13 +67,22 @@ function getDbTables(buffer: Buffer): string[] {
   }
 }
 
-function parseFile(buffer: Buffer, filename: string, table?: string): Record<string, string>[] {
-  const ext = filename.toLowerCase().split(".").pop();
+async function parseFile(buffer: Buffer, filename: string, table?: string): Promise<Record<string, string>[]> {
+  const ext = filename.toLowerCase().split(".").pop() ?? "";
   if (ext === "db" || ext === "sqlite") {
     if (!table) throw new Error("table_required");
     return parseSqliteDb(buffer, table);
   }
-  return parseSpreadsheet(buffer);
+  // Security Patch A -- previously any extension other than .db/.sqlite
+  // fell through to the spreadsheet parser unconditionally (a file named
+  // "malicious.exe" would have been handed straight to XLSX.read()).
+  // Legacy binary .xls is no longer accepted -- see
+  // docs/security/spreadsheet-import-hardening.md for the removal
+  // rationale; users are asked to re-save as .xlsx or .csv.
+  if (ext !== "csv" && ext !== "xlsx") {
+    throw new SpreadsheetValidationError("UNSUPPORTED_FORMAT", "Unsupported file type. Please upload a .csv or .xlsx file (or a .db/.sqlite export).");
+  }
+  return parseSpreadsheet(buffer, ext);
 }
 
 function parseMoney(val: string): number | null {
@@ -219,8 +227,11 @@ export async function POST(request: Request) {
 
     let rows: Record<string, string>[];
     try {
-      rows = parseFile(buffer, file.name, table);
+      rows = await parseFile(buffer, file.name, table);
     } catch (err) {
+      if (err instanceof SpreadsheetValidationError) {
+        return Response.json({ error: err.message }, { status: 400 });
+      }
       if (String(err).includes("table_required")) {
         return Response.json({ error: "Please select a table from the SQLite file." }, { status: 400 });
       }

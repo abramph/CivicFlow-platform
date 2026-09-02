@@ -2,8 +2,8 @@ import { withApiErrorHandling } from "@/lib/api-route";
 import { requireRole } from "@/lib/auth-guards";
 import { ValidationError } from "@/lib/validation";
 import { runMigrationImport, type DesktopExport } from "@/lib/migration-import";
+import { parseSpreadsheetBuffer, SpreadsheetValidationError } from "@/lib/imports/spreadsheet-parser";
 import Database from "better-sqlite3";
-import * as XLSX from "xlsx";
 import { writeFileSync, unlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -115,12 +115,10 @@ const TXN_ALIASES: Record<string, string> = {
   "member email": "member_email", "donor email": "member_email",
 };
 
-function buildExportFromSpreadsheet(buffer: Buffer, filename: string): DesktopExport {
-  const wb = XLSX.read(buffer, { type: "buffer", dateNF: "yyyy-mm-dd" });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { raw: false, defval: "" });
-
-  if (rows.length === 0) throw new ValidationError("File has no data rows");
+/** Security Patch A -- routes through the hardened shared parser
+ * (spreadsheet-parser.ts) rather than the vulnerable `xlsx` package. */
+async function buildExportFromSpreadsheet(buffer: Buffer, extension: string): Promise<DesktopExport> {
+  const { rows } = await parseSpreadsheetBuffer(buffer, extension);
 
   const headers = Object.keys(rows[0]).map((h) => h.toLowerCase().trim());
 
@@ -252,13 +250,21 @@ export async function POST(request: Request) {
       } catch (err) {
         throw new ValidationError(`Could not read SQLite file: ${String(err)}`);
       }
-    } else if (["csv", "xlsx", "xls"].includes(ext)) {
+    } else if (ext === "csv" || ext === "xlsx") {
       try {
-        data = buildExportFromSpreadsheet(buffer, file.name);
+        data = await buildExportFromSpreadsheet(buffer, ext);
       } catch (err) {
         if (err instanceof ValidationError) throw err;
-        throw new ValidationError(`Could not parse spreadsheet: ${String(err)}`);
+        if (err instanceof SpreadsheetValidationError) throw new ValidationError(err.message);
+        // Never surface a raw internal exception (String(err)) to the
+        // client or an audit event -- see docs/security/
+        // spreadsheet-import-hardening.md's error-sanitization note.
+        throw new ValidationError("Could not parse spreadsheet.");
       }
+      // Legacy binary .xls is no longer accepted -- see the removal
+      // rationale in docs/security/spreadsheet-import-hardening.md.
+    } else if (ext === "xls") {
+      throw new ValidationError("Legacy .xls files are no longer supported. Please re-save the file as .xlsx or .csv and try again.");
     } else {
       throw new ValidationError("Unsupported file type. Upload a .json, .db, .csv, or .xlsx file.");
     }
