@@ -7,7 +7,8 @@ import { requirePtaAccess } from "@/lib/labs/pta/guard";
 import { requireHoaPropertyWrite, requireHoaResidentWrite } from "@/lib/hoa/guard";
 import { PERMISSIONS } from "@/lib/rbac";
 import { requireRateLimit } from "@/lib/rate-limit";
-import { parseSpreadsheetBuffer, SpreadsheetValidationError } from "@/lib/imports/spreadsheet-parser";
+import { SpreadsheetValidationError } from "@/lib/imports/spreadsheet-parser";
+import { parseUploadedSpreadsheet, ParseAdmissionDeniedError } from "@/lib/imports/parse-spreadsheet-isolated";
 import Database from "better-sqlite3";
 import { writeFileSync, unlinkSync } from "fs";
 import { tmpdir } from "os";
@@ -20,11 +21,14 @@ const MAX_BYTES = 50 * 1024 * 1024; // 50 MB (db files can be larger)
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-/** Security Patch A -- routes through the hardened shared parser
- * (spreadsheet-parser.ts) rather than the vulnerable `xlsx` package.
- * Rejections surface as the caller's existing plain-message convention. */
-async function parseSpreadsheet(buffer: Buffer, extension: string): Promise<Record<string, string>[]> {
-  const { rows } = await parseSpreadsheetBuffer(buffer, extension);
+/** Security Patch A -- routes through the hardened shared parser.
+ * Worker-isolation follow-up -- now via parseUploadedSpreadsheet(),
+ * which runs the actual parse in an isolated, heap-bounded worker
+ * thread behind organization-scoped admission control, rather than
+ * directly in this request's own event loop. Rejections surface as the
+ * caller's existing plain-message convention. */
+async function parseSpreadsheet(buffer: Buffer, extension: string, organizationId: string): Promise<Record<string, string>[]> {
+  const { rows } = await parseUploadedSpreadsheet(buffer, extension, organizationId);
   return rows;
 }
 
@@ -68,7 +72,7 @@ function getDbTables(buffer: Buffer): string[] {
   }
 }
 
-async function parseFile(buffer: Buffer, filename: string, table?: string): Promise<Record<string, string>[]> {
+async function parseFile(buffer: Buffer, filename: string, organizationId: string, table?: string): Promise<Record<string, string>[]> {
   const ext = filename.toLowerCase().split(".").pop() ?? "";
   if (ext === "db" || ext === "sqlite") {
     if (!table) throw new Error("table_required");
@@ -83,7 +87,7 @@ async function parseFile(buffer: Buffer, filename: string, table?: string): Prom
   if (ext !== "csv" && ext !== "xlsx") {
     throw new SpreadsheetValidationError("UNSUPPORTED_FORMAT", "Unsupported file type. Please upload a .csv or .xlsx file (or a .db/.sqlite export).");
   }
-  return parseSpreadsheet(buffer, ext);
+  return parseSpreadsheet(buffer, ext, organizationId);
 }
 
 function parseMoney(val: string): number | null {
@@ -247,8 +251,14 @@ export async function POST(request: Request) {
 
     let rows: Record<string, string>[];
     try {
-      rows = await parseFile(buffer, file.name, table);
+      rows = await parseFile(buffer, file.name, organizationId, table);
     } catch (err) {
+      if (err instanceof ParseAdmissionDeniedError) {
+        return Response.json(
+          { ok: false, error: err.message, retryAfterSeconds: err.retryAfterSeconds },
+          { status: 429, headers: { "Retry-After": String(err.retryAfterSeconds) } }
+        );
+      }
       if (err instanceof SpreadsheetValidationError) {
         return Response.json({ error: err.message }, { status: 400 });
       }

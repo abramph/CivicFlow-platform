@@ -49,6 +49,7 @@ vi.mock("@/lib/vertical-import", () => ({
 
 import { requirePermission } from "@/lib/auth-guards";
 import { POST } from "@/app/api/import/route";
+import { withParseAdmission, configureParseAdmissionForTests, resetParseAdmissionStateForTests } from "@/lib/imports/parse-admission";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function permissionContextForOrg(organizationId: string): any {
@@ -214,7 +215,7 @@ describe("POST /api/import -- organization-scoped rate limiting (Security Patch 
     expect(response21.headers.get("Retry-After")).toBeTruthy();
     expect(payload21.ok).toBe(false);
     expect(importMembers).not.toHaveBeenCalled();
-  });
+  }, 30000); // worker-isolation follow-up -- 20 requests each spawn a real worker thread; the default 5s timeout isn't enough headroom under full-suite CPU contention
 
   it("does not let one organization's usage exhaust a different organization's allowance", async () => {
     const orgA = `rl-test-org-a-${Math.random()}`;
@@ -234,7 +235,7 @@ describe("POST /api/import -- organization-scoped rate limiting (Security Patch 
     vi.mocked(requirePermission).mockResolvedValue(permissionContextForOrg(orgB));
     const orgBFirst = await POST(makeRequest(new File(["First Name\nJane\n"], "members.csv", { type: "text/csv" })));
     expect(orgBFirst.status).toBe(200);
-  });
+  }, 30000);
 
   it("resets the allowance after the window elapses", async () => {
     vi.useFakeTimers();
@@ -253,7 +254,7 @@ describe("POST /api/import -- organization-scoped rate limiting (Security Patch 
 
     const afterWindow = await POST(makeRequest(new File(["First Name\nY\n"], "members.csv", { type: "text/csv" })));
     expect(afterWindow.status).toBe(200);
-  });
+  }, 30000);
 
   it("still enforces authorization first -- an unauthorized caller is rejected on its own merits, not confused with a rate-limit response", async () => {
     vi.mocked(requirePermission).mockRejectedValueOnce(Object.assign(new Error("Forbidden"), { status: 403 }));
@@ -261,5 +262,68 @@ describe("POST /api/import -- organization-scoped rate limiting (Security Patch 
     const response = await POST(makeRequest(file));
     expect(response.status).not.toBe(429);
     expect(response.status).not.toBe(200);
+  });
+});
+
+describe("POST /api/import -- worker-isolation admission control (worker-isolation follow-up)", () => {
+  const originalEnv = process.env.CIVICFLOW_USE_MEMORY_RATE_LIMITER;
+
+  beforeEach(() => {
+    process.env.CIVICFLOW_USE_MEMORY_RATE_LIMITER = "1";
+    resetParseAdmissionStateForTests();
+  });
+
+  afterEach(() => {
+    if (originalEnv === undefined) delete process.env.CIVICFLOW_USE_MEMORY_RATE_LIMITER;
+    else process.env.CIVICFLOW_USE_MEMORY_RATE_LIMITER = originalEnv;
+    resetParseAdmissionStateForTests();
+  });
+
+  it("returns 429 with Retry-After and never invokes the importer when the same organization already has a parse in flight -- distinct from, and checked separately from, the request-rate limiter above", async () => {
+    const org = `admission-test-org-${Math.random()}`;
+    vi.mocked(requirePermission).mockResolvedValue(permissionContextForOrg(org));
+
+    const holdOpen = new Promise<void>(() => {}); // never resolves for the life of this test
+    const releaseSlotPromise = withParseAdmission(org, () => holdOpen).catch(() => {});
+    await new Promise((r) => setTimeout(r, 10)); // let the slot actually get acquired
+
+    const file = new File(["First Name\nJane\n"], "members.csv", { type: "text/csv" });
+    const response = await POST(makeRequest(file));
+    const payload = await response.json();
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Retry-After")).toBeTruthy();
+    expect(payload.ok).toBe(false);
+    expect(importMembers).not.toHaveBeenCalled();
+
+    void releaseSlotPromise; // slot is released automatically when this test's admission state resets
+  });
+
+  it("still enforces authorization before admission control -- an unauthorized caller is rejected on its own merits even while the admission slot is occupied", async () => {
+    const org = `admission-test-org-authz-${Math.random()}`;
+    const holdOpen = new Promise<void>(() => {});
+    withParseAdmission(org, () => holdOpen).catch(() => {});
+    await new Promise((r) => setTimeout(r, 10));
+
+    vi.mocked(requirePermission).mockRejectedValueOnce(Object.assign(new Error("Forbidden"), { status: 403 }));
+    const file = new File(["First Name\nJane\n"], "members.csv", { type: "text/csv" });
+    const response = await POST(makeRequest(file));
+    expect(response.status).not.toBe(429);
+    expect(importMembers).not.toHaveBeenCalled();
+  });
+
+  it("does not deny an unrelated organization merely because a different organization's slot is occupied (global capacity allows a second)", async () => {
+    configureParseAdmissionForTests({ maxConcurrent: 2, maxQueueLength: 2, retryAfterSeconds: 5 });
+    const busyOrg = `admission-test-busy-${Math.random()}`;
+    const freeOrg = `admission-test-free-${Math.random()}`;
+
+    const holdOpen = new Promise<void>(() => {});
+    withParseAdmission(busyOrg, () => holdOpen).catch(() => {});
+    await new Promise((r) => setTimeout(r, 10));
+
+    vi.mocked(requirePermission).mockResolvedValue(permissionContextForOrg(freeOrg));
+    const file = new File(["First Name\nJane\n"], "members.csv", { type: "text/csv" });
+    const response = await POST(makeRequest(file));
+    expect(response.status).toBe(200);
   });
 });

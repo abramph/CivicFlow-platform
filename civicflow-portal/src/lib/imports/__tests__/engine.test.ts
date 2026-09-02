@@ -123,12 +123,27 @@ vi.mock("@/lib/plan-gate", () => ({
 // correctness (spreadsheet-parser.ts has its own dedicated test suite at
 // src/lib/__tests__/spreadsheet-parser.test.ts), so parsing itself stays
 // mocked here -- same role the old xlsx mock played, one layer higher.
+//
+// Worker-isolation follow-up -- engine.ts now calls
+// parseUploadedSpreadsheet() from parse-spreadsheet-isolated.ts (which
+// runs the real parse in an isolated worker thread behind admission
+// control), not spreadsheet-parser.ts directly -- that module is mocked
+// here instead, at the same layer.
 vi.mock("@/lib/imports/spreadsheet-parser", () => ({
-  parseSpreadsheetBuffer: vi.fn(async () => ({ format: "csv", rows: FIXTURE_ROWS })),
   SpreadsheetValidationError: class SpreadsheetValidationError extends Error {
     constructor(public reason: string, message: string) {
       super(message);
       this.name = "SpreadsheetValidationError";
+    }
+  },
+}));
+
+vi.mock("@/lib/imports/parse-spreadsheet-isolated", () => ({
+  parseUploadedSpreadsheet: vi.fn(async () => ({ format: "csv", rows: FIXTURE_ROWS })),
+  ParseAdmissionDeniedError: class ParseAdmissionDeniedError extends Error {
+    constructor(public reason: string, message: string, public retryAfterSeconds: number) {
+      super(message);
+      this.name = "ParseAdmissionDeniedError";
     }
   },
 }));

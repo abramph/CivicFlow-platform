@@ -229,6 +229,112 @@ function buildFakeZipCentralDirectory(entryName: string, uncompressedSize: numbe
   return Buffer.concat([localFileHeaderSignature, cdEntry, eocd]);
 }
 
+/** Worker-isolation follow-up (Phase 5, ZIP robustness) -- a more
+ * flexible fixture builder than buildFakeZipCentralDirectory above,
+ * supporting multiple entries and explicit compressionMethod/
+ * compressedSize control (needed for the ZIP64/duplicate/compression-
+ * method/ratio checks, none of which the original helper's fixed shape
+ * could exercise). */
+function buildFakeZipMultiEntry(
+  entries: { name: string; uncompressedSize: number; compressedSize?: number; compressionMethod?: number; encrypted?: boolean }[]
+): Buffer {
+  const localFileHeaderSignature = Buffer.alloc(4);
+  localFileHeaderSignature.writeUInt32LE(0x04034b50, 0);
+
+  const cdEntries = entries.map((entry) => {
+    const nameBuf = Buffer.from(entry.name, "utf-8");
+    const cdEntry = Buffer.alloc(46 + nameBuf.length);
+    cdEntry.writeUInt32LE(0x02014b50, 0);
+    cdEntry.writeUInt16LE(entry.encrypted ? 0x0001 : 0, 8);
+    cdEntry.writeUInt16LE(entry.compressionMethod ?? 8, 10);
+    cdEntry.writeUInt32LE(entry.compressedSize ?? 0, 20);
+    cdEntry.writeUInt32LE(entry.uncompressedSize, 24);
+    cdEntry.writeUInt16LE(nameBuf.length, 28);
+    cdEntry.writeUInt16LE(0, 30);
+    cdEntry.writeUInt16LE(0, 32);
+    nameBuf.copy(cdEntry, 46);
+    return cdEntry;
+  });
+  const cdBuffer = Buffer.concat(cdEntries);
+
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(entries.length, 8);
+  eocd.writeUInt16LE(entries.length, 10);
+  eocd.writeUInt32LE(cdBuffer.length, 12);
+  eocd.writeUInt32LE(localFileHeaderSignature.length, 16);
+  eocd.writeUInt16LE(0, 20);
+
+  return Buffer.concat([localFileHeaderSignature, cdBuffer, eocd]);
+}
+
+describe("parseSpreadsheetBuffer -- ZIP robustness follow-up (Phase 5)", () => {
+  it("rejects a ZIP64 sentinel uncompressed size rather than trusting the literal (understated) 4-byte value", async () => {
+    const buffer = buildFakeZipMultiEntry([
+      { name: "xl/worksheets/sheet1.xml", uncompressedSize: 0xffffffff, compressedSize: 10 },
+    ]);
+    await expect(parseSpreadsheetBuffer(buffer, "xlsx")).rejects.toMatchObject({ reason: "ZIP64_UNSUPPORTED" });
+  });
+
+  it("rejects a ZIP64 sentinel compressed size the same way", async () => {
+    const buffer = buildFakeZipMultiEntry([
+      { name: "xl/worksheets/sheet1.xml", uncompressedSize: 100, compressedSize: 0xffffffff },
+    ]);
+    await expect(parseSpreadsheetBuffer(buffer, "xlsx")).rejects.toMatchObject({ reason: "ZIP64_UNSUPPORTED" });
+  });
+
+  it("rejects a ZIP central directory declaring two entries with the identical name", async () => {
+    const buffer = buildFakeZipMultiEntry([
+      { name: "xl/worksheets/sheet1.xml", uncompressedSize: 100, compressedSize: 50 },
+      { name: "xl/worksheets/sheet1.xml", uncompressedSize: 200, compressedSize: 60 },
+    ]);
+    await expect(parseSpreadsheetBuffer(buffer, "xlsx")).rejects.toMatchObject({ reason: "DUPLICATE_ZIP_ENTRY" });
+  });
+
+  it("rejects a compression method other than store(0)/deflate(8)", async () => {
+    const buffer = buildFakeZipMultiEntry([
+      { name: "xl/worksheets/sheet1.xml", uncompressedSize: 100, compressedSize: 50, compressionMethod: 99 },
+    ]);
+    await expect(parseSpreadsheetBuffer(buffer, "xlsx")).rejects.toMatchObject({ reason: "UNSUPPORTED_COMPRESSION_METHOD" });
+  });
+
+  it("accepts compression method store(0)", async () => {
+    const buffer = buildFakeZipMultiEntry([
+      { name: "xl/worksheets/sheet1.xml", uncompressedSize: 100, compressedSize: 100, compressionMethod: 0 },
+    ]);
+    // Still fails downstream (not a real workbook) -- the point here is
+    // it fails for a DIFFERENT reason, proving compressionMethod 0 itself
+    // isn't what's rejected.
+    await expect(parseSpreadsheetBuffer(buffer, "xlsx")).rejects.not.toMatchObject({ reason: "UNSUPPORTED_COMPRESSION_METHOD" });
+  });
+
+  it("rejects a declared compression ratio implausible for real XML content (early heuristic on top of the total-byte budget)", async () => {
+    const buffer = buildFakeZipMultiEntry([
+      { name: "xl/worksheets/sheet1.xml", uncompressedSize: 10_000_000, compressedSize: 100, compressionMethod: 8 },
+    ]);
+    await expect(parseSpreadsheetBuffer(buffer, "xlsx")).rejects.toMatchObject({ reason: "EXCESSIVE_COMPRESSION_RATIO" });
+  });
+
+  it("does not reject a directory entry / empty file (compressedSize 0) on the ratio check", async () => {
+    const buffer = buildFakeZipMultiEntry([
+      { name: "xl/worksheets/", uncompressedSize: 0, compressedSize: 0, compressionMethod: 0 },
+    ]);
+    await expect(parseSpreadsheetBuffer(buffer, "xlsx")).rejects.not.toMatchObject({ reason: "EXCESSIVE_COMPRESSION_RATIO" });
+  });
+
+  it("rejects macro-workbook entries regardless of case (xl/VBAProject.BIN, XL/vbaproject.bin, etc.)", async () => {
+    for (const name of ["xl/VBAProject.BIN", "XL/vbaproject.bin", "Xl/VbaProject.Bin"]) {
+      const buffer = buildFakeZipMultiEntry([{ name, uncompressedSize: 10, compressedSize: 10 }]);
+      await expect(parseSpreadsheetBuffer(buffer, "xlsx")).rejects.toMatchObject({ reason: "MACRO_WORKBOOK" });
+    }
+  });
+
+  it("rejects external-link entries regardless of case", async () => {
+    const buffer = buildFakeZipMultiEntry([{ name: "XL/EXTERNALLINKS/externalLink1.xml", uncompressedSize: 10, compressedSize: 10 }]);
+    await expect(parseSpreadsheetBuffer(buffer, "xlsx")).rejects.toMatchObject({ reason: "EXTERNAL_LINKS" });
+  });
+});
+
 describe("parseSpreadsheetBuffer -- ZIP container structural preflight (xlsx only)", () => {
   it("rejects a ZIP whose central directory declares more entries than the configured maximum", async () => {
     // Build a minimal, well-formed empty ZIP end-of-central-directory

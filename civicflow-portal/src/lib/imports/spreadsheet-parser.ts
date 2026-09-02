@@ -42,7 +42,23 @@ export type SpreadsheetRejectionReason =
   | "DUPLICATE_HEADER"
   | "UNSAFE_HEADER_NAME"
   | "PARSE_TIMEOUT"
-  | "MALFORMED_WORKBOOK";
+  | "MALFORMED_WORKBOOK"
+  // Worker-isolation follow-up -- boundary-level failures that happen
+  // outside parseSpreadsheetBuffer() itself (see
+  // spreadsheet-parser-worker-client.ts), surfaced through the same
+  // SpreadsheetValidationError type so every existing caller's
+  // `catch (error) { if (error instanceof SpreadsheetValidationError) }`
+  // handling keeps working unchanged regardless of which boundary a
+  // rejection came from.
+  | "WORKER_TIMEOUT"
+  | "WORKER_CRASHED"
+  | "WORKER_RESULT_INVALID"
+  // ZIP-robustness follow-up -- structural cases readZipCentralDirectory
+  // now checks explicitly rather than silently mis-parsing or ignoring.
+  | "ZIP64_UNSUPPORTED"
+  | "DUPLICATE_ZIP_ENTRY"
+  | "UNSUPPORTED_COMPRESSION_METHOD"
+  | "EXCESSIVE_COMPRESSION_RATIO";
 
 /** Thrown for every rejection above. `reason` is a stable machine-readable
  * code for tests/metrics; `message` is already safe to show a caller (never
@@ -64,6 +80,17 @@ export const SPREADSHEET_LIMITS = {
   maxCompressedBytes: 100 * 1024 * 1024,
   /** Sum of every ZIP entry's declared uncompressed size -- the standard
    * "zip bomb" budget, checked before any entry is decompressed.
+   *
+   * This is early rejection on attacker-controlled metadata, NOT the
+   * hard memory boundary -- a ZIP's central directory can simply lie
+   * about an entry's real uncompressed size (see the EXCESSIVE_COMPRESSION_RATIO
+   * check and its comment, just below, for a second, ratio-based
+   * heuristic on the same untrustworthy metadata). The actual enforcement
+   * boundary is the isolated worker's own resourceLimits heap ceiling
+   * (spreadsheet-parser-worker-client.ts) -- verified directly, not
+   * assumed: a hand-crafted ZIP with a forged small declared size that
+   * decompresses to far more than that is contained by the worker's own
+   * OOM, not by this budget catching the lie.
    *
    * Justified against real infrastructure, not assumed: production runs
    * on a single `apps-s-1vcpu-1gb` DigitalOcean instance (1 GiB total
@@ -89,8 +116,23 @@ export const SPREADSHEET_LIMITS = {
    * workbook may declare in total, not how many are read. */
   maxSheets: 50,
   maxRows: 50_000,
-  maxColumns: 500,
-  maxCells: 2_000_000,
+  /** Worker-isolation follow-up -- re-derived from this application's
+   * actual supported import templates (src/lib/imports/field-defs.ts),
+   * not assumed. Every column-mapping UI this module's output feeds
+   * offers a fixed, small set of target fields: members (9), contributions
+   * (5), pta-households (7), hoa-properties (13, the largest of the four).
+   * A real upload will also carry a handful of columns the mapping UI
+   * ultimately ignores (an internal ID, a free-text note not in the
+   * canonical list, etc.), so this isn't set to exactly 13 -- but 500 was
+   * never derived from any of this either. 50 stays comfortably above
+   * every real template (roughly 4x the largest one) while cutting the
+   * previous limit's attack surface by 10x. */
+  maxColumns: 50,
+  /** Consistent with maxColumns above -- even a maximally-shaped legitimate
+   * import (50,000 rows x the largest real 13-field template) is only
+   * 650,000 cells; 1,000,000 keeps real headroom above that without
+   * reopening the old 500-column-shaped path to a high cell count. */
+  maxCells: 1_000_000,
   /** Excel's own real per-cell limit is 32,767 characters. */
   maxCellLength: 32_767,
   parseTimeoutMs: 30_000,
@@ -107,10 +149,39 @@ const ZIP_END_OF_CENTRAL_DIRECTORY_SIGNATURE = 0x06054b50;
  * strong ZIP encryption). We reject any such entry outright rather than
  * attempt to decrypt or guess a password. */
 const ZIP_ENCRYPTED_FLAG = 0x0001;
+/** The sentinel value a ZIP32 central directory record's 4-byte size
+ * field holds when the real size lives in a ZIP64 extra field instead
+ * (the field itself cannot represent sizes >= 4GB). This parser reads
+ * only the 4-byte field -- if it ever sees this sentinel, trusting it
+ * literally would silently understate the entry's real size (0xFFFFFFFF
+ * looks like "4,294,967,295 bytes", but the ACTUAL size lives elsewhere
+ * and could be anything). No legitimate Excel workbook needs ZIP64 --
+ * rejected outright rather than parsed incorrectly. */
+const ZIP64_SIZE_SENTINEL = 0xffffffff;
+/** Compression methods this parser accepts: 0 = stored (no compression),
+ * 8 = deflate (the only two methods any real .xlsx writer uses). Every
+ * other method code is rejected -- there is no reason a workbook needs
+ * one, and accepting an exotic method this codebase doesn't specifically
+ * validate would mean trusting whatever ExcelJS's own unzip dependency
+ * does with it. */
+const SUPPORTED_COMPRESSION_METHODS = new Set([0, 8]);
+/** A cheap, early heuristic on top of the total-uncompressed-size budget
+ * below: no legitimate .xlsx entry (XML text, even highly repetitive) is
+ * likely to exceed roughly this expansion ratio. This is NOT the hard
+ * memory boundary -- declared sizes are attacker-controlled metadata a
+ * malicious file can simply lie about (see the module comment on
+ * maxUncompressedBytes and spreadsheet-parser-worker-client.ts's own
+ * comment on why parsing itself runs in a heap-bounded worker thread).
+ * This just rejects the obviously-bomb-shaped case a little earlier and
+ * a little cheaper than waiting for the worker's own resourceLimits to
+ * catch a forged-size file after decompression has already started. */
+const MAX_PLAUSIBLE_COMPRESSION_RATIO = 2000;
 
 interface ZipEntrySummary {
   name: string;
   uncompressedSize: number;
+  compressedSize: number;
+  compressionMethod: number;
   encrypted: boolean;
 }
 
@@ -148,7 +219,13 @@ function readZipCentralDirectory(buffer: Buffer): ZipEntrySummary[] {
   }
 
   const entries: ZipEntrySummary[] = [];
+  const seenNames = new Set<string>();
   let offset = centralDirectoryOffset;
+  // JS numbers are exact integers up to 2^53 (~9x10^15); even the
+  // theoretical worst case here -- maxZipEntries (2000) entries each
+  // declaring the maximum possible 4-byte size (~4.29x10^9) -- sums to
+  // ~8.6x10^12, several orders of magnitude below that ceiling. No
+  // overflow/precision-loss risk in this accumulation.
   let totalUncompressed = 0;
 
   for (let i = 0; i < totalEntries; i++) {
@@ -156,6 +233,8 @@ function readZipCentralDirectory(buffer: Buffer): ZipEntrySummary[] {
       throw new Error("not_a_zip");
     }
     const generalPurposeFlag = buffer.readUInt16LE(offset + 8);
+    const compressionMethod = buffer.readUInt16LE(offset + 10);
+    const compressedSize = buffer.readUInt32LE(offset + 20);
     const uncompressedSize = buffer.readUInt32LE(offset + 24);
     const nameLength = buffer.readUInt16LE(offset + 28);
     const extraLength = buffer.readUInt16LE(offset + 30);
@@ -167,8 +246,16 @@ function readZipCentralDirectory(buffer: Buffer): ZipEntrySummary[] {
     const name = buffer.toString("utf-8", nameStart, nameStart + nameLength);
     const encrypted = (generalPurposeFlag & ZIP_ENCRYPTED_FLAG) !== 0;
 
+    if (uncompressedSize === ZIP64_SIZE_SENTINEL || compressedSize === ZIP64_SIZE_SENTINEL) {
+      throw new SpreadsheetValidationError("ZIP64_UNSUPPORTED", "This file uses an unsupported archive format (ZIP64) and was rejected.");
+    }
+    if (seenNames.has(name)) {
+      throw new SpreadsheetValidationError("DUPLICATE_ZIP_ENTRY", "This file's internal structure is invalid and was rejected.");
+    }
+    seenNames.add(name);
+
     totalUncompressed += uncompressedSize;
-    entries.push({ name, uncompressedSize, encrypted });
+    entries.push({ name, uncompressedSize, compressedSize, compressionMethod, encrypted });
 
     offset = nameStart + nameLength + extraLength + commentLength;
   }
@@ -186,9 +273,20 @@ function readZipCentralDirectory(buffer: Buffer): ZipEntrySummary[] {
     }
     // Reject absolute paths and parent-directory traversal in any entry
     // name -- no legitimate .xlsx ever contains one; this only ever
-    // appears in a deliberately malformed archive.
+    // appears in a deliberately malformed archive. Checking for a
+    // backslash covers Windows-style traversal too, even though ZIP
+    // filenames are specified to use forward slashes.
     if (entry.name.startsWith("/") || entry.name.includes("..") || entry.name.includes("\\")) {
       throw new SpreadsheetValidationError("PATH_TRAVERSAL_ENTRY", "This file's internal structure is invalid and was rejected.");
+    }
+    if (!SUPPORTED_COMPRESSION_METHODS.has(entry.compressionMethod)) {
+      throw new SpreadsheetValidationError("UNSUPPORTED_COMPRESSION_METHOD", "This file's internal structure is invalid and was rejected.");
+    }
+    // A directory entry or a genuinely empty file legitimately has
+    // compressedSize 0 -- only entries that actually claim compressed
+    // content are checked for a plausible ratio.
+    if (entry.compressedSize > 0 && entry.uncompressedSize / entry.compressedSize > MAX_PLAUSIBLE_COMPRESSION_RATIO) {
+      throw new SpreadsheetValidationError("EXCESSIVE_COMPRESSION_RATIO", "This file's contents are too large once decompressed and were rejected.");
     }
   }
 
@@ -208,14 +306,21 @@ function preflightXlsxContainer(buffer: Buffer): void {
   // any workbook carrying a VBA project) is rejected outright -- this
   // application never needs macro execution and has no code path that
   // would run one, but there is no reason to accept and store one either.
-  if (entries.some((e) => e.name === "xl/vbaProject.bin")) {
+  // ZIP entry names are matched case-insensitively -- ZIP itself is
+  // case-sensitive, but this check exists to catch anything a downstream
+  // consumer might still treat as the dangerous path via its own
+  // case-insensitive/normalized lookup, not to describe the ZIP spec.
+  if (entries.some((e) => e.name.toLowerCase() === "xl/vbaproject.bin")) {
     throw new SpreadsheetValidationError("MACRO_WORKBOOK", "Macro-enabled workbooks (.xlsm) are not supported. Please save as a standard .xlsx file.");
   }
   // External data connections/links are rejected -- they have no purpose
   // for a one-time data import and are a known vector for triggering
   // outbound requests or reading other files when a workbook is later
   // opened in a full desktop copy of Excel.
-  if (entries.some((e) => e.name.startsWith("xl/externalLinks/") || e.name.startsWith("xl/connections"))) {
+  if (entries.some((e) => {
+    const lower = e.name.toLowerCase();
+    return lower.startsWith("xl/externallinks/") || lower.startsWith("xl/connections");
+  })) {
     throw new SpreadsheetValidationError("EXTERNAL_LINKS", "Workbooks with external data connections or links are not supported.");
   }
 

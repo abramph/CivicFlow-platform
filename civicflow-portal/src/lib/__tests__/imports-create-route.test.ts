@@ -69,6 +69,7 @@ vi.mock("@/lib/imports/engine", () => ({
 
 import { requirePermission } from "@/lib/auth-guards";
 import { POST as createPOST } from "@/app/api/imports/route";
+import { withParseAdmission, resetParseAdmissionStateForTests } from "@/lib/imports/parse-admission";
 
 function makeUploadRequest(mapping: Record<string, string>, kind?: string, csvContent = "First Name,Last Name\nJane,Doe\n") {
   const form = new FormData();
@@ -281,5 +282,22 @@ describe("POST /api/imports -- preview mode (Security Patch A)", () => {
     const response = await createPOST(makePreviewRequest("First Name\nJane\n"));
     expect(response.status).not.toBe(200);
     expect(createImportBatch).not.toHaveBeenCalled();
+  });
+
+  it("returns 429 with Retry-After and creates no batch when this organization already has a parse in flight (worker-isolation follow-up)", async () => {
+    resetParseAdmissionStateForTests();
+    const holdOpen = new Promise<void>(() => {});
+    withParseAdmission("org-a", () => holdOpen).catch(() => {});
+    await new Promise((r) => setTimeout(r, 10));
+
+    const response = await createPOST(makePreviewRequest("First Name\nJane\n"));
+    const payload = await response.json();
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Retry-After")).toBeTruthy();
+    expect(payload.ok).toBe(false);
+    expect(createImportBatch).not.toHaveBeenCalled();
+
+    resetParseAdmissionStateForTests();
   });
 });

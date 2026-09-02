@@ -2,7 +2,8 @@ import { withApiErrorHandling } from "@/lib/api-route";
 import { requireRole } from "@/lib/auth-guards";
 import { ValidationError } from "@/lib/validation";
 import { runMigrationImport, type DesktopExport } from "@/lib/migration-import";
-import { parseSpreadsheetBuffer, SpreadsheetValidationError } from "@/lib/imports/spreadsheet-parser";
+import { SpreadsheetValidationError } from "@/lib/imports/spreadsheet-parser";
+import { parseUploadedSpreadsheet, ParseAdmissionDeniedError } from "@/lib/imports/parse-spreadsheet-isolated";
 import Database from "better-sqlite3";
 import { writeFileSync, unlinkSync } from "fs";
 import { tmpdir } from "os";
@@ -116,9 +117,12 @@ const TXN_ALIASES: Record<string, string> = {
 };
 
 /** Security Patch A -- routes through the hardened shared parser
- * (spreadsheet-parser.ts) rather than the vulnerable `xlsx` package. */
-async function buildExportFromSpreadsheet(buffer: Buffer, extension: string): Promise<DesktopExport> {
-  const { rows } = await parseSpreadsheetBuffer(buffer, extension);
+ * (spreadsheet-parser.ts) rather than the vulnerable `xlsx` package.
+ * Worker-isolation follow-up -- now via parseUploadedSpreadsheet(), so
+ * this runs in an isolated, heap-bounded worker thread behind
+ * organization-scoped admission control. */
+async function buildExportFromSpreadsheet(buffer: Buffer, extension: string, organizationId: string): Promise<DesktopExport> {
+  const { rows } = await parseUploadedSpreadsheet(buffer, extension, organizationId);
 
   const headers = Object.keys(rows[0]).map((h) => h.toLowerCase().trim());
 
@@ -252,8 +256,14 @@ export async function POST(request: Request) {
       }
     } else if (ext === "csv" || ext === "xlsx") {
       try {
-        data = await buildExportFromSpreadsheet(buffer, ext);
+        data = await buildExportFromSpreadsheet(buffer, ext, organizationId);
       } catch (err) {
+        if (err instanceof ParseAdmissionDeniedError) {
+          return Response.json(
+            { ok: false, error: err.message, retryAfterSeconds: err.retryAfterSeconds },
+            { status: 429, headers: { "Retry-After": String(err.retryAfterSeconds) } }
+          );
+        }
         if (err instanceof ValidationError) throw err;
         if (err instanceof SpreadsheetValidationError) throw new ValidationError(err.message);
         // Never surface a raw internal exception (String(err)) to the

@@ -9,7 +9,8 @@ import { buildImportSourceObjectKey, computeImportRetentionDate, uploadImportSou
 import { analyzeBatch } from "@/lib/imports/engine";
 import { ImportError } from "@/lib/imports/errors";
 import { IMPORT_KINDS, authorizeImportKind } from "@/lib/imports/authorization";
-import { parseSpreadsheetBuffer, SpreadsheetValidationError } from "@/lib/imports/spreadsheet-parser";
+import { SpreadsheetValidationError } from "@/lib/imports/spreadsheet-parser";
+import { parseUploadedSpreadsheet, ParseAdmissionDeniedError } from "@/lib/imports/parse-spreadsheet-isolated";
 
 export const runtime = "nodejs";
 
@@ -84,9 +85,15 @@ export async function POST(request: Request) {
       const previewExt = file.name.toLowerCase().split(".").pop() ?? "";
       try {
         const previewBuffer = Buffer.from(await file.arrayBuffer());
-        const { rows } = await parseSpreadsheetBuffer(previewBuffer, previewExt);
+        const { rows } = await parseUploadedSpreadsheet(previewBuffer, previewExt, organizationId);
         return Response.json({ ok: true, data: { headers: Object.keys(rows[0]), preview: rows.slice(0, 5), totalRows: rows.length } });
       } catch (error) {
+        if (error instanceof ParseAdmissionDeniedError) {
+          return Response.json(
+            { ok: false, error: error.message, retryAfterSeconds: error.retryAfterSeconds },
+            { status: 429, headers: { "Retry-After": String(error.retryAfterSeconds) } }
+          );
+        }
         if (error instanceof SpreadsheetValidationError) {
           throw new ImportError("IMPORT_VALIDATION_ERROR", error.message);
         }

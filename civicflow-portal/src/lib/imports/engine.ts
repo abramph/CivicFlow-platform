@@ -2,7 +2,8 @@ import { Prisma, type ImportKind } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { transitionImportBatch } from "@/lib/imports/batch-state-machine";
 import { getImportSourceFile } from "@/lib/imports/storage";
-import { parseSpreadsheetBuffer, SpreadsheetValidationError } from "@/lib/imports/spreadsheet-parser";
+import { SpreadsheetValidationError } from "@/lib/imports/spreadsheet-parser";
+import { parseUploadedSpreadsheet, ParseAdmissionDeniedError } from "@/lib/imports/parse-spreadsheet-isolated";
 import {
   computeRowFingerprint,
   normalizeMemberRow,
@@ -77,17 +78,10 @@ async function claimBatchForProcessing(batchId: string, expectedStatus: "UPLOADE
  * malformed/rejected file surfaces as a normal ImportError so the batch
  * fails cleanly (FAILED status) instead of throwing an unhandled
  * exception mid-analysis. */
-async function parseSpreadsheet(buffer: Buffer, fileName: string): Promise<Record<string, string>[]> {
+async function parseSpreadsheet(buffer: Buffer, fileName: string, organizationId: string): Promise<Record<string, string>[]> {
   const extension = fileName.toLowerCase().split(".").pop() ?? "";
-  try {
-    const { rows } = await parseSpreadsheetBuffer(buffer, extension);
-    return rows;
-  } catch (error) {
-    if (error instanceof SpreadsheetValidationError) {
-      throw new ImportError("IMPORT_VALIDATION_ERROR", error.message);
-    }
-    throw error;
-  }
+  const { rows } = await parseUploadedSpreadsheet(buffer, extension, organizationId);
+  return rows;
 }
 
 /**
@@ -182,9 +176,21 @@ export async function analyzeBatch(batchId: string, organizationId: string): Pro
   const buffer = await getImportSourceFile(batch.storageObjectKey);
   let rows: Record<string, string>[];
   try {
-    rows = await parseSpreadsheet(buffer, batch.fileName);
+    rows = await parseSpreadsheet(buffer, batch.fileName, organizationId);
   } catch (error) {
-    if (error instanceof ImportError) {
+    if (error instanceof ParseAdmissionDeniedError) {
+      // Worker-isolation follow-up -- this is a transient capacity
+      // condition (another parse is already using this single instance's
+      // one admission slot), not a problem with the file itself. Release
+      // the claim and put the batch back to UPLOADED (unclaimed) rather
+      // than FAILED, so the next analyzePendingBatches() cron sweep picks
+      // it up again naturally -- the same retry path an interrupted
+      // (crashed mid-run) analysis already relies on via the stale-claim
+      // mechanism in claimBatchForProcessing.
+      await prisma.importBatch.update({ where: { id: batchId }, data: { status: "UPLOADED", claimedAt: null } });
+      return;
+    }
+    if (error instanceof SpreadsheetValidationError || error instanceof ImportError) {
       // A rejected/malformed file is an expected outcome now that the
       // parser enforces real structural limits (see spreadsheet-parser.ts)
       // -- surfaced as a clean FAILED batch (with its own audit event, via

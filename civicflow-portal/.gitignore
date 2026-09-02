@@ -17,6 +17,9 @@
 /.next/
 /out/
 
+# compiled isolated import worker (scripts/build-worker.mjs output)
+/dist-workers/
+
 # production
 /build
 

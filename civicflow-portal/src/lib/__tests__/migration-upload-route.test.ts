@@ -26,6 +26,7 @@ vi.mock("@/lib/migration-import", () => ({
 
 import { requireRole } from "@/lib/auth-guards";
 import { POST } from "@/app/api/migration/upload/route";
+import { withParseAdmission, resetParseAdmissionStateForTests } from "@/lib/imports/parse-admission";
 
 async function buildXlsxFile(rows: string[][], filename = "export.xlsx"): Promise<File> {
   const wb = new ExcelJS.Workbook();
@@ -117,5 +118,23 @@ describe("POST /api/migration/upload -- hardened spreadsheet parsing", () => {
     const response = await POST(makeRequest(file));
     expect(response.status).not.toBe(200);
     expect(runMigrationImport).not.toHaveBeenCalled();
+  });
+
+  it("returns 429 with Retry-After and runs no migration import when this organization already has a parse in flight (worker-isolation follow-up)", async () => {
+    resetParseAdmissionStateForTests();
+    const holdOpen = new Promise<void>(() => {});
+    withParseAdmission("org-a", () => holdOpen).catch(() => {});
+    await new Promise((r) => setTimeout(r, 10));
+
+    const file = await buildXlsxFile([["first name"], ["Jane"]]);
+    const response = await POST(makeRequest(file));
+    const payload = await response.json();
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Retry-After")).toBeTruthy();
+    expect(payload.ok).toBe(false);
+    expect(runMigrationImport).not.toHaveBeenCalled();
+
+    resetParseAdmissionStateForTests();
   });
 });
