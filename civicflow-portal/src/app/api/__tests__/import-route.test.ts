@@ -36,17 +36,19 @@ vi.mock("@/lib/prisma", () => ({ prisma: { contribution: { create: vi.fn() }, or
 
 import { POST } from "@/app/api/import/route";
 
-function csvFormData(type: string, rows: string) {
+function csvFormData(rows: string) {
   const form = new FormData();
   const blob = new Blob([rows], { type: "text/csv" });
   form.append("file", blob, "data.csv");
-  form.append("type", type);
   form.append("mapping", "{}");
   return form;
 }
 
-function makeRequest(form: FormData) {
-  return new Request("https://portal.test/api/import", { method: "POST", body: form });
+// Auth-ordering follow-up -- `type` now travels as a query parameter, not a
+// form field, so the route can select the right permission check before it
+// ever calls request.formData(). See ImportPageClient.tsx's real call sites.
+function makeRequest(form: FormData, type: string) {
+  return new Request(`https://portal.test/api/import?type=${encodeURIComponent(type)}`, { method: "POST", body: form });
 }
 
 beforeEach(() => {
@@ -56,7 +58,7 @@ beforeEach(() => {
 
 describe("POST /api/import — invalid type rejected before any guard runs", () => {
   it("400s on an unrecognized import type without calling any permission guard", async () => {
-    const response = await POST(makeRequest(csvFormData("not-a-real-type", "a,b\n1,2\n")));
+    const response = await POST(makeRequest(csvFormData("a,b\n1,2\n"), "not-a-real-type"));
     expect(response.status).toBe(400);
     expect(requirePermission).not.toHaveBeenCalled();
     expect(requirePtaAccess).not.toHaveBeenCalled();
@@ -67,7 +69,7 @@ describe("POST /api/import — invalid type rejected before any guard runs", () 
 describe("POST /api/import — PTA households import is vertical-gated, not just permission-gated", () => {
   it("rejects when the organization isn't a PTA vertical (requirePtaAccess throws), never running the importer", async () => {
     requirePtaAccess.mockRejectedValueOnce(Object.assign(new Error("Not a PTA organization"), { status: 403 }));
-    const response = await POST(makeRequest(csvFormData("pta-households", "householdName\nThe Smiths\n")));
+    const response = await POST(makeRequest(csvFormData("householdName\nThe Smiths\n"), "pta-households"));
     expect(response.status).toBe(500); // withApiErrorHandling's generic fallback for an unrecognized error shape
     expect(importPtaHouseholds).not.toHaveBeenCalled();
     expect(requirePermission).not.toHaveBeenCalled(); // members:write is never checked for this import type
@@ -76,7 +78,7 @@ describe("POST /api/import — PTA households import is vertical-gated, not just
   it("proceeds when requirePtaAccess succeeds", async () => {
     requirePtaAccess.mockResolvedValueOnce({ organizationId: "org-a", session: { userId: "u1", userEmail: "a@example.org" } });
     importPtaHouseholds.mockResolvedValueOnce([{ row: 2, status: "ok" }]);
-    const response = await POST(makeRequest(csvFormData("pta-households", "householdName\nThe Smiths\n")));
+    const response = await POST(makeRequest(csvFormData("householdName\nThe Smiths\n"), "pta-households"));
     expect(response.status).toBe(200);
     expect(importPtaHouseholds).toHaveBeenCalledWith(expect.any(Array), {}, "org-a", "u1", "a@example.org", false);
   });
@@ -85,7 +87,7 @@ describe("POST /api/import — PTA households import is vertical-gated, not just
 describe("POST /api/import — HOA properties import requires BOTH property write and resident write", () => {
   it("rejects when the organization isn't an HOA vertical (requireHoaPropertyWrite throws)", async () => {
     requireHoaPropertyWrite.mockRejectedValueOnce(Object.assign(new Error("Not an HOA organization"), { status: 403 }));
-    const response = await POST(makeRequest(csvFormData("hoa-properties", "addressLine1\n142 Oak Ridge Drive\n")));
+    const response = await POST(makeRequest(csvFormData("addressLine1\n142 Oak Ridge Drive\n"), "hoa-properties"));
     expect(response.status).toBe(500);
     expect(importHoaProperties).not.toHaveBeenCalled();
     expect(requireHoaResidentWrite).not.toHaveBeenCalled(); // fails closed before even checking the second guard
@@ -94,7 +96,7 @@ describe("POST /api/import — HOA properties import requires BOTH property writ
   it("rejects when property write passes but resident write does not (a role with partial HOA permissions)", async () => {
     requireHoaPropertyWrite.mockResolvedValueOnce({ organizationId: "org-a", session: { userId: "u1", userEmail: "a@example.org" } });
     requireHoaResidentWrite.mockRejectedValueOnce(Object.assign(new Error("Permission denied: hoa:residents:write"), { status: 403 }));
-    const response = await POST(makeRequest(csvFormData("hoa-properties", "addressLine1\n142 Oak Ridge Drive\n")));
+    const response = await POST(makeRequest(csvFormData("addressLine1\n142 Oak Ridge Drive\n"), "hoa-properties"));
     expect(response.status).toBe(500);
     expect(importHoaProperties).not.toHaveBeenCalled();
   });
@@ -103,7 +105,7 @@ describe("POST /api/import — HOA properties import requires BOTH property writ
     requireHoaPropertyWrite.mockResolvedValueOnce({ organizationId: "org-a", session: { userId: "u1", userEmail: "a@example.org" } });
     requireHoaResidentWrite.mockResolvedValueOnce({ organizationId: "org-a", session: { userId: "u1", userEmail: "a@example.org" } });
     importHoaProperties.mockResolvedValueOnce([{ row: 2, status: "ok" }]);
-    const response = await POST(makeRequest(csvFormData("hoa-properties", "addressLine1\n142 Oak Ridge Drive\n")));
+    const response = await POST(makeRequest(csvFormData("addressLine1\n142 Oak Ridge Drive\n"), "hoa-properties"));
     expect(response.status).toBe(200);
     expect(importHoaProperties).toHaveBeenCalledWith(expect.any(Array), {}, "org-a", "u1", "a@example.org", false);
   });
@@ -112,7 +114,7 @@ describe("POST /api/import — HOA properties import requires BOTH property writ
 describe("POST /api/import — generic members import still uses members:write, unaffected by the new branches", () => {
   it("still routes members through requirePermission(\"members:write\")", async () => {
     importMembers.mockResolvedValueOnce([{ row: 2, status: "ok" }]);
-    const response = await POST(makeRequest(csvFormData("members", "firstName,lastName\nA,B\n")));
+    const response = await POST(makeRequest(csvFormData("firstName,lastName\nA,B\n"), "members"));
     expect(response.status).toBe(200);
     expect(requirePermission).toHaveBeenCalledWith("members:write", "throw");
     expect(requirePtaAccess).not.toHaveBeenCalled();

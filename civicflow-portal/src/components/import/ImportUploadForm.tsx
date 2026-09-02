@@ -119,24 +119,37 @@ export function ImportUploadForm({ kind }: { kind: ImportKind }) {
   if (step === "upload") {
     return (
       <div className="space-y-3">
-        {error ? <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div> : null}
+        {error ? (
+          <div role="alert" className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
+            <span className="font-semibold">Error: </span>{error}
+          </div>
+        ) : null}
         <input
           ref={fileRef}
           type="file"
-          accept=".csv,.xlsx,.xls"
+          accept=".csv,.xlsx"
+          aria-describedby="import-upload-format-help"
           onChange={(event) => {
             const selected = event.target.files?.[0];
             if (selected) void onFileSelected(selected);
           }}
           className="block w-full text-sm text-slate-700 file:mr-4 file:rounded-lg file:border-0 file:bg-emerald-700 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-emerald-800"
         />
+        <p id="import-upload-format-help" className="text-sm text-slate-500">
+          Supports .xlsx and .csv. Legacy .xls files are no longer supported. Open the file and save it as .xlsx or
+          .csv before uploading.
+        </p>
       </div>
     );
   }
 
   return (
     <div className="space-y-4">
-      {error ? <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div> : null}
+      {error ? (
+        <div role="alert" className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <span className="font-semibold">Error: </span>{error}
+        </div>
+      ) : null}
 
       {matchedBatch ? (
         <div className="space-y-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">

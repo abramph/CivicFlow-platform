@@ -223,7 +223,23 @@ export async function POST(request: Request) {
       throw new ValidationError("File too large (max 100 MB)");
     }
 
-    const formData = await request.formData();
+    // Auth-ordering follow-up -- content type checked before parsing,
+    // and a malformed multipart body now surfaces as a clean 400 instead
+    // of falling through to the generic unhandled-error path. This
+    // route's auth/content-length ordering was already correct (auth
+    // runs above, before this point) -- only these two checks were
+    // missing.
+    const contentType = request.headers.get("content-type") ?? "";
+    if (!contentType.toLowerCase().startsWith("multipart/form-data")) {
+      return Response.json({ ok: false, error: "Unsupported content type. Expected a multipart/form-data file upload." }, { status: 415 });
+    }
+
+    let formData: FormData;
+    try {
+      formData = await request.formData();
+    } catch {
+      throw new ValidationError("Could not read the uploaded file. Please try again.");
+    }
     const file = formData.get("file");
     if (!file || !(file instanceof File)) {
       throw new ValidationError("No file provided");

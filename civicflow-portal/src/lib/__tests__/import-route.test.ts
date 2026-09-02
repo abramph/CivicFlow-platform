@@ -49,7 +49,7 @@ vi.mock("@/lib/vertical-import", () => ({
 
 import { existsSync, renameSync } from "node:fs";
 import { join } from "node:path";
-import { requirePermission } from "@/lib/auth-guards";
+import { requirePermission, UnauthenticatedError, ForbiddenError } from "@/lib/auth-guards";
 import { POST } from "@/app/api/import/route";
 import { withParseAdmission, configureParseAdmissionForTests, resetParseAdmissionStateForTests } from "@/lib/imports/parse-admission";
 
@@ -74,13 +74,25 @@ async function buildXlsxFile(rows: string[][], filename = "members.xlsx"): Promi
 function makeRequest(file: File, extra: Record<string, string> = {}): Request {
   const form = new FormData();
   form.set("file", file);
-  form.set("type", extra.type ?? "members");
   form.set("mapping", extra.mapping ?? "{}");
   for (const [key, value] of Object.entries(extra)) {
     if (key === "type" || key === "mapping") continue;
     form.set(key, value);
   }
-  return new Request("https://portal.test/api/import", { method: "POST", body: form });
+  // Auth-ordering follow-up -- `type` now travels as a query parameter, not
+  // a form field, so the route can select the right permission check
+  // before it ever calls request.formData(). See ImportPageClient.tsx's
+  // real call sites, which build the URL the same way.
+  const importType = extra.type ?? "members";
+  return new Request(`https://portal.test/api/import?type=${encodeURIComponent(importType)}`, { method: "POST", body: form });
+}
+
+function makeRawRequest(init: { url?: string; headers?: Record<string, string>; body?: BodyInit | null; method?: string } = {}): Request {
+  return new Request(init.url ?? "https://portal.test/api/import?type=members", {
+    method: init.method ?? "POST",
+    headers: init.headers,
+    body: init.body,
+  });
 }
 
 beforeEach(() => {
@@ -350,6 +362,95 @@ describe("POST /api/import -- fails closed with no mutation when the compiled wo
     const file = new File(["First Name\nJane\n"], "members.csv", { type: "text/csv" });
     const response = await POST(makeRequest(file));
     expect(response.status).toBe(400);
+    expect(importMembers).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Auth-ordering follow-up -- proves the actual ordering, not just the
+ * final status code. Every "before parsing" assertion here spies on
+ * Request.prototype.formData directly, so a future regression that moves
+ * formData() back above auth/rate-limit/content checks fails these tests
+ * even if it happens to still return the same status code.
+ */
+describe("POST /api/import -- auth-before-parse ordering (auth-ordering follow-up)", () => {
+  let formDataSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    formDataSpy = vi.spyOn(Request.prototype, "formData");
+  });
+
+  afterEach(() => {
+    formDataSpy.mockRestore();
+  });
+
+  it("returns 401 for an unauthenticated multipart request and never calls request.formData()", async () => {
+    vi.mocked(requirePermission).mockRejectedValueOnce(new UnauthenticatedError());
+    const file = new File(["First Name\nJane\n"], "members.csv", { type: "text/csv" });
+    const response = await POST(makeRequest(file));
+    expect(response.status).toBe(401);
+    expect(formDataSpy).not.toHaveBeenCalled();
+    expect(importMembers).not.toHaveBeenCalled();
+  });
+
+  it("returns 401 for an unauthenticated non-multipart (e.g. empty) request and never calls request.formData()", async () => {
+    vi.mocked(requirePermission).mockRejectedValueOnce(new UnauthenticatedError());
+    const response = await POST(makeRawRequest({ headers: { "content-type": "application/json" }, body: "{}" }));
+    expect(response.status).toBe(401);
+    expect(formDataSpy).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 for an unauthorized caller and never calls request.formData()", async () => {
+    vi.mocked(requirePermission).mockRejectedValueOnce(new ForbiddenError());
+    const file = new File(["First Name\nJane\n"], "members.csv", { type: "text/csv" });
+    const response = await POST(makeRequest(file));
+    expect(response.status).toBe(403);
+    expect(formDataSpy).not.toHaveBeenCalled();
+    expect(importMembers).not.toHaveBeenCalled();
+  });
+
+  it("checks Content-Length before parsing and rejects an oversized declared length with 413 without calling request.formData()", async () => {
+    const response = await POST(
+      makeRawRequest({
+        headers: { "content-type": "multipart/form-data; boundary=x", "content-length": String(51 * 1024 * 1024) },
+        body: "irrelevant -- rejected on the declared length before this body is ever read",
+      })
+    );
+    const payload = await response.json();
+    expect(response.status).toBe(413);
+    expect(payload.error).toBeTruthy();
+    expect(formDataSpy).not.toHaveBeenCalled();
+    expect(importMembers).not.toHaveBeenCalled();
+  });
+
+  it("checks Content-Type before parsing and rejects a non-multipart request with 415 without calling request.formData()", async () => {
+    const response = await POST(
+      makeRawRequest({ headers: { "content-type": "application/json" }, body: JSON.stringify({ file: "not-a-real-upload" }) })
+    );
+    const payload = await response.json();
+    expect(response.status).toBe(415);
+    expect(payload.error).toBeTruthy();
+    expect(formDataSpy).not.toHaveBeenCalled();
+    expect(importMembers).not.toHaveBeenCalled();
+  });
+
+  it("returns a safe 400 (not 500) for a malformed multipart body with a claimed multipart content type", async () => {
+    const response = await POST(
+      makeRawRequest({ headers: { "content-type": "multipart/form-data; boundary=x" }, body: "this is not valid multipart data" })
+    );
+    const payload = await response.json();
+    expect(response.status).toBe(400);
+    expect(payload.error).toBeTruthy();
+    expect(importMembers).not.toHaveBeenCalled();
+  });
+
+  it("returns a safe 400 for an authenticated, well-formed multipart request with no file field", async () => {
+    const form = new FormData();
+    form.set("mapping", "{}");
+    const response = await POST(new Request("https://portal.test/api/import?type=members", { method: "POST", body: form }));
+    const payload = await response.json();
+    expect(response.status).toBe(400);
+    expect(payload.error).toBeTruthy();
     expect(importMembers).not.toHaveBeenCalled();
   });
 });

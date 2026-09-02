@@ -55,7 +55,25 @@ export async function POST(request: Request) {
 
     const { organizationId, session, can } = await requirePermission("imports:create", "throw");
 
-    const form = await request.formData();
+    // Auth-ordering follow-up -- content type checked before parsing,
+    // and a malformed multipart body now surfaces as a clean 400 instead
+    // of falling through to the generic unhandled-error path (safe
+    // either way, but that path answers 500 for what is really a client
+    // error). This route's auth/rate-limit/content-length ordering was
+    // already correct (all run above, before this point) -- only these
+    // two checks were missing.
+    const contentType = request.headers.get("content-type") ?? "";
+    if (!contentType.toLowerCase().startsWith("multipart/form-data")) {
+      return Response.json({ ok: false, error: "Unsupported content type. Expected a multipart/form-data file upload.", code: "IMPORT_VALIDATION_ERROR" }, { status: 415 });
+    }
+
+    let form: FormData;
+    try {
+      form = await request.formData();
+    } catch {
+      return Response.json({ ok: false, error: "Could not read the uploaded file. Please try again.", code: "IMPORT_VALIDATION_ERROR" }, { status: 400 });
+    }
+
     const file = form.get("file") as File | null;
     const mappingRaw = String(form.get("mapping") ?? "{}");
     const forceNewAnalysis = form.get("forceNewAnalysis") === "1";

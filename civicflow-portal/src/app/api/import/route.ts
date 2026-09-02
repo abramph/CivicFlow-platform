@@ -199,35 +199,36 @@ async function requireImportPermission(
 
 export async function POST(request: Request) {
   return withApiErrorHandling(async () => {
-    const contentLength = Number(request.headers.get("content-length") ?? 0);
-    if (contentLength > MAX_BYTES) {
-      return Response.json({ error: "File too large (max 50 MB)" }, { status: 413 });
-    }
-
-    const form = await request.formData();
-    const file = form.get("file") as File | null;
-    const importTypeRaw = String(form.get("type") ?? "");
-    const mappingRaw = String(form.get("mapping") ?? "{}");
-    const preview = form.get("preview") === "1";
-    const table = form.get("table") ? String(form.get("table")) : undefined;
-    const listTables = form.get("listTables") === "1";
-
+    // Auth-ordering follow-up -- everything in this block runs before a
+    // single byte of the request body is read. `type` used to live in
+    // the multipart body itself, which made that structurally
+    // impossible (the type-specific permission check below needs to
+    // know which permission to check before it can run). Moving it to a
+    // query parameter is what makes the ordering below possible at all
+    // -- see ImportPageClient.tsx's three call sites, updated to match.
+    const importTypeRaw = new URL(request.url).searchParams.get("type") ?? "";
     if (!IMPORT_TYPES.includes(importTypeRaw as ImportTypeValue)) {
       return Response.json({ error: "Invalid import type" }, { status: 400 });
     }
     const importType = importTypeRaw as ImportTypeValue;
+
+    // Authentication, organization/subscription resolution, and the
+    // type-specific import permission -- requireImportPermission's own
+    // dispatch (requirePermission/requirePtaAccess/requireHoaProperty*)
+    // bottoms out in requireOrganization(), which checks session
+    // authentication, then organization membership, then the
+    // subscription/entitlement gate, in that order, before this
+    // function's own permission check runs on top. All of it happens
+    // before any request-body access.
     const { organizationId, actorUserId, actorEmail } = await requireImportPermission(importType);
 
-    // Security Patch A follow-up -- this route previously had no rate
-    // limit at all despite doing the same computationally expensive
-    // parsing work /api/imports already limits. Organization-scoped (not
-    // IP-scoped, unlike /api/imports' existing limiter): keyed by
-    // organizationId, resolved server-side from the just-verified
-    // session, so one organization's usage can never exhaust another's
-    // allowance, and it doesn't matter which IP a given staff member's
-    // request happens to come from. Runs after authorization (so an
-    // unauthorized caller is rejected on its own merits, not confused
-    // with a rate-limit response) but before any file parsing.
+    // Organization-scoped (not IP-scoped): keyed by organizationId,
+    // already resolved from the just-verified session above, so one
+    // organization's usage can never exhaust another's allowance
+    // regardless of which IP a given staff member's request comes from.
+    // Runs after authorization (so an unauthorized caller is rejected on
+    // its own merits, not confused with a rate-limit response) but still
+    // before any request-body access.
     const limited = await requireRateLimit({
       scope: "api:import:legacy",
       request,
@@ -236,6 +237,43 @@ export async function POST(request: Request) {
       key: organizationId,
     });
     if (limited) return limited;
+
+    // Declared Content-Length, when present, is checked before touching
+    // the body -- this cannot stop the hosting proxy from having already
+    // received the bytes over the wire, but it does stop THIS route from
+    // ever materializing them into a multipart FormData structure for an
+    // oversized declared request.
+    const contentLength = Number(request.headers.get("content-length") ?? 0);
+    if (contentLength > MAX_BYTES) {
+      return Response.json({ error: "File too large (max 50 MB)" }, { status: 413 });
+    }
+
+    // Content-Type checked before parsing -- this route only ever
+    // accepts a real file upload, never JSON/urlencoded/anything else.
+    const contentType = request.headers.get("content-type") ?? "";
+    if (!contentType.toLowerCase().startsWith("multipart/form-data")) {
+      return Response.json({ ok: false, error: "Unsupported content type. Expected a multipart/form-data file upload." }, { status: 415 });
+    }
+
+    // Only now -- after auth, rate limiting, declared-length, and
+    // content-type have all already passed -- is the body actually
+    // parsed. A malformed multipart body throws here rather than
+    // anywhere upstream; caught explicitly so it surfaces as a clean,
+    // sanitized 400 instead of falling through to the generic unhandled-
+    // error path (which would still be safe, but would answer 500 for
+    // what is really a client error).
+    let form: FormData;
+    try {
+      form = await request.formData();
+    } catch {
+      return Response.json({ error: "Could not read the uploaded file. Please try again." }, { status: 400 });
+    }
+
+    const file = form.get("file") as File | null;
+    const mappingRaw = String(form.get("mapping") ?? "{}");
+    const preview = form.get("preview") === "1";
+    const table = form.get("table") ? String(form.get("table")) : undefined;
+    const listTables = form.get("listTables") === "1";
 
     if (!file) return Response.json({ error: "No file uploaded" }, { status: 400 });
 

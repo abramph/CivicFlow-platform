@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ExcelJS from "exceljs";
 
 /**
@@ -24,7 +24,7 @@ vi.mock("@/lib/migration-import", () => ({
   runMigrationImport: (...args: unknown[]) => runMigrationImport(...args),
 }));
 
-import { requireRole } from "@/lib/auth-guards";
+import { requireRole, UnauthenticatedError } from "@/lib/auth-guards";
 import { POST } from "@/app/api/migration/upload/route";
 import { withParseAdmission, resetParseAdmissionStateForTests } from "@/lib/imports/parse-admission";
 
@@ -136,5 +136,61 @@ describe("POST /api/migration/upload -- hardened spreadsheet parsing", () => {
     expect(runMigrationImport).not.toHaveBeenCalled();
 
     resetParseAdmissionStateForTests();
+  });
+});
+
+/**
+ * Auth-ordering follow-up -- this route's auth ordering (requireRole runs
+ * before formData()) was already correct; only the content-type check and
+ * safe malformed-multipart handling were added.
+ */
+describe("POST /api/migration/upload -- auth-before-parse ordering (auth-ordering follow-up)", () => {
+  let formDataSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    formDataSpy = vi.spyOn(Request.prototype, "formData");
+  });
+
+  afterEach(() => {
+    formDataSpy.mockRestore();
+  });
+
+  it("returns 401 for an unauthenticated request and never calls request.formData()", async () => {
+    vi.mocked(requireRole).mockRejectedValueOnce(new UnauthenticatedError());
+    const file = await buildXlsxFile([["first name"], ["Jane"]]);
+    const response = await POST(makeRequest(file));
+    expect(response.status).toBe(401);
+    expect(formDataSpy).not.toHaveBeenCalled();
+    expect(runMigrationImport).not.toHaveBeenCalled();
+  });
+
+  it("checks Content-Type before parsing and rejects a non-multipart request with 415 without calling request.formData()", async () => {
+    const response = await POST(
+      new Request("https://portal.test/api/migration/upload", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ file: "nope" }) })
+    );
+    const payload = await response.json();
+    expect(response.status).toBe(415);
+    expect(payload.error).toBeTruthy();
+    expect(formDataSpy).not.toHaveBeenCalled();
+    expect(runMigrationImport).not.toHaveBeenCalled();
+  });
+
+  it("returns a safe 400 (not 500) for a malformed multipart body with a claimed multipart content type", async () => {
+    const response = await POST(
+      new Request("https://portal.test/api/migration/upload", { method: "POST", headers: { "content-type": "multipart/form-data; boundary=x" }, body: "not valid multipart data" })
+    );
+    const payload = await response.json();
+    expect(response.status).toBe(400);
+    expect(payload.error).toBeTruthy();
+    expect(runMigrationImport).not.toHaveBeenCalled();
+  });
+
+  it("returns a safe 400 for a well-formed multipart request with no file field", async () => {
+    const form = new FormData();
+    const response = await POST(new Request("https://portal.test/api/migration/upload", { method: "POST", body: form }));
+    const payload = await response.json();
+    expect(response.status).toBe(400);
+    expect(payload.error).toBeTruthy();
+    expect(runMigrationImport).not.toHaveBeenCalled();
   });
 });

@@ -51,13 +51,15 @@ export function ImportPageClient({ capabilities }: { capabilities: Record<Capabi
       // parsed client-side) now goes through the server's hardened
       // spreadsheet pipeline via /api/import's existing preview mode;
       // nothing is stored or imported for a preview request.
+      // Auth-ordering follow-up -- `type` moved to a query parameter (was
+      // a form field) so the server can enforce the type-specific import
+      // permission before it ever touches the request body.
       const form = new FormData();
       form.append("file", f);
-      form.append("type", importType);
       form.append("mapping", "{}");
       form.append("preview", "1");
       if (table) form.append("table", table);
-      const res = await fetch("/api/import", { method: "POST", body: form });
+      const res = await fetch(`/api/import?type=${encodeURIComponent(importType)}`, { method: "POST", body: form });
       const data = await res.json();
       if (!res.ok) { setError(data.error || "Failed to read file."); return; }
       setHeaders(data.headers);
@@ -81,10 +83,9 @@ export function ImportPageClient({ capabilities }: { capabilities: Record<Capabi
       try {
         const form = new FormData();
         form.append("file", f);
-        form.append("type", importType);
         form.append("mapping", "{}");
         form.append("listTables", "1");
-        const res = await fetch("/api/import", { method: "POST", body: form });
+        const res = await fetch(`/api/import?type=${encodeURIComponent(importType)}`, { method: "POST", body: form });
         const data = await res.json();
         if (!res.ok) { setError(data.error || "Failed to read SQLite file."); return; }
         setDbTables(data.tables ?? []);
@@ -113,10 +114,9 @@ export function ImportPageClient({ capabilities }: { capabilities: Record<Capabi
     try {
       const form = new FormData();
       form.append("file", file);
-      form.append("type", importType);
       form.append("mapping", JSON.stringify(mapping));
       if (selectedTable) form.append("table", selectedTable);
-      const res = await fetch("/api/import", { method: "POST", body: form });
+      const res = await fetch(`/api/import?type=${encodeURIComponent(importType)}`, { method: "POST", body: form });
       const data = await res.json();
       if (!res.ok) { setError(data.error || "Import failed."); return; }
       setResult(data);
@@ -150,7 +150,9 @@ export function ImportPageClient({ capabilities }: { capabilities: Record<Capabi
         <p className="mt-1 text-sm text-slate-600">Upload a CSV or Excel file to import records into your organization.</p>
 
         {error && (
-          <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+          <div role="alert" className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <span className="font-semibold">Error: </span>{error}
+          </div>
         )}
 
         {/* Step: choose type */}
@@ -187,17 +189,22 @@ export function ImportPageClient({ capabilities }: { capabilities: Record<Capabi
               role="button"
               tabIndex={0}
               aria-label="Drop your file here or press Enter to browse for a file"
+              aria-describedby="import-format-help"
               className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 px-6 py-16 text-center hover:border-emerald-400 hover:bg-emerald-50 transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500"
             >
               <div className="text-4xl mb-3">📂</div>
               <p className="font-semibold text-slate-700">Drop your file here or click to browse</p>
-              <p className="mt-1 text-sm text-slate-500">Supports CSV, Excel (.xlsx, .xls), and SQLite (.db) — max 50 MB</p>
+              <p id="import-format-help" className="mt-1 text-sm text-slate-500">
+                Supports CSV, Excel (.xlsx), and SQLite (.db) — max 50 MB. Legacy .xls files are no longer supported.
+                Open the file and save it as .xlsx or .csv before uploading.
+              </p>
               {uploading && <p className="mt-3 text-sm text-emerald-600 animate-pulse">Parsing file…</p>}
             </div>
             <input
               ref={fileRef}
               type="file"
-              accept=".csv,.xlsx,.xls,.db,.sqlite"
+              accept=".csv,.xlsx,.db,.sqlite"
+              aria-describedby="import-format-help"
               className="hidden"
               onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
             />

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function permissionContext(allowed: string[]): any {
@@ -67,7 +67,8 @@ vi.mock("@/lib/imports/engine", () => ({
   analyzeBatch: (...args: unknown[]) => analyzeBatch(...args),
 }));
 
-import { requirePermission } from "@/lib/auth-guards";
+import { requirePermission, UnauthenticatedError } from "@/lib/auth-guards";
+import { requireRateLimit } from "@/lib/rate-limit";
 import { POST as createPOST } from "@/app/api/imports/route";
 import { withParseAdmission, resetParseAdmissionStateForTests } from "@/lib/imports/parse-admission";
 
@@ -299,5 +300,74 @@ describe("POST /api/imports -- preview mode (Security Patch A)", () => {
     expect(createImportBatch).not.toHaveBeenCalled();
 
     resetParseAdmissionStateForTests();
+  });
+});
+
+/**
+ * Auth-ordering follow-up -- this route's auth/rate-limit/content-length
+ * ordering was already correct before this change (see the summary in
+ * route.ts); only the content-type check and safe malformed-multipart
+ * handling were added. These tests prove the new behavior and, via the
+ * formData spy, prove no request that should be rejected pre-parse ever
+ * reaches request.formData().
+ */
+describe("POST /api/imports -- auth-before-parse ordering (auth-ordering follow-up)", () => {
+  let formDataSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    formDataSpy = vi.spyOn(Request.prototype, "formData");
+  });
+
+  afterEach(() => {
+    formDataSpy.mockRestore();
+  });
+
+  it("returns 401 for an unauthenticated request and never calls request.formData()", async () => {
+    vi.mocked(requirePermission).mockRejectedValueOnce(new UnauthenticatedError());
+    const response = await createPOST(makeUploadRequest({ "First Name": "firstName" }));
+    expect(response.status).toBe(401);
+    expect(formDataSpy).not.toHaveBeenCalled();
+    expect(createImportBatch).not.toHaveBeenCalled();
+  });
+
+  it("returns 429 for a rate-limited request and never calls request.formData()", async () => {
+    vi.mocked(requireRateLimit).mockResolvedValueOnce(
+      Response.json({ ok: false, error: "Too many requests" }, { status: 429, headers: { "Retry-After": "5" } })
+    );
+    const response = await createPOST(makeUploadRequest({ "First Name": "firstName" }));
+    expect(response.status).toBe(429);
+    expect(formDataSpy).not.toHaveBeenCalled();
+    expect(createImportBatch).not.toHaveBeenCalled();
+  });
+
+  it("checks Content-Type before parsing and rejects a non-multipart request with 415 without calling request.formData()", async () => {
+    const response = await createPOST(
+      new Request("https://portal.test/api/imports", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ file: "nope" }) })
+    );
+    const payload = await response.json();
+    expect(response.status).toBe(415);
+    expect(payload.error).toBeTruthy();
+    expect(formDataSpy).not.toHaveBeenCalled();
+    expect(createImportBatch).not.toHaveBeenCalled();
+  });
+
+  it("returns a safe 400 (not 500) for a malformed multipart body with a claimed multipart content type", async () => {
+    const response = await createPOST(
+      new Request("https://portal.test/api/imports", { method: "POST", headers: { "content-type": "multipart/form-data; boundary=x" }, body: "not valid multipart data" })
+    );
+    const payload = await response.json();
+    expect(response.status).toBe(400);
+    expect(payload.error).toBeTruthy();
+    expect(createImportBatch).not.toHaveBeenCalled();
+  });
+
+  it("returns a safe 400 for a well-formed multipart request with no file field", async () => {
+    const form = new FormData();
+    form.set("mapping", "{}");
+    const response = await createPOST(new Request("https://portal.test/api/imports", { method: "POST", body: form }));
+    const payload = await response.json();
+    expect(response.status).toBe(400);
+    expect(payload.error).toBeTruthy();
+    expect(createImportBatch).not.toHaveBeenCalled();
   });
 });
