@@ -1,5 +1,5 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import type { ReportData, ReportRow, ReportType } from "@/lib/reports/report-builder";
 import { formatCurrency, formatDate } from "@/lib/formatting";
 import { csvCell, sanitizeFormulaCell } from "@/lib/csv-safety";
@@ -40,9 +40,11 @@ export function exportReportCsv(report: ReportData) {
   return Buffer.from(lines.join("\r\n"), "utf8");
 }
 
-export function exportReportXlsx(report: ReportData) {
-  const workbook = XLSX.utils.book_new();
-  const summaryRows = [
+export async function exportReportXlsx(report: ReportData): Promise<Buffer> {
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet("Report");
+
+  const summaryRows: (string | number)[][] = [
     [report.title],
     ["Generated", formatDate(report.metadata.generatedAt)],
     ["Date range", `${formatDate(report.metadata.startDate)} - ${formatDate(report.metadata.endDate)}`],
@@ -52,11 +54,12 @@ export function exportReportXlsx(report: ReportData) {
     report.columns,
     ...report.rows.map((row) => report.columns.map((column) => sanitizeFormulaCell(row[column]))),
   ];
-  const worksheet = XLSX.utils.aoa_to_sheet(summaryRows);
-  worksheet["!cols"] = report.columns.map((column) => ({ wch: Math.max(14, column.length + 4) }));
-  worksheet["!freeze"] = { xSplit: 0, ySplit: 7 };
-  XLSX.utils.book_append_sheet(workbook, worksheet, "Report");
-  return XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }) as Buffer;
+  for (const row of summaryRows) worksheet.addRow(row);
+
+  worksheet.columns = report.columns.map((column) => ({ width: Math.max(14, column.length + 4) }));
+  worksheet.views = [{ state: "frozen", ySplit: 7 }];
+
+  return Buffer.from(await workbook.xlsx.writeBuffer());
 }
 
 function truncate(text: string, max: number) {

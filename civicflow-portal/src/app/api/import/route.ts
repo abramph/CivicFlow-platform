@@ -6,7 +6,9 @@ import { importPtaHouseholds, importHoaProperties } from "@/lib/vertical-import"
 import { requirePtaAccess } from "@/lib/labs/pta/guard";
 import { requireHoaPropertyWrite, requireHoaResidentWrite } from "@/lib/hoa/guard";
 import { PERMISSIONS } from "@/lib/rbac";
-import * as XLSX from "xlsx";
+import { requireRateLimit } from "@/lib/rate-limit";
+import { SpreadsheetValidationError } from "@/lib/imports/spreadsheet-parser";
+import { parseUploadedSpreadsheet, ParseAdmissionDeniedError } from "@/lib/imports/parse-spreadsheet-isolated";
 import Database from "better-sqlite3";
 import { writeFileSync, unlinkSync } from "fs";
 import { tmpdir } from "os";
@@ -19,13 +21,15 @@ const MAX_BYTES = 50 * 1024 * 1024; // 50 MB (db files can be larger)
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-function parseSpreadsheet(buffer: Buffer): Record<string, string>[] {
-  const wb = XLSX.read(buffer, { type: "buffer", dateNF: "yyyy-mm-dd" });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  return XLSX.utils.sheet_to_json<Record<string, string>>(ws, {
-    raw: false,
-    defval: "",
-  });
+/** Security Patch A -- routes through the hardened shared parser.
+ * Worker-isolation follow-up -- now via parseUploadedSpreadsheet(),
+ * which runs the actual parse in an isolated, heap-bounded worker
+ * thread behind organization-scoped admission control, rather than
+ * directly in this request's own event loop. Rejections surface as the
+ * caller's existing plain-message convention. */
+async function parseSpreadsheet(buffer: Buffer, extension: string, organizationId: string): Promise<Record<string, string>[]> {
+  const { rows } = await parseUploadedSpreadsheet(buffer, extension, organizationId);
+  return rows;
 }
 
 function parseSqliteDb(buffer: Buffer, table: string): Record<string, string>[] {
@@ -68,13 +72,22 @@ function getDbTables(buffer: Buffer): string[] {
   }
 }
 
-function parseFile(buffer: Buffer, filename: string, table?: string): Record<string, string>[] {
-  const ext = filename.toLowerCase().split(".").pop();
+async function parseFile(buffer: Buffer, filename: string, organizationId: string, table?: string): Promise<Record<string, string>[]> {
+  const ext = filename.toLowerCase().split(".").pop() ?? "";
   if (ext === "db" || ext === "sqlite") {
     if (!table) throw new Error("table_required");
     return parseSqliteDb(buffer, table);
   }
-  return parseSpreadsheet(buffer);
+  // Security Patch A -- previously any extension other than .db/.sqlite
+  // fell through to the spreadsheet parser unconditionally (a file named
+  // "malicious.exe" would have been handed straight to XLSX.read()).
+  // Legacy binary .xls is no longer accepted -- see
+  // docs/security/spreadsheet-import-hardening.md for the removal
+  // rationale; users are asked to re-save as .xlsx or .csv.
+  if (ext !== "csv" && ext !== "xlsx") {
+    throw new SpreadsheetValidationError("UNSUPPORTED_FORMAT", "Unsupported file type. Please upload a .csv or .xlsx file (or a .db/.sqlite export).");
+  }
+  return parseSpreadsheet(buffer, ext, organizationId);
 }
 
 function parseMoney(val: string): number | null {
@@ -205,6 +218,25 @@ export async function POST(request: Request) {
     const importType = importTypeRaw as ImportTypeValue;
     const { organizationId, actorUserId, actorEmail } = await requireImportPermission(importType);
 
+    // Security Patch A follow-up -- this route previously had no rate
+    // limit at all despite doing the same computationally expensive
+    // parsing work /api/imports already limits. Organization-scoped (not
+    // IP-scoped, unlike /api/imports' existing limiter): keyed by
+    // organizationId, resolved server-side from the just-verified
+    // session, so one organization's usage can never exhaust another's
+    // allowance, and it doesn't matter which IP a given staff member's
+    // request happens to come from. Runs after authorization (so an
+    // unauthorized caller is rejected on its own merits, not confused
+    // with a rate-limit response) but before any file parsing.
+    const limited = await requireRateLimit({
+      scope: "api:import:legacy",
+      request,
+      limit: 20,
+      windowMs: 60_000,
+      key: organizationId,
+    });
+    if (limited) return limited;
+
     if (!file) return Response.json({ error: "No file uploaded" }, { status: 400 });
 
     const buffer = Buffer.from(await file.arrayBuffer());
@@ -219,8 +251,17 @@ export async function POST(request: Request) {
 
     let rows: Record<string, string>[];
     try {
-      rows = parseFile(buffer, file.name, table);
+      rows = await parseFile(buffer, file.name, organizationId, table);
     } catch (err) {
+      if (err instanceof ParseAdmissionDeniedError) {
+        return Response.json(
+          { ok: false, error: err.message, retryAfterSeconds: err.retryAfterSeconds },
+          { status: 429, headers: { "Retry-After": String(err.retryAfterSeconds) } }
+        );
+      }
+      if (err instanceof SpreadsheetValidationError) {
+        return Response.json({ error: err.message }, { status: 400 });
+      }
       if (String(err).includes("table_required")) {
         return Response.json({ error: "Please select a table from the SQLite file." }, { status: 400 });
       }

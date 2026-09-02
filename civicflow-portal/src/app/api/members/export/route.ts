@@ -1,5 +1,5 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import { requirePermission } from "@/lib/auth-guards";
 import { withApiErrorHandling } from "@/lib/api-route";
 import { requirePlanFeature } from "@/lib/plan-gate";
@@ -95,15 +95,18 @@ function buildCsv(rows: Array<Record<string, unknown>>) {
   return [headers.join(","), ...rows.map((row) => headers.map((header) => csvCell(row[header])).join(","))].join("\r\n");
 }
 
-function buildXlsx(rows: Array<Record<string, unknown>>) {
-  const workbook = XLSX.utils.book_new();
-  const worksheet = XLSX.utils.json_to_sheet(rows);
-  worksheet["!freeze"] = { xSplit: 0, ySplit: 1 };
-  worksheet["!cols"] = Object.keys(rows[0] ?? {}).map((header) => ({
-    wch: Math.min(40, Math.max(header.length + 2, ...rows.map((row) => String(row[header] ?? "").length + 2))),
+async function buildXlsx(rows: Array<Record<string, unknown>>): Promise<Buffer> {
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet("Members");
+  const headers = Object.keys(rows[0] ?? {});
+  worksheet.columns = headers.map((header) => ({
+    header,
+    key: header,
+    width: Math.min(40, Math.max(header.length + 2, ...rows.map((row) => String(row[header] ?? "").length + 2))),
   }));
-  XLSX.utils.book_append_sheet(workbook, worksheet, "Members");
-  return XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }) as Buffer;
+  worksheet.addRows(rows);
+  worksheet.views = [{ state: "frozen", ySplit: 1 }];
+  return Buffer.from(await workbook.xlsx.writeBuffer());
 }
 
 async function buildPdf(input: {
@@ -242,7 +245,7 @@ export async function GET(request: Request) {
       return Response.redirect(new URL(`/members/print?${url.searchParams.toString()}`, url.origin));
     }
     if (format === "xlsx") {
-      const buffer = buildXlsx(buildRows(members));
+      const buffer = await buildXlsx(buildRows(members));
       return new Response(new Uint8Array(buffer), {
         headers: {
           "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

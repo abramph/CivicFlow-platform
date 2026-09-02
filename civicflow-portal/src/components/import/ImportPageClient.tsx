@@ -2,7 +2,6 @@
 
 import { useRef, useState } from "react";
 import { PortalShell } from "@/components/app/PortalShell";
-import * as XLSX from "xlsx";
 import { type ImportType, IMPORT_TYPES, FIELD_DEFS, COMMON_ALIASES } from "@/lib/imports/field-defs";
 import type { CapabilityFlag } from "@/lib/vertical-capabilities";
 
@@ -48,34 +47,24 @@ export function ImportPageClient({ capabilities }: { capabilities: Record<Capabi
     setError(null);
     setUploading(true);
     try {
-      if (isSqlite(f)) {
-        const form = new FormData();
-        form.append("file", f);
-        form.append("type", importType);
-        form.append("mapping", "{}");
-        form.append("preview", "1");
-        if (table) form.append("table", table);
-        const res = await fetch("/api/import", { method: "POST", body: form });
-        const data = await res.json();
-        if (!res.ok) { setError(data.error || "Failed to read file."); return; }
-        setHeaders(data.headers);
-        setPreviewRows(data.preview);
-        setTotalRows(data.totalRows);
-        setMapping(autoMap(data.headers, importType));
-        setStep("map");
-      } else {
-        const buffer = await f.arrayBuffer();
-        const wb = XLSX.read(buffer, { type: "array", dateNF: "yyyy-mm-dd" });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { raw: false, defval: "" });
-        if (rows.length === 0) { setError("File has no data rows."); return; }
-        const hdrs = Object.keys(rows[0]);
-        setHeaders(hdrs);
-        setPreviewRows(rows.slice(0, 5));
-        setTotalRows(rows.length);
-        setMapping(autoMap(hdrs, importType));
-        setStep("map");
-      }
+      // Security Patch A -- every format (including CSV/Excel, previously
+      // parsed client-side) now goes through the server's hardened
+      // spreadsheet pipeline via /api/import's existing preview mode;
+      // nothing is stored or imported for a preview request.
+      const form = new FormData();
+      form.append("file", f);
+      form.append("type", importType);
+      form.append("mapping", "{}");
+      form.append("preview", "1");
+      if (table) form.append("table", table);
+      const res = await fetch("/api/import", { method: "POST", body: form });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error || "Failed to read file."); return; }
+      setHeaders(data.headers);
+      setPreviewRows(data.preview);
+      setTotalRows(data.totalRows);
+      setMapping(autoMap(data.headers, importType));
+      setStep("map");
     } catch {
       setError("Could not parse file. Make sure it is a valid CSV, Excel, or SQLite file.");
     } finally {

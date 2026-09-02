@@ -9,6 +9,8 @@ import { buildImportSourceObjectKey, computeImportRetentionDate, uploadImportSou
 import { analyzeBatch } from "@/lib/imports/engine";
 import { ImportError } from "@/lib/imports/errors";
 import { IMPORT_KINDS, authorizeImportKind } from "@/lib/imports/authorization";
+import { SpreadsheetValidationError } from "@/lib/imports/spreadsheet-parser";
+import { parseUploadedSpreadsheet, ParseAdmissionDeniedError } from "@/lib/imports/parse-spreadsheet-isolated";
 
 export const runtime = "nodejs";
 
@@ -57,6 +59,7 @@ export async function POST(request: Request) {
     const file = form.get("file") as File | null;
     const mappingRaw = String(form.get("mapping") ?? "{}");
     const forceNewAnalysis = form.get("forceNewAnalysis") === "1";
+    const preview = form.get("preview") === "1";
     const kindRaw = String(form.get("kind") ?? "COMMUNITY_MEMBERS");
     if (!IMPORT_KINDS.includes(kindRaw as ImportKind)) {
       throw new ImportError("IMPORT_VALIDATION_ERROR", "Unrecognized import kind.");
@@ -70,6 +73,32 @@ export async function POST(request: Request) {
     }
     if (file.size > MAX_BYTES) {
       return Response.json({ ok: false, error: "File too large (max 50 MB)", code: "IMPORT_VALIDATION_ERROR" }, { status: 413 });
+    }
+
+    // Security Patch A -- lets the upload form get headers/a preview for
+    // its column-mapping step through the same hardened server-side
+    // parser used for the real import, instead of parsing the file with a
+    // library in the user's browser at all (mirrors the existing preview
+    // convention on /api/import). Nothing is stored or persisted for a
+    // preview request.
+    if (preview) {
+      const previewExt = file.name.toLowerCase().split(".").pop() ?? "";
+      try {
+        const previewBuffer = Buffer.from(await file.arrayBuffer());
+        const { rows } = await parseUploadedSpreadsheet(previewBuffer, previewExt, organizationId);
+        return Response.json({ ok: true, data: { headers: Object.keys(rows[0]), preview: rows.slice(0, 5), totalRows: rows.length } });
+      } catch (error) {
+        if (error instanceof ParseAdmissionDeniedError) {
+          return Response.json(
+            { ok: false, error: error.message, retryAfterSeconds: error.retryAfterSeconds },
+            { status: 429, headers: { "Retry-After": String(error.retryAfterSeconds) } }
+          );
+        }
+        if (error instanceof SpreadsheetValidationError) {
+          throw new ImportError("IMPORT_VALIDATION_ERROR", error.message);
+        }
+        throw error;
+      }
     }
 
     let columnMapping: Record<string, string>;

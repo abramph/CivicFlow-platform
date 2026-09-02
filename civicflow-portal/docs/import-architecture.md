@@ -1,5 +1,7 @@
 # Resumable Import Program — Architecture (PR A)
 
+> **Spreadsheet parsing security**: how uploaded `.csv`/`.xlsx` files are validated and parsed (the vulnerable `xlsx` package has been removed) is documented separately in [spreadsheet-import-security.md](./spreadsheet-import-security.md).
+
 ## Why this exists
 
 Before PR A, Unestra had four separate, independently-built import pathways with wildly inconsistent maturity:
