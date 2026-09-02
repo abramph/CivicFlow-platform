@@ -6,6 +6,7 @@ import { importPtaHouseholds, importHoaProperties } from "@/lib/vertical-import"
 import { requirePtaAccess } from "@/lib/labs/pta/guard";
 import { requireHoaPropertyWrite, requireHoaResidentWrite } from "@/lib/hoa/guard";
 import { PERMISSIONS } from "@/lib/rbac";
+import { requireRateLimit } from "@/lib/rate-limit";
 import { parseSpreadsheetBuffer, SpreadsheetValidationError } from "@/lib/imports/spreadsheet-parser";
 import Database from "better-sqlite3";
 import { writeFileSync, unlinkSync } from "fs";
@@ -212,6 +213,25 @@ export async function POST(request: Request) {
     }
     const importType = importTypeRaw as ImportTypeValue;
     const { organizationId, actorUserId, actorEmail } = await requireImportPermission(importType);
+
+    // Security Patch A follow-up -- this route previously had no rate
+    // limit at all despite doing the same computationally expensive
+    // parsing work /api/imports already limits. Organization-scoped (not
+    // IP-scoped, unlike /api/imports' existing limiter): keyed by
+    // organizationId, resolved server-side from the just-verified
+    // session, so one organization's usage can never exhaust another's
+    // allowance, and it doesn't matter which IP a given staff member's
+    // request happens to come from. Runs after authorization (so an
+    // unauthorized caller is rejected on its own merits, not confused
+    // with a rate-limit response) but before any file parsing.
+    const limited = await requireRateLimit({
+      scope: "api:import:legacy",
+      request,
+      limit: 20,
+      windowMs: 60_000,
+      key: organizationId,
+    });
+    if (limited) return limited;
 
     if (!file) return Response.json({ error: "No file uploaded" }, { status: 400 });
 

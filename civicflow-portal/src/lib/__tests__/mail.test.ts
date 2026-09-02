@@ -101,6 +101,48 @@ describe("sendEmail -- header-injection hardening", () => {
     expect(sendMail).not.toHaveBeenCalled();
   });
 
+  it("rejects an attachment content type carrying a CRLF injection payload", async () => {
+    const { sendEmail } = await import("@/lib/mail");
+    await expect(
+      sendEmail({
+        to: "member@example.org",
+        subject: "Test",
+        text: "Body",
+        attachments: [{ filename: "receipt.pdf", content: Buffer.from("x"), contentType: "application/pdf\r\nBcc: attacker@evil.example" }],
+      })
+    ).rejects.toThrow();
+    expect(sendMail).not.toHaveBeenCalled();
+  });
+
+  it("accepts an ordinary attachment content type", async () => {
+    const { sendEmail } = await import("@/lib/mail");
+    await sendEmail({
+      to: "member@example.org",
+      subject: "Test",
+      text: "Body",
+      attachments: [{ filename: "receipt.pdf", content: Buffer.from("x"), contentType: "application/pdf" }],
+    });
+    expect(sendMail).toHaveBeenCalledWith(
+      expect.objectContaining({ attachments: [expect.objectContaining({ contentType: "application/pdf" })] })
+    );
+  });
+
+  it("accepts a subject containing Unicode line/paragraph separators (U+2028/U+2029) -- not a real SMTP header-injection vector: nodemailer MIME-encodes the whole subject as soon as any non-ASCII codepoint is present, so these become part of an encoded-word rather than a raw header byte (verified directly against nodemailer's MailComposer, not assumed)", async () => {
+    const { sendEmail } = await import("@/lib/mail");
+    const subject = `Notice Second line Third line`;
+    await sendEmail({ to: "member@example.org", subject, text: "Body" });
+    expect(sendMail).toHaveBeenCalledWith(expect.objectContaining({ subject }));
+  });
+
+  it("rejects an organization display name interpolated into a subject template carrying a CRLF payload (member-invites.ts's `You're invited... — ${orgName}` pattern)", async () => {
+    const { sendEmail } = await import("@/lib/mail");
+    const orgName = "Pine Grove PTA\r\nBcc: attacker@evil.example";
+    await expect(
+      sendEmail({ to: "member@example.org", subject: `You're invited to the Unestra app — ${orgName}`, text: "Body" })
+    ).rejects.toThrow();
+    expect(sendMail).not.toHaveBeenCalled();
+  });
+
   it("rejects a recipient address containing CRLF (a malicious organization-controlled value flowing into `to`)", async () => {
     const { sendEmail } = await import("@/lib/mail");
     await expect(sendEmail({ to: "member@example.org\r\nBcc: attacker@evil.example", subject: "Test", text: "Body" })).rejects.toThrow();

@@ -280,3 +280,94 @@ describe("parseSpreadsheetBuffer -- ZIP container structural preflight (xlsx onl
     await expect(parseSpreadsheetBuffer(buffer, "xlsx")).rejects.toMatchObject({ reason: "EXTERNAL_LINKS" });
   });
 });
+
+/**
+ * Security Patch A follow-up -- dedicated adversarial pass over the
+ * hand-written RFC-4180 CSV state machine (parseCsvText/parseCsvRows in
+ * spreadsheet-parser.ts), matching the review's exact checklist. Quoted
+ * commas/embedded newlines/escaped quotes are already covered above under
+ * "valid input" -- this block covers the remaining vectors: BOM handling,
+ * row/field edge cases, malformed input, and algorithmic complexity.
+ */
+describe("parseSpreadsheetBuffer -- CSV adversarial review", () => {
+  it("strips a leading UTF-8 BOM instead of corrupting the first header (Excel-on-Windows commonly writes one)", async () => {
+    const bom = Buffer.from([0xef, 0xbb, 0xbf]);
+    const buffer = Buffer.concat([bom, Buffer.from(VALID_CSV_TEXT, "utf-8")]);
+    const result = await parseSpreadsheetBuffer(buffer, "csv");
+    expect(Object.keys(result.rows[0])).toEqual(["firstName", "lastName", "email"]);
+    expect(result.rows[0].firstName).toBe("Jane");
+  });
+
+  it("parses the final row correctly when the file has no trailing newline", async () => {
+    const csv = "a,b\n1,2\n3,4";
+    const result = await parseSpreadsheetBuffer(buildCsv(csv), "csv");
+    expect(result.rows).toEqual([{ a: "1", b: "2" }, { a: "3", b: "4" }]);
+  });
+
+  it("handles empty cells within an otherwise populated row", async () => {
+    const csv = "a,b,c\n1,,3\n";
+    const result = await parseSpreadsheetBuffer(buildCsv(csv), "csv");
+    expect(result.rows).toEqual([{ a: "1", b: "", c: "3" }]);
+  });
+
+  it("drops a single blank trailing line at EOF rather than emitting a phantom row", async () => {
+    const csv = "a,b\n1,2\n\n";
+    const result = await parseSpreadsheetBuffer(buildCsv(csv), "csv");
+    expect(result.rows).toEqual([{ a: "1", b: "2" }]);
+  });
+
+  it("blank-fills a data row with fewer fields than the header row rather than erroring", async () => {
+    const csv = "a,b,c\n1\n";
+    const result = await parseSpreadsheetBuffer(buildCsv(csv), "csv");
+    expect(result.rows).toEqual([{ a: "1", b: "", c: "" }]);
+  });
+
+  it("silently drops extra fields beyond the header count on a data row (no crash, no misalignment into the wrong column)", async () => {
+    const csv = "a,b\n1,2,3,4\n";
+    const result = await parseSpreadsheetBuffer(buildCsv(csv), "csv");
+    expect(result.rows).toEqual([{ a: "1", b: "2" }]);
+  });
+
+  it("handles Unicode content in both headers and values", async () => {
+    const csv = "名前,note\n田中,café ☕ — 日本語\n";
+    const result = await parseSpreadsheetBuffer(buildCsv(csv), "csv");
+    expect(result.rows).toEqual([{ "名前": "田中", note: "café ☕ — 日本語" }]);
+  });
+
+  it("does not crash or hang on an unclosed quote that runs to EOF -- degrades gracefully by treating the remainder as one field", async () => {
+    const csv = 'a,b\n"unterminated,1\nnext,2\n';
+    const result = await parseSpreadsheetBuffer(buildCsv(csv), "csv");
+    // No throw, no hang. Everything after the opening quote (including the
+    // literal comma and newline that would otherwise be delimiters) is
+    // consumed as literal field content until EOF -- this is inert (no
+    // exploitable state), just a data-fidelity edge case for a malformed
+    // file, not a security boundary.
+    expect(result.rows.length).toBe(1);
+  });
+
+  it("parses a large, deliberately adversarial run of doubled-quote sequences across many rows in linear time (no ReDoS-style blowup)", async () => {
+    // Each field is 20,000 doubled-quote pairs (collapsing to a 20,000-char
+    // value, safely under the 32,767 per-cell cap) -- the shape most likely
+    // to trip up a naive/backtracking implementation -- repeated across 500
+    // rows for a large total input (~20MB). The parser is a single-pass
+    // state machine with no regex and no lookahead beyond one character, so
+    // this is expected to stay linear; this test proves it by timing rather
+    // than asserting it from the algorithm's shape alone.
+    const adversarialField = '""'.repeat(20_000);
+    const rows = Array.from({ length: 500 }, (_, i) => `${i},"${adversarialField}"`);
+    const csv = `a,b\n${rows.join("\n")}\n`;
+    const start = performance.now();
+    const result = await parseSpreadsheetBuffer(buildCsv(csv), "csv");
+    const elapsedMs = performance.now() - start;
+    expect(result.rows.length).toBe(500);
+    expect(result.rows[0].b.length).toBe(20_000); // each "" collapses to one literal "
+    expect(elapsedMs).toBeLessThan(5000);
+  });
+
+  it("rejects excessive rows even though the whole file is parsed before the row-count check runs (documents current buffered-then-checked behavior, bounded by the overall byte cap)", async () => {
+    const header = "a\n";
+    const tooManyRows = Array.from({ length: SPREADSHEET_LIMITS.maxRows + 1 }, (_, i) => `${i}`).join("\n");
+    const csv = header + tooManyRows + "\n";
+    await expect(parseSpreadsheetBuffer(buildCsv(csv), "csv")).rejects.toMatchObject({ reason: "TOO_MANY_ROWS" });
+  });
+});

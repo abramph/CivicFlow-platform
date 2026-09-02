@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ExcelJS from "exceljs";
 
 /**
@@ -49,6 +49,16 @@ vi.mock("@/lib/vertical-import", () => ({
 
 import { requirePermission } from "@/lib/auth-guards";
 import { POST } from "@/app/api/import/route";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function permissionContextForOrg(organizationId: string): any {
+  return {
+    session: { userId: "officer-1", userEmail: "officer@example.com" },
+    organizationId,
+    role: "ORG_ADMIN",
+    can: () => true,
+  };
+}
 
 async function buildXlsxFile(rows: string[][], filename = "members.xlsx"): Promise<File> {
   const wb = new ExcelJS.Workbook();
@@ -161,5 +171,95 @@ describe("POST /api/import -- hardened spreadsheet parsing", () => {
     expect(response.status).toBe(200);
     expect(importPtaHouseholds).toHaveBeenCalledTimes(1);
     expect(importMembers).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Security Patch A follow-up -- /api/import previously had no rate limit
+ * at all despite doing the same expensive parsing work /api/imports
+ * already limits. These tests exercise the REAL in-memory rate limiter
+ * (not mocked -- rate-limit.ts is never mocked in this file), forced via
+ * CIVICFLOW_USE_MEMORY_RATE_LIMITER so the counting/window logic itself
+ * is genuinely proven, not just that some rate-limit function was called.
+ */
+describe("POST /api/import -- organization-scoped rate limiting (Security Patch A follow-up)", () => {
+  const originalEnv = process.env.CIVICFLOW_USE_MEMORY_RATE_LIMITER;
+
+  beforeEach(() => {
+    process.env.CIVICFLOW_USE_MEMORY_RATE_LIMITER = "1";
+  });
+
+  afterEach(() => {
+    if (originalEnv === undefined) delete process.env.CIVICFLOW_USE_MEMORY_RATE_LIMITER;
+    else process.env.CIVICFLOW_USE_MEMORY_RATE_LIMITER = originalEnv;
+    vi.useRealTimers();
+  });
+
+  it("allows requests up to the limit, then rejects the next one with 429 and never invokes the parser/importer on the rejected request", async () => {
+    const org = `rl-test-org-${Math.random()}`;
+    vi.mocked(requirePermission).mockResolvedValue(permissionContextForOrg(org));
+
+    for (let i = 0; i < 20; i++) {
+      const file = new File([`First Name\nJane${i}\n`], "members.csv", { type: "text/csv" });
+      const response = await POST(makeRequest(file));
+      expect(response.status).toBe(200);
+    }
+    importMembers.mockClear();
+
+    const file21 = new File(["First Name\nJane21\n"], "members.csv", { type: "text/csv" });
+    const response21 = await POST(makeRequest(file21));
+    const payload21 = await response21.json();
+
+    expect(response21.status).toBe(429);
+    expect(response21.headers.get("Retry-After")).toBeTruthy();
+    expect(payload21.ok).toBe(false);
+    expect(importMembers).not.toHaveBeenCalled();
+  });
+
+  it("does not let one organization's usage exhaust a different organization's allowance", async () => {
+    const orgA = `rl-test-org-a-${Math.random()}`;
+    const orgB = `rl-test-org-b-${Math.random()}`;
+
+    vi.mocked(requirePermission).mockResolvedValue(permissionContextForOrg(orgA));
+    for (let i = 0; i < 20; i++) {
+      const file = new File([`First Name\nJane${i}\n`], "members.csv", { type: "text/csv" });
+      const response = await POST(makeRequest(file));
+      expect(response.status).toBe(200);
+    }
+    // org A is now exhausted
+    const orgAOverLimit = await POST(makeRequest(new File(["First Name\nX\n"], "members.csv", { type: "text/csv" })));
+    expect(orgAOverLimit.status).toBe(429);
+
+    // org B, first request, should still succeed
+    vi.mocked(requirePermission).mockResolvedValue(permissionContextForOrg(orgB));
+    const orgBFirst = await POST(makeRequest(new File(["First Name\nJane\n"], "members.csv", { type: "text/csv" })));
+    expect(orgBFirst.status).toBe(200);
+  });
+
+  it("resets the allowance after the window elapses", async () => {
+    vi.useFakeTimers();
+    const org = `rl-test-org-window-${Math.random()}`;
+    vi.mocked(requirePermission).mockResolvedValue(permissionContextForOrg(org));
+
+    for (let i = 0; i < 20; i++) {
+      const file = new File([`First Name\nJane${i}\n`], "members.csv", { type: "text/csv" });
+      const response = await POST(makeRequest(file));
+      expect(response.status).toBe(200);
+    }
+    const exhausted = await POST(makeRequest(new File(["First Name\nX\n"], "members.csv", { type: "text/csv" })));
+    expect(exhausted.status).toBe(429);
+
+    vi.advanceTimersByTime(61_000); // just past the 60s window
+
+    const afterWindow = await POST(makeRequest(new File(["First Name\nY\n"], "members.csv", { type: "text/csv" })));
+    expect(afterWindow.status).toBe(200);
+  });
+
+  it("still enforces authorization first -- an unauthorized caller is rejected on its own merits, not confused with a rate-limit response", async () => {
+    vi.mocked(requirePermission).mockRejectedValueOnce(Object.assign(new Error("Forbidden"), { status: 403 }));
+    const file = new File(["First Name\nJane\n"], "members.csv", { type: "text/csv" });
+    const response = await POST(makeRequest(file));
+    expect(response.status).not.toBe(429);
+    expect(response.status).not.toBe(200);
   });
 });

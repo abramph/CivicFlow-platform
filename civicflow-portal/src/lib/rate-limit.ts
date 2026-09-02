@@ -93,8 +93,8 @@ export function getClientIp(request: Request): string {
   return request.headers.get("x-real-ip") ?? "unknown";
 }
 
-function makeKey(scope: string, request: Request): string {
-  return `rl:${scope}:${getClientIp(request)}`;
+function makeKey(scope: string, request: Request, explicitKey?: string): string {
+  return `rl:${scope}:${explicitKey ?? getClientIp(request)}`;
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -104,8 +104,17 @@ export async function applyRateLimit(params: {
   request: Request;
   limit: number;
   windowMs: number;
+  /** Security Patch A follow-up -- overrides the default IP-derived key.
+   * Use this for authenticated routes that must limit per-organization
+   * (so one organization's usage can never exhaust another's allowance,
+   * and multiple staff at the same organization share one budget
+   * regardless of which IP each request comes from) rather than
+   * per-client-IP (the only option previously available, which two
+   * different organizations behind a shared IP -- e.g. the same office
+   * network -- would have silently shared). */
+  key?: string;
 }): Promise<RateLimitDecision> {
-  const key = makeKey(params.scope, params.request);
+  const key = makeKey(params.scope, params.request, params.key);
 
   if (process.env.CIVICFLOW_USE_MEMORY_RATE_LIMITER === "1") {
     return checkMemoryLimit(key, params.limit, params.windowMs);
@@ -129,6 +138,7 @@ export async function requireRateLimit(params: {
   request: Request;
   limit: number;
   windowMs: number;
+  key?: string;
 }): Promise<Response | null> {
   const result = await applyRateLimit(params);
   if (result.allowed) return null;

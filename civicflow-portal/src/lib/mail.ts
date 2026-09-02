@@ -56,6 +56,9 @@ export async function sendEmail(input: SendEmailInput) {
     if (input.attachments) {
       for (const attachment of input.attachments) {
         assertSafeHeaderValue("attachment filename", attachment.filename);
+        if (attachment.contentType) {
+          assertSafeHeaderValue("attachment content type", attachment.contentType);
+        }
       }
     }
   } catch (error) {

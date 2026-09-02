@@ -63,8 +63,26 @@ export const SPREADSHEET_LIMITS = {
    * ever sees the buffer; this is a second, module-level backstop. */
   maxCompressedBytes: 100 * 1024 * 1024,
   /** Sum of every ZIP entry's declared uncompressed size -- the standard
-   * "zip bomb" budget, checked before any entry is decompressed. */
-  maxUncompressedBytes: 500 * 1024 * 1024,
+   * "zip bomb" budget, checked before any entry is decompressed.
+   *
+   * Justified against real infrastructure, not assumed: production runs
+   * on a single `apps-s-1vcpu-1gb` DigitalOcean instance (1 GiB total
+   * memory, instance_count 1 -- confirmed via `doctl apps spec get`,
+   * non-secret app metadata). Measuring parseXlsxRows() directly showed
+   * roughly a 3.2x multiplier from a workbook's declared uncompressed
+   * size to actual V8 heap growth (a real 50,000-row x 20-column
+   * workbook -- the largest shape this module's own maxRows/maxColumns
+   * allow at a realistic column width -- was 66.57MB uncompressed and
+   * grew heap usage by ~211MB when parsed). The previous 500MB figure
+   * was not derived from any of this -- at that multiplier, a single
+   * accepted request near the old limit could grow the process by
+   * roughly 1.6GB, comfortably exceeding the entire container on its
+   * own, before accounting for the Next.js/Prisma baseline or any other
+   * concurrent request the same single instance is also serving. 100MB
+   * keeps worst-case growth in the low hundreds of MB (~320MB by the
+   * measured multiplier) while still comfortably exceeding the 66.57MB
+   * a maximally-sized *legitimate* import actually needs. */
+  maxUncompressedBytes: 100 * 1024 * 1024,
   maxZipEntries: 2000,
   /** We only ever read the first worksheet (matches this codebase's
    * existing, unchanged behavior) -- this bounds how many sheets a
@@ -472,7 +490,13 @@ async function parseCsvRows(buffer: Buffer): Promise<Record<string, string>[]> {
   }
 
   const run = async (): Promise<Record<string, string>[]> => {
-    const text = buffer.toString("utf-8");
+    // Node's Buffer#toString("utf-8") does not strip a leading UTF-8 BOM
+    // (confirmed directly, not assumed) -- Excel on Windows routinely
+    // writes one, and left in place it silently attaches itself to the
+    // first header's text (`"﻿Name"` instead of `"Name"`), breaking
+    // that column's field-mapping for every legitimate BOM-prefixed
+    // upload without any visible error.
+    const text = buffer.toString("utf-8").replace(/^﻿/, "");
     const rawRows = parseCsvText(text);
     if (rawRows.length === 0) return [];
 
