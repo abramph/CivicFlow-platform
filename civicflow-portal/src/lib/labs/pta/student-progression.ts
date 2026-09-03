@@ -27,7 +27,11 @@ interface ActorInput {
   actorEmail?: string | null;
 }
 
-async function assertProgressionEnabled(organizationId: string): Promise<void> {
+/** Exported so the family-facing read surface (parent-progression.ts) gates
+ * on the exact same two flags as every administrative entry point here,
+ * rather than reimplementing the check and risking the two drifting apart.
+ * Behavior is unchanged for the administrative callers below. */
+export async function assertProgressionEnabled(organizationId: string): Promise<void> {
   if (!isPtaStudentProgressionPlatformEnabled()) {
     throw new PtaError("PTA_STUDENT_PROGRESSION_PLATFORM_DISABLED", "Student progression is not enabled on this platform.");
   }
