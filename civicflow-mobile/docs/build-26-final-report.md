@@ -1002,15 +1002,34 @@ plus reflog plus stash plus the raw object store:**
   any tracked commit and was never pushed. The one caveat beyond a pure
   "never touched by git" reading: a single orphaned, unreachable blob with
   this content still physically exists in the local `.git/objects` store
-  on this machine. It carries no history/graph exposure (nothing points
-  to it), but it is a real local artifact worth clearing — `git gc
-  --prune=now` (or the default ~2-week automatic prune expiry) would
-  remove it non-destructively, since it is not reachable from, and does
-  not need to be preserved by, any current branch, tag, or the stash.
-  **This specific cleanup step was not run in this pass** — it touches
-  `.git` internals, and per this session's standing caution around
-  git-destructive operations, is flagged for explicit authorization
-  rather than performed automatically.
+  on this machine. It is unreachable from every commit, branch, tag,
+  stash, and remote-tracking ref, and **an unreachable blob cannot be
+  included in an ordinary push** — so it carries no history or remote
+  exposure.
+
+**Correction — garbage collection is NOT a safe or recommended cleanup
+step here.** An earlier draft of this section described `git gc
+--prune=now` as removing the blob "non-destructively." **That
+characterization was wrong and is retracted.** `git gc --prune=now` does
+not target one object: it may permanently remove *every* unreachable
+object in the repository at once. This repository currently holds roughly
+250 other unreachable objects produced by ordinary rebase, amend, and
+reset activity across its many feature branches — those are exactly the
+objects that make accidental work recoverable, and pruning them would
+permanently destroy that safety net for unrelated work. The same applies
+to `git prune` and to any manual deletion inside `.git/objects`.
+
+Accordingly:
+- **No Git garbage collection, pruning, object deletion, or history
+  rewriting was performed at any point** in this or any prior pass.
+- **Garbage collection is unnecessary for Build 26 integration.** The
+  orphan blob does not affect the branch's mergeability, its contents, or
+  what a push would transmit.
+- **The real priorities are credential invalidation (external, by the
+  account holder) and removal of the working-tree file** — not touching
+  the object store. Once the credential is revoked, the orphan blob holds
+  only a dead value, and Git's own default maintenance will age it out on
+  its normal schedule without any manual intervention.
 
 **Other untracked artifacts checked for duplication:** all 9
 `civicflow-portal/docs/operations/*.md` files, all 3 dated HTML reports
@@ -1031,23 +1050,66 @@ or `--porcelain=v1 --untracked-files=all`; the other four legitimate
 untracked items still appear normally, unaffected; `git diff --check`
 passed with no whitespace/conflict-marker issues.
 
+### Credential-purpose investigation (local repository evidence only)
+
+A follow-up pass attempted to establish what this credential is for,
+using only local repository context — no external service was contacted,
+and the credential was never used, tested, or read for this purpose.
+
+Sanitized findings:
+- **WordPress integration present: yes** — `civicflow-marketing-theme/`
+  (34 tracked files) is a WordPress theme for the public marketing site.
+- **Credential file referenced by code: no** — zero tracked source files,
+  scripts, `package.json` commands, CI workflows
+  (`.github/workflows/*`), or environment loaders reference this path or
+  any path under `.claude/`.
+- **Credential file referenced by documentation: no** — the only two
+  tracked files naming it are `.gitignore` and this report, both created
+  by this containment work itself.
+- **Likely environment-variable name: none exists.** No tracked
+  `.env.example` across any of the five packages defines any
+  WordPress-related variable, and no `WP_*`/`WORDPRESS_*` identifier
+  appears anywhere in tracked content.
+- **One likely public site association: no.**
+- **Multiple possible site associations: yes** — the untracked
+  `docs/unestra-website-launch-report-2026-07-14.html` mentions
+  "application password" twice, and each mention sits near more than one
+  of this project's three public domains (getunestra.com,
+  civicflowapp.com, aphtechgroup.com). The repository does not
+  disambiguate which site or account the credential belongs to.
+- **Active use can be established locally: no** — the theme's own README
+  documents manual installation through the WordPress admin UI
+  (Appearance → Themes → Upload), not automated API publishing. No
+  committed automation consumes this credential.
+- **Credential purpose remains uncertain: yes** — combined with the
+  format mismatch noted above (the value does not match WordPress's
+  standard generated application-password shape), neither the credential
+  type nor its owning account can be established from the repository.
+  The earlier, more confident attribution to the getunestra.com
+  marketing-site launch was an inference from the filename and this
+  project's work history; it is **not** supported by repository evidence
+  and should not be acted on as fact.
+
+**Operational-requirement classification: `UNREFERENCED LOCAL CREDENTIAL
+NOTE`.** Nothing in the repository reads this file, so removing it cannot
+break any local or production workflow, any Build 26 test or build, or
+any documented deployment step. It appears to be a human convenience note,
+not wiring for an automated integration.
+
 **External remediation required (not performed by this review, per its
-explicit boundary):**
-1. Sign in to the WordPress administrative account this credential
-   belongs to. **Not confirmed by this file's contents** (never read for
-   this purpose) — based on this project's own prior work history (the
-   getunestra.com marketing-site launch, which used WordPress's REST API
-   with application-password authentication), that site is the most
-   plausible association, but the human operator must verify the correct
-   account and site directly rather than relying on this inference.
-2. Locate Users → Profile → Application Passwords (or the account's login
-   credential, if this turns out not to be an application password
-   specifically) for the associated user.
-3. Revoke the exposed credential.
-4. If an active integration still needs it, create a replacement scoped
-   to the minimum required purpose, and store it only in the deployment
+explicit boundary) — blocked pending user identification:**
+1. Identify the account and service this credential belongs to. **The
+   repository cannot establish this** (see above), so this step requires
+   the account holder's own knowledge.
+2. Once identified, locate the relevant credential record (for WordPress:
+   Users → Profile → Application Passwords) by its label and account
+   context — never by exposing the secret value.
+3. Revoke the credential.
+4. Only if an active integration still needs one, create a replacement
+   scoped to the minimum required purpose, and store it in the deployment
    secret manager or protected environment configuration — never back
-   into a repository file.
+   into a repository file. Note that no committed integration currently
+   requires one.
 5. Verify the old credential no longer works only as part of an
    explicitly authorized operational test.
 
@@ -1079,13 +1141,16 @@ every local ref, every `refs/remotes/origin/*` ref, and the one stash. One
 orphaned, unreachable local blob with matching content exists in
 `.git/objects` (not reachable from anything, structurally unpushable, and
 one of roughly 250 similar unreachable objects this repository's history
-already contains) — flagged for an optional `git gc --prune=now`, not yet
-run pending authorization. Repository protection (a narrow `.gitignore`
-rule for the exact path) is now in place. **External revocation of the
-credential, and local file removal, both remain outstanding and require
-the account holder's direct action** — this review does not perform
-either. No secret value was printed, logged, staged, or committed at any
-point.
+already contains). **No garbage collection, pruning, or object deletion
+was performed, and none is recommended** — `git gc --prune=now` would
+permanently remove all ~250 unreachable objects, not just this one,
+destroying the recoverability safety net for unrelated work; it is also
+unnecessary for Build 26 integration (see Part 15's correction note).
+Repository protection (a narrow `.gitignore` rule for the exact path) is
+now in place. **External revocation of the credential, and local file
+removal, both remain outstanding and require the account holder's direct
+action** — this review does not perform either. No secret value was
+printed, logged, staged, or committed at any point.
 
 This status carries forward, not replaces, the prior
 **BUILD 26 CODE REVIEW COMPLETE**, **BUILD 26 USER-FACING FAMILY PHOTO
