@@ -71,6 +71,8 @@ import { PtaError } from "@/lib/labs/pta/errors";
 const actor = { actorUserId: "u1", actorEmail: "officer@example.org" };
 const ORG = "org-1";
 
+const executeRawUnsafe = vi.fn().mockResolvedValue(undefined);
+
 function transactionRunsCallback() {
   transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) =>
     callback({
@@ -82,6 +84,13 @@ function transactionRunsCallback() {
         update: (...a: unknown[]) => updateEnrollment(...a),
       },
       ptaProgressionClassroomMapping: { deleteMany: (...a: unknown[]) => deleteManyMapping(...a), createMany: (...a: unknown[]) => createManyMapping(...a) },
+      // commitProgressionBatch wraps each record's processing in a real
+      // SAVEPOINT (see student-progression.ts) so one record's failure can't
+      // poison the rest of the transaction -- verified end-to-end against a
+      // real Postgres database during the build-26 review pass. This mock
+      // just needs to exist and resolve; the actual savepoint semantics are
+      // a real-database property, not something a mocked tx can exercise.
+      $executeRawUnsafe: (...a: unknown[]) => executeRawUnsafe(...a),
     })
   );
 }
@@ -402,6 +411,44 @@ describe("commitProgressionBatch", () => {
 
     expect(result.promoted).toBe(1);
     expect(result.graduated).toBe(1);
+  });
+
+  it("isolates one record's failure via a SAVEPOINT -- the rest of the batch still commits, and the batch itself is not aborted", async () => {
+    // Regression test for a real defect found during the build-26 review:
+    // Postgres aborts the ENTIRE surrounding transaction after any error,
+    // even one caught in application code -- verified end-to-end against a
+    // real database that without a per-record SAVEPOINT, a single
+    // constraint violation on one student's enrollment silently rolled back
+    // every other student's progression in the same commit, surfacing only
+    // as an unhandled error rather than one FAILED record.
+    findFirstBatch.mockResolvedValueOnce(
+      batchWithRecords([
+        { id: "r1", studentId: "s1", outcome: "PROMOTE", targetGradeId: "g2", targetClassroomId: "c2" },
+        { id: "r2", studentId: "s2", outcome: "PROMOTE", targetGradeId: "g2", targetClassroomId: "c2" },
+      ])
+    );
+    findFirstEnrollment.mockResolvedValueOnce(null); // r1: no existing target enrollment
+    createEnrollment.mockRejectedValueOnce(new Error("Unique constraint failed on the fields: (`studentId`,`schoolYear`)")); // r1's create fails
+    findFirstEnrollment.mockResolvedValueOnce(null); // r2: no existing target enrollment
+    createEnrollment.mockResolvedValueOnce({ id: "e-r2" }); // r2's create succeeds
+    findFirstBatch.mockResolvedValueOnce({ id: "batch-1", status: "COMMITTED", records: [] });
+
+    const result = await commitProgressionBatch({ organizationId: ORG, batchId: "batch-1", previewVersion: PREVIEW_TIME.toISOString(), idempotencyKey: "k1", ...actor });
+
+    // r1 failed cleanly and was marked FAILED with the real error recorded.
+    expect(updateRecord).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "r1" }, data: expect.objectContaining({ status: "FAILED", exceptionReason: expect.stringContaining("Unique constraint") }) })
+    );
+    // r2 still succeeded in the SAME commit.
+    expect(updateRecord).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "r2" }, data: expect.objectContaining({ status: "APPLIED", targetEnrollmentId: "e-r2" }) }));
+    expect(result.failed).toBe(1);
+    expect(result.promoted).toBe(1);
+    // The batch itself still committed -- one record's failure did not
+    // abort the whole commit or leave the batch stuck at PREVIEWED.
+    expect(updateBatch).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "COMMITTED" }) }));
+    // A savepoint was taken and either released or rolled back for each record.
+    expect(executeRawUnsafe.mock.calls.filter((c) => String(c[0]).startsWith("SAVEPOINT")).length).toBe(2);
+    expect(executeRawUnsafe.mock.calls.some((c) => String(c[0]).startsWith("ROLLBACK TO SAVEPOINT"))).toBe(true);
   });
 
   it("a retried commit with the SAME idempotency key against an already-COMMITTED batch returns the prior result without re-applying", async () => {

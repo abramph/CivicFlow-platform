@@ -448,61 +448,72 @@ export async function commitProgressionBatch(input: CommitProgressionBatchInput)
   let failed = 0;
 
   await prisma.$transaction(async (tx) => {
+    let savepointCounter = 0;
     for (const record of batch.records) {
+      // Postgres aborts the ENTIRE surrounding transaction on any error,
+      // even one caught in application code — a later query in the same
+      // transaction fails with "current transaction is aborted" regardless
+      // of the JS-level try/catch (verified empirically: an uncaught-looking
+      // recovery write after a caught unique-violation also throws). A
+      // per-record SAVEPOINT is the only way to actually isolate one
+      // record's failure — release it on success, roll back to it (and
+      // only it) on failure, so the rest of the batch keeps committing.
+      // Without this, a single conflicting record would silently abort
+      // every other student's progression too, discovered only as an
+      // opaque unhandled error rather than one FAILED record.
+      const savepoint = `pta_progression_commit_${savepointCounter++}`;
+      await tx.$executeRawUnsafe(`SAVEPOINT ${savepoint}`);
       try {
         if (record.outcome === "NEEDS_REVIEW" || record.outcome === "EXCLUDE") {
           await tx.ptaStudentProgressionRecord.update({ where: { id: record.id }, data: { status: "SKIPPED" } });
           skipped += 1;
-          continue;
-        }
-        if (record.outcome === "TRANSFER" || record.outcome === "WITHDRAW") {
+        } else if (record.outcome === "TRANSFER" || record.outcome === "WITHDRAW") {
           await tx.ptaStudentProgressionRecord.update({ where: { id: record.id }, data: { status: "APPLIED" } });
           if (record.outcome === "TRANSFER") transferred += 1;
           else withdrawn += 1;
-          continue;
-        }
-        if (record.outcome === "GRADUATE") {
+        } else if (record.outcome === "GRADUATE") {
           await tx.ptaStudentProgressionRecord.update({ where: { id: record.id }, data: { status: "APPLIED" } });
           graduated += 1;
-          continue;
-        }
-        // PROMOTE, RETAIN, MANUAL: all create a target-year enrollment when
-        // a target grade+classroom are present. Idempotent against
-        // PtaStudentEnrollment's own unique(studentId, schoolYear) — if a
-        // row already exists for this student+target year (e.g. someone
-        // enrolled them manually ahead of this batch), reuse it rather
-        // than erroring.
-        if (!record.targetGradeId || !record.targetClassroomId) {
+        } else if (!record.targetGradeId || !record.targetClassroomId) {
+          // PROMOTE, RETAIN, MANUAL require a target grade+classroom.
           await tx.ptaStudentProgressionRecord.update({ where: { id: record.id }, data: { status: "SKIPPED" } });
           skipped += 1;
-          continue;
+        } else {
+          // Idempotent against PtaStudentEnrollment's own
+          // unique(studentId, schoolYear) — if a row already exists for
+          // this student+target year (e.g. someone enrolled them manually
+          // ahead of this batch, or a concurrent commit attempt won the
+          // race), reuse it rather than erroring.
+          const existingTargetEnrollment = await tx.ptaStudentEnrollment.findFirst({
+            where: { organizationId: input.organizationId, studentId: record.studentId, schoolYearId: batch.toSchoolYearId },
+          });
+          const targetEnrollment =
+            existingTargetEnrollment ??
+            (await tx.ptaStudentEnrollment.create({
+              data: {
+                organizationId: input.organizationId,
+                studentId: record.studentId,
+                classroomId: record.targetClassroomId,
+                schoolYear: batch.toSchoolYear.label,
+                schoolYearId: batch.toSchoolYearId,
+                status: "ACTIVE",
+              },
+            }));
+          await tx.ptaStudentProgressionRecord.update({
+            where: { id: record.id },
+            data: { status: "APPLIED", targetEnrollmentId: targetEnrollment.id },
+          });
+          if (record.outcome === "PROMOTE") promoted += 1;
+          else retained += 1;
         }
-        const existingTargetEnrollment = await tx.ptaStudentEnrollment.findFirst({
-          where: { organizationId: input.organizationId, studentId: record.studentId, schoolYearId: batch.toSchoolYearId },
-        });
-        const targetEnrollment =
-          existingTargetEnrollment ??
-          (await tx.ptaStudentEnrollment.create({
-            data: {
-              organizationId: input.organizationId,
-              studentId: record.studentId,
-              classroomId: record.targetClassroomId,
-              schoolYear: batch.toSchoolYear.label,
-              schoolYearId: batch.toSchoolYearId,
-              status: "ACTIVE",
-            },
-          }));
-        await tx.ptaStudentProgressionRecord.update({
-          where: { id: record.id },
-          data: { status: "APPLIED", targetEnrollmentId: targetEnrollment.id },
-        });
-        if (record.outcome === "PROMOTE") promoted += 1;
-        else retained += 1;
+        await tx.$executeRawUnsafe(`RELEASE SAVEPOINT ${savepoint}`);
       } catch (err) {
+        await tx.$executeRawUnsafe(`ROLLBACK TO SAVEPOINT ${savepoint}`);
         await tx.ptaStudentProgressionRecord.update({
           where: { id: record.id },
           data: { status: "FAILED", exceptionReason: err instanceof Error ? err.message.slice(0, 500) : "Unknown error" },
         });
+        await tx.$executeRawUnsafe(`RELEASE SAVEPOINT ${savepoint}`);
         failed += 1;
       }
     }
