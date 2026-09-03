@@ -120,12 +120,21 @@ export default function PtaFamilyPhotoScreen() {
 
   async function launchPicker(source: PhotoSource) {
     const options: ImagePicker.ImagePickerOptions = { mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.8 };
-    const result = source === 'camera' ? await ImagePicker.launchCameraAsync(options) : await ImagePicker.launchImageLibraryAsync(options);
-    if (result.canceled || !result.assets[0]) {
+    try {
+      const result = source === 'camera' ? await ImagePicker.launchCameraAsync(options) : await ImagePicker.launchImageLibraryAsync(options);
+      if (result.canceled || !result.assets[0]) {
+        setStage({ kind: 'idle' });
+        return;
+      }
+      setStage({ kind: 'previewing', asset: result.assets[0] });
+    } catch {
+      // The native call itself can throw (e.g. no camera hardware
+      // available) distinctly from a normal user cancellation, which
+      // arrives as result.canceled above, not a rejection. Surfaces as a
+      // normal, visible error rather than a silently stuck screen.
+      setActionError(source === 'camera' ? 'Unable to use the camera on this device.' : 'Unable to open your photo library.');
       setStage({ kind: 'idle' });
-      return;
     }
-    setStage({ kind: 'previewing', asset: result.assets[0] });
   }
 
   async function confirmUpload(asset: ImagePicker.ImagePickerAsset) {

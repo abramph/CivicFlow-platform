@@ -172,6 +172,20 @@ describe('PtaFamilyPhotoScreen', () => {
     expect(screen.queryByText('Use Your Camera')).toBeNull();
   });
 
+  it('shows a visible error instead of silently hanging when the native camera call itself throws', async () => {
+    // build-26 review, Section 6: a device with no camera hardware (or any
+    // other native-level failure) rejects rather than resolving with
+    // canceled:true -- distinct from a normal user cancellation, and
+    // previously unhandled.
+    mockGetCameraPermissionsAsync.mockResolvedValue(granted());
+    mockLaunchCameraAsync.mockRejectedValueOnce(new Error('Camera not available'));
+    render(<PtaFamilyPhotoScreen />);
+    await openTakePhoto();
+
+    expect(screen.getByText('Unable to use the camera on this device.')).toBeTruthy();
+    expect(screen.getByLabelText('Add photo')).toBeTruthy(); // back to a usable idle state, not stuck
+  });
+
   it('shows a neutral Settings redirect (not a repeated system prompt) when permission was already denied and cannot be re-asked', async () => {
     mockGetCameraPermissionsAsync.mockResolvedValue(blocked());
     const openSettingsSpy = jest.spyOn(Linking, 'openSettings').mockResolvedValue();
