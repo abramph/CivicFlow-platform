@@ -699,6 +699,37 @@ export function getPtaDues(organizationId: string) {
   return apiFetch<PtaDuesSummary>(`/api/mobile/pta/dues?organizationId=${encodeURIComponent(organizationId)}`);
 }
 
+// ── PTA parent — read-only student progression ───────────────────────────
+// Backed by /api/mobile/pta/progression. Family-scoped and read-only: the
+// household is resolved server-side from the caller's own
+// PtaHouseholdAdult linkage, never sent by the client, and the response
+// carries no administrative preview, batch, outcome, or audit data (see
+// parent-progression.ts). Administrative progression stays portal-only.
+
+/** Family-facing status vocabulary — deliberately small and safe; never a
+ * raw internal progression record status or outcome code. */
+export type PtaProgressionStatus = 'CURRENT' | 'CONFIRMED' | 'NOT_YET_AVAILABLE' | 'COMPLETED';
+
+export interface PtaProgressionStudent {
+  studentId: string;
+  displayName: string;
+  currentGrade: string | null;
+  currentClassroom: string | null;
+  nextGrade: string | null;
+  nextClassroom: string | null;
+  status: PtaProgressionStatus;
+}
+
+export interface PtaProgressionSummary {
+  currentSchoolYear: string | null;
+  nextSchoolYear: string | null;
+  students: PtaProgressionStudent[];
+}
+
+export function getPtaProgression(organizationId: string) {
+  return apiFetch<PtaProgressionSummary>(`/api/mobile/pta/progression?organizationId=${encodeURIComponent(organizationId)}`);
+}
+
 export interface ReportPtaDuesPaymentInput {
   organizationId: string;
   duesChargeId?: string | null;

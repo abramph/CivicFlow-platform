@@ -9,7 +9,7 @@ import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { useScreenTopPadding } from '@/hooks/use-screen-top-padding';
 import { useAuth } from '@/lib/auth-context';
-import { getPtaHouseholdPhoto, type PtaHouseholdPhoto } from '@/lib/mobile-api';
+import { getPtaHouseholdPhoto, getPtaProgression, type PtaHouseholdPhoto } from '@/lib/mobile-api';
 
 /**
  * "My Family" -- the parent-facing home for household-level PTA content.
@@ -29,6 +29,7 @@ export default function PtaMyFamilyScreen() {
   const householdName = selectedOrganization?.pta?.householdName ?? null;
 
   const [photo, setPhoto] = useState<PtaHouseholdPhoto | null>(null);
+  const [progressionAvailable, setProgressionAvailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const topPadding = useScreenTopPadding();
@@ -40,6 +41,20 @@ export default function PtaMyFamilyScreen() {
       setLoadError(null);
     } catch {
       setLoadError('Unable to load your family photo. Check your connection and try again.');
+    }
+    // Progression availability is decided by the SERVER, not by the client:
+    // both progression feature flags default OFF and are checked inside
+    // /api/mobile/pta/progression, which 403s when either is off. Probing
+    // it here is what keeps the entry point genuinely flag-respecting
+    // without duplicating flag state into the org-capability payload. A
+    // failure of any kind hides the card (fails closed) and is otherwise
+    // silent -- the family photo is this screen's primary content and must
+    // not show an error just because an optional card is unavailable.
+    try {
+      await getPtaProgression(selectedOrganizationId);
+      setProgressionAvailable(true);
+    } catch {
+      setProgressionAvailable(false);
     }
   }, [selectedOrganizationId, hasPtaIdentity]);
 
@@ -117,6 +132,23 @@ export default function PtaMyFamilyScreen() {
           </>
         )}
       </ThemedView>
+
+      {/* Rendered only when the server confirmed progression is available
+          for this organization (both feature flags on) -- see load(). */}
+      {!loading && progressionAvailable ? (
+        <ThemedView type="backgroundElement" style={styles.card} accessible={false}>
+          <ThemedText type="smallBold" style={styles.cardLabel}>Progression</ThemedText>
+          <ThemedText type="small" themeColor="textSecondary" style={styles.cardLabel}>
+            See each child&apos;s current placement and any confirmed next-year placement.
+          </ThemedText>
+          <PrimaryActionButton
+            label="View Student Progression"
+            accessibilityLabel="View student progression"
+            accessibilityHint="Opens a read-only view of each child's current grade and class, and any confirmed placement for next school year."
+            onPress={() => router.push('/pta-progression' as never)}
+          />
+        </ThemedView>
+      ) : null}
     </ScrollView>
   );
 }
