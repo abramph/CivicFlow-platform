@@ -92,6 +92,27 @@ describe('PtaFamilyPhotoScreen', () => {
     expect(mockRequestCameraPermissionsAsync).not.toHaveBeenCalled();
   });
 
+  it('Choose from Library launches the system picker directly, never requesting media-library permission', async () => {
+    // build-26 review, Section 6: launchImageLibraryAsync's own doc
+    // comment says it "Requires Permissions.MEDIA_LIBRARY on iOS 10 only"
+    // -- on every platform this app actually supports, the system picker
+    // needs no broad library grant at all, so requesting one would be
+    // exactly the unnecessary photo-library permission to avoid.
+    mockLaunchImageLibraryAsync.mockResolvedValue({
+      canceled: false,
+      assets: [{ uri: 'file:///tmp/library-photo.jpg', width: 10, height: 10, fileName: 'library-photo.jpg', mimeType: 'image/jpeg' }],
+    });
+    render(<PtaFamilyPhotoScreen />);
+    await waitFor(() => expect(screen.getByLabelText('Add photo')).toBeTruthy());
+    await press('Add photo');
+    await press('Choose from library');
+
+    expect(mockGetMediaLibraryPermissionsAsync).not.toHaveBeenCalled();
+    expect(mockRequestMediaLibraryPermissionsAsync).not.toHaveBeenCalled();
+    expect(mockLaunchImageLibraryAsync).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText('Use this photo')).toBeTruthy();
+  });
+
   it('shows the neutral priming screen (not the system prompt directly) when camera permission has never been asked', async () => {
     mockGetCameraPermissionsAsync.mockResolvedValue(undetermined());
     render(<PtaFamilyPhotoScreen />);

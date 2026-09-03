@@ -21,43 +21,34 @@ import {
 type PhotoSource = 'camera' | 'library';
 
 /**
- * Custom pre-permission copy. Deliberately neutral -- "Continue" only
- * advances to the system's own permission dialog; it does not itself
- * grant, allow, or enable anything, and nothing here tries to influence
- * what the user picks once that system dialog appears. This screen is only
- * ever shown in-context, after the user has already tapped "Take Photo" or
- * "Choose from Library" below -- never at launch, sign-in, or registration.
- * See attendance-scan.tsx for the pattern this deliberately does NOT
- * follow ("Grant Camera Access" -- flagged for correction in a later
- * pass); this screen is the corrected version of that pattern.
+ * Custom pre-permission copy for the camera path only. Deliberately
+ * neutral -- "Continue" only advances to the system's own permission
+ * dialog; it does not itself grant, allow, or enable anything, and nothing
+ * here tries to influence what the user picks once that system dialog
+ * appears. This screen is only ever shown in-context, after the user has
+ * already tapped "Take Photo" below -- never at launch, sign-in, or
+ * registration. See attendance-scan.tsx for the pattern this deliberately
+ * does NOT follow ("Grant Camera Access" -- corrected in a later pass);
+ * this screen is the corrected version of that pattern.
+ *
+ * The library path never reaches this priming step at all -- see
+ * beginSource's own comment on why no permission is requested for it.
  */
-const PRIMING_COPY: Record<PhotoSource, { title: string; body: string }> = {
-  camera: {
-    title: 'Use Your Camera',
-    body: "To take a new family photo, Unestra needs to use your camera. You'll be asked to confirm on the next screen.",
-  },
-  library: {
-    title: 'Choose a Photo',
-    body: "To choose a family photo from your library, Unestra needs access to your photos. You'll be asked to confirm on the next screen.",
-  },
+const CAMERA_PRIMING_COPY = {
+  title: 'Use Your Camera',
+  body: "To take a new family photo, Unestra needs to use your camera. You'll be asked to confirm on the next screen.",
 };
 
-const BLOCKED_COPY: Record<PhotoSource, { title: string; body: string }> = {
-  camera: {
-    title: 'Camera Access Is Off',
-    body: 'Camera access for Unestra is currently off. You can turn it back on in Settings if you want to take a new photo.',
-  },
-  library: {
-    title: 'Photo Access Is Off',
-    body: 'Photo library access for Unestra is currently off. You can turn it back on in Settings if you want to choose a photo.',
-  },
+const CAMERA_BLOCKED_COPY = {
+  title: 'Camera Access Is Off',
+  body: 'Camera access for Unestra is currently off. You can turn it back on in Settings if you want to take a new photo.',
 };
 
 type Stage =
   | { kind: 'idle' }
   | { kind: 'choosingSource' }
-  | { kind: 'primingPermission'; source: PhotoSource }
-  | { kind: 'permissionBlocked'; source: PhotoSource }
+  | { kind: 'primingPermission'; source: 'camera' }
+  | { kind: 'permissionBlocked'; source: 'camera' }
   | { kind: 'previewing'; asset: ImagePicker.ImagePickerAsset }
   | { kind: 'uploading' }
   | { kind: 'removing' };
@@ -94,26 +85,37 @@ export default function PtaFamilyPhotoScreen() {
 
   const beginSource = useCallback(async (source: PhotoSource) => {
     setActionError(null);
-    const current = source === 'camera' ? await ImagePicker.getCameraPermissionsAsync() : await ImagePicker.getMediaLibraryPermissionsAsync();
-
+    if (source === 'library') {
+      // launchImageLibraryAsync's own doc comment: "Requires
+      // Permissions.MEDIA_LIBRARY on iOS 10 only" -- on every iOS version
+      // this app actually supports, and on Android (the plugin config never
+      // requests a storage/media-library runtime permission either), the
+      // system picker runs out-of-process and hands back only the file the
+      // user chose, with no broad library grant at all. Requesting it
+      // anyway would be exactly the unnecessary photo-library permission
+      // the Apple 5.1.1(iv) correction is scoped to avoid introducing.
+      await launchPicker('library');
+      return;
+    }
+    const current = await ImagePicker.getCameraPermissionsAsync();
     if (current.granted) {
-      await launchPicker(source);
+      await launchPicker('camera');
       return;
     }
     if (!current.canAskAgain) {
-      setStage({ kind: 'permissionBlocked', source });
+      setStage({ kind: 'permissionBlocked', source: 'camera' });
       return;
     }
-    setStage({ kind: 'primingPermission', source });
+    setStage({ kind: 'primingPermission', source: 'camera' });
   }, []);
 
-  async function confirmPriming(source: PhotoSource) {
-    const result = source === 'camera' ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
+  async function confirmPriming() {
+    const result = await ImagePicker.requestCameraPermissionsAsync();
     if (!result.granted) {
-      setStage(result.canAskAgain ? { kind: 'idle' } : { kind: 'permissionBlocked', source });
+      setStage(result.canAskAgain ? { kind: 'idle' } : { kind: 'permissionBlocked', source: 'camera' });
       return;
     }
-    await launchPicker(source);
+    await launchPicker('camera');
   }
 
   async function launchPicker(source: PhotoSource) {
@@ -219,17 +221,17 @@ export default function PtaFamilyPhotoScreen() {
 
           {stage.kind === 'primingPermission' ? (
             <ThemedView type="backgroundElement" style={styles.actionCard}>
-              <ThemedText type="smallBold">{PRIMING_COPY[stage.source].title}</ThemedText>
-              <ThemedText type="small" themeColor="textSecondary">{PRIMING_COPY[stage.source].body}</ThemedText>
-              <PrimaryActionButton label="Continue" onPress={() => confirmPriming(stage.source)} />
+              <ThemedText type="smallBold">{CAMERA_PRIMING_COPY.title}</ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">{CAMERA_PRIMING_COPY.body}</ThemedText>
+              <PrimaryActionButton label="Continue" onPress={() => confirmPriming()} />
               <SecondaryLinkButton label="Not Now" onPress={() => setStage({ kind: 'idle' })} accessibilityLabel="Not now" />
             </ThemedView>
           ) : null}
 
           {stage.kind === 'permissionBlocked' ? (
             <ThemedView type="backgroundElement" style={styles.actionCard}>
-              <ThemedText type="smallBold">{BLOCKED_COPY[stage.source].title}</ThemedText>
-              <ThemedText type="small" themeColor="textSecondary">{BLOCKED_COPY[stage.source].body}</ThemedText>
+              <ThemedText type="smallBold">{CAMERA_BLOCKED_COPY.title}</ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">{CAMERA_BLOCKED_COPY.body}</ThemedText>
               <PrimaryActionButton label="Open Settings" onPress={() => Linking.openSettings()} />
               <SecondaryLinkButton label="Not Now" onPress={() => setStage({ kind: 'idle' })} accessibilityLabel="Not now" />
             </ThemedView>
