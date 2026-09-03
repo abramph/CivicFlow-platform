@@ -9,7 +9,7 @@ import { buildImportSourceObjectKey, computeImportRetentionDate, uploadImportSou
 import { analyzeBatch } from "@/lib/imports/engine";
 import { ImportError } from "@/lib/imports/errors";
 import { IMPORT_KINDS, authorizeImportKind } from "@/lib/imports/authorization";
-import { SpreadsheetValidationError } from "@/lib/imports/spreadsheet-parser";
+import { SpreadsheetValidationError, LEGACY_XLS_MESSAGE } from "@/lib/imports/spreadsheet-parser";
 import { parseUploadedSpreadsheet, ParseAdmissionDeniedError } from "@/lib/imports/parse-spreadsheet-isolated";
 
 export const runtime = "nodejs";
@@ -44,6 +44,22 @@ function validateMapping(importKind: ImportKind, mappedFields: Set<string>): voi
 }
 
 export async function POST(request: Request) {
+  // Rate-limit-order follow-up -- this call passes no explicit `key`, so
+  // requireRateLimit falls back to an IP-derived bucket (see makeKey() in
+  // rate-limit.ts), NOT organizationId. That is deliberate here, and
+  // safe to run before authentication: an IP-derived key carries no
+  // organizational identity at all, so an unauthenticated caller can
+  // never consume or exhaust a SPECIFIC organization's allowance --
+  // there is no per-org bucket for them to reach. Its real tradeoff is
+  // the normal one for any pre-auth IP throttle (two different orgs
+  // sharing one office network's IP share one bucket), proven and
+  // documented in imports-create-route-rate-limit.test.ts, not a
+  // cross-tenant authorization bypass. Contrast with /api/import's own
+  // rate limiter below in this codebase, which explicitly passes
+  // `key: organizationId` -- that one runs AFTER authentication (so an
+  // organizationId is already available to key on) and exists to give
+  // each organization its own fair-use budget, a different goal from
+  // this route's "throttle the unauthenticated front door" placement.
   const limited = await requireRateLimit({ scope: "api:imports:create", request, limit: 20, windowMs: 60_000 });
   if (limited) return limited;
 
@@ -55,7 +71,25 @@ export async function POST(request: Request) {
 
     const { organizationId, session, can } = await requirePermission("imports:create", "throw");
 
-    const form = await request.formData();
+    // Auth-ordering follow-up -- content type checked before parsing,
+    // and a malformed multipart body now surfaces as a clean 400 instead
+    // of falling through to the generic unhandled-error path (safe
+    // either way, but that path answers 500 for what is really a client
+    // error). This route's auth/rate-limit/content-length ordering was
+    // already correct (all run above, before this point) -- only these
+    // two checks were missing.
+    const contentType = request.headers.get("content-type") ?? "";
+    if (!contentType.toLowerCase().startsWith("multipart/form-data")) {
+      return Response.json({ ok: false, error: "Unsupported content type. Expected a multipart/form-data file upload.", code: "IMPORT_VALIDATION_ERROR" }, { status: 415 });
+    }
+
+    let form: FormData;
+    try {
+      form = await request.formData();
+    } catch {
+      return Response.json({ ok: false, error: "Could not read the uploaded file. Please try again.", code: "IMPORT_VALIDATION_ERROR" }, { status: 400 });
+    }
+
     const file = form.get("file") as File | null;
     const mappingRaw = String(form.get("mapping") ?? "{}");
     const forceNewAnalysis = form.get("forceNewAnalysis") === "1";
@@ -73,6 +107,23 @@ export async function POST(request: Request) {
     }
     if (file.size > MAX_BYTES) {
       return Response.json({ ok: false, error: "File too large (max 50 MB)", code: "IMPORT_VALIDATION_ERROR" }, { status: 413 });
+    }
+
+    // Auth-ordering follow-up (.xls message unification) -- unlike preview
+    // mode below, the non-preview path used to have no synchronous format
+    // check at all: a .xls upload would reach prisma.importBatch.create()
+    // and uploadImportSourceFile() and only fail later, asynchronously,
+    // inside analyzeBatch() (whose result this route doesn't even wait for
+    // -- see the .catch(() => null) a few lines down). That meant a
+    // rejected .xls request still left a real ImportBatch + stored file
+    // behind. This is a cheap, extension-only check (no parse, no worker)
+    // so the happy path's parse cost is unchanged; it intentionally does
+    // NOT replace analyzeBatch()'s deeper magic-byte/spoofed-extension
+    // detection, which still runs (and still safely fails the batch
+    // asynchronously) for every other malformed-content case.
+    const claimedExt = file.name.toLowerCase().split(".").pop() ?? "";
+    if (claimedExt === "xls") {
+      return Response.json({ ok: false, error: LEGACY_XLS_MESSAGE, code: "IMPORT_VALIDATION_ERROR" }, { status: 400 });
     }
 
     // Security Patch A -- lets the upload form get headers/a preview for

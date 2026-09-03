@@ -30,10 +30,10 @@ const FORMAT_INFO = [
     full: true,
   },
   {
-    ext: ".csv / .xlsx / .xls",
+    ext: ".csv / .xlsx",
     label: "CSV or Excel Spreadsheet",
     desc: "Partial migration — imports members and contributions from a flat file. Events, campaigns, and meetings are not included.",
-    how: "Include columns: First Name, Last Name, Email, Phone, Join Date, City, State, ZIP, Amount, Date.",
+    how: "Include columns: First Name, Last Name, Email, Phone, Join Date, City, State, ZIP, Amount, Date. Legacy .xls files are no longer supported — open the file and save it as .xlsx or .csv before uploading.",
     full: false,
   },
 ];
@@ -130,11 +130,16 @@ export default function MigrationPage() {
                 ref={fileRef}
                 id="file"
                 type="file"
-                accept=".json,.db,.sqlite,.csv,.xlsx,.xls"
+                accept=".json,.db,.sqlite,.csv,.xlsx"
+                aria-describedby="migration-format-help"
                 required
                 onChange={handleFileChange}
                 className="block w-full text-sm text-slate-600 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100"
               />
+              <p id="migration-format-help" className="mt-1 text-xs text-slate-500">
+                Legacy .xls files are no longer supported. Open the file and save it as .xlsx or .csv before
+                uploading.
+              </p>
               {file && (
                 <p className="mt-1 text-xs text-slate-500">
                   {file.name} ({(file.size / 1024).toFixed(0)} KB)
@@ -173,8 +178,8 @@ export default function MigrationPage() {
                   </p>
                 </div>
               ) : (
-                <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                  {result.error}
+                <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  <span className="font-semibold">Error: </span>{result.error}
                 </div>
               )}
             </div>

@@ -2,7 +2,7 @@ import { withApiErrorHandling } from "@/lib/api-route";
 import { requireRole } from "@/lib/auth-guards";
 import { ValidationError } from "@/lib/validation";
 import { runMigrationImport, type DesktopExport } from "@/lib/migration-import";
-import { SpreadsheetValidationError } from "@/lib/imports/spreadsheet-parser";
+import { SpreadsheetValidationError, LEGACY_XLS_MESSAGE } from "@/lib/imports/spreadsheet-parser";
 import { parseUploadedSpreadsheet, ParseAdmissionDeniedError } from "@/lib/imports/parse-spreadsheet-isolated";
 import Database from "better-sqlite3";
 import { writeFileSync, unlinkSync } from "fs";
@@ -218,18 +218,40 @@ export async function POST(request: Request) {
   return withApiErrorHandling(async () => {
     const { organizationId } = await requireRole("ORG_ADMIN", "throw");
 
+    // Malformed-request-behavior follow-up -- ValidationError's status is
+    // hardcoded to 400 (see validation.ts), so throwing it here silently
+    // downgraded what should be a 413 ("oversized declared request,
+    // rejected before body parsing") to a generic 400. Returned directly
+    // instead, matching /api/import and /api/imports' own 413 responses
+    // for the identical declared-Content-Length check.
     const contentLength = Number(request.headers.get("content-length") ?? 0);
     if (contentLength > MAX_BYTES) {
-      throw new ValidationError("File too large (max 100 MB)");
+      return Response.json({ ok: false, error: "File too large (max 100 MB)" }, { status: 413 });
     }
 
-    const formData = await request.formData();
+    // Auth-ordering follow-up -- content type checked before parsing,
+    // and a malformed multipart body now surfaces as a clean 400 instead
+    // of falling through to the generic unhandled-error path. This
+    // route's auth/content-length ordering was already correct (auth
+    // runs above, before this point) -- only these two checks were
+    // missing.
+    const contentType = request.headers.get("content-type") ?? "";
+    if (!contentType.toLowerCase().startsWith("multipart/form-data")) {
+      return Response.json({ ok: false, error: "Unsupported content type. Expected a multipart/form-data file upload." }, { status: 415 });
+    }
+
+    let formData: FormData;
+    try {
+      formData = await request.formData();
+    } catch {
+      throw new ValidationError("Could not read the uploaded file. Please try again.");
+    }
     const file = formData.get("file");
     if (!file || !(file instanceof File)) {
       throw new ValidationError("No file provided");
     }
     if (file.size > MAX_BYTES) {
-      throw new ValidationError("File too large (max 100 MB)");
+      return Response.json({ ok: false, error: "File too large (max 100 MB)" }, { status: 413 });
     }
 
     const ext = file.name.toLowerCase().split(".").pop() ?? "";
@@ -274,7 +296,7 @@ export async function POST(request: Request) {
       // Legacy binary .xls is no longer accepted -- see the removal
       // rationale in docs/security/spreadsheet-import-hardening.md.
     } else if (ext === "xls") {
-      throw new ValidationError("Legacy .xls files are no longer supported. Please re-save the file as .xlsx or .csv and try again.");
+      throw new ValidationError(LEGACY_XLS_MESSAGE);
     } else {
       throw new ValidationError("Unsupported file type. Upload a .json, .db, .csv, or .xlsx file.");
     }
