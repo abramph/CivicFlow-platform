@@ -1,0 +1,481 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const findUniqueProfile = vi.fn();
+const findFirstYear = vi.fn();
+const findFirstBatch = vi.fn();
+const findManyBatch = vi.fn();
+const createBatch = vi.fn();
+const updateBatch = vi.fn();
+const findManyEnrollment = vi.fn();
+const findFirstEnrollment = vi.fn();
+const createEnrollment = vi.fn();
+const updateEnrollment = vi.fn();
+const findManyGrade = vi.fn();
+const findManyClassroom = vi.fn();
+const findFirstStudent = vi.fn();
+const upsertRecord = vi.fn();
+const updateRecord = vi.fn();
+const findFirstRecord = vi.fn();
+const deleteManyMapping = vi.fn();
+const createManyMapping = vi.fn();
+const findFirstLedgerEntry = vi.fn();
+const transaction = vi.fn();
+const createAuditEvent = vi.fn().mockResolvedValue(undefined);
+
+vi.mock("@/lib/prisma", () => ({
+  prisma: {
+    ptaProfile: { findUnique: (...a: unknown[]) => findUniqueProfile(...a) },
+    ptaSchoolYear: { findFirst: (...a: unknown[]) => findFirstYear(...a) },
+    ptaStudentProgressionBatch: {
+      findFirst: (...a: unknown[]) => findFirstBatch(...a),
+      findMany: (...a: unknown[]) => findManyBatch(...a),
+      create: (...a: unknown[]) => createBatch(...a),
+      update: (...a: unknown[]) => updateBatch(...a),
+    },
+    ptaStudentEnrollment: {
+      findMany: (...a: unknown[]) => findManyEnrollment(...a),
+      findFirst: (...a: unknown[]) => findFirstEnrollment(...a),
+      create: (...a: unknown[]) => createEnrollment(...a),
+      update: (...a: unknown[]) => updateEnrollment(...a),
+    },
+    ptaGrade: { findMany: (...a: unknown[]) => findManyGrade(...a) },
+    ptaClassroom: { findMany: (...a: unknown[]) => findManyClassroom(...a) },
+    ptaStudent: { findFirst: (...a: unknown[]) => findFirstStudent(...a) },
+    ptaStudentProgressionRecord: {
+      upsert: (...a: unknown[]) => upsertRecord(...a),
+      update: (...a: unknown[]) => updateRecord(...a),
+      findFirst: (...a: unknown[]) => findFirstRecord(...a),
+    },
+    ptaProgressionClassroomMapping: {
+      deleteMany: (...a: unknown[]) => deleteManyMapping(...a),
+      createMany: (...a: unknown[]) => createManyMapping(...a),
+    },
+    ptaVolunteerLedgerEntry: { findFirst: (...a: unknown[]) => findFirstLedgerEntry(...a) },
+    $transaction: (...a: unknown[]) => transaction(...a),
+  },
+}));
+vi.mock("@/lib/audit", () => ({ createAuditEvent: (...args: unknown[]) => createAuditEvent(...args) }));
+vi.mock("@/lib/env", () => ({ isPtaStudentProgressionPlatformEnabled: vi.fn().mockReturnValue(true) }));
+
+import {
+  commitProgressionBatch,
+  createProgressionBatch,
+  generateProgressionPreview,
+  getProgressionBatchDetail,
+  rollbackProgressionBatch,
+  saveProgressionException,
+} from "@/lib/labs/pta/student-progression";
+import { isPtaStudentProgressionPlatformEnabled } from "@/lib/env";
+import { PtaError } from "@/lib/labs/pta/errors";
+
+const actor = { actorUserId: "u1", actorEmail: "officer@example.org" };
+const ORG = "org-1";
+
+function transactionRunsCallback() {
+  transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) =>
+    callback({
+      ptaStudentProgressionRecord: { upsert: (...a: unknown[]) => upsertRecord(...a), update: (...a: unknown[]) => updateRecord(...a) },
+      ptaStudentProgressionBatch: { update: (...a: unknown[]) => updateBatch(...a) },
+      ptaStudentEnrollment: {
+        findFirst: (...a: unknown[]) => findFirstEnrollment(...a),
+        create: (...a: unknown[]) => createEnrollment(...a),
+        update: (...a: unknown[]) => updateEnrollment(...a),
+      },
+      ptaProgressionClassroomMapping: { deleteMany: (...a: unknown[]) => deleteManyMapping(...a), createMany: (...a: unknown[]) => createManyMapping(...a) },
+    })
+  );
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.mocked(isPtaStudentProgressionPlatformEnabled).mockReturnValue(true);
+  findUniqueProfile.mockResolvedValue({ studentProgressionEnabled: true });
+  transactionRunsCallback();
+});
+
+describe("feature-flag gate", () => {
+  it("blocks when the platform kill-switch is off, before touching the org flag", async () => {
+    vi.mocked(isPtaStudentProgressionPlatformEnabled).mockReturnValue(false);
+    await expect(createProgressionBatch({ organizationId: ORG, fromSchoolYearId: "y1", toSchoolYearId: "y2", ...actor })).rejects.toThrow(PtaError);
+    expect(findUniqueProfile).not.toHaveBeenCalled();
+  });
+
+  it("blocks when the platform switch is on but the org flag is off", async () => {
+    findUniqueProfile.mockResolvedValueOnce({ studentProgressionEnabled: false });
+    await expect(createProgressionBatch({ organizationId: ORG, fromSchoolYearId: "y1", toSchoolYearId: "y2", ...actor })).rejects.toMatchObject({
+      code: "PTA_STUDENT_PROGRESSION_DISABLED",
+    });
+  });
+});
+
+describe("createProgressionBatch", () => {
+  it("rejects a same-year transition", async () => {
+    await expect(createProgressionBatch({ organizationId: ORG, fromSchoolYearId: "y1", toSchoolYearId: "y1", ...actor })).rejects.toMatchObject({
+      code: "PTA_VALIDATION_ERROR",
+    });
+  });
+
+  it("rejects a target year that chronologically precedes the source year", async () => {
+    findFirstYear.mockResolvedValueOnce({ id: "y1", label: "2026-2027" }).mockResolvedValueOnce({ id: "y0", label: "2025-2026" });
+    await expect(createProgressionBatch({ organizationId: ORG, fromSchoolYearId: "y1", toSchoolYearId: "y0", ...actor })).rejects.toMatchObject({
+      code: "PTA_PROGRESSION_INVALID_YEAR_ORDER",
+    });
+  });
+
+  it("rejects a duplicate batch for an already-used year pair (idempotency at creation)", async () => {
+    findFirstYear.mockResolvedValueOnce({ id: "y1", label: "2026-2027" }).mockResolvedValueOnce({ id: "y2", label: "2027-2028" });
+    findFirstBatch.mockResolvedValueOnce({ id: "existing-batch" });
+    await expect(createProgressionBatch({ organizationId: ORG, fromSchoolYearId: "y1", toSchoolYearId: "y2", ...actor })).rejects.toMatchObject({
+      code: "PTA_PROGRESSION_BATCH_ALREADY_EXISTS",
+    });
+    expect(createBatch).not.toHaveBeenCalled();
+  });
+
+  it("creates a batch and audits it", async () => {
+    findFirstYear.mockResolvedValueOnce({ id: "y1", label: "2026-2027" }).mockResolvedValueOnce({ id: "y2", label: "2027-2028" });
+    findFirstBatch.mockResolvedValueOnce(null);
+    createBatch.mockResolvedValueOnce({ id: "batch-1" });
+
+    const batch = await createProgressionBatch({ organizationId: ORG, fromSchoolYearId: "y1", toSchoolYearId: "y2", ...actor });
+
+    expect(batch.id).toBe("batch-1");
+    expect(createAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "pta.student_progression.batch_created" }));
+  });
+});
+
+describe("generateProgressionPreview -- automatic outcome computation", () => {
+  const grades = [
+    { id: "g1", sortOrder: 1 },
+    { id: "g2", sortOrder: 2 },
+  ];
+
+  it("promotes a student to the next grade when a classroom mapping exists", async () => {
+    findFirstBatch.mockResolvedValueOnce({
+      id: "batch-1",
+      fromSchoolYearId: "y1",
+      toSchoolYearId: "y2",
+      status: "PREPARING",
+      preparedByUserId: "u1",
+      records: [],
+      classroomMappings: [{ sourceClassroomId: "c1", targetClassroomId: "c2" }],
+    });
+    findManyEnrollment.mockResolvedValueOnce([
+      { id: "e1", studentId: "s1", classroomId: "c1", classroom: { id: "c1", grade: grades[0] } },
+    ]);
+    findManyGrade.mockResolvedValueOnce(grades);
+    findManyEnrollment.mockResolvedValueOnce([]); // existing target-year enrollments
+    findFirstBatch.mockResolvedValueOnce({ id: "batch-1", status: "PREVIEWED", records: [] }); // final getProgressionBatchDetail() lookup
+
+    await generateProgressionPreview(ORG, "batch-1");
+
+    expect(upsertRecord).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ outcome: "PROMOTE", targetGradeId: "g2", targetClassroomId: "c2" }),
+      })
+    );
+    expect(updateBatch).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "PREVIEWED" }) }));
+  });
+
+  it("marks a student in the highest-sortOrder grade as GRADUATE, with no target classroom needed", async () => {
+    findFirstBatch.mockResolvedValueOnce({
+      id: "batch-1",
+      fromSchoolYearId: "y1",
+      toSchoolYearId: "y2",
+      status: "PREPARING",
+      preparedByUserId: "u1",
+      records: [],
+      classroomMappings: [],
+    });
+    findManyEnrollment.mockResolvedValueOnce([
+      { id: "e1", studentId: "s1", classroomId: "c1", classroom: { id: "c1", grade: grades[1] } }, // already at the highest grade
+    ]);
+    findManyGrade.mockResolvedValueOnce(grades);
+    findManyEnrollment.mockResolvedValueOnce([]);
+    findFirstBatch.mockResolvedValueOnce({ id: "batch-1", status: "PREVIEWED", records: [] });
+
+    await generateProgressionPreview(ORG, "batch-1");
+
+    expect(upsertRecord).toHaveBeenCalledWith(expect.objectContaining({ create: expect.objectContaining({ outcome: "GRADUATE", targetGradeId: null }) }));
+  });
+
+  it("marks a student NEEDS_REVIEW when a next grade exists but no classroom mapping was configured -- never guesses", async () => {
+    findFirstBatch.mockResolvedValueOnce({
+      id: "batch-1",
+      fromSchoolYearId: "y1",
+      toSchoolYearId: "y2",
+      status: "PREPARING",
+      preparedByUserId: "u1",
+      records: [],
+      classroomMappings: [], // no mapping configured for c1
+    });
+    findManyEnrollment.mockResolvedValueOnce([{ id: "e1", studentId: "s1", classroomId: "c1", classroom: { id: "c1", grade: grades[0] } }]);
+    findManyGrade.mockResolvedValueOnce(grades);
+    findManyEnrollment.mockResolvedValueOnce([]);
+    findFirstBatch.mockResolvedValueOnce({ id: "batch-1", status: "PREVIEWED", records: [] });
+
+    await generateProgressionPreview(ORG, "batch-1");
+
+    expect(upsertRecord).toHaveBeenCalledWith(expect.objectContaining({ create: expect.objectContaining({ outcome: "NEEDS_REVIEW", targetGradeId: "g2", targetClassroomId: null }) }));
+  });
+
+  it("re-running preview NEVER overwrites a student who already has an admin-set exception (RETAIN/TRANSFER/WITHDRAW/EXCLUDE/MANUAL)", async () => {
+    findFirstBatch.mockResolvedValueOnce({
+      id: "batch-1",
+      fromSchoolYearId: "y1",
+      toSchoolYearId: "y2",
+      status: "PREVIEWED",
+      preparedByUserId: "u1",
+      records: [{ id: "r1", studentId: "s1", outcome: "WITHDRAW" }], // admin already set this
+      classroomMappings: [{ sourceClassroomId: "c1", targetClassroomId: "c2" }],
+    });
+    findManyEnrollment.mockResolvedValueOnce([{ id: "e1", studentId: "s1", classroomId: "c1", classroom: { id: "c1", grade: grades[0] } }]);
+    findManyGrade.mockResolvedValueOnce(grades);
+    findManyEnrollment.mockResolvedValueOnce([]);
+    findFirstBatch.mockResolvedValueOnce({ id: "batch-1", status: "PREVIEWED", records: [] });
+
+    await generateProgressionPreview(ORG, "batch-1");
+
+    expect(upsertRecord).not.toHaveBeenCalled();
+  });
+
+  it("dry-run preview writes no PtaStudentEnrollment rows -- only PtaStudentProgressionRecord upserts", async () => {
+    findFirstBatch.mockResolvedValueOnce({
+      id: "batch-1",
+      fromSchoolYearId: "y1",
+      toSchoolYearId: "y2",
+      status: "PREPARING",
+      preparedByUserId: "u1",
+      records: [],
+      classroomMappings: [{ sourceClassroomId: "c1", targetClassroomId: "c2" }],
+    });
+    findManyEnrollment.mockResolvedValueOnce([{ id: "e1", studentId: "s1", classroomId: "c1", classroom: { id: "c1", grade: grades[0] } }]);
+    findManyGrade.mockResolvedValueOnce(grades);
+    findManyEnrollment.mockResolvedValueOnce([]);
+    findFirstBatch.mockResolvedValueOnce({ id: "batch-1", status: "PREVIEWED", records: [] });
+
+    await generateProgressionPreview(ORG, "batch-1");
+
+    expect(createEnrollment).not.toHaveBeenCalled();
+  });
+
+  it("refuses to preview an already-committed batch", async () => {
+    findFirstBatch.mockResolvedValueOnce({ id: "batch-1", status: "COMMITTED", classroomMappings: [], records: [] });
+    await expect(generateProgressionPreview(ORG, "batch-1")).rejects.toMatchObject({ code: "PTA_PROGRESSION_BATCH_NOT_CORRECTABLE" });
+  });
+});
+
+describe("saveProgressionException", () => {
+  it("saves a RETAIN exception for a student", async () => {
+    findFirstBatch.mockResolvedValueOnce({ id: "batch-1", status: "PREVIEWED", fromSchoolYearId: "y1" });
+    findFirstStudent.mockResolvedValueOnce({ id: "s1" });
+    findFirstEnrollment.mockResolvedValueOnce({ id: "e1", classroomId: "c1" });
+    upsertRecord.mockResolvedValueOnce({ id: "r1", outcome: "RETAIN" });
+
+    const record = await saveProgressionException({
+      organizationId: ORG,
+      batchId: "batch-1",
+      studentId: "s1",
+      outcome: "RETAIN",
+      targetGradeId: "g1",
+      targetClassroomId: "c1-new",
+      ...actor,
+    });
+
+    expect(record.outcome).toBe("RETAIN");
+    expect(createAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "pta.student_progression.exception_saved" }));
+  });
+
+  it("refuses exceptions on an already-committed batch", async () => {
+    findFirstBatch.mockResolvedValueOnce({ id: "batch-1", status: "COMMITTED" });
+    await expect(
+      saveProgressionException({ organizationId: ORG, batchId: "batch-1", studentId: "s1", outcome: "WITHDRAW", ...actor })
+    ).rejects.toMatchObject({ code: "PTA_PROGRESSION_BATCH_NOT_CORRECTABLE" });
+  });
+});
+
+describe("commitProgressionBatch", () => {
+  const PREVIEW_TIME = new Date("2027-06-01T00:00:00Z");
+
+  function batchWithRecords(records: Record<string, unknown>[]) {
+    return {
+      id: "batch-1",
+      organizationId: ORG,
+      status: "PREVIEWED",
+      previewedAt: PREVIEW_TIME,
+      toSchoolYearId: "y2",
+      toSchoolYear: { id: "y2", label: "2027-2028" },
+      records,
+    };
+  }
+
+  it("requires a preview before committing", async () => {
+    findFirstBatch.mockResolvedValueOnce({ id: "batch-1", status: "PREPARING", records: [] });
+    await expect(
+      commitProgressionBatch({ organizationId: ORG, batchId: "batch-1", previewVersion: PREVIEW_TIME.toISOString(), idempotencyKey: "k1", ...actor })
+    ).rejects.toMatchObject({ code: "PTA_PROGRESSION_BATCH_NOT_PREVIEWED" });
+  });
+
+  it("rejects a stale preview version (regenerated since the caller last fetched it)", async () => {
+    findFirstBatch.mockResolvedValueOnce(batchWithRecords([]));
+    await expect(
+      commitProgressionBatch({ organizationId: ORG, batchId: "batch-1", previewVersion: new Date("2020-01-01").toISOString(), idempotencyKey: "k1", ...actor })
+    ).rejects.toMatchObject({ code: "PTA_PROGRESSION_BATCH_STALE_PREVIEW" });
+  });
+
+  it("promotes a PROMOTE record by creating a new target-year enrollment", async () => {
+    findFirstBatch.mockResolvedValueOnce(
+      batchWithRecords([{ id: "r1", studentId: "s1", outcome: "PROMOTE", targetGradeId: "g2", targetClassroomId: "c2" }])
+    );
+    findFirstEnrollment.mockResolvedValueOnce(null); // no existing target-year enrollment
+    createEnrollment.mockResolvedValueOnce({ id: "new-enrollment" });
+    findFirstBatch.mockResolvedValueOnce({ id: "batch-1", status: "COMMITTED", records: [] }); // final getProgressionBatchDetail() lookup
+
+    const result = await commitProgressionBatch({ organizationId: ORG, batchId: "batch-1", previewVersion: PREVIEW_TIME.toISOString(), idempotencyKey: "k1", ...actor });
+
+    expect(createEnrollment).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ studentId: "s1", classroomId: "c2", schoolYearId: "y2", status: "ACTIVE" }) })
+    );
+    expect(result.promoted).toBe(1);
+    expect(updateBatch).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "COMMITTED", commitIdempotencyKey: "k1" }) }));
+  });
+
+  it("is idempotent against an existing target-year enrollment (student already enrolled ahead of the batch) -- reuses it, never a duplicate", async () => {
+    findFirstBatch.mockResolvedValueOnce(
+      batchWithRecords([{ id: "r1", studentId: "s1", outcome: "PROMOTE", targetGradeId: "g2", targetClassroomId: "c2" }])
+    );
+    findFirstEnrollment.mockResolvedValueOnce({ id: "already-there" });
+    findFirstBatch.mockResolvedValueOnce({ id: "batch-1", status: "COMMITTED", records: [] });
+
+    const result = await commitProgressionBatch({ organizationId: ORG, batchId: "batch-1", previewVersion: PREVIEW_TIME.toISOString(), idempotencyKey: "k1", ...actor });
+
+    expect(createEnrollment).not.toHaveBeenCalled();
+    expect(result.promoted).toBe(1);
+  });
+
+  it("marks GRADUATE records applied with no enrollment created", async () => {
+    findFirstBatch.mockResolvedValueOnce(batchWithRecords([{ id: "r1", studentId: "s1", outcome: "GRADUATE", targetGradeId: null, targetClassroomId: null }]));
+    findFirstBatch.mockResolvedValueOnce({ id: "batch-1", status: "COMMITTED", records: [] });
+    const result = await commitProgressionBatch({ organizationId: ORG, batchId: "batch-1", previewVersion: PREVIEW_TIME.toISOString(), idempotencyKey: "k1", ...actor });
+    expect(createEnrollment).not.toHaveBeenCalled();
+    expect(result.graduated).toBe(1);
+  });
+
+  it("marks TRANSFER and WITHDRAW records applied with no enrollment", async () => {
+    findFirstBatch.mockResolvedValueOnce(
+      batchWithRecords([
+        { id: "r1", studentId: "s1", outcome: "TRANSFER", targetGradeId: null, targetClassroomId: null },
+        { id: "r2", studentId: "s2", outcome: "WITHDRAW", targetGradeId: null, targetClassroomId: null },
+      ])
+    );
+    findFirstBatch.mockResolvedValueOnce({ id: "batch-1", status: "COMMITTED", records: [] });
+    const result = await commitProgressionBatch({ organizationId: ORG, batchId: "batch-1", previewVersion: PREVIEW_TIME.toISOString(), idempotencyKey: "k1", ...actor });
+    expect(result.transferred).toBe(1);
+    expect(result.withdrawn).toBe(1);
+    expect(createEnrollment).not.toHaveBeenCalled();
+  });
+
+  it("skips EXCLUDE and NEEDS_REVIEW records without creating anything", async () => {
+    findFirstBatch.mockResolvedValueOnce(
+      batchWithRecords([
+        { id: "r1", studentId: "s1", outcome: "EXCLUDE", targetGradeId: null, targetClassroomId: null },
+        { id: "r2", studentId: "s2", outcome: "NEEDS_REVIEW", targetGradeId: "g2", targetClassroomId: null },
+      ])
+    );
+    findFirstBatch.mockResolvedValueOnce({ id: "batch-1", status: "COMMITTED", records: [] });
+    const result = await commitProgressionBatch({ organizationId: ORG, batchId: "batch-1", previewVersion: PREVIEW_TIME.toISOString(), idempotencyKey: "k1", ...actor });
+    expect(result.skipped).toBe(2);
+    expect(createEnrollment).not.toHaveBeenCalled();
+  });
+
+  it("handles two students from one family progressing differently in the same commit", async () => {
+    findFirstBatch.mockResolvedValueOnce(
+      batchWithRecords([
+        { id: "r1", studentId: "s1", outcome: "PROMOTE", targetGradeId: "g2", targetClassroomId: "c2" },
+        { id: "r2", studentId: "s2", outcome: "GRADUATE", targetGradeId: null, targetClassroomId: null },
+      ])
+    );
+    findFirstEnrollment.mockResolvedValueOnce(null);
+    createEnrollment.mockResolvedValueOnce({ id: "e-new" });
+    findFirstBatch.mockResolvedValueOnce({ id: "batch-1", status: "COMMITTED", records: [] });
+
+    const result = await commitProgressionBatch({ organizationId: ORG, batchId: "batch-1", previewVersion: PREVIEW_TIME.toISOString(), idempotencyKey: "k1", ...actor });
+
+    expect(result.promoted).toBe(1);
+    expect(result.graduated).toBe(1);
+  });
+
+  it("a retried commit with the SAME idempotency key against an already-COMMITTED batch returns the prior result without re-applying", async () => {
+    findFirstBatch.mockResolvedValueOnce({
+      id: "batch-1",
+      status: "COMMITTED",
+      commitIdempotencyKey: "k1",
+    });
+    findFirstBatch.mockResolvedValueOnce({
+      // getProgressionBatchDetail's own lookup
+      id: "batch-1",
+      status: "COMMITTED",
+      records: [{ id: "r1", studentId: "s1", outcome: "PROMOTE", status: "APPLIED" }],
+    });
+
+    const result = await commitProgressionBatch({ organizationId: ORG, batchId: "batch-1", previewVersion: PREVIEW_TIME.toISOString(), idempotencyKey: "k1", ...actor });
+
+    expect(result.promoted).toBe(1);
+    expect(createEnrollment).not.toHaveBeenCalled();
+    expect(updateBatch).not.toHaveBeenCalled();
+  });
+
+  it("a DIFFERENT idempotency key against an already-COMMITTED batch is rejected as a genuinely new attempt", async () => {
+    findFirstBatch.mockResolvedValueOnce({ id: "batch-1", status: "COMMITTED", commitIdempotencyKey: "k1" });
+    await expect(
+      commitProgressionBatch({ organizationId: ORG, batchId: "batch-1", previewVersion: PREVIEW_TIME.toISOString(), idempotencyKey: "k2", ...actor })
+    ).rejects.toMatchObject({ code: "PTA_PROGRESSION_BATCH_ALREADY_COMMITTED" });
+  });
+});
+
+describe("rollbackProgressionBatch", () => {
+  it("rolls back a committed batch with no dependent activity", async () => {
+    findFirstBatch.mockResolvedValueOnce({
+      id: "batch-1",
+      status: "COMMITTED",
+      committedAt: new Date("2027-06-01"),
+      records: [{ id: "r1", studentId: "s1", targetEnrollmentId: "e1", student: { householdId: "h1" } }],
+    });
+    findFirstLedgerEntry.mockResolvedValueOnce(null);
+    findFirstBatch.mockResolvedValueOnce({ id: "batch-1", status: "ROLLED_BACK", records: [] });
+
+    await rollbackProgressionBatch({ organizationId: ORG, batchId: "batch-1", ...actor });
+
+    expect(updateEnrollment).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "e1" }, data: { status: "INACTIVE" } }));
+    expect(updateBatch).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "ROLLED_BACK" }) }));
+  });
+
+  it("blocks rollback when a target-year household already has dependent volunteer-ledger activity", async () => {
+    findFirstBatch.mockResolvedValueOnce({
+      id: "batch-1",
+      status: "COMMITTED",
+      committedAt: new Date("2027-06-01"),
+      records: [{ id: "r1", studentId: "s1", targetEnrollmentId: "e1", student: { householdId: "h1" } }],
+    });
+    findFirstLedgerEntry.mockResolvedValueOnce({ id: "ledger-1" });
+
+    await expect(rollbackProgressionBatch({ organizationId: ORG, batchId: "batch-1", ...actor })).rejects.toMatchObject({
+      code: "PTA_PROGRESSION_ROLLBACK_BLOCKED_DEPENDENT_ACTIVITY",
+    });
+    expect(updateEnrollment).not.toHaveBeenCalled();
+  });
+
+  it("refuses to roll back a batch that was never committed", async () => {
+    findFirstBatch.mockResolvedValueOnce({ id: "batch-1", status: "PREVIEWED" });
+    await expect(rollbackProgressionBatch({ organizationId: ORG, batchId: "batch-1", ...actor })).rejects.toMatchObject({
+      code: "PTA_PROGRESSION_BATCH_NOT_CORRECTABLE",
+    });
+  });
+});
+
+describe("tenant isolation", () => {
+  it("getProgressionBatchDetail scopes by organizationId and 404s across tenants", async () => {
+    findFirstBatch.mockResolvedValueOnce(null);
+    await expect(getProgressionBatchDetail(ORG, "batch-from-other-org")).rejects.toMatchObject({ code: "PTA_PROGRESSION_BATCH_NOT_FOUND" });
+    expect(findFirstBatch).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ organizationId: ORG }) }));
+  });
+});

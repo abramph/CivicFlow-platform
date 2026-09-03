@@ -182,6 +182,41 @@ export const PTA_ERROR_CODES = [
    * the remedy is for an admin to add a name to the household adult
    * record, not for the system to invent one. */
   "PTA_VOLUNTEER_AGREEMENT_SIGNER_UNRESOLVED",
+  // Academic-year student progression.
+  /** Platform-wide env kill-switch is off — checked before any org flag,
+   * covers both preview and commit (unlike the volunteer-hours program,
+   * this one switch covers the whole feature, since even a preview reads
+   * and displays real cross-household student data). */
+  "PTA_STUDENT_PROGRESSION_PLATFORM_DISABLED",
+  /** PtaProfile.studentProgressionEnabled is false for this org. */
+  "PTA_STUDENT_PROGRESSION_DISABLED",
+  "PTA_PROGRESSION_BATCH_NOT_FOUND",
+  "PTA_PROGRESSION_RECORD_NOT_FOUND",
+  /** A batch already exists for this exact (fromYear, toYear) pair — the
+   * DB-level unique constraint's friendly front door. Use the correction
+   * workflow on the existing batch instead of creating a second one. */
+  "PTA_PROGRESSION_BATCH_ALREADY_EXISTS",
+  /** Commit was requested before any preview exists for this batch. */
+  "PTA_PROGRESSION_BATCH_NOT_PREVIEWED",
+  /** Commit was requested with a previewVersion that no longer matches the
+   * batch's current previewedAt — the preview was regenerated (or the
+   * batch's state changed) since the caller last fetched it. Re-fetch the
+   * preview and confirm again before retrying commit. */
+  "PTA_PROGRESSION_BATCH_STALE_PREVIEW",
+  /** Commit was requested with a NEW idempotency key against a batch that
+   * is already COMMITTED under a different key — a genuinely new commit
+   * attempt, not a safe retry of the original one. */
+  "PTA_PROGRESSION_BATCH_ALREADY_COMMITTED",
+  /** A completed/committed batch's records are historical — corrections go
+   * through the dedicated correction endpoint, never a raw record edit. */
+  "PTA_PROGRESSION_BATCH_NOT_CORRECTABLE",
+  /** Rollback blocked: at least one target-year enrollment created by this
+   * batch already has dependent volunteer-ledger activity recorded against
+   * it. Use the correction workflow for individual records instead. */
+  "PTA_PROGRESSION_ROLLBACK_BLOCKED_DEPENDENT_ACTIVITY",
+  /** toSchoolYearId must chronologically follow fromSchoolYearId (by parsed
+   * "YYYY-YYYY" label) — a rollover can't progress a student into the past. */
+  "PTA_PROGRESSION_INVALID_YEAR_ORDER",
 ] as const;
 
 export type PtaErrorCode = (typeof PTA_ERROR_CODES)[number];
@@ -258,6 +293,17 @@ const STATUS_FOR_CODE: Record<PtaErrorCode, number> = {
   PTA_VOLUNTEER_AGREEMENT_ACTIVELY_REQUIRED: 409,
   PTA_VOLUNTEER_AGREEMENT_CONTENT_HASH_MISMATCH: 500,
   PTA_VOLUNTEER_AGREEMENT_SIGNER_UNRESOLVED: 400,
+  PTA_STUDENT_PROGRESSION_PLATFORM_DISABLED: 403,
+  PTA_STUDENT_PROGRESSION_DISABLED: 403,
+  PTA_PROGRESSION_BATCH_NOT_FOUND: 404,
+  PTA_PROGRESSION_RECORD_NOT_FOUND: 404,
+  PTA_PROGRESSION_BATCH_ALREADY_EXISTS: 409,
+  PTA_PROGRESSION_BATCH_NOT_PREVIEWED: 409,
+  PTA_PROGRESSION_BATCH_STALE_PREVIEW: 409,
+  PTA_PROGRESSION_BATCH_ALREADY_COMMITTED: 409,
+  PTA_PROGRESSION_BATCH_NOT_CORRECTABLE: 409,
+  PTA_PROGRESSION_ROLLBACK_BLOCKED_DEPENDENT_ACTIVITY: 409,
+  PTA_PROGRESSION_INVALID_YEAR_ORDER: 400,
 };
 
 export class PtaError extends Error {
