@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ExcelJS from "exceljs";
+import { LEGACY_XLS_MESSAGE } from "@/lib/imports/spreadsheet-parser";
 
 /**
  * Security Patch A -- route-level coverage for POST /api/migration/upload,
@@ -67,12 +68,21 @@ describe("POST /api/migration/upload -- hardened spreadsheet parsing", () => {
     expect(runMigrationImport).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects a legacy .xls file with a clear conversion message, and attempts no import", async () => {
+  it("rejects a legacy .xls file with the exact conversion message, and attempts no import", async () => {
     const file = new File(["not a real xls file"], "export.xls", { type: "application/vnd.ms-excel" });
     const response = await POST(makeRequest(file));
     const payload = await response.json();
     expect(response.status).toBe(400);
-    expect(payload.error).toMatch(/\.xlsx or \.csv/i);
+    expect(payload.error).toBe(LEGACY_XLS_MESSAGE);
+    expect(runMigrationImport).not.toHaveBeenCalled();
+  });
+
+  it("does not treat a renamed arbitrary file as a valid legacy workbook -- a .xls-named file with executable content is still rejected on the claimed extension alone, never parsed", async () => {
+    const file = new File([new Uint8Array([0x4d, 0x5a, 0x90, 0x00])], "totally-not-a-workbook.xls", { type: "application/vnd.ms-excel" });
+    const response = await POST(makeRequest(file));
+    const payload = await response.json();
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe(LEGACY_XLS_MESSAGE);
     expect(runMigrationImport).not.toHaveBeenCalled();
   });
 
@@ -161,6 +171,31 @@ describe("POST /api/migration/upload -- auth-before-parse ordering (auth-orderin
     const response = await POST(makeRequest(file));
     expect(response.status).toBe(401);
     expect(formDataSpy).not.toHaveBeenCalled();
+    expect(runMigrationImport).not.toHaveBeenCalled();
+  });
+
+  it("checks the declared Content-Length before parsing and rejects an oversized request with 413 without calling request.formData() (malformed-request-behavior follow-up)", async () => {
+    const response = await POST(
+      new Request("https://portal.test/api/migration/upload", {
+        method: "POST",
+        headers: { "content-type": "multipart/form-data; boundary=x", "content-length": String(101 * 1024 * 1024) },
+        body: "irrelevant -- rejected on the declared length before this body is ever read",
+      })
+    );
+    expect(response.status).toBe(413);
+    expect(formDataSpy).not.toHaveBeenCalled();
+    expect(runMigrationImport).not.toHaveBeenCalled();
+  });
+
+  it("also returns 413 (not 400) for the post-parse actual-byte-size backstop, when a dishonest/absent Content-Length let an oversized body through to formData()", async () => {
+    // Same underlying bug as the declared-length check above: this branch
+    // used to `throw new ValidationError(...)`, whose status is hardcoded
+    // to 400 in validation.ts, silently downgrading what should be 413.
+    const bigFile = new File([new Uint8Array(101 * 1024 * 1024)], "export.csv", { type: "text/csv" });
+    const response = await POST(makeRequest(bigFile));
+    const payload = await response.json();
+    expect(response.status).toBe(413);
+    expect(payload.error).toBeTruthy();
     expect(runMigrationImport).not.toHaveBeenCalled();
   });
 

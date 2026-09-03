@@ -7,7 +7,7 @@ import { requirePtaAccess } from "@/lib/labs/pta/guard";
 import { requireHoaPropertyWrite, requireHoaResidentWrite } from "@/lib/hoa/guard";
 import { PERMISSIONS } from "@/lib/rbac";
 import { requireRateLimit } from "@/lib/rate-limit";
-import { SpreadsheetValidationError } from "@/lib/imports/spreadsheet-parser";
+import { SpreadsheetValidationError, LEGACY_XLS_MESSAGE } from "@/lib/imports/spreadsheet-parser";
 import { parseUploadedSpreadsheet, ParseAdmissionDeniedError } from "@/lib/imports/parse-spreadsheet-isolated";
 import Database from "better-sqlite3";
 import { writeFileSync, unlinkSync } from "fs";
@@ -83,7 +83,13 @@ async function parseFile(buffer: Buffer, filename: string, organizationId: strin
   // "malicious.exe" would have been handed straight to XLSX.read()).
   // Legacy binary .xls is no longer accepted -- see
   // docs/security/spreadsheet-import-hardening.md for the removal
-  // rationale; users are asked to re-save as .xlsx or .csv.
+  // rationale; users are asked to re-save as .xlsx or .csv. Decided
+  // purely from the claimed extension, before parseSpreadsheet() (and
+  // therefore detectFormat()/the worker) ever runs -- a .xls-claimed file
+  // is never given the chance to be treated as a valid workbook.
+  if (ext === "xls") {
+    throw new SpreadsheetValidationError("LEGACY_XLS_UNSUPPORTED", LEGACY_XLS_MESSAGE);
+  }
   if (ext !== "csv" && ext !== "xlsx") {
     throw new SpreadsheetValidationError("UNSUPPORTED_FORMAT", "Unsupported file type. Please upload a .csv or .xlsx file (or a .db/.sqlite export).");
   }

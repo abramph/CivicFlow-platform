@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ExcelJS from "exceljs";
+import { LEGACY_XLS_MESSAGE } from "@/lib/imports/spreadsheet-parser";
 
 /**
  * Security Patch A -- route-level coverage for POST /api/import, proving
@@ -138,12 +139,21 @@ describe("POST /api/import -- hardened spreadsheet parsing", () => {
     expect(importMembers).not.toHaveBeenCalled();
   });
 
-  it("rejects a legacy .xls file (no longer accepted) with no import attempted", async () => {
+  it("rejects a legacy .xls file (no longer accepted) with the exact conversion message, no import attempted", async () => {
     const file = new File(["not a real xls file"], "members.xls", { type: "application/vnd.ms-excel" });
     const response = await POST(makeRequest(file));
     const payload = await response.json();
     expect(response.status).toBe(400);
-    expect(payload.error).toBeTruthy();
+    expect(payload.error).toBe(LEGACY_XLS_MESSAGE);
+    expect(importMembers).not.toHaveBeenCalled();
+  });
+
+  it("does not treat a renamed arbitrary file as a valid legacy workbook -- a .xls-named file with executable content is still rejected on the claimed extension alone, never parsed", async () => {
+    const file = new File([new Uint8Array([0x4d, 0x5a, 0x90, 0x00])], "totally-not-a-workbook.xls", { type: "application/vnd.ms-excel" });
+    const response = await POST(makeRequest(file));
+    const payload = await response.json();
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe(LEGACY_XLS_MESSAGE);
     expect(importMembers).not.toHaveBeenCalled();
   });
 
@@ -452,5 +462,90 @@ describe("POST /api/import -- auth-before-parse ordering (auth-ordering follow-u
     expect(response.status).toBe(400);
     expect(payload.error).toBeTruthy();
     expect(importMembers).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Query-parameter contract follow-up -- `type` moved from the multipart
+ * body to a URL query parameter (see the auth-ordering describe block
+ * above). These tests prove the contract is airtight at its edges: no
+ * value, a blank value, a duplicated value, and a conflicting form-body
+ * value all resolve deterministically, fail closed, and never reach
+ * request.formData() when they should be rejected before it.
+ */
+describe("POST /api/import -- query-parameter `type` contract edge cases (query-parameter-contract follow-up)", () => {
+  let formDataSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    formDataSpy = vi.spyOn(Request.prototype, "formData");
+  });
+
+  afterEach(() => {
+    formDataSpy.mockRestore();
+  });
+
+  it("returns a deterministic 400 when the `type` query parameter is entirely absent, without calling request.formData()", async () => {
+    const form = new FormData();
+    form.set("file", new File(["First Name\nJane\n"], "members.csv", { type: "text/csv" }));
+    const response = await POST(new Request("https://portal.test/api/import", { method: "POST", body: form }));
+    const payload = await response.json();
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe("Invalid import type");
+    expect(formDataSpy).not.toHaveBeenCalled();
+    expect(importMembers).not.toHaveBeenCalled();
+    expect(requirePermission).not.toHaveBeenCalled();
+  });
+
+  it("returns a deterministic 400 for a blank `type=` query parameter, without calling request.formData()", async () => {
+    const form = new FormData();
+    form.set("file", new File(["First Name\nJane\n"], "members.csv", { type: "text/csv" }));
+    const response = await POST(new Request("https://portal.test/api/import?type=", { method: "POST", body: form }));
+    const payload = await response.json();
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe("Invalid import type");
+    expect(formDataSpy).not.toHaveBeenCalled();
+  });
+
+  it("returns a deterministic 400 for an unsupported `type` value, without calling request.formData()", async () => {
+    const form = new FormData();
+    form.set("file", new File(["First Name\nJane\n"], "members.csv", { type: "text/csv" }));
+    const response = await POST(new Request("https://portal.test/api/import?type=not-a-real-type", { method: "POST", body: form }));
+    const payload = await response.json();
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe("Invalid import type");
+    expect(formDataSpy).not.toHaveBeenCalled();
+  });
+
+  it("resolves a duplicated `type` query parameter deterministically to the FIRST value (standard URLSearchParams.get semantics), never an array and never a crash", async () => {
+    // ?type=members&type=hoa-properties -- URLSearchParams.get("type")
+    // always returns the first occurrence ("members"), so this must route
+    // through the generic members:write gate, not the HOA dual-gate.
+    const file = new File(["First Name\nJane\n"], "members.csv", { type: "text/csv" });
+    const form = new FormData();
+    form.set("file", file);
+    form.set("mapping", "{}");
+    const response = await POST(
+      new Request("https://portal.test/api/import?type=members&type=hoa-properties", { method: "POST", body: form })
+    );
+    expect(response.status).toBe(200);
+    expect(requirePermission).toHaveBeenCalledWith("members:write", "throw");
+    expect(importMembers).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a conflicting `type` value placed in the multipart form body -- only the query parameter can ever select the permission gate, because the route never reads form.get(\"type\")", async () => {
+    // The query string says "members" (generic members:write gate); the
+    // form body claims "hoa-households" (would, if honored, imply a
+    // different-vertical-only guard). Since requireImportPermission()
+    // exclusively branches on the value already resolved from the query
+    // string before formData() is even called, the form-body value can
+    // structurally never be read, let alone influence which guard runs.
+    const form = new FormData();
+    form.set("file", new File(["First Name\nJane\n"], "members.csv", { type: "text/csv" }));
+    form.set("mapping", "{}");
+    form.set("type", "hoa-properties");
+    const response = await POST(new Request("https://portal.test/api/import?type=members", { method: "POST", body: form }));
+    expect(response.status).toBe(200);
+    expect(requirePermission).toHaveBeenCalledWith("members:write", "throw");
+    expect(importMembers).toHaveBeenCalledTimes(1);
   });
 });

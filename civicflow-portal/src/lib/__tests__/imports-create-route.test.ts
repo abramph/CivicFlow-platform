@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { LEGACY_XLS_MESSAGE } from "@/lib/imports/spreadsheet-parser";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function permissionContext(allowed: string[]): any {
@@ -135,6 +136,66 @@ describe("POST /api/imports", () => {
 
     expect(response.status).toBe(200);
     expect(payload.data.matchedExistingBatch.batchId).toBe("batch-existing");
+    expect(createImportBatch).not.toHaveBeenCalled();
+  });
+
+  it("rejects a legacy .xls file with the exact conversion message BEFORE creating an ImportBatch, uploading to storage, or writing an audit event -- auth-ordering follow-up (.xls persistent-record fix)", async () => {
+    // Unlike preview mode, the non-preview path used to have no
+    // synchronous format check at all: a .xls upload would reach
+    // prisma.importBatch.create() and uploadImportSourceFile() and only
+    // fail later, asynchronously, inside analyzeBatch() (whose result
+    // this route doesn't even wait for). This proves that gap is closed.
+    const form = new FormData();
+    form.set("file", new File(["not a real xls file"], "members.xls", { type: "application/vnd.ms-excel" }));
+    form.set("mapping", JSON.stringify({ "First Name": "firstName" }));
+    const response = await createPOST(new Request("https://portal.test/api/imports", { method: "POST", body: form }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe(LEGACY_XLS_MESSAGE);
+    expect(createImportBatch).not.toHaveBeenCalled();
+    expect(uploadImportSourceFile).not.toHaveBeenCalled();
+    expect(createAuditEvent).not.toHaveBeenCalled();
+    expect(analyzeBatch).not.toHaveBeenCalled();
+  });
+
+  it("SCOPE-BOUNDARY DOCUMENTATION (not asserted-safe, not fixed under this change): a spoofed extension on the non-preview path still creates an ImportBatch before the mismatch is caught -- unlike .xls above, this is deferred to analyzeBatch()'s own FORMAT_MISMATCH-to-FAILED transition, by the pre-existing resumable-import architecture (Import Program 2026-08), not something introduced or fixed by the auth-ordering/.xls follow-up", async () => {
+    // Contrast with the .xls test above: that one is now rejected
+    // synchronously (400, no batch) because the extension itself (".xls")
+    // is unambiguous without reading any bytes. A SPOOFED extension (real
+    // CSV content named "members.xlsx") can only be caught by actually
+    // parsing the file -- which the non-preview path defers to
+    // analyzeBatch(), called fire-and-forget after the batch already
+    // exists. This is intentional: the resumable-import design wants a
+    // trackable record even for a batch that turns out to be malformed,
+    // so a user isn't left wondering whether their upload was received.
+    // Recorded here as an explicit, deliberate scope boundary -- see the
+    // final report's "deferred findings" section if full synchronous
+    // parity with /api/import is ever wanted.
+    const form = new FormData();
+    form.set("file", new File(["First Name,Last Name\nJane,Doe\n"], "members.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+    form.set("mapping", JSON.stringify({ "First Name": "firstName" }));
+    const response = await createPOST(new Request("https://portal.test/api/imports", { method: "POST", body: form }));
+
+    expect(response.status).toBe(201);
+    expect(createImportBatch).toHaveBeenCalledTimes(1);
+    expect(uploadImportSourceFile).toHaveBeenCalledTimes(1);
+    // The actual FORMAT_MISMATCH rejection happens inside analyzeBatch(),
+    // which IS invoked (fire-and-forget) -- its real implementation
+    // (mocked here) is what transitions this batch to FAILED. See
+    // imports-engine-analyze.test.ts for that behavior's own coverage.
+    expect(analyzeBatch).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not treat a renamed arbitrary file as a valid legacy workbook -- a .xls-named file with executable content is still rejected on the claimed extension alone, no batch created", async () => {
+    const form = new FormData();
+    form.set("file", new File([new Uint8Array([0x4d, 0x5a, 0x90, 0x00])], "totally-not-a-workbook.xls", { type: "application/vnd.ms-excel" }));
+    form.set("mapping", JSON.stringify({ "First Name": "firstName" }));
+    const response = await createPOST(new Request("https://portal.test/api/imports", { method: "POST", body: form }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe(LEGACY_XLS_MESSAGE);
     expect(createImportBatch).not.toHaveBeenCalled();
   });
 
@@ -278,6 +339,14 @@ describe("POST /api/imports -- preview mode (Security Patch A)", () => {
     expect(createImportBatch).not.toHaveBeenCalled();
   });
 
+  it("rejects a legacy .xls file in preview mode with the exact conversion message, no batch created", async () => {
+    const response = await createPOST(makePreviewRequest("not a real xls file", "members.xls"));
+    const payload = await response.json();
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe(LEGACY_XLS_MESSAGE);
+    expect(createImportBatch).not.toHaveBeenCalled();
+  });
+
   it("still requires imports:create for a preview request", async () => {
     vi.mocked(requirePermission).mockResolvedValueOnce(permissionContext([]));
     const response = await createPOST(makePreviewRequest("First Name\nJane\n"));
@@ -336,6 +405,21 @@ describe("POST /api/imports -- auth-before-parse ordering (auth-ordering follow-
     );
     const response = await createPOST(makeUploadRequest({ "First Name": "firstName" }));
     expect(response.status).toBe(429);
+    expect(formDataSpy).not.toHaveBeenCalled();
+    expect(createImportBatch).not.toHaveBeenCalled();
+  });
+
+  it("checks the declared Content-Length before parsing and rejects an oversized request with 413 without calling request.formData() (malformed-request-behavior follow-up)", async () => {
+    const response = await createPOST(
+      new Request("https://portal.test/api/imports", {
+        method: "POST",
+        headers: { "content-type": "multipart/form-data; boundary=x", "content-length": String(51 * 1024 * 1024) },
+        body: "irrelevant -- rejected on the declared length before this body is ever read",
+      })
+    );
+    const payload = await response.json();
+    expect(response.status).toBe(413);
+    expect(payload.error).toBeTruthy();
     expect(formDataSpy).not.toHaveBeenCalled();
     expect(createImportBatch).not.toHaveBeenCalled();
   });

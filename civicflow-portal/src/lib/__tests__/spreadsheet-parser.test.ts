@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import ExcelJS from "exceljs";
-import { parseSpreadsheetBuffer, SpreadsheetValidationError, SPREADSHEET_LIMITS } from "@/lib/imports/spreadsheet-parser";
+import { parseSpreadsheetBuffer, SpreadsheetValidationError, SPREADSHEET_LIMITS, LEGACY_XLS_MESSAGE } from "@/lib/imports/spreadsheet-parser";
 
 /**
  * Security Patch A -- regression tests for the hardened parser that
@@ -92,8 +92,21 @@ describe("parseSpreadsheetBuffer -- valid input", () => {
 
 describe("parseSpreadsheetBuffer -- format and extension validation", () => {
   it("rejects an unsupported claimed extension", async () => {
-    await expect(parseSpreadsheetBuffer(buildCsv("a,b\n1,2\n"), "xls")).rejects.toMatchObject({ reason: "UNSUPPORTED_FORMAT" });
     await expect(parseSpreadsheetBuffer(buildCsv("a,b\n1,2\n"), "exe")).rejects.toMatchObject({ reason: "UNSUPPORTED_FORMAT" });
+    await expect(parseSpreadsheetBuffer(buildCsv("a,b\n1,2\n"), "docx")).rejects.toMatchObject({ reason: "UNSUPPORTED_FORMAT" });
+  });
+
+  it("rejects a claimed .xls extension with its own dedicated reason and exact conversion message, decided purely from the extension before any content is read (auth-ordering follow-up)", async () => {
+    await expect(parseSpreadsheetBuffer(buildCsv("a,b\n1,2\n"), "xls")).rejects.toMatchObject({
+      reason: "LEGACY_XLS_UNSUPPORTED",
+      message: LEGACY_XLS_MESSAGE,
+    });
+    // A .xls-named file whose bytes aren't even a valid CSV/XLSX still gets
+    // the same rejection -- proving it's never handed to detectFormat().
+    await expect(parseSpreadsheetBuffer(Buffer.from([0x4d, 0x5a, 0x90, 0x00]), "xls")).rejects.toMatchObject({
+      reason: "LEGACY_XLS_UNSUPPORTED",
+      message: LEGACY_XLS_MESSAGE,
+    });
   });
 
   it("rejects a spoofed extension -- CSV content claiming to be .xlsx", async () => {
