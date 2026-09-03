@@ -217,6 +217,25 @@ export const PTA_ERROR_CODES = [
   /** toSchoolYearId must chronologically follow fromSchoolYearId (by parsed
    * "YYYY-YYYY" label) — a rollover can't progress a student into the past. */
   "PTA_PROGRESSION_INVALID_YEAR_ORDER",
+  /** Publication requires a committed (or corrected) batch — a merely
+   * previewed batch has no real target enrollments to disclose. */
+  "PTA_PROGRESSION_NOT_COMMITTED",
+  /** A rolled-back batch's target enrollments are INACTIVE; there is
+   * nothing valid left to publish. */
+  "PTA_PROGRESSION_ROLLED_BACK",
+  /** Unresolved records (NEEDS_REVIEW still PLANNED, or FAILED) remain.
+   * Publication is blocked rather than partial — see parent-progression's
+   * rationale: a family shown "Confirmed" for a student the office has not
+   * actually resolved is worse than a family shown nothing yet. */
+  "PTA_PROGRESSION_PUBLISH_BLOCKED",
+  /** The caller's publicationVersion is not the current one — someone else
+   * published/unpublished in between. */
+  "PTA_PROGRESSION_PUBLICATION_STALE",
+  /** Rollback attempted while results are still published to families.
+   * Unpublish first, so the disclosure change is an explicit, audited act. */
+  "PTA_PROGRESSION_ROLLBACK_BLOCKED_PUBLISHED",
+  /** Unpublish attempted on a batch that is not currently published. */
+  "PTA_PROGRESSION_NOT_PUBLISHED",
 ] as const;
 
 export type PtaErrorCode = (typeof PTA_ERROR_CODES)[number];
@@ -304,6 +323,12 @@ const STATUS_FOR_CODE: Record<PtaErrorCode, number> = {
   PTA_PROGRESSION_BATCH_NOT_CORRECTABLE: 409,
   PTA_PROGRESSION_ROLLBACK_BLOCKED_DEPENDENT_ACTIVITY: 409,
   PTA_PROGRESSION_INVALID_YEAR_ORDER: 400,
+  PTA_PROGRESSION_NOT_COMMITTED: 409,
+  PTA_PROGRESSION_ROLLED_BACK: 409,
+  PTA_PROGRESSION_PUBLISH_BLOCKED: 409,
+  PTA_PROGRESSION_PUBLICATION_STALE: 409,
+  PTA_PROGRESSION_ROLLBACK_BLOCKED_PUBLISHED: 409,
+  PTA_PROGRESSION_NOT_PUBLISHED: 409,
 };
 
 export class PtaError extends Error {

@@ -1,24 +1,31 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * Family-facing progression read surface. The privacy-critical assertions
- * here are the structural ones: this module must never query the
- * progression batch/record tables, and must never publish a placement that
- * isn't a committed, non-rolled-back target-year enrollment.
+ * Family-facing progression read surface, after publication control.
+ *
+ * The privacy assertions here are the load-bearing ones:
+ *   - a COMMITTED but UNPUBLISHED future placement is invisible;
+ *   - only an explicitly PUBLISHED one appears;
+ *   - the module reads the MINIMUM publication state it needs and never
+ *     selects batch internals (actor, timestamps, idempotency keys, notes,
+ *     mappings, exception reasons).
+ *
+ * The previous version of this file asserted that the progression tables
+ * were never touched at all. That is no longer true or desirable —
+ * publication state lives on the batch — so that blanket prohibition is
+ * replaced by the stricter, more useful check above: what is selected, and
+ * what can therefore possibly leak.
  */
 
 const findUniqueProfile = vi.fn();
 const findManyYear = vi.fn();
 const findManyStudent = vi.fn();
 const findManyEnrollment = vi.fn();
-/** Deliberately wired so that ANY read of the administrative progression
- * tables throws — that is what makes "families never see preview/audit
- * data" a proven property rather than a promise. */
+const findManyRecord = vi.fn();
+/** Batch reads must go through the record->batch relation filter, never a
+ * direct batch query from this module. */
 const forbiddenBatchAccess = vi.fn((..._args: unknown[]): never => {
-  throw new Error("parent-progression must never read PtaStudentProgressionBatch");
-});
-const forbiddenRecordAccess = vi.fn((..._args: unknown[]): never => {
-  throw new Error("parent-progression must never read PtaStudentProgressionRecord");
+  throw new Error("parent-progression must not query PtaStudentProgressionBatch directly");
 });
 
 vi.mock("@/lib/prisma", () => ({
@@ -27,15 +34,11 @@ vi.mock("@/lib/prisma", () => ({
     ptaSchoolYear: { findMany: (...a: unknown[]) => findManyYear(...a) },
     ptaStudent: { findMany: (...a: unknown[]) => findManyStudent(...a) },
     ptaStudentEnrollment: { findMany: (...a: unknown[]) => findManyEnrollment(...a) },
+    ptaStudentProgressionRecord: { findMany: (...a: unknown[]) => findManyRecord(...a) },
     ptaStudentProgressionBatch: {
       findMany: (...a: unknown[]) => forbiddenBatchAccess(...a),
       findFirst: (...a: unknown[]) => forbiddenBatchAccess(...a),
       findUnique: (...a: unknown[]) => forbiddenBatchAccess(...a),
-    },
-    ptaStudentProgressionRecord: {
-      findMany: (...a: unknown[]) => forbiddenRecordAccess(...a),
-      findFirst: (...a: unknown[]) => forbiddenRecordAccess(...a),
-      findUnique: (...a: unknown[]) => forbiddenRecordAccess(...a),
     },
   },
 }));
@@ -57,8 +60,14 @@ const YEARS = [
   { id: "y-next", label: "2027-2028", isCurrent: false },
 ];
 
-function enrollment(studentId: string, yearId: string, yearLabel: string, grade: string, classroom: string) {
-  return { studentId, schoolYearId: yearId, schoolYear: yearLabel, classroom: { name: classroom, grade: { name: grade } } };
+function enrollment(id: string, studentId: string, yearId: string, yearLabel: string, grade: string, classroom: string) {
+  return { id, studentId, schoolYearId: yearId, schoolYear: yearLabel, classroom: { name: classroom, grade: { name: grade } } };
+}
+
+/** Simulates the publication join returning the given target enrollment ids
+ * as PUBLISHED. An empty result means nothing is published. */
+function published(...targetEnrollmentIds: string[]) {
+  findManyRecord.mockResolvedValue(targetEnrollmentIds.map((targetEnrollmentId) => ({ targetEnrollmentId })));
 }
 
 beforeEach(() => {
@@ -68,9 +77,10 @@ beforeEach(() => {
   findManyYear.mockResolvedValue(YEARS);
   findManyStudent.mockResolvedValue([]);
   findManyEnrollment.mockResolvedValue([]);
+  findManyRecord.mockResolvedValue([]);
 });
 
-describe("getPtaParentProgressionSummary — feature gating (both flags default OFF)", () => {
+describe("parent progression — feature gating (both flags default OFF)", () => {
   it("denies when the platform kill-switch is off, before any student query", async () => {
     isPtaStudentProgressionPlatformEnabled.mockReturnValue(false);
     await expect(getPtaParentProgressionSummary(ORG, HOUSEHOLD)).rejects.toMatchObject({
@@ -78,6 +88,7 @@ describe("getPtaParentProgressionSummary — feature gating (both flags default 
     });
     expect(findManyStudent).not.toHaveBeenCalled();
     expect(findManyEnrollment).not.toHaveBeenCalled();
+    expect(findManyRecord).not.toHaveBeenCalled();
   });
 
   it("denies when the organization flag is off", async () => {
@@ -96,7 +107,152 @@ describe("getPtaParentProgressionSummary — feature gating (both flags default 
   });
 });
 
-describe("getPtaParentProgressionSummary — tenant and family scoping", () => {
+describe("parent progression — publication gate", () => {
+  beforeEach(() => {
+    findManyStudent.mockResolvedValue([{ id: "s-1", displayName: "Ada" }]);
+    findManyEnrollment.mockResolvedValue([
+      enrollment("e-cur", "s-1", "y-cur", "2026-2027", "5th Grade", "Room 12"),
+      enrollment("e-next", "s-1", "y-next", "2027-2028", "6th Grade", "Room 20"),
+    ]);
+  });
+
+  it("HIDES a committed but UNPUBLISHED future placement", async () => {
+    published(); // nothing published
+    const summary = await getPtaParentProgressionSummary(ORG, HOUSEHOLD);
+    expect(summary.students[0]).toMatchObject({
+      currentGrade: "5th Grade",
+      currentClassroom: "Room 12",
+      nextGrade: null,
+      nextClassroom: null,
+      status: "NOT_YET_AVAILABLE",
+      publicationStatus: "NOT_AVAILABLE",
+    });
+  });
+
+  it("SHOWS the future placement once it is published", async () => {
+    published("e-next");
+    const summary = await getPtaParentProgressionSummary(ORG, HOUSEHOLD);
+    expect(summary.students[0]).toMatchObject({
+      currentGrade: "5th Grade",
+      nextGrade: "6th Grade",
+      nextClassroom: "Room 20",
+      status: "CONFIRMED",
+      publicationStatus: "PUBLISHED",
+    });
+  });
+
+  it("keeps the CURRENT placement visible regardless of publication state", async () => {
+    published();
+    const summary = await getPtaParentProgressionSummary(ORG, HOUSEHOLD);
+    // Publication gating applies to future results only — a student's
+    // ordinary current-year placement is never withheld.
+    expect(summary.students[0].currentGrade).toBe("5th Grade");
+    expect(summary.students[0].currentClassroom).toBe("Room 12");
+  });
+
+  it("HIDES the placement again after it is withdrawn/unpublished", async () => {
+    published("e-next");
+    expect((await getPtaParentProgressionSummary(ORG, HOUSEHOLD)).students[0].status).toBe("CONFIRMED");
+    // Withdrawal flips the batch out of PUBLISHED, so the join returns nothing.
+    published();
+    const after = await getPtaParentProgressionSummary(ORG, HOUSEHOLD);
+    expect(after.students[0]).toMatchObject({ nextGrade: null, status: "NOT_YET_AVAILABLE", publicationStatus: "NOT_AVAILABLE" });
+  });
+
+  it("HIDES a rolled-back placement (target enrollment goes INACTIVE, filtered at the enrollment query)", async () => {
+    findManyEnrollment.mockResolvedValue([enrollment("e-cur", "s-1", "y-cur", "2026-2027", "5th Grade", "Room 12")]);
+    published("e-next");
+    const summary = await getPtaParentProgressionSummary(ORG, HOUSEHOLD);
+    expect(summary.students[0].nextGrade).toBeNull();
+    expect(findManyEnrollment.mock.calls[0][0].where.status).toBe("ACTIVE");
+  });
+
+  it("reflects a correction made after publication (the live enrollment is the source of truth)", async () => {
+    findManyEnrollment.mockResolvedValue([
+      enrollment("e-cur", "s-1", "y-cur", "2026-2027", "5th Grade", "Room 12"),
+      // Corrected placement — same enrollment id, different classroom.
+      enrollment("e-next", "s-1", "y-next", "2027-2028", "6th Grade", "Room 33"),
+    ]);
+    published("e-next");
+    const summary = await getPtaParentProgressionSummary(ORG, HOUSEHOLD);
+    expect(summary.students[0].nextClassroom).toBe("Room 33");
+    expect(summary.students[0].status).toBe("CONFIRMED");
+  });
+});
+
+describe("parent progression — minimal publication access (what can possibly leak)", () => {
+  beforeEach(() => {
+    findManyStudent.mockResolvedValue([{ id: "s-1", displayName: "Ada" }]);
+    findManyEnrollment.mockResolvedValue([
+      enrollment("e-cur", "s-1", "y-cur", "2026-2027", "5th Grade", "Room 12"),
+      enrollment("e-next", "s-1", "y-next", "2027-2028", "6th Grade", "Room 20"),
+    ]);
+    published("e-next");
+  });
+
+  it("never queries the progression batch table directly — publication is reached only through the record relation", async () => {
+    await getPtaParentProgressionSummary(ORG, HOUSEHOLD);
+    expect(forbiddenBatchAccess).not.toHaveBeenCalled();
+  });
+
+  it("selects ONLY targetEnrollmentId from the progression record — no outcome, reason, mapping or audit field", async () => {
+    await getPtaParentProgressionSummary(ORG, HOUSEHOLD);
+    expect(findManyRecord.mock.calls[0][0].select).toEqual({ targetEnrollmentId: true });
+  });
+
+  it("filters on publicationStatus PUBLISHED, organization scope, APPLIED status and real placement outcomes", async () => {
+    await getPtaParentProgressionSummary(ORG, HOUSEHOLD);
+    const where = findManyRecord.mock.calls[0][0].where;
+    expect(where.organizationId).toBe(ORG);
+    expect(where.status).toBe("APPLIED");
+    expect(where.batch).toEqual({ organizationId: ORG, publicationStatus: "PUBLISHED" });
+    expect(where.outcome.notIn).toEqual(expect.arrayContaining(["NEEDS_REVIEW", "EXCLUDE"]));
+  });
+
+  it("only ever asks about the family's own next-year enrollment ids", async () => {
+    await getPtaParentProgressionSummary(ORG, HOUSEHOLD);
+    expect(findManyRecord.mock.calls[0][0].where.targetEnrollmentId).toEqual({ in: ["e-next"] });
+  });
+
+  it("returns no batch id, publication actor, or publication timestamp to the family", async () => {
+    const summary = await getPtaParentProgressionSummary(ORG, HOUSEHOLD);
+    const serialized = JSON.stringify(summary);
+    for (const forbidden of [
+      "batchId",
+      "publishedByUserId",
+      "publishIdempotencyKey",
+      "commitIdempotencyKey",
+      "publicationVersion",
+      "exceptionReason",
+      "NEEDS_REVIEW",
+      "PLANNED",
+      "previewedAt",
+      "notes",
+    ]) {
+      expect(serialized).not.toContain(forbidden);
+    }
+    expect(Object.keys(summary.students[0]).sort()).toEqual(
+      [
+        "currentClassroom",
+        "currentGrade",
+        "displayName",
+        "nextClassroom",
+        "nextGrade",
+        "publicationStatus",
+        "status",
+        "studentId",
+      ].sort()
+    );
+  });
+
+  it("skips the publication query entirely when the family has no next-year enrollment", async () => {
+    findManyEnrollment.mockResolvedValue([enrollment("e-cur", "s-1", "y-cur", "2026-2027", "5th Grade", "Room 12")]);
+    await getPtaParentProgressionSummary(ORG, HOUSEHOLD);
+    expect(findManyRecord).not.toHaveBeenCalled();
+  });
+});
+
+describe("parent progression — tenant and family scoping", () => {
   it("scopes students to the caller's own organization AND household", async () => {
     await getPtaParentProgressionSummary(ORG, HOUSEHOLD);
     expect(findManyStudent).toHaveBeenCalledWith(
@@ -110,8 +266,6 @@ describe("getPtaParentProgressionSummary — tenant and family scoping", () => {
     const where = findManyEnrollment.mock.calls[0][0].where;
     expect(where.organizationId).toBe(ORG);
     expect(where.studentId).toEqual({ in: ["s-1"] });
-    // Rolled-back / corrected-away placements are INACTIVE, never deleted —
-    // they must not surface to a family.
     expect(where.status).toBe("ACTIVE");
   });
 
@@ -121,116 +275,46 @@ describe("getPtaParentProgressionSummary — tenant and family scoping", () => {
     expect(summary.students).toEqual([]);
   });
 
-  it("never reads the administrative progression batch or record tables", async () => {
-    findManyStudent.mockResolvedValue([{ id: "s-1", displayName: "Ada" }]);
-    findManyEnrollment.mockResolvedValue([enrollment("s-1", "y-cur", "2026-2027", "2nd Grade", "Room 4")]);
-    await expect(getPtaParentProgressionSummary(ORG, HOUSEHOLD)).resolves.toBeTruthy();
-    expect(forbiddenBatchAccess).not.toHaveBeenCalled();
-    expect(forbiddenRecordAccess).not.toHaveBeenCalled();
-  });
-
-  it("is bounded — three queries regardless of how many children the family has", async () => {
-    findManyStudent.mockResolvedValue(
-      Array.from({ length: 6 }, (_, i) => ({ id: `s-${i}`, displayName: `Child ${i}` }))
+  it("is bounded — at most four queries regardless of how many children the family has", async () => {
+    findManyStudent.mockResolvedValue(Array.from({ length: 6 }, (_, i) => ({ id: `s-${i}`, displayName: `Child ${i}` })));
+    findManyEnrollment.mockResolvedValue(
+      Array.from({ length: 6 }, (_, i) => enrollment(`e-${i}`, `s-${i}`, "y-next", "2027-2028", "6th Grade", "Room 1"))
     );
+    published();
     await getPtaParentProgressionSummary(ORG, HOUSEHOLD);
     expect(findManyYear).toHaveBeenCalledTimes(1);
     expect(findManyStudent).toHaveBeenCalledTimes(1);
     expect(findManyEnrollment).toHaveBeenCalledTimes(1);
+    expect(findManyRecord).toHaveBeenCalledTimes(1);
   });
 });
 
-describe("getPtaParentProgressionSummary — publication rule", () => {
-  it("publishes a confirmed next-year placement when a committed target enrollment exists", async () => {
-    findManyStudent.mockResolvedValue([{ id: "s-1", displayName: "Ada" }]);
-    findManyEnrollment.mockResolvedValue([
-      enrollment("s-1", "y-cur", "2026-2027", "5th Grade", "Room 12"),
-      enrollment("s-1", "y-next", "2027-2028", "6th Grade", "Room 20"),
-    ]);
-    const summary = await getPtaParentProgressionSummary(ORG, HOUSEHOLD);
-    expect(summary.currentSchoolYear).toBe("2026-2027");
-    expect(summary.nextSchoolYear).toBe("2027-2028");
-    expect(summary.students[0]).toMatchObject({
-      displayName: "Ada",
-      currentGrade: "5th Grade",
-      currentClassroom: "Room 12",
-      nextGrade: "6th Grade",
-      nextClassroom: "Room 20",
-      status: "CONFIRMED",
-    });
-  });
-
-  it("shows only the current placement, and no next-year data, when the target enrollment does not exist", async () => {
-    findManyStudent.mockResolvedValue([{ id: "s-1", displayName: "Ada" }]);
-    findManyEnrollment.mockResolvedValue([enrollment("s-1", "y-cur", "2026-2027", "2nd Grade", "Room 4")]);
-    const summary = await getPtaParentProgressionSummary(ORG, HOUSEHOLD);
-    expect(summary.students[0]).toMatchObject({
-      currentGrade: "2nd Grade",
-      nextGrade: null,
-      nextClassroom: null,
-      status: "NOT_YET_AVAILABLE",
-    });
-  });
-
-  it("treats NEEDS_REVIEW / excluded / skipped / graduated / transferred / withdrawn identically — all have no target enrollment, so none is distinguishable", async () => {
-    // Each of those administrative outcomes leaves no ACTIVE target-year
-    // enrollment. The family result must be byte-identical in every case.
-    findManyStudent.mockResolvedValue([{ id: "s-1", displayName: "Ada" }]);
-    findManyEnrollment.mockResolvedValue([enrollment("s-1", "y-cur", "2026-2027", "8th Grade", "Room 1")]);
-    const summary = await getPtaParentProgressionSummary(ORG, HOUSEHOLD);
-    const student = summary.students[0];
-    expect(student.status).toBe("NOT_YET_AVAILABLE");
-    expect(student.nextGrade).toBeNull();
-    expect(student.nextClassroom).toBeNull();
-    // No outcome/reason/notes field is exposed at all.
-    expect(Object.keys(student).sort()).toEqual(
-      ["currentClassroom", "currentGrade", "displayName", "nextClassroom", "nextGrade", "status", "studentId"].sort()
-    );
-  });
-
-  it("does not publish a placement carried on an INACTIVE (rolled-back) enrollment — those are filtered at the query level", async () => {
-    findManyStudent.mockResolvedValue([{ id: "s-1", displayName: "Ada" }]);
-    // The service asks Prisma for status: "ACTIVE" only, so a rolled-back
-    // row never reaches it.
-    findManyEnrollment.mockResolvedValue([enrollment("s-1", "y-cur", "2026-2027", "3rd Grade", "Room 7")]);
-    const summary = await getPtaParentProgressionSummary(ORG, HOUSEHOLD);
-    expect(findManyEnrollment.mock.calls[0][0].where.status).toBe("ACTIVE");
-    expect(summary.students[0].nextGrade).toBeNull();
-  });
-
-  it("matches legacy enrollments that carry only the free-text school-year label (null schoolYearId)", async () => {
-    findManyStudent.mockResolvedValue([{ id: "s-1", displayName: "Ada" }]);
-    findManyEnrollment.mockResolvedValue([
-      { studentId: "s-1", schoolYearId: null, schoolYear: "2026-2027", classroom: { name: "Room 9", grade: { name: "1st Grade" } } },
-    ]);
-    const summary = await getPtaParentProgressionSummary(ORG, HOUSEHOLD);
-    expect(summary.students[0].currentGrade).toBe("1st Grade");
-  });
-});
-
-describe("getPtaParentProgressionSummary — family shapes and statuses", () => {
-  it("handles multiple students progressing differently in one family, in deterministic order", async () => {
+describe("parent progression — family shapes and statuses", () => {
+  it("handles multiple students with different publication outcomes, in deterministic order", async () => {
     findManyStudent.mockResolvedValue([
       { id: "s-a", displayName: "Ada" },
       { id: "s-b", displayName: "Ben" },
     ]);
     findManyEnrollment.mockResolvedValue([
-      enrollment("s-a", "y-cur", "2026-2027", "5th Grade", "Room 12"),
-      enrollment("s-a", "y-next", "2027-2028", "6th Grade", "Room 20"),
-      enrollment("s-b", "y-cur", "2026-2027", "2nd Grade", "Room 4"),
+      enrollment("e-a-cur", "s-a", "y-cur", "2026-2027", "5th Grade", "Room 12"),
+      enrollment("e-a-next", "s-a", "y-next", "2027-2028", "6th Grade", "Room 20"),
+      enrollment("e-b-cur", "s-b", "y-cur", "2026-2027", "2nd Grade", "Room 4"),
+      // Ben also has a committed target enrollment, but it is NOT published.
+      enrollment("e-b-next", "s-b", "y-next", "2027-2028", "3rd Grade", "Room 5"),
     ]);
+    published("e-a-next");
     const summary = await getPtaParentProgressionSummary(ORG, HOUSEHOLD);
     expect(summary.students.map((s) => s.displayName)).toEqual(["Ada", "Ben"]);
-    expect(summary.students[0].status).toBe("CONFIRMED");
-    expect(summary.students[1].status).toBe("NOT_YET_AVAILABLE");
+    expect(summary.students[0]).toMatchObject({ nextGrade: "6th Grade", status: "CONFIRMED", publicationStatus: "PUBLISHED" });
+    // Ben's committed-but-unpublished placement must not leak.
+    expect(summary.students[1]).toMatchObject({ nextGrade: null, status: "NOT_YET_AVAILABLE", publicationStatus: "NOT_AVAILABLE" });
     expect(findManyStudent.mock.calls[0][0].orderBy).toEqual([{ displayName: "asc" }, { id: "asc" }]);
   });
 
   it("reports a student with no current placement at all as not yet available", async () => {
     findManyStudent.mockResolvedValue([{ id: "s-1", displayName: "Ada" }]);
-    findManyEnrollment.mockResolvedValue([]);
     const summary = await getPtaParentProgressionSummary(ORG, HOUSEHOLD);
-    expect(summary.students[0]).toMatchObject({ currentGrade: null, currentClassroom: null, status: "NOT_YET_AVAILABLE" });
+    expect(summary.students[0]).toMatchObject({ currentGrade: null, status: "NOT_YET_AVAILABLE", publicationStatus: "NOT_AVAILABLE" });
   });
 
   it("returns an empty student list for a family with no students", async () => {
@@ -245,8 +329,7 @@ describe("getPtaParentProgressionSummary — family shapes and statuses", () => 
     findManyStudent.mockResolvedValue([{ id: "s-1", displayName: "Ada" }]);
     const summary = await getPtaParentProgressionSummary(ORG, HOUSEHOLD);
     expect(summary.currentSchoolYear).toBeNull();
-    expect(summary.nextSchoolYear).toBeNull();
-    expect(summary.students[0].status).toBe("NOT_YET_AVAILABLE");
+    expect(summary.students[0]).toMatchObject({ status: "NOT_YET_AVAILABLE", publicationStatus: "NOT_AVAILABLE" });
   });
 
   it("reports COMPLETED when the student rolled into the active year and no later year is defined", async () => {
@@ -256,8 +339,8 @@ describe("getPtaParentProgressionSummary — family shapes and statuses", () => 
     ]);
     findManyStudent.mockResolvedValue([{ id: "s-1", displayName: "Ada" }]);
     findManyEnrollment.mockResolvedValue([
-      enrollment("s-1", "y-prev", "2025-2026", "4th Grade", "Room 3"),
-      enrollment("s-1", "y-cur", "2026-2027", "5th Grade", "Room 12"),
+      enrollment("e-prev", "s-1", "y-prev", "2025-2026", "4th Grade", "Room 3"),
+      enrollment("e-cur", "s-1", "y-cur", "2026-2027", "5th Grade", "Room 12"),
     ]);
     const summary = await getPtaParentProgressionSummary(ORG, HOUSEHOLD);
     expect(summary.students[0].status).toBe("COMPLETED");
@@ -267,7 +350,7 @@ describe("getPtaParentProgressionSummary — family shapes and statuses", () => 
   it("reports CURRENT for a first-year student with no prior history and no later year defined", async () => {
     findManyYear.mockResolvedValue([{ id: "y-cur", label: "2026-2027", isCurrent: true }]);
     findManyStudent.mockResolvedValue([{ id: "s-1", displayName: "Ada" }]);
-    findManyEnrollment.mockResolvedValue([enrollment("s-1", "y-cur", "2026-2027", "Kindergarten", "Room 1")]);
+    findManyEnrollment.mockResolvedValue([enrollment("e-cur", "s-1", "y-cur", "2026-2027", "Kindergarten", "Room 1")]);
     const summary = await getPtaParentProgressionSummary(ORG, HOUSEHOLD);
     expect(summary.students[0].status).toBe("CURRENT");
   });
@@ -290,5 +373,14 @@ describe("getPtaParentProgressionSummary — family shapes and statuses", () => 
     findManyStudent.mockResolvedValue([{ id: "s-1", displayName: "Ada" }]);
     const summary = await getPtaParentProgressionSummary(ORG, HOUSEHOLD);
     expect(summary.nextSchoolYear).toBeNull();
+  });
+
+  it("matches legacy enrollments that carry only the free-text school-year label (null schoolYearId)", async () => {
+    findManyStudent.mockResolvedValue([{ id: "s-1", displayName: "Ada" }]);
+    findManyEnrollment.mockResolvedValue([
+      { id: "e-legacy", studentId: "s-1", schoolYearId: null, schoolYear: "2026-2027", classroom: { name: "Room 9", grade: { name: "1st Grade" } } },
+    ]);
+    const summary = await getPtaParentProgressionSummary(ORG, HOUSEHOLD);
+    expect(summary.students[0].currentGrade).toBe("1st Grade");
   });
 });

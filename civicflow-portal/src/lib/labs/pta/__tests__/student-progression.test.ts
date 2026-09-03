@@ -479,6 +479,53 @@ describe("commitProgressionBatch", () => {
   });
 });
 
+describe("rollbackProgressionBatch — publication interaction", () => {
+  it("BLOCKS rollback while results are still published to families", async () => {
+    findFirstBatch.mockResolvedValueOnce({
+      id: "batch-1",
+      status: "COMMITTED",
+      publicationStatus: "PUBLISHED",
+      committedAt: new Date("2027-06-01"),
+      records: [{ id: "r1", studentId: "s1", targetEnrollmentId: "e1", student: { householdId: "h1" } }],
+    });
+
+    await expect(rollbackProgressionBatch({ organizationId: ORG, batchId: "batch-1", ...actor })).rejects.toMatchObject({
+      code: "PTA_PROGRESSION_ROLLBACK_BLOCKED_PUBLISHED",
+    });
+    // Nothing was touched -- the disclosure must be withdrawn explicitly first.
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it("allows rollback once the results have been withdrawn", async () => {
+    findFirstBatch.mockResolvedValueOnce({
+      id: "batch-1",
+      status: "COMMITTED",
+      publicationStatus: "WITHDRAWN",
+      committedAt: new Date("2027-06-01"),
+      records: [{ id: "r1", studentId: "s1", targetEnrollmentId: "e1", student: { householdId: "h1" } }],
+    });
+    findFirstLedgerEntry.mockResolvedValueOnce(null);
+    findFirstBatch.mockResolvedValueOnce({ id: "batch-1", status: "ROLLED_BACK", records: [] });
+
+    await expect(rollbackProgressionBatch({ organizationId: ORG, batchId: "batch-1", ...actor })).resolves.toBeTruthy();
+    expect(transaction).toHaveBeenCalled();
+  });
+
+  it("allows rollback of a never-published committed batch", async () => {
+    findFirstBatch.mockResolvedValueOnce({
+      id: "batch-1",
+      status: "COMMITTED",
+      publicationStatus: "UNPUBLISHED",
+      committedAt: new Date("2027-06-01"),
+      records: [{ id: "r1", studentId: "s1", targetEnrollmentId: "e1", student: { householdId: "h1" } }],
+    });
+    findFirstLedgerEntry.mockResolvedValueOnce(null);
+    findFirstBatch.mockResolvedValueOnce({ id: "batch-1", status: "ROLLED_BACK", records: [] });
+
+    await expect(rollbackProgressionBatch({ organizationId: ORG, batchId: "batch-1", ...actor })).resolves.toBeTruthy();
+  });
+});
+
 describe("rollbackProgressionBatch", () => {
   it("rolls back a committed batch with no dependent activity", async () => {
     findFirstBatch.mockResolvedValueOnce({

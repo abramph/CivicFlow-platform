@@ -5,35 +5,46 @@ import { assertProgressionEnabled } from "./student-progression";
 /**
  * Parent/family-facing READ-ONLY view of student progression.
  *
- * The single most important property of this module: **it never reads
- * `PtaStudentProgressionBatch` or `PtaStudentProgressionRecord` at all.**
- * Everything a family sees is derived purely from committed
- * `PtaStudentEnrollment` rows (plus classroom/grade/school-year lookups).
- * That is a structural privacy guarantee, not a filtering convention —
- * preview calculations, draft classroom mappings, NEEDS_REVIEW state,
- * administrator notes, conflict details, audit actors, batch idempotency
- * keys and outcome codes are simply not reachable from here, so no future
- * edit to this file can accidentally leak one.
+ * ## Visibility rule
  *
- * Why enrollment rows alone are a safe publication signal (verified
- * against student-progression.ts, not assumed):
- *   - `previewProgressionBatch` only ever READS enrollments; it writes
- *     `PtaStudentProgressionRecord` rows in PLANNED state and creates no
- *     enrollment.
- *   - Target-year `PtaStudentEnrollment` rows are created in exactly two
- *     places, both inside `commitProgressionBatch`/`correctProgressionRecord`,
- *     and always with `status: "ACTIVE"`.
- *   - Correcting a student away from an enrolling outcome, and rolling a
- *     batch back, both set that row to `status: "INACTIVE"` rather than
- *     deleting it.
- * So "an ACTIVE enrollment row exists for the target year" is, by
- * construction, equivalent to "this placement was committed and has not
- * been rolled back" — which is the safest available publication rule given
- * that `PtaEnrollmentStatus` has no explicit publish/visibility state.
- * A student who is NEEDS_REVIEW, SKIPPED, excluded, graduated,
- * transferred or withdrawn has no ACTIVE target-year enrollment and is
- * therefore reported identically as "not yet available" — the family
- * cannot distinguish those cases, which is intended.
+ * A student's **current-year** placement is always shown — that is their
+ * ordinary, already-official enrollment and has nothing to do with
+ * progression disclosure.
+ *
+ * A **future-year** placement is shown **only when an administrator has
+ * explicitly published** the progression batch that produced it. A
+ * committed target enrollment is necessary but NOT sufficient: committing
+ * is the office finishing its data work, publishing is the school deciding
+ * families should be told. Those are different decisions, and this module
+ * gates on the second.
+ *
+ * Concretely, a future placement is published only when ALL of:
+ *   - an ACTIVE target-year `PtaStudentEnrollment` exists (so it was
+ *     committed, and not rolled back or corrected away — both of those set
+ *     the row INACTIVE rather than deleting it), AND
+ *   - the `PtaStudentProgressionRecord` linking that enrollment is APPLIED
+ *     with a real placement outcome, AND
+ *   - its batch's `publicationStatus` is `PUBLISHED` (not UNPUBLISHED, not
+ *     WITHDRAWN).
+ *
+ * ## Minimal-access principle
+ *
+ * This module previously never touched the progression tables at all. It
+ * now must, because publication state lives there — but it reads the
+ * **minimum** needed and nothing else:
+ *   - from the record: `targetEnrollmentId`, `outcome`, `status` (to
+ *     confirm a real applied placement) — never `exceptionReason`, never
+ *     the source/target grade/classroom mapping ids, never audit fields.
+ *   - from the batch: `publicationStatus` only — never `publishedByUserId`,
+ *     `publishIdempotencyKey`, `commitIdempotencyKey`, `notes`,
+ *     `previewedAt`, or any actor/timestamp beyond what a family display
+ *     needs.
+ * Nothing about *why* a placement is unavailable ever leaves this module.
+ * A student who is NEEDS_REVIEW, skipped, excluded, graduated, transferred,
+ * withdrawn, committed-but-unpublished, or withdrawn-after-publication all
+ * produce byte-identical output: no next placement, status
+ * `NOT_YET_AVAILABLE`. The family cannot distinguish them, which is the
+ * point.
  *
  * Deliberately NOT introduced here: graduated/transferred/withdrawn
  * wording. Those outcomes mark only the progression record APPLIED; they
@@ -60,6 +71,10 @@ export interface PtaParentProgressionStudent {
   nextGrade: string | null;
   nextClassroom: string | null;
   status: PtaParentProgressionStatus;
+  /** Whether a future placement is actually published for this student.
+   * Never explains *why* not — an unpublished, unresolved, excluded,
+   * withdrawn or rolled-back student all report NOT_AVAILABLE. */
+  publicationStatus: "NOT_AVAILABLE" | "PUBLISHED";
 }
 
 export interface PtaParentProgressionSummary {
@@ -154,6 +169,7 @@ export async function getPtaParentProgressionSummary(
         nextGrade: null,
         nextClassroom: null,
         status: "NOT_YET_AVAILABLE" as const,
+        publicationStatus: "NOT_AVAILABLE" as const,
       })),
     };
   }
@@ -172,6 +188,7 @@ export async function getPtaParentProgressionSummary(
       OR: [{ schoolYearId: { in: relevantYears.map((y) => y.id) } }, { schoolYear: { in: relevantYears.map((y) => y.label) } }],
     },
     select: {
+      id: true,
       studentId: true,
       schoolYearId: true,
       schoolYear: true,
@@ -184,26 +201,60 @@ export async function getPtaParentProgressionSummary(
     year: YearRef | null
   ): boolean => (year ? enrollment.schoolYearId === year.id || enrollment.schoolYear === year.label : false);
 
+  // Which of those enrollments are actually PUBLISHED to families?
+  //
+  // Only future-year enrollments need this check — a current-year placement
+  // is the student's ordinary official enrollment and is always shown. The
+  // query deliberately selects the minimum: which enrollment id, and
+  // nothing from the batch beyond the fact that it matched
+  // publicationStatus PUBLISHED. No actor, timestamp, key, note or mapping
+  // is read, so none can leak.
+  const nextYearEnrollmentIds = next
+    ? enrollments.filter((e) => matches(e, next)).map((e) => e.id)
+    : [];
+  const publishedEnrollmentIds = new Set<string>();
+  if (nextYearEnrollmentIds.length > 0) {
+    const publishedRecords = await prisma.ptaStudentProgressionRecord.findMany({
+      where: {
+        organizationId,
+        targetEnrollmentId: { in: nextYearEnrollmentIds },
+        // A real, applied placement — not PLANNED, SKIPPED or FAILED.
+        status: "APPLIED",
+        // Never disclose a still-unresolved review or an explicit exclusion,
+        // even if some other path had produced an enrollment for it.
+        outcome: { notIn: ["NEEDS_REVIEW", "EXCLUDE", "GRADUATE", "TRANSFER", "WITHDRAW"] },
+        // The publication gate itself.
+        batch: { organizationId, publicationStatus: "PUBLISHED" },
+      },
+      select: { targetEnrollmentId: true },
+    });
+    for (const record of publishedRecords) {
+      if (record.targetEnrollmentId) publishedEnrollmentIds.add(record.targetEnrollmentId);
+    }
+  }
+
   return {
     currentSchoolYear: current.label,
     nextSchoolYear: next?.label ?? null,
     students: students.map((student) => {
       const own = enrollments.filter((e) => e.studentId === student.id);
       const currentEnrollment = own.find((e) => matches(e, current)) ?? null;
-      const nextEnrollment = own.find((e) => matches(e, next)) ?? null;
       const hasPreviousEnrollment = own.some((e) => matches(e, previous));
+      // Future placement only counts once it is PUBLISHED. A committed but
+      // unpublished (or withdrawn) placement is treated exactly as if it
+      // did not exist.
+      const nextEnrollment = own.find((e) => matches(e, next) && publishedEnrollmentIds.has(e.id)) ?? null;
 
       let status: PtaParentProgressionStatus;
       if (nextEnrollment) {
-        // Committed and not rolled back — the only case that publishes a
-        // future placement.
         status = "CONFIRMED";
       } else if (!currentEnrollment) {
         status = "NOT_YET_AVAILABLE";
       } else if (next) {
-        // A later year exists but this student has no committed placement
-        // in it yet. Covers not-yet-run, NEEDS_REVIEW, skipped, excluded,
-        // graduated, transferred and withdrawn alike — indistinguishably.
+        // A later year exists but nothing is published for this student.
+        // Covers not-yet-run, committed-but-unpublished, withdrawn,
+        // NEEDS_REVIEW, skipped, excluded, graduated, transferred, withdrawn
+        // and rolled-back alike — all indistinguishable.
         status = "NOT_YET_AVAILABLE";
       } else if (hasPreviousEnrollment) {
         // Rolled into the active year and no further year is defined:
@@ -221,6 +272,7 @@ export async function getPtaParentProgressionSummary(
         nextGrade: nextEnrollment?.classroom.grade.name ?? null,
         nextClassroom: nextEnrollment?.classroom.name ?? null,
         status,
+        publicationStatus: nextEnrollment ? ("PUBLISHED" as const) : ("NOT_AVAILABLE" as const),
       };
     }),
   };

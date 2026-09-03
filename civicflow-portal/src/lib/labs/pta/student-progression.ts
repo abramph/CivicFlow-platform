@@ -41,6 +41,24 @@ export async function assertProgressionEnabled(organizationId: string): Promise<
   }
 }
 
+/**
+ * A published batch must be explicitly unpublished before it can be rolled
+ * back. Chosen over transactionally unpublishing as part of rollback so the
+ * disclosure change is a deliberate, separately-audited act the
+ * administrator actually performs and sees — not a silent side effect.
+ *
+ * Lives here rather than in progression-publication.ts to keep the import
+ * dependency one-way (publication -> progression), avoiding a cycle.
+ */
+export function assertNotPublishedForRollback(publicationStatus: string): void {
+  if (publicationStatus === "PUBLISHED") {
+    throw new PtaError(
+      "PTA_PROGRESSION_ROLLBACK_BLOCKED_PUBLISHED",
+      "These results are currently published to families. Hide them from families first, then roll back."
+    );
+  }
+}
+
 function assertChronologicalOrder(fromLabel: string, toLabel: string): void {
   const from = parseSchoolYearLabel(fromLabel);
   const to = parseSchoolYearLabel(toLabel);
@@ -652,8 +670,39 @@ export async function correctProgressionRecord(input: CorrectProgressionRecordIn
     action: "pta.student_progression.record_corrected",
     entityType: "pta_student_progression_record",
     entityId: record.id,
-    metadata: { studentId: record.studentId, before: record.outcome, after: input.outcome },
+    metadata: {
+      studentId: record.studentId,
+      before: record.outcome,
+      after: input.outcome,
+      // Correcting an already-published batch changes what families see on
+      // their next read. The correction is allowed (blocking it would leave
+      // families looking at a placement the office knows is wrong), but it
+      // is flagged here so the audit trail shows the change happened after
+      // disclosure, and the portal warns the administrator before saving.
+      correctedAfterPublication: batch.publicationStatus === "PUBLISHED",
+    },
   });
+
+  if (batch.publicationStatus === "PUBLISHED") {
+    // A second, batch-level event so a reviewer scanning the batch's
+    // publication history sees post-publication changes without having to
+    // correlate per-record events.
+    await createAuditEvent({
+      organizationId: input.organizationId,
+      actorUserId: input.actorUserId,
+      actorEmail: input.actorEmail ?? null,
+      action: "pta.progression.corrected_after_publication",
+      entityType: "PtaStudentProgressionBatch",
+      entityId: input.batchId,
+      metadata: {
+        outcome: "CORRECTED_AFTER_PUBLICATION",
+        recordId: record.id,
+        before: record.outcome,
+        after: input.outcome,
+        familiesMayHaveSeenPreviousResult: true,
+      },
+    });
+  }
 
   return updated;
 }
@@ -678,6 +727,10 @@ export async function rollbackProgressionBatch(input: ActorInput & { organizatio
   if (batch.status !== "COMMITTED" && batch.status !== "CORRECTED") {
     throw new PtaError("PTA_PROGRESSION_BATCH_NOT_CORRECTABLE", "Only a committed batch can be rolled back.");
   }
+  // A published batch must be explicitly unpublished first, so withdrawing
+  // the disclosure is a deliberate, separately-audited act rather than a
+  // silent side effect of a rollback.
+  assertNotPublishedForRollback(batch.publicationStatus);
   if (!batch.committedAt) {
     throw new PtaError("PTA_PROGRESSION_BATCH_NOT_CORRECTABLE", "This batch has no commit timestamp to check dependent activity against.");
   }
