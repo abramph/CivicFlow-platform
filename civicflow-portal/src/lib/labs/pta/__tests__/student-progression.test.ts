@@ -63,6 +63,7 @@ import {
   generateProgressionPreview,
   getProgressionBatchDetail,
   rollbackProgressionBatch,
+  saveProgressionClassroomMappings,
   saveProgressionException,
 } from "@/lib/labs/pta/student-progression";
 import { isPtaStudentProgressionPlatformEnabled } from "@/lib/env";
@@ -571,5 +572,88 @@ describe("tenant isolation", () => {
     findFirstBatch.mockResolvedValueOnce(null);
     await expect(getProgressionBatchDetail(ORG, "batch-from-other-org")).rejects.toMatchObject({ code: "PTA_PROGRESSION_BATCH_NOT_FOUND" });
     expect(findFirstBatch).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ organizationId: ORG }) }));
+  });
+});
+
+/**
+ * Lifecycle immutability. Committed work must never become editable again.
+ *
+ * These exist because the three editing services originally used a
+ * DENYLIST ("reject if COMMITTED or ROLLED_BACK") which silently omitted
+ * CORRECTED. Since correctProgressionRecord sets exactly that status, one
+ * correction re-opened a committed batch for wholesale editing --
+ * reproduced before the fix: a CORRECTED batch's classroom mappings were
+ * deleted and recreated with no error raised.
+ */
+describe("progression lifecycle — committed batches are immutable", () => {
+  const NON_EDITABLE = ["COMMITTED", "CORRECTED", "ROLLED_BACK"] as const;
+
+  describe.each(NON_EDITABLE)("a %s batch", (status) => {
+    it("rejects classroom-mapping edits and writes nothing", async () => {
+      findFirstBatch.mockResolvedValue({ id: "batch-1", status, organizationId: ORG });
+      await expect(
+        saveProgressionClassroomMappings({
+          organizationId: ORG,
+          batchId: "batch-1",
+          mappings: [{ sourceClassroomId: "c1", targetClassroomId: "c2" }],
+          ...actor,
+        } as never)
+      ).rejects.toMatchObject({ code: "PTA_PROGRESSION_BATCH_NOT_CORRECTABLE" });
+      expect(deleteManyMapping).not.toHaveBeenCalled();
+      expect(createManyMapping).not.toHaveBeenCalled();
+    });
+
+    it("rejects preview regeneration, so committed records cannot be overwritten", async () => {
+      findFirstBatch.mockResolvedValue({ id: "batch-1", status, organizationId: ORG, classroomMappings: [], records: [] });
+      await expect(generateProgressionPreview(ORG, "batch-1")).rejects.toMatchObject({
+        code: "PTA_PROGRESSION_BATCH_NOT_CORRECTABLE",
+      });
+      expect(transaction).not.toHaveBeenCalled();
+    });
+
+    it("rejects per-student exception/override changes", async () => {
+      findFirstBatch.mockResolvedValue({ id: "batch-1", status, organizationId: ORG });
+      await expect(
+        saveProgressionException({ organizationId: ORG, batchId: "batch-1", studentId: "s1", outcome: "RETAIN", ...actor } as never)
+      ).rejects.toMatchObject({ code: "PTA_PROGRESSION_BATCH_NOT_CORRECTABLE" });
+      expect(upsertRecord).not.toHaveBeenCalled();
+    });
+  });
+
+  it("a PUBLISHED batch is not editable even if some future status were considered editable", async () => {
+    // Defence in depth: publication is checked independently of status.
+    findFirstBatch.mockResolvedValue({ id: "batch-1", status: "PREVIEWED", publicationStatus: "PUBLISHED", organizationId: ORG });
+    await expect(
+      saveProgressionClassroomMappings({
+        organizationId: ORG,
+        batchId: "batch-1",
+        mappings: [{ sourceClassroomId: "c1", targetClassroomId: "c2" }],
+        ...actor,
+      } as never)
+    ).rejects.toMatchObject({ code: "PTA_PROGRESSION_BATCH_NOT_CORRECTABLE" });
+    expect(deleteManyMapping).not.toHaveBeenCalled();
+  });
+
+  describe.each(["PREPARING", "PREVIEWED"] as const)("a %s batch remains editable", (status) => {
+    it("allows classroom-mapping edits", async () => {
+      findFirstBatch.mockResolvedValue({ id: "batch-1", status, organizationId: ORG });
+      findManyClassroom.mockResolvedValue([{ id: "c1" }, { id: "c2" }]);
+      await expect(
+        saveProgressionClassroomMappings({
+          organizationId: ORG,
+          batchId: "batch-1",
+          mappings: [{ sourceClassroomId: "c1", targetClassroomId: "c2" }],
+          ...actor,
+        } as never)
+      ).resolves.toBeTruthy();
+      expect(createManyMapping).toHaveBeenCalled();
+    });
+  });
+
+  it("a cross-organization batch id is not found, so no state check can be bypassed", async () => {
+    findFirstBatch.mockResolvedValue(null);
+    await expect(
+      saveProgressionClassroomMappings({ organizationId: ORG, batchId: "other-org-batch", mappings: [], ...actor } as never)
+    ).rejects.toMatchObject({ code: "PTA_PROGRESSION_BATCH_NOT_FOUND" });
   });
 });

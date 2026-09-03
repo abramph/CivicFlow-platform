@@ -42,6 +42,42 @@ export async function assertProgressionEnabled(organizationId: string): Promise<
 }
 
 /**
+ * The ONLY batch states in which the plan itself may still be edited
+ * (classroom mappings, per-student exceptions, preview regeneration).
+ *
+ * Deliberately an allowlist. The three editing services previously used a
+ * denylist — "reject if COMMITTED or ROLLED_BACK" — which silently omitted
+ * `CORRECTED`. Since `correctProgressionRecord` sets exactly that status,
+ * a single correction re-opened a committed batch for wholesale editing:
+ * mappings could be rewritten and `generateProgressionPreview` could
+ * overwrite the committed records outright, including while the results
+ * were published to families. Verified empirically before this fix (a
+ * CORRECTED batch's mappings were deleted and recreated with no error).
+ * An allowlist cannot fail that way when a new state is added later.
+ */
+const EDITABLE_BATCH_STATUSES = ["PREPARING", "PREVIEWED"] as const;
+
+/**
+ * Guard for every service that mutates the *plan*. Committed work is
+ * immutable: after commit the only permitted changes are the dedicated
+ * correction workflow, publication/withdrawal, and rollback.
+ *
+ * Publication is checked too, as defence in depth — a published batch must
+ * never be editable through any path, whatever its lifecycle status.
+ */
+function assertBatchEditable(batch: { status: string; publicationStatus?: string }, action: string): void {
+  if ((batch.publicationStatus ?? "UNPUBLISHED") === "PUBLISHED") {
+    throw new PtaError(
+      "PTA_PROGRESSION_BATCH_NOT_CORRECTABLE",
+      `These results are published to families and cannot be edited. ${action}`
+    );
+  }
+  if (!(EDITABLE_BATCH_STATUSES as readonly string[]).includes(batch.status)) {
+    throw new PtaError("PTA_PROGRESSION_BATCH_NOT_CORRECTABLE", `This batch is already committed — ${action}`);
+  }
+}
+
+/**
  * A published batch must be explicitly unpublished before it can be rolled
  * back. Chosen over transactionally unpublishing as part of rollback so the
  * disclosure change is a deliberate, separately-audited act the
@@ -175,9 +211,7 @@ export interface SaveClassroomMappingsInput extends ActorInput {
 export async function saveProgressionClassroomMappings(input: SaveClassroomMappingsInput) {
   const batch = await prisma.ptaStudentProgressionBatch.findFirst({ where: { id: input.batchId, organizationId: input.organizationId } });
   if (!batch) throw new PtaError("PTA_PROGRESSION_BATCH_NOT_FOUND", "Progression batch not found.");
-  if (batch.status === "COMMITTED" || batch.status === "ROLLED_BACK") {
-    throw new PtaError("PTA_PROGRESSION_BATCH_NOT_CORRECTABLE", "This batch is already committed — mapping changes no longer apply retroactively.");
-  }
+  assertBatchEditable(batch, "mapping changes no longer apply retroactively.");
 
   const sourceIds = input.mappings.map((m) => m.sourceClassroomId);
   const targetIds = input.mappings.map((m) => m.targetClassroomId);
@@ -238,9 +272,7 @@ export async function generateProgressionPreview(organizationId: string, batchId
     include: { fromSchoolYear: true, toSchoolYear: true, classroomMappings: true, records: true },
   });
   if (!batch) throw new PtaError("PTA_PROGRESSION_BATCH_NOT_FOUND", "Progression batch not found.");
-  if (batch.status === "COMMITTED" || batch.status === "ROLLED_BACK") {
-    throw new PtaError("PTA_PROGRESSION_BATCH_NOT_CORRECTABLE", "This batch is already committed — generate a new batch for further changes.");
-  }
+  assertBatchEditable(batch, "generate a new batch for further changes.");
 
   const [sourceEnrollments, grades, existingTargetEnrollments] = await Promise.all([
     prisma.ptaStudentEnrollment.findMany({
@@ -360,9 +392,7 @@ export interface SaveProgressionExceptionInput extends ActorInput {
 export async function saveProgressionException(input: SaveProgressionExceptionInput) {
   const batch = await prisma.ptaStudentProgressionBatch.findFirst({ where: { id: input.batchId, organizationId: input.organizationId } });
   if (!batch) throw new PtaError("PTA_PROGRESSION_BATCH_NOT_FOUND", "Progression batch not found.");
-  if (batch.status === "COMMITTED" || batch.status === "ROLLED_BACK") {
-    throw new PtaError("PTA_PROGRESSION_BATCH_NOT_CORRECTABLE", "This batch is already committed — use the correction workflow instead.");
-  }
+  assertBatchEditable(batch, "use the correction workflow instead.");
 
   const student = await prisma.ptaStudent.findFirst({ where: { id: input.studentId, organizationId: input.organizationId } });
   if (!student) throw new PtaError("PTA_STUDENT_NOT_FOUND", "Student not found.");

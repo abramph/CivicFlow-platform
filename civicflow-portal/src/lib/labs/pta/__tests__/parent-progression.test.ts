@@ -24,7 +24,7 @@ const findManyEnrollment = vi.fn();
 const findManyRecord = vi.fn();
 /** Batch reads must go through the record->batch relation filter, never a
  * direct batch query from this module. */
-const forbiddenBatchAccess = vi.fn((..._args: unknown[]): never => {
+const forbiddenBatchAccess = vi.fn((): never => {
   throw new Error("parent-progression must not query PtaStudentProgressionBatch directly");
 });
 
@@ -36,9 +36,9 @@ vi.mock("@/lib/prisma", () => ({
     ptaStudentEnrollment: { findMany: (...a: unknown[]) => findManyEnrollment(...a) },
     ptaStudentProgressionRecord: { findMany: (...a: unknown[]) => findManyRecord(...a) },
     ptaStudentProgressionBatch: {
-      findMany: (...a: unknown[]) => forbiddenBatchAccess(...a),
-      findFirst: (...a: unknown[]) => forbiddenBatchAccess(...a),
-      findUnique: (...a: unknown[]) => forbiddenBatchAccess(...a),
+      findMany: () => forbiddenBatchAccess(),
+      findFirst: () => forbiddenBatchAccess(),
+      findUnique: () => forbiddenBatchAccess(),
     },
   },
 }));
