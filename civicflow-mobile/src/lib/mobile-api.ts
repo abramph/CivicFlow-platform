@@ -739,6 +739,57 @@ export function getPtaDocuments(organizationId: string) {
   return apiFetch<PtaDocument[]>(`/api/mobile/pta/documents?organizationId=${encodeURIComponent(organizationId)}`);
 }
 
+// ── PTA parent — family photo ────────────────────────────────────────────
+// Backed by /api/mobile/pta/household/photo, a bearer-token bridge over the
+// same household-photo.ts security pipeline (magic-byte validation, sharp
+// re-encode, EXIF strip) the web parent self-service route uses. The
+// household id is never sent by the client — the server resolves it from
+// the caller's own PtaHouseholdAdult linkage on every call.
+
+export interface PtaHouseholdPhoto {
+  url: string;
+  byteSize: number;
+}
+
+export function getPtaHouseholdPhoto(organizationId: string) {
+  return apiFetch<PtaHouseholdPhoto | null>(`/api/mobile/pta/household/photo?organizationId=${encodeURIComponent(organizationId)}`);
+}
+
+export interface UploadPtaHouseholdPhotoAsset {
+  uri: string;
+  fileName: string;
+  mimeType: string;
+}
+
+export interface PtaHouseholdPhotoUploadResult {
+  photoUrl: string;
+  byteSize: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * React Native's fetch/FormData accepts a {uri, name, type} object in place
+ * of a web File/Blob to reference a local file by its on-device URI --
+ * there's no Blob to construct from an asset URI without reading the whole
+ * file into memory first, which this deliberately avoids. The DOM lib's
+ * FormData.append() type only knows about `Blob`, hence the cast; this is
+ * the standard React Native pattern for multipart file uploads. apiFetch()
+ * already skips forcing a JSON Content-Type whenever the body is FormData.
+ */
+export function uploadPtaHouseholdPhoto(organizationId: string, asset: UploadPtaHouseholdPhotoAsset) {
+  const form = new FormData();
+  form.append('file', { uri: asset.uri, name: asset.fileName, type: asset.mimeType } as unknown as Blob);
+  return apiFetch<PtaHouseholdPhotoUploadResult>(`/api/mobile/pta/household/photo?organizationId=${encodeURIComponent(organizationId)}`, {
+    method: 'POST',
+    body: form,
+  });
+}
+
+export function deletePtaHouseholdPhoto(organizationId: string) {
+  return apiFetch<void>(`/api/mobile/pta/household/photo?organizationId=${encodeURIComponent(organizationId)}`, { method: 'DELETE' });
+}
+
 // ── Admin ─────────────────────────────────────────────────────────────────
 // Mobile Admin program (PR A). Gated server-side on resolveMobileAdminCapabilities()
 // (see civicflow-portal's GET /api/mobile/admin/dashboard) -- a 403 here means
