@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { requireOrganization } from "@/lib/auth-guards";
 import { prisma } from "@/lib/prisma";
+import { isPtaStudentProgressionPlatformEnabled } from "@/lib/env";
 import { PtaTabNav, type PtaTab } from "@/components/labs/pta/PtaTabNav";
 
 /**
@@ -31,7 +32,7 @@ export default async function PtaLayout({ children }: { children: ReactNode }) {
 
   const profile = await prisma.ptaProfile.findUnique({
     where: { organizationId },
-    select: { concernsEnabled: true, concernsLabel: true, electionsEnabled: true },
+    select: { concernsEnabled: true, concernsLabel: true, electionsEnabled: true, studentProgressionEnabled: true },
   });
 
   const officerTabs: PtaTab[] = [
@@ -40,6 +41,14 @@ export default async function PtaLayout({ children }: { children: ReactNode }) {
     { href: "/labs/pta/transition", label: "Transition", visible: can("pta:board:view") },
     { href: "/labs/pta/households", label: "Households", visible: can("pta:directory:read") },
     { href: "/labs/pta/academic", label: "Academic", visible: can("pta:directory:read") },
+    // Platform kill-switch AND the org's own flag AND permission — same
+    // triple-gate discipline as the volunteer-hours program, since even
+    // previewing this feature reads real cross-household student data.
+    {
+      href: "/labs/pta/student-progression",
+      label: "Student Progression",
+      visible: can("pta:student-progression:preview") && profile?.studentProgressionEnabled === true && isPtaStudentProgressionPlatformEnabled(),
+    },
     { href: "/labs/pta/committees", label: "Committees", visible: can("pta:directory:read") },
     { href: "/labs/pta/volunteers/manage", label: "Manage Volunteers", visible: can("pta:volunteers:manage") },
     { href: "/labs/pta/volunteers/approvals", label: "Hour Approvals", visible: can("pta:volunteer-hours:approve") },

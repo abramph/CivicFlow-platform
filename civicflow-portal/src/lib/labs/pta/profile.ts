@@ -26,6 +26,10 @@ export interface UpsertPtaProfileInput {
   concernsLabel?: string | null;
   /** PTA-L: elections stay dark until deliberately enabled (default false). */
   electionsEnabled?: boolean;
+  /** Academic-year student progression stays dark until deliberately
+   * enabled (default false) — also requires the platform kill-switch to be
+   * on; see isPtaStudentProgressionPlatformEnabled. */
+  studentProgressionEnabled?: boolean;
   /** fix/pta-volunteer-settings-atomic-audit: the six volunteer-hours
    * capability flags are deliberately NOT accepted here anymore. They used
    * to be written by this function's own upsert() with their audit event
@@ -65,6 +69,7 @@ export async function upsertPtaProfile(input: UpsertPtaProfileInput) {
     ...(input.concernsEnabled !== undefined ? { concernsEnabled: input.concernsEnabled } : {}),
     ...(input.concernsLabel !== undefined ? { concernsLabel: input.concernsLabel?.trim() || null } : {}),
     ...(input.electionsEnabled !== undefined ? { electionsEnabled: input.electionsEnabled } : {}),
+    ...(input.studentProgressionEnabled !== undefined ? { studentProgressionEnabled: input.studentProgressionEnabled } : {}),
   } as const;
 
   const existing = await prisma.ptaProfile.findUnique({ where: { organizationId: input.organizationId } });
