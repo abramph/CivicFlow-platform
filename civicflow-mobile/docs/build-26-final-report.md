@@ -13,15 +13,17 @@ submission, production setting change, real payment, or real notification.
 (the Part 14 verification pass's closing commit); this report's own Part 15
 was produced by a subsequent, narrower credential-containment review that
 added a `.gitignore` rule and documentation only.
-**Working tree:** tracked working tree clean; five untracked paths remain
-(`.claude/` — see Part 15 for the one flagged file inside it, now
-gitignored but not yet removed, pending external revocation,
-`civicflow-portal/docs/operations/`, and three unrelated dated HTML report
-files under `docs/`), all confirmed pre-dating the Build 26 program by
-roughly 19 hours (Part 14) and none modified by any pass. Earlier drafts
-of this report described these as "four" items; Part 14 traces this to a
-plain arithmetic error in one sentence, not a real change in the working
-tree.
+**Working tree:** tracked working tree clean; **four** untracked paths
+remain (`civicflow-portal/docs/operations/` and three unrelated dated
+HTML report files under `docs/`), all confirmed pre-dating the Build 26
+program by roughly 19 hours (Part 14) and none modified by any pass. The
+count was five until Part 15's credential remediation: `.claude/` no
+longer appears, because the one flagged file inside it has been removed
+(recoverably, after confirmed revocation) and its three remaining entries
+are gitignored local-tooling files. Separately, earlier drafts of this
+report described the original set as "four" items; Part 14 traces that to
+a plain arithmetic error in one sentence, not a real change in the
+working tree — an unrelated coincidence with today's count.
 **`fix/import-auth-order-and-format-ui`:** unchanged at `e92ffd7`/`983c8e2`,
 re-verified byte-identical at the end of the build pass, the review pass,
 the Part 13 completion pass, and this Part 14 verification pass.
@@ -1153,49 +1155,64 @@ repository-side finding above (`No repository-controlled ongoing
 integration found.`). Revocation was explicitly authorized, with no
 replacement to be created.
 
-**Revocation status: NOT COMPLETED — blocked on an authenticated
-administrative session.**
+**Revocation: COMPLETED by the account holder.** The one-time GetUnestra
+WordPress application password has been revoked, confirmed directly by
+the account holder. **No replacement was created or required.**
 
-The authorized revocation could not be carried out. Reaching the
-WordPress profile page where application passwords are managed redirected
-to the login screen (`reauth=1`), confirming **no authenticated WordPress
-administrative session exists in the available browser profile**. The two
-ways past that are both excluded by standing policy and by the
-account holder's own instructions: signing in would require entering
-credentials (never done), and asking the account holder to paste a
-WordPress password or application password was explicitly ruled out. No
-login was attempted, no credential was used or tested, and the browser
-tab opened for this check was closed immediately afterward.
+An intermediate attempt to perform the revocation from this environment
+was correctly abandoned rather than forced: reaching the WordPress
+application-passwords page redirected to the login screen (`reauth=1`),
+showing no authenticated administrative session existed. Signing in would
+have required entering credentials, which is never done, and asking the
+account holder to paste a password was explicitly excluded. No login was
+attempted, the credential was never used or tested at any point, and the
+browser tab opened for that check was closed immediately. The revocation
+was therefore performed by the account holder directly, which is the
+correct locus for it.
 
-**Consequently, and deliberately, the local plaintext file was NOT
-removed.** Its removal was gated on confirmed revocation; revoking first
-and deleting second is the correct order, because deleting the local copy
-while the credential is still live would destroy the only local record of
-*which* credential needs revoking without reducing the actual risk. The
-file remains in place, ignored, unmodified.
+**Local plaintext file: REMOVED.** After (and only after) revocation was
+confirmed, the exact file `.claude/Application Password WP` was deleted
+using a **recoverable** removal — Windows Recycle Bin, via
+`Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(..., SendToRecycleBin)`
+— not a permanent unlink, so it stays restorable if it is ever needed for
+audit. Ordering was deliberate throughout: revoke first, delete second,
+because deleting the local copy while the credential was still live would
+have destroyed the record of *which* credential needed revoking without
+reducing real risk.
 
-**Remaining steps — for the account holder, directly:**
-1. Sign in to the GetUnestra WordPress admin (Users → Profile →
-   Application Passwords).
-2. Revoke the entry corresponding to this one-time website-update
-   credential, identifying it by its administrative label and creation
-   date — never by pasting the value anywhere.
-3. Create no replacement (confirmed not needed).
-4. Once revoked, the local file at `.claude/Application Password WP` can
-   be deleted; it is referenced by nothing in this repository, so nothing
-   breaks. Deleting the parent `.claude/` directory is neither needed nor
-   advised — it holds unrelated local tooling files.
+Verified before removal:
+- Same file previously reviewed — **cryptographically confirmed**, not
+  just by name: the file hashed to blob `61161b01…`, byte-identical to
+  the object identified in the original containment scan.
+- 18-byte regular file, not a symbolic link.
+- Still untracked and still matched by the exact-path `.gitignore` rule.
 
-Until step 2 is done, the credential must still be treated as
-potentially active. Note that the repository-side risk is already fully
-contained regardless: the value is untracked, gitignored, absent from all
-reachable and remote Git history, and cannot be pushed.
+Verified after removal:
+- The exact file no longer exists in the working tree.
+- **Zero plaintext duplicates** anywhere in the workspace (recursive
+  content scan excluding `.git/` and `node_modules/`).
+- **Zero matches in reachable Git history** (13,390 objects across all
+  refs) and **zero in remote-tracking refs** (13,089 objects).
+- The parent `.claude/` directory was **not** removed; its three
+  unrelated local-tooling entries (`worktrees`, `scheduled_tasks.lock`,
+  `settings.local.json`) are present and unchanged.
+- The four legitimate untracked items (operations docs and three dated
+  HTML reports) are untouched.
+- The unreachable orphan blob is **untouched and still unreachable** —
+  not deleted, not pruned, not inspected beyond the content comparison
+  needed for the duplicate/history scans. It now holds a dead,
+  revoked value.
+- Tracked working tree clean; Build 26 application code unchanged.
 
-**File removal: still pending**, gated on confirmed revocation (see the
-one-time determination section above). No replacement is required. The
-file remains on disk, gitignored, otherwise untouched. No plaintext
-duplicate of the value exists anywhere else in the workspace
-(re-verified: 14 other untracked files scanned, zero matches).
+**No Git garbage collection, pruning, object deletion, reflog expiration,
+or history rewriting was performed at any point** across this or any
+prior pass — and none is needed. The orphan blob cannot be included in an
+ordinary push and does not block integration.
+
+**File removal: DONE** — see the one-time determination and remediation
+section above. Removed to the Recycle Bin (recoverable) only after
+revocation was confirmed. No replacement was required. No plaintext
+duplicate of the value exists anywhere in the workspace.
 
 **Build 26 confirmation:** zero PTA progression, family-photo, mobile
 navigation, permission-flow, authentication, payment, subscription,
@@ -1204,23 +1221,23 @@ Stripe Connect, QR, or migration files were touched by this review — only
 
 ## Final status
 
-**REPOSITORY CREDENTIAL RISK CONTAINED — EXTERNAL ROTATION/REMOVAL STILL
-REQUIRED**
+**GETUNESTRA WORDPRESS CREDENTIAL REMEDIATED — BUILD 26 READY FOR
+INTEGRATION AUTHORIZATION**
 
 Part 15's credential-containment review found the flagged file
 (`.claude/Application Password WP`) was **never tracked, never committed,
 and never pushed** — classified `UNTRACKED_ONLY` after an exhaustive,
 secret-safe scan of all 13,783 objects in the local git object database,
 every local ref, every `refs/remotes/origin/*` ref, and the one stash.
-The account holder has since identified it as the **GetUnestra WordPress
+The account holder identified it as the **GetUnestra WordPress
 website-update credential**, created for a completed **one-time** update
 with no ongoing automation needing it — matching the repository-side
-finding of no committed integration. Revocation was authorized but
-**could not be completed**: no authenticated WordPress administrative
-session exists, and signing in would require entering credentials, which
-is not done. The credential therefore remains potentially active
-externally, and the local plaintext file remains in place (deliberately —
-its removal is gated on confirmed revocation). One
+finding of no committed integration. **The credential has since been
+revoked by the account holder, with no replacement required, and the
+local plaintext file has been removed** (recoverably, to the Recycle Bin,
+only after revocation was confirmed). Zero plaintext duplicates remain in
+the workspace, and the value remains absent from all reachable (13,390
+objects) and remote-tracking (13,089 objects) Git history. One
 orphaned, unreachable local blob with matching content exists in
 `.git/objects` (not reachable from anything, structurally unpushable, and
 one of roughly 250 similar unreachable objects this repository's history
@@ -1228,12 +1245,11 @@ already contains). **No garbage collection, pruning, or object deletion
 was performed, and none is recommended** — `git gc --prune=now` would
 permanently remove all ~250 unreachable objects, not just this one,
 destroying the recoverability safety net for unrelated work; it is also
-unnecessary for Build 26 integration (see Part 15's correction note).
-Repository protection (a narrow `.gitignore` rule for the exact path) is
-now in place. **External revocation of the credential, and local file
-removal, both remain outstanding and require the account holder's direct
-action** — this review does not perform either. No secret value was
-printed, logged, staged, or committed at any point.
+unnecessary for Build 26 integration (see Part 15's correction note). The
+blob now holds a dead, revoked value and is left untouched. Repository
+protection (a narrow `.gitignore` rule for the exact path) remains in
+place, so the same filename cannot be reintroduced accidentally. No
+secret value was printed, logged, staged, or committed at any point.
 
 This status carries forward, not replaces, the prior
 **BUILD 26 CODE REVIEW COMPLETE**, **BUILD 26 USER-FACING FAMILY PHOTO
@@ -1241,12 +1257,11 @@ COMPLETE**, and **BUILD 26 CROSS-VERTICAL ISOLATION VERIFIED** verdicts
 above: the review pass's five defect fixes and one documented
 officer-facing gap (Part 5), the completion pass's new entry point, and
 the verification pass's Community/Nonprofit isolation evidence all stand
-as reported and are unaffected by this credential review — Build 26's own
-code was not touched here. This status means: Build 26's functionality
-remains ready for a human reviewer to authorize merging, on the same terms
-as before — **not** "ready for store submission," native build and
-physical-device verification still pending (Parts 10-11), volunteer-shift
-QR still fully deferred (Part 7) — but the **repository itself** should
-not be considered fully clean of credential risk until the account holder
-completes external rotation and confirms it, at which point the file can
-be safely removed locally.
+as reported and are unaffected by this credential work — Build 26's own
+production code was never touched by any of Parts 15's passes. This
+status means: the credential matter is closed, and Build 26 remains ready
+for a human reviewer to authorize merging, on the same terms as before —
+**not** "ready for store submission." Native build installation and
+physical-device verification remain incomplete and are separate required
+gates (Parts 10-11); volunteer-shift QR check-in remains fully deferred
+(Part 7).
