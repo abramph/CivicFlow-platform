@@ -1070,25 +1070,16 @@ Sanitized findings:
   `.env.example` across any of the five packages defines any
   WordPress-related variable, and no `WP_*`/`WORDPRESS_*` identifier
   appears anywhere in tracked content.
-- **One likely public site association: no.**
-- **Multiple possible site associations: yes** — the untracked
+- **Site association (at the time of this investigation): could not be
+  narrowed** — the untracked
   `docs/unestra-website-launch-report-2026-07-14.html` mentions
-  "application password" twice, and each mention sits near more than one
-  of this project's three public domains (getunestra.com,
-  civicflowapp.com, aphtechgroup.com). The repository does not
-  disambiguate which site or account the credential belongs to.
+  "application password" twice, with more than one of this project's
+  three public domains near each mention. **Since resolved by the account
+  holder — see the identification below.**
 - **Active use can be established locally: no** — the theme's own README
-  documents manual installation through the WordPress admin UI
-  (Appearance → Themes → Upload), not automated API publishing. No
-  committed automation consumes this credential.
-- **Credential purpose remains uncertain: yes** — combined with the
-  format mismatch noted above (the value does not match WordPress's
-  standard generated application-password shape), neither the credential
-  type nor its owning account can be established from the repository.
-  The earlier, more confident attribution to the getunestra.com
-  marketing-site launch was an inference from the filename and this
-  project's work history; it is **not** supported by repository evidence
-  and should not be acted on as fact.
+  documents manual installation through the WordPress admin UI, not
+  automated API publishing. No committed automation consumes this
+  credential.
 
 **Operational-requirement classification: `UNREFERENCED LOCAL CREDENTIAL
 NOTE`.** Nothing in the repository reads this file, so removing it cannot
@@ -1096,26 +1087,89 @@ break any local or production workflow, any Build 26 test or build, or
 any documented deployment step. It appears to be a human convenience note,
 not wiring for an automated integration.
 
+### Credential identified by the account holder
+
+**Classification: `GETUNESTRA WORDPRESS UPDATE CREDENTIAL — CONTINUING
+USE UNCONFIRMED`.**
+
+The account holder has identified this file as **a credential used to
+update the GetUnestra WordPress website**. Its service and purpose are
+therefore no longer unknown, and the earlier
+`CREDENTIAL PURPOSE UNRESOLVED` status is superseded. This identification
+came from the account holder directly, not from repository inference or
+from reading the file. No website login URL, WordPress username,
+application-password label, or credential value appears in this report.
+
+What remains open is only whether it is still *needed*:
+
+- **Not used by this repository.** It is referenced by no Unestra
+  application code, test, CI workflow, build command, package script, or
+  deployment workflow. A dedicated non-authenticating review (below)
+  re-confirmed this.
+- **It may have been created for a one-time website update** — the
+  documented process for updating this site is manual, through the
+  WordPress admin UI — **but ongoing external use has not yet been
+  confirmed** by the account holder.
+- **It remains untracked** and excluded by the exact-path `.gitignore`
+  rule added earlier in this part.
+- **It never appeared in reachable or remote Git history** — re-verified
+  by a batched scan of all 13,375 reachable objects and all 13,089
+  remote-tracking-ref objects: zero matches in both.
+- **It must be treated as potentially active until revoked or confirmed
+  obsolete.** Nothing in this work established that it has stopped
+  working, and no attempt was made to find out.
+- **No Git garbage collection is necessary or authorized** (see the
+  correction note above).
+
+### Non-authenticating review for an ongoing publishing process
+
+Performed against repository evidence only; WordPress was not contacted
+and the credential was not used or tested.
+
+| Surface checked | Finding |
+|---|---|
+| Package scripts (all 5 packages) | No WordPress/site publishing. The root `publish`/`dist`/`build:*` scripts are Electron desktop-app packaging (`electron-forge`/`electron-builder`). |
+| CI/CD workflows (3 tracked) | None reference WordPress, `wp-json`, FTP/SFTP, or theme deployment. |
+| Deployment/publishing scripts | None exist in tracked content. |
+| WordPress REST API clients | None. The one `wp_remote_post` call lives *inside* the theme (`functions.php`) and posts the contact form to Brevo's email API — it runs on the WordPress server and consumes no application password. |
+| Website publishing scripts | None. |
+| Scheduled tasks | The one scheduled workflow (`report-export-scheduler.yml`) calls the Unestra portal API, not WordPress. |
+| Automation documentation | `docs/macos-dmg-release.md` states explicitly that no WordPress or marketing-site link is touched by the release pipeline; the theme README documents manual admin-UI updates. |
+| Environment-variable names | No `WP_*`/`WORDPRESS_*` identifier exists anywhere in tracked content, and no `.env.example` across the five packages defines one. |
+| Committed external-service config | None for WordPress. |
+| References to the credential filename/path | Only `.gitignore` and this report — both created by this containment work. |
+
+**`No repository-controlled ongoing integration found.`** This does not
+prove no external process uses it — a manual or externally-scheduled
+workflow would leave no trace here — so account-holder confirmation is
+still required before revocation.
+
 **External remediation required (not performed by this review, per its
-explicit boundary) — blocked pending user identification:**
-1. Identify the account and service this credential belongs to. **The
-   repository cannot establish this** (see above), so this step requires
-   the account holder's own knowledge.
-2. Once identified, locate the relevant credential record (for WordPress:
-   Users → Profile → Application Passwords) by its label and account
-   context — never by exposing the secret value.
-3. Revoke the credential.
-4. Only if an active integration still needs one, create a replacement
-   scoped to the minimum required purpose, and store it in the deployment
-   secret manager or protected environment configuration — never back
-   into a repository file. Note that no committed integration currently
-   requires one.
-5. Verify the old credential no longer works only as part of an
+explicit boundary) — now blocked only on the one-time-vs-ongoing
+determination:**
+1. ~~Identify the account and service.~~ **Done** — identified by the
+   account holder as the GetUnestra WordPress website-update credential.
+2. **Confirm whether it is still needed** — was it created only for the
+   completed one-time website update, or must an ongoing automation keep
+   using it? The repository cannot answer this (no committed integration
+   consumes it), so only the account holder can. **This is the current
+   blocker.**
+3. If **one-time**: revoke it, create no replacement, then remove the
+   local plaintext file.
+4. If **ongoing**: rotate rather than simply revoke — stand up the
+   replacement in an approved secret manager or protected environment
+   configuration *first*, update only the authorized integration, then
+   revoke the old credential and remove the local file. Never write the
+   replacement into `.claude`, the repository, documentation, terminal
+   output, logs, or chat.
+5. In either case, locate the credential record by its administrative
+   label and account context — never by exposing the secret value — and
+   verify the old credential no longer works only as part of an
    explicitly authorized operational test.
 
 This review did not authenticate with the credential, attempt to
 determine its validity, revoke it, or create a replacement — all of that
-requires the account holder's direct action.
+requires the account holder's direct action and separate authorization.
 
 **File removal: still pending.** Per this review's own boundary, the file
 is not deleted until both (a) the credential is confirmed revoked or
@@ -1137,7 +1191,13 @@ Part 15's credential-containment review found the flagged file
 (`.claude/Application Password WP`) was **never tracked, never committed,
 and never pushed** — classified `UNTRACKED_ONLY` after an exhaustive,
 secret-safe scan of all 13,783 objects in the local git object database,
-every local ref, every `refs/remotes/origin/*` ref, and the one stash. One
+every local ref, every `refs/remotes/origin/*` ref, and the one stash.
+The account holder has since identified it as the **GetUnestra WordPress
+website-update credential** (`GETUNESTRA WORDPRESS UPDATE CREDENTIAL —
+CONTINUING USE UNCONFIRMED`); a non-authenticating review found **no
+repository-controlled ongoing integration**, but whether an external
+process still relies on it is unconfirmed, so it is treated as
+potentially active until revoked. One
 orphaned, unreachable local blob with matching content exists in
 `.git/objects` (not reachable from anything, structurally unpushable, and
 one of roughly 250 similar unreachable objects this repository's history
