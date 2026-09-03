@@ -62,7 +62,23 @@ export type SpreadsheetRejectionReason =
   // Production-path follow-up -- the compiled worker artifact is missing
   // in a production process. Fails closed: no dev-runtime fallback, no
   // parse attempted, no persistent mutation follows.
-  | "PARSER_UNAVAILABLE";
+  | "PARSER_UNAVAILABLE"
+  // Auth-ordering follow-up (.xls message unification) -- distinct from
+  // UNSUPPORTED_FORMAT so every caller can give the specific re-save
+  // guidance for a genuine legacy .xls upload, rather than the generic
+  // "pick a different format" message meant for arbitrary bad extensions.
+  // Decided purely from the claimed extension, before any content is
+  // read -- a .xls-claimed file never reaches detectFormat()/parseXlsxRows
+  // either before or after this change, so this cannot be used to smuggle
+  // a legacy binary workbook (or anything else) past content validation.
+  | "LEGACY_XLS_UNSUPPORTED";
+
+/** Auth-ordering follow-up (.xls message unification) -- the one exact
+ * string every route (/api/import, /api/imports, /api/migration/upload)
+ * and the UI's static guidance text must agree on for a genuine legacy
+ * .xls upload, so a caller sees identical, actionable copy regardless of
+ * which upload surface rejected the file. */
+export const LEGACY_XLS_MESSAGE = "Legacy .xls files are no longer supported. Please re-save the file as .xlsx or .csv and try again.";
 
 /** Thrown for every rejection above. `reason` is a stable machine-readable
  * code for tests/metrics; `message` is already safe to show a caller (never
@@ -662,6 +678,14 @@ export async function parseSpreadsheetBuffer(buffer: Buffer, claimedExtension: s
   }
 
   const claimed = claimedExtension.toLowerCase().replace(/^\./, "");
+  // Decided purely from the claimed extension string -- rejected here,
+  // before detectFormat()/parseXlsxRows/parseCsvRows ever run, exactly
+  // like the generic UNSUPPORTED_FORMAT branch below. A file claiming
+  // .xls is never given the chance to be "validated" as a real workbook;
+  // it is refused outright regardless of its actual bytes.
+  if (claimed === "xls") {
+    throw new SpreadsheetValidationError("LEGACY_XLS_UNSUPPORTED", LEGACY_XLS_MESSAGE);
+  }
   if (claimed !== "xlsx" && claimed !== "csv") {
     throw new SpreadsheetValidationError("UNSUPPORTED_FORMAT", `Unsupported file type "${claimedExtension}". Please upload a .xlsx or .csv file.`);
   }
