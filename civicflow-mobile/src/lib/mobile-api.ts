@@ -715,9 +715,15 @@ export interface PtaProgressionStudent {
   displayName: string;
   currentGrade: string | null;
   currentClassroom: string | null;
+  /** Populated only once an administrator has explicitly PUBLISHED the
+   * progression results. A committed-but-unpublished placement arrives as
+   * null, exactly like an unresolved or excluded one. */
   nextGrade: string | null;
   nextClassroom: string | null;
   status: PtaProgressionStatus;
+  /** Never explains why a placement is unavailable — unpublished,
+   * withdrawn, unresolved, excluded and rolled-back are indistinguishable. */
+  publicationStatus: 'NOT_AVAILABLE' | 'PUBLISHED';
 }
 
 export interface PtaProgressionSummary {

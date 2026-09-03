@@ -63,8 +63,16 @@ export default async function PtaStudentProgressionPage() {
 
   const [yearContext, batches] = await Promise.all([getSchoolYearContext(organizationId), listProgressionBatches(organizationId)]);
 
-  const active = batches.find((b) => b.status !== "COMMITTED" && b.status !== "ROLLED_BACK") ?? null;
-  const history = batches.filter((b) => b.status === "COMMITTED" || b.status === "ROLLED_BACK");
+  // A COMMITTED batch used to drop straight into history, which meant the
+  // workflow visibly ended at commit. With publication as a separate step,
+  // a committed batch still has work outstanding (publish, or withdraw
+  // again), so it stays active until it is rolled back or published — at
+  // which point the rollover really is finished and the next one can start.
+  const active =
+    batches.find((b) => b.status !== "ROLLED_BACK" && (b as { publicationStatus?: string }).publicationStatus !== "PUBLISHED") ?? null;
+  const history = batches.filter(
+    (b) => b.status === "ROLLED_BACK" || (b as { publicationStatus?: string }).publicationStatus === "PUBLISHED"
+  );
 
   let activeDetail = null;
   let sourceClassrooms: { id: string; name: string; gradeName: string }[] = [];
@@ -96,6 +104,7 @@ export default async function PtaStudentProgressionPage() {
       >
         <PtaStudentProgressionCenter
           canCommit={can("pta:student-progression:commit")}
+          canPublish={can("pta:student-progression:publish")}
           years={yearContext.years.map((y) => ({ id: y.id, label: y.label }))}
           suggestedToLabel={yearContext.suggestedNextLabel}
           activeBatch={
@@ -107,6 +116,9 @@ export default async function PtaStudentProgressionPage() {
                   previewedAt: activeDetail.previewedAt ? activeDetail.previewedAt.toISOString() : null,
                   fromYearLabel: activeDetail.fromSchoolYear.label,
                   toYearLabel: activeDetail.toSchoolYear.label,
+                  publicationStatus: activeDetail.publicationStatus,
+                  publicationVersion: activeDetail.publicationVersion,
+                  publishedAt: activeDetail.publishedAt ? activeDetail.publishedAt.toISOString() : null,
                   classroomMappings: activeDetail.classroomMappings.map((m) => ({
                     sourceClassroomId: m.sourceClassroomId,
                     targetClassroomId: m.targetClassroomId,

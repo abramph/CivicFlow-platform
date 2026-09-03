@@ -50,6 +50,12 @@ interface ActiveBatchView {
   toYearLabel: string;
   classroomMappings: { sourceClassroomId: string; targetClassroomId: string }[];
   records: RecordView[];
+  /** Disclosure-to-families state. Committed results stay private until
+   * published, so this is deliberately separate from `status`. */
+  publicationStatus?: string;
+  publicationVersion?: number;
+  publishedAt?: string | null;
+  publishedByEmail?: string | null;
 }
 
 interface ClassroomOption {
@@ -67,6 +73,7 @@ interface ClassroomOption {
  */
 export function PtaStudentProgressionCenter({
   canCommit,
+  canPublish,
   years,
   suggestedToLabel,
   activeBatch,
@@ -75,6 +82,11 @@ export function PtaStudentProgressionCenter({
   history,
 }: {
   canCommit: boolean;
+  /** Holder of pta:student-progression:publish. Separate from canCommit
+   * because disclosing results to families is a distinct decision from
+   * committing the data. Server-enforced regardless -- hiding the control
+   * is a UX measure, not the security boundary. */
+  canPublish: boolean;
   years: YearOption[];
   suggestedToLabel: string | null;
   activeBatch: ActiveBatchView | null;
@@ -179,6 +191,46 @@ export function PtaStudentProgressionCenter({
     }
   }
 
+  async function publishResults() {
+    if (!activeBatch) return;
+    // Deliberately NOT a generic "Are you sure?" — this dialog has to say
+    // plainly what becomes visible to whom, because publishing is the
+    // irreversible disclosure step.
+    const confirmMessage =
+      "Publish progression results?\n\n" +
+      "Families will be able to see confirmed next-year grade and classroom information in the Unestra mobile app. " +
+      "Draft, unresolved, and excluded records will not be shown.";
+    if (!window.confirm(confirmMessage)) return;
+    const idempotencyKey = crypto.randomUUID();
+    if (
+      await call(`/api/labs/pta/student-progression/${activeBatch.id}/publication`, {
+        method: "POST",
+        body: JSON.stringify({ publicationVersion: activeBatch.publicationVersion ?? 0, idempotencyKey }),
+      })
+    ) {
+      router.refresh();
+    }
+  }
+
+  async function unpublishResults() {
+    if (!activeBatch) return;
+    if (
+      !window.confirm(
+        "Hide future results from families?\n\n" +
+          "Families may already have viewed these results. Hiding them does not undo prior disclosure."
+      )
+    )
+      return;
+    if (
+      await call(`/api/labs/pta/student-progression/${activeBatch.id}/publication`, {
+        method: "DELETE",
+        body: JSON.stringify({ publicationVersion: activeBatch.publicationVersion ?? 0 }),
+      })
+    ) {
+      router.refresh();
+    }
+  }
+
   const summary = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const record of activeBatch?.records ?? []) {
@@ -252,6 +304,15 @@ export function PtaStudentProgressionCenter({
 
   const isPreviewed = activeBatch.status === "PREVIEWED";
   const isCommittedOrCorrected = activeBatch.status === "COMMITTED" || activeBatch.status === "CORRECTED";
+  const publicationStatus = activeBatch.publicationStatus ?? "UNPUBLISHED";
+  const isPublished = publicationStatus === "PUBLISHED";
+  // Mirrors the server's classification (progression-publication.ts) so the
+  // panel's counts match what publishing would actually disclose. The server
+  // re-derives and re-validates these independently — this is display only.
+  const eligibleCount = activeBatch.records.filter(
+    (r) => r.status === "APPLIED" && !["GRADUATE", "TRANSFER", "WITHDRAW", "EXCLUDE", "NEEDS_REVIEW"].includes(r.outcome)
+  ).length;
+  const unresolvedOrExcludedCount = activeBatch.records.length - eligibleCount;
   const canEditMappings = activeBatch.status === "PREPARING" || activeBatch.status === "PREVIEWED";
 
   return (
@@ -385,6 +446,97 @@ export function PtaStudentProgressionCenter({
         </div>
       ) : null}
 
+      {/* Publication panel — only meaningful once results actually exist.
+          Committing and publishing are separate decisions, so this is a
+          distinct panel rather than another button in the row below. */}
+      {isCommittedOrCorrected ? (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-sm font-semibold text-slate-800">Family visibility</h3>
+            <span
+              className={
+                isPublished
+                  ? "rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800"
+                  : "rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700"
+              }
+            >
+              {isPublished ? "Published to Families" : publicationStatus === "WITHDRAWN" ? "Hidden from families" : "Not published"}
+            </span>
+            <span className="text-xs text-slate-600">
+              {activeBatch.fromYearLabel} → {activeBatch.toYearLabel}
+            </span>
+          </div>
+
+          <p className="mt-2 text-sm text-slate-700">
+            Committed progression results remain private until you publish them to families.
+          </p>
+
+          <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-sm text-slate-700">
+            <div className="flex gap-1">
+              <dt className="font-medium">Eligible students:</dt>
+              <dd>{eligibleCount}</dd>
+            </div>
+            <div className="flex gap-1">
+              <dt className="font-medium">Unresolved or excluded:</dt>
+              <dd>{unresolvedOrExcludedCount}</dd>
+            </div>
+            {isPublished && activeBatch.publishedAt ? (
+              <div className="flex gap-1">
+                <dt className="font-medium">Published:</dt>
+                <dd>
+                  {new Date(activeBatch.publishedAt).toLocaleString()}
+                  {activeBatch.publishedByEmail ? ` by ${activeBatch.publishedByEmail}` : ""}
+                </dd>
+              </div>
+            ) : null}
+          </dl>
+
+          {!isPublished && needsReviewCount > 0 ? (
+            <p role="status" className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              <span className="font-semibold">
+                {needsReviewCount} student{needsReviewCount === 1 ? "" : "s"} still need
+                {needsReviewCount === 1 ? "s" : ""} review.{" "}
+              </span>
+              Publication is blocked until {needsReviewCount === 1 ? "this record is" : "these records are"} resolved, so families
+              are never shown a confirmed placement for a student the office has not settled.
+            </p>
+          ) : null}
+
+          {isPublished ? (
+            <p className="mt-3 text-sm text-slate-700">
+              Families can now see confirmed next-year grade and classroom information for {eligibleCount} student
+              {eligibleCount === 1 ? "" : "s"} in the Unestra mobile app.{" "}
+              <a href="/labs/pta/students" className="font-medium text-blue-700 underline">
+                Review student placements
+              </a>
+            </p>
+          ) : null}
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            {canPublish && !isPublished ? (
+              <button
+                type="button"
+                disabled={pending || needsReviewCount > 0}
+                onClick={publishResults}
+                className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-60"
+              >
+                Publish to Families
+              </button>
+            ) : null}
+            {canPublish && isPublished ? (
+              <button
+                type="button"
+                disabled={pending}
+                onClick={unpublishResults}
+                className="rounded-lg border border-amber-400 bg-white px-4 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-50 disabled:opacity-60"
+              >
+                Hide Future Results from Families
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
       <div className="flex gap-2">
         {canCommit && isPreviewed ? (
           <button type="button" disabled={pending} onClick={commitBatch} className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white hover:bg-red-800 disabled:opacity-60">
@@ -392,11 +544,23 @@ export function PtaStudentProgressionCenter({
           </button>
         ) : null}
         {canCommit && isCommittedOrCorrected ? (
-          <button type="button" disabled={pending} onClick={rollbackBatch} className="rounded-lg border border-red-300 bg-white px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60">
+          <button
+            type="button"
+            disabled={pending || isPublished}
+            onClick={rollbackBatch}
+            title={isPublished ? "Hide these results from families before rolling back." : undefined}
+            className="rounded-lg border border-red-300 bg-white px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60"
+          >
             Roll back
           </button>
         ) : null}
       </div>
+      {isPublished && canCommit ? (
+        <p className="text-xs text-slate-600">
+          Rollback is unavailable while results are published. Hide them from families first, so withdrawing the disclosure is a
+          deliberate, recorded step.
+        </p>
+      ) : null}
 
       {history.length > 0 ? (
         <div className="pt-4">

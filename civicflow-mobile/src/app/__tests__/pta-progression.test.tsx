@@ -129,8 +129,21 @@ function student(overrides: Record<string, unknown> = {}) {
     nextGrade: null,
     nextClassroom: null,
     status: 'NOT_YET_AVAILABLE',
+    publicationStatus: 'NOT_AVAILABLE',
     ...overrides,
   };
+}
+
+/** A published future placement, as the server reports it once an
+ * administrator has explicitly published the batch. */
+function publishedStudent(overrides: Record<string, unknown> = {}) {
+  return student({
+    nextGrade: '6th Grade',
+    nextClassroom: 'Room 20',
+    status: 'CONFIRMED',
+    publicationStatus: 'PUBLISHED',
+    ...overrides,
+  });
 }
 
 async function triggerFocus() {
@@ -413,5 +426,122 @@ describe('PtaProgressionScreen — accessibility', () => {
     mockGetPtaProgression.mockResolvedValue(summary([student({ status: 'CURRENT' })]));
     await openScreen();
     expect(screen.getByText('Current')).toBeTruthy();
+  });
+});
+
+describe('PtaProgressionScreen — publication gating (what families may see)', () => {
+  it('shows only the current placement while results are committed but NOT yet published', async () => {
+    mockUseAuth.mockReturnValue(ptaAuth());
+    // The server withholds next-year fields entirely until publication, so
+    // the screen has nothing to accidentally render.
+    mockGetPtaProgression.mockResolvedValue(summary([student({ currentGrade: '5th Grade', currentClassroom: 'Room 12' })]));
+    await openScreen();
+
+    expect(screen.getByText('5th Grade')).toBeTruthy();
+    expect(screen.getByText('Current class: Room 12')).toBeTruthy();
+    expect(screen.getByText('Next-year placement is not yet available.')).toBeTruthy();
+    // No proposed grade or classroom leaks.
+    expect(screen.queryByText(/6th Grade/)).toBeNull();
+    expect(screen.queryByText(/Room 20/)).toBeNull();
+    expect(screen.queryByText(/→/)).toBeNull();
+  });
+
+  it('shows the confirmed placement once results are published', async () => {
+    mockUseAuth.mockReturnValue(ptaAuth());
+    mockGetPtaProgression.mockResolvedValue(summary([publishedStudent()]));
+    await openScreen();
+    expect(screen.getByText('5th Grade → 6th Grade')).toBeTruthy();
+    expect(screen.getByText('Next class: Room 20')).toBeTruthy();
+    expect(screen.getByText('Confirmed')).toBeTruthy();
+    expect(screen.getByText('Looking ahead to 2027-2028')).toBeTruthy();
+  });
+
+  it('removes the placement on the next refresh after it is unpublished', async () => {
+    mockUseAuth.mockReturnValue(ptaAuth());
+    mockGetPtaProgression.mockResolvedValueOnce(summary([publishedStudent()]));
+    await openScreen();
+    expect(screen.getByText('5th Grade → 6th Grade')).toBeTruthy();
+
+    // Administrator withdraws the results; the next read returns them hidden.
+    mockGetPtaProgression.mockResolvedValueOnce(summary([student({ currentGrade: '5th Grade', currentClassroom: 'Room 12' })]));
+    await triggerFocus();
+
+    expect(screen.queryByText('5th Grade → 6th Grade')).toBeNull();
+    expect(screen.queryByText('Next class: Room 20')).toBeNull();
+    expect(screen.getByText('Next-year placement is not yet available.')).toBeTruthy();
+  });
+
+  it('removes the placement after a rollback', async () => {
+    mockUseAuth.mockReturnValue(ptaAuth());
+    mockGetPtaProgression.mockResolvedValueOnce(summary([publishedStudent()]));
+    await openScreen();
+    mockGetPtaProgression.mockResolvedValueOnce(summary([student({ currentGrade: '5th Grade', currentClassroom: 'Room 12' })]));
+    await triggerFocus();
+    expect(screen.getByText('Not yet available')).toBeTruthy();
+  });
+
+  it('reflects a correction made after publication', async () => {
+    mockUseAuth.mockReturnValue(ptaAuth());
+    mockGetPtaProgression.mockResolvedValueOnce(summary([publishedStudent()]));
+    await openScreen();
+    expect(screen.getByText('Next class: Room 20')).toBeTruthy();
+
+    mockGetPtaProgression.mockResolvedValueOnce(summary([publishedStudent({ nextClassroom: 'Room 33' })]));
+    await triggerFocus();
+    expect(screen.getByText('Next class: Room 33')).toBeTruthy();
+    expect(screen.queryByText('Next class: Room 20')).toBeNull();
+  });
+
+  it('shows a mix of published and unpublished siblings without leaking the unpublished one', async () => {
+    mockUseAuth.mockReturnValue(ptaAuth());
+    mockGetPtaProgression.mockResolvedValue(
+      summary([
+        publishedStudent({ studentId: 's-a', displayName: 'Ada Kim' }),
+        student({ studentId: 's-b', displayName: 'Ben Kim', currentGrade: '2nd Grade', currentClassroom: 'Room 4' }),
+      ])
+    );
+    await openScreen();
+    expect(screen.getByText('5th Grade → 6th Grade')).toBeTruthy();
+    expect(screen.getByText('2nd Grade')).toBeTruthy();
+    expect(screen.getByText('Confirmed')).toBeTruthy();
+    expect(screen.getByText('Not yet available')).toBeTruthy();
+  });
+
+  it('does not keep a published placement visible after switching organizations', async () => {
+    mockUseAuth.mockReturnValue(ptaAuth({ organizationId: 'org-a' }));
+    mockGetPtaProgression.mockResolvedValueOnce(summary([publishedStudent({ displayName: 'Ada Kim' })]));
+    const { rerender } = await render(<PtaProgressionScreen />);
+    await triggerFocus();
+    expect(screen.getByText('5th Grade → 6th Grade')).toBeTruthy();
+
+    mockUseAuth.mockReturnValue(ptaAuth({ organizationId: 'org-b' }));
+    mockGetPtaProgression.mockResolvedValueOnce(summary([student({ studentId: 's-z', displayName: 'Zoe Ortiz', currentGrade: '1st Grade' })]));
+    await rerender(<PtaProgressionScreen />);
+    await triggerFocus();
+
+    expect(screen.queryByText('Ada Kim')).toBeNull();
+    expect(screen.queryByText('5th Grade → 6th Grade')).toBeNull();
+    expect(screen.getByText('Zoe Ortiz')).toBeTruthy();
+  });
+
+  it('clears a published placement when a later refresh fails, rather than leaving it on screen', async () => {
+    mockUseAuth.mockReturnValue(ptaAuth());
+    mockGetPtaProgression.mockResolvedValueOnce(summary([publishedStudent()]));
+    await openScreen();
+    expect(screen.getByText('5th Grade → 6th Grade')).toBeTruthy();
+
+    mockGetPtaProgression.mockRejectedValueOnce(new ApiError('Network request failed.', 0));
+    await triggerFocus();
+    expect(screen.queryByText('5th Grade → 6th Grade')).toBeNull();
+    expect(screen.getByLabelText('Retry loading')).toBeTruthy();
+  });
+
+  it('never renders publication internals even when a placement is published', async () => {
+    mockUseAuth.mockReturnValue(ptaAuth());
+    mockGetPtaProgression.mockResolvedValue(summary([publishedStudent()]));
+    await openScreen();
+    for (const forbidden of [/publish/i, /batch/i, /idempotenc/i, /version/i, /audit/i, /administrator/i]) {
+      expect(screen.queryByText(forbidden)).toBeNull();
+    }
   });
 });

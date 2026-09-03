@@ -16,15 +16,23 @@ import { getPtaProgression, type PtaProgressionStatus, type PtaProgressionSummar
  * child's current placement and any confirmed next-year placement.
  *
  * There are deliberately no controls here beyond retry: no commit,
- * approve, correct, exclude, retain, withdraw, transfer or rollback
- * action, and no editable field. Every administrative progression
- * operation remains portal-only, behind the portal's own permission
- * checks. This screen calls exactly one read endpoint
- * (/api/mobile/pta/progression), which itself never reads the progression
- * batch/record tables -- so preview calculations, draft mappings,
- * NEEDS_REVIEW state, administrator notes, conflict details, audit actors
- * and batch idempotency keys are unreachable from this surface by
- * construction, not by filtering.
+ * approve, correct, exclude, retain, withdraw, transfer, rollback,
+ * publish or unpublish action, and no editable field. Every administrative
+ * progression operation -- including publication itself -- remains
+ * portal-only, behind the portal's own permission checks.
+ *
+ * A future-year placement appears here ONLY once an administrator has
+ * explicitly published it. Committing target enrollments is not enough:
+ * committed-but-unpublished, withdrawn, unresolved, excluded and
+ * rolled-back placements are all reported identically as "not yet
+ * available", so this screen cannot reveal which of those applies. The
+ * current-year placement is unaffected by publication and always shows.
+ *
+ * This screen calls exactly one read endpoint
+ * (/api/mobile/pta/progression). That endpoint reads only the minimum
+ * publication state it needs (see parent-progression.ts) and returns no
+ * batch id, publication actor, timestamp, idempotency key, outcome code,
+ * exception reason or audit field.
  *
  * Requires no new device permission of any kind (no camera, photo library,
  * location, notification, or tracking).
@@ -110,11 +118,16 @@ export default function PtaProgressionScreen() {
   }
 
   const students = summary?.students ?? [];
+  // `students` is derived from the latest successful response only. A
+  // failed refresh clears `summary` (see load()), so a previously published
+  // placement can never linger after unpublication, rollback, an
+  // organization switch, or sign-out -- there is no separate cache to go
+  // stale, and the screen re-fetches on every focus.
 
   return (
     <ScrollView contentContainerStyle={[styles.container, topPadding]}>
       <ThemedText type="title">Student Progression</ThemedText>
-      {summary?.nextSchoolYear ? (
+      {summary?.nextSchoolYear && students.some((s) => s.publicationStatus === 'PUBLISHED') ? (
         <ThemedText type="small" themeColor="textSecondary">
           Looking ahead to {summary.nextSchoolYear}
         </ThemedText>
