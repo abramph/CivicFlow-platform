@@ -45,8 +45,10 @@ jest.mock('@/lib/auth-context', () => ({
 }));
 
 const mockGetPtaHouseholdPhoto = jest.fn();
+const mockGetPtaProgression = jest.fn();
 jest.mock('@/lib/mobile-api', () => ({
   getPtaHouseholdPhoto: (...args: unknown[]) => mockGetPtaHouseholdPhoto(...args),
+  getPtaProgression: (...args: unknown[]) => mockGetPtaProgression(...args),
 }));
 
 function authWith(overrides: { householdAdultId?: string | null; householdName?: string | null; organizationId?: string } = {}) {
@@ -122,6 +124,11 @@ async function openScreen() {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockGetPtaHouseholdPhoto.mockReset();
+  mockGetPtaProgression.mockReset();
+  // Default: progression unavailable (both feature flags default OFF), so
+  // existing expectations describe an org without progression enabled.
+  mockGetPtaProgression.mockRejectedValue(new Error('progression unavailable'));
   latestFocusCallback = null;
 });
 
@@ -320,6 +327,62 @@ describe('PtaMyFamilyScreen -- no permission prompt on mere viewing', () => {
     // -- see the module's own imports); the only network call it ever
     // makes is the read-only photo fetch.
     expect(mockGetPtaHouseholdPhoto).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('PtaMyFamilyScreen -- progression entry point (server-gated by both feature flags)', () => {
+  it('shows the Progression card only when the server confirms progression is available', async () => {
+    mockUseAuth.mockReturnValue(authWith());
+    mockGetPtaHouseholdPhoto.mockResolvedValue(null);
+    mockGetPtaProgression.mockResolvedValue({ currentSchoolYear: '2026-2027', nextSchoolYear: null, students: [] });
+    await openScreen();
+    expect(screen.getByLabelText('View student progression')).toBeTruthy();
+    expect(screen.getByText('Progression')).toBeTruthy();
+  });
+
+  it('navigates to the read-only progression screen', async () => {
+    mockUseAuth.mockReturnValue(authWith());
+    mockGetPtaHouseholdPhoto.mockResolvedValue(null);
+    mockGetPtaProgression.mockResolvedValue({ currentSchoolYear: '2026-2027', nextSchoolYear: null, students: [] });
+    await openScreen();
+    await fireEvent.press(screen.getByLabelText('View student progression'));
+    expect(mockPush).toHaveBeenCalledWith('/pta-progression');
+  });
+
+  it('hides the Progression card when either feature flag is OFF (server denies)', async () => {
+    mockUseAuth.mockReturnValue(authWith());
+    mockGetPtaHouseholdPhoto.mockResolvedValue(null);
+    mockGetPtaProgression.mockRejectedValue(new Error('Student progression is not enabled on this platform.'));
+    await openScreen();
+    expect(screen.queryByLabelText('View student progression')).toBeNull();
+    expect(screen.queryByText('Progression')).toBeNull();
+    // The family photo, this screen's primary content, is unaffected.
+    expect(screen.getByLabelText('Add family photo')).toBeTruthy();
+  });
+
+  it('a progression failure never surfaces an error banner over the family photo', async () => {
+    mockUseAuth.mockReturnValue(authWith());
+    mockGetPtaHouseholdPhoto.mockResolvedValue(null);
+    mockGetPtaProgression.mockRejectedValue(new Error('network down'));
+    await openScreen();
+    expect(screen.queryByLabelText('Retry loading')).toBeNull();
+    expect(screen.queryByLabelText('View student progression')).toBeNull();
+  });
+
+  it('never requests progression for an account with no PTA family identity', async () => {
+    mockUseAuth.mockReturnValue(authWith({ householdAdultId: null }));
+    await render(<PtaMyFamilyScreen />);
+    expect(mockGetPtaProgression).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('View student progression')).toBeNull();
+  });
+
+  it('requests progression with only the active organization id -- no household or student id', async () => {
+    mockUseAuth.mockReturnValue(authWith({ organizationId: 'org-7' }));
+    mockGetPtaHouseholdPhoto.mockResolvedValue(null);
+    mockGetPtaProgression.mockResolvedValue({ currentSchoolYear: null, nextSchoolYear: null, students: [] });
+    await openScreen();
+    expect(mockGetPtaProgression).toHaveBeenCalledWith('org-7');
+    expect(mockGetPtaProgression.mock.calls[0]).toHaveLength(1);
   });
 });
 
