@@ -9,17 +9,23 @@ followed by a focused independent code-review-and-correction pass. Branch:
 throughout both passes: no merge, push, deploy, build upload, store
 submission, production setting change, real payment, or real notification.
 
-**HEAD at time of this report:** `b82bf2b021def94530ddd1cc75b2bf0f955e0481`.
-**Working tree:** clean except four pre-existing untracked paths present
-since before this program started (`.claude/`, `civicflow-portal/docs/
-operations/`, and three unrelated dated HTML report files under `docs/`) —
-none created, modified, or touched by this program.
-**`fix/import-auth-order-and-format-ui`:** unchanged at `e92ffd7`/`983c8e2`,
-re-verified byte-identical at the end of both the build pass and the review
+**HEAD at time of this report:** `7ddbca5857be3f9f691b3bfda94cea6d2305c313`
+(the independent-review pass's closing commit); this report's own Part 13
+was produced one commit later, by a subsequent narrowly-scoped completion
 pass.
+**Working tree:** tracked working tree clean; five pre-existing untracked
+items remain and were not modified (`.claude/` — see Part 13's note on one
+flagged file inside it, `civicflow-portal/docs/operations/`, and three
+unrelated dated HTML report files under `docs/`). Earlier drafts of this
+report described these as "four" items; the actual `git status` count is
+five distinct entries (the three HTML files are each separate) — corrected
+here rather than left inconsistent.
+**`fix/import-auth-order-and-format-ui`:** unchanged at `e92ffd7`/`983c8e2`,
+re-verified byte-identical at the end of the build pass, the review pass,
+and the Part 13 completion pass.
 **`main`:** unchanged at `db73f2a`. Nothing has been merged, pushed,
 deployed, built via EAS, or submitted to Apple or Google at any point in
-either pass.
+any pass.
 
 ## Part 1 — Complete commit inventory (14 commits)
 
@@ -348,7 +354,10 @@ was documented rather than built under this review's "correct defects"
 scope. **This is a real gap the human owner should weigh before treating
 the family-photo feature as complete for officers** — parent self-service
 is fully built and working end-to-end; officer-side photo management is
-backend-only today.
+backend-only today. **Still true after Part 13's completion pass below:**
+that pass addressed a separate, parent-facing discoverability gap (a
+proper "My Family" home, rather than a bare dashboard shortcut) — it
+touched no officer-facing screen and does not narrow this gap.
 
 ## Part 6 — Apple Guideline 5.1.1(iv): review findings and corrections
 
@@ -612,36 +621,150 @@ that phase, using **synthetic data only**:
 ## Part 12 — Confirmations
 
 - No merge, push, deployment, external build, artifact upload, or store
-  submission occurred at any point across the build pass or this review
-  pass.
+  submission occurred at any point across the build pass, the review pass,
+  or the Part 13 completion pass below.
 - `983c8e2` and `e92ffd7` on `fix/import-auth-order-and-format-ui` remain
-  unchanged — re-verified at the start and end of this review pass by
-  exact hash comparison.
+  unchanged — re-verified at the start and end of the review pass and
+  again at the end of the Part 13 completion pass, by exact hash
+  comparison each time.
 - `main` remains at `db73f2a`, untouched.
+
+## Part 13 — Completion pass: user-facing family-photo entry point
+
+A separate, narrowly-scoped pass following the review above. Its target
+was distinct from Part 5's documented officer-facing gap: parents already
+had a *working* family-photo flow (`pta-family-photo.tsx`, built in Phase
+F), but its only entry point was a flat "Family Photo" quick-action button
+on the dashboard, with no household/family framing around it. This pass
+added that framing without touching the photo pipeline itself.
+
+**What was built:**
+- `src/app/pta-my-family.tsx` (new) — a "My Family" home screen containing
+  one card, "Family Photo," which shows the current photo (or a
+  placeholder — the household name's first letter, or a generic family
+  glyph if no name is available) and an "Add Family Photo" / "Edit Family
+  Photo" button. The button navigates to the existing, entirely unchanged
+  `pta-family-photo.tsx` for the actual take/choose/preview/upload/
+  replace/remove/cancel flow — **no second implementation was created.**
+- `src/app/(tabs)/dashboard.tsx` (modified) — the "Family Photo" quick
+  action now reads "My Family" and routes to `/pta-my-family` instead of
+  straight into the photo picker; this is the only dashboard change.
+- Data refresh: `useFocusEffect` re-fetches the household photo every time
+  the screen regains focus (initial mount and every return trip from
+  photo management), so an upload, replace, removal, or org switch is
+  reflected immediately on return with no app restart.
+- Upload controls live only on this household-level card, never on a
+  student card — this screen renders no student list at all.
+
+**Authorization and vertical isolation (server-side remains the only real
+boundary — hiding the button is not a security control):**
+- The screen's client-side `hasPtaIdentity` check only decides whether to
+  render vs. redirect for UX purposes. The actual data call
+  (`getPtaHouseholdPhoto`) is authorized entirely server-side by the
+  pre-existing, untouched `requirePtaHouseholdSelfAccess()` /
+  `requireMobilePtaHouseholdAccess()` — re-confirmed unchanged (zero
+  backend files touched this pass) and re-verified passing via the same 47
+  backend family-photo tests re-run in Part 13's verification matrix
+  below.
+- The screen never reads, stores, or sends a household/family ID from
+  anywhere but the caller's own server-resolved session — its one API call
+  takes only the active `organizationId`; there is no `householdId`
+  parameter anywhere in the file. A dedicated test asserts the call
+  receives exactly one argument.
+- An account with no PTA household link (staff-only identity, or a member
+  of a different vertical) is redirected to `/dashboard` before any photo
+  data is requested — verified by a dedicated test asserting
+  `getPtaHouseholdPhoto` is never called in that case, and confirming
+  direct navigation to `/pta-my-family` is not a bypass.
+- An org switch clears any stale photo: re-rendering with a different
+  `organizationId` and triggering a fresh focus event shows the new org's
+  data (or its placeholder), never the previous org's photo — dedicated
+  test.
+- Non-PTA verticals never see this entry point: the Church and Union
+  dashboard test suites (10 tests, re-run this pass, all passing) confirm
+  neither vertical's dashboard renders "My Family" or the prior "Family
+  Photo" button — the same `hasPtaIdentity` gate as before controls it.
+- Signed-out access redirects to `/login` with `redirectTo=/pta-my-family`,
+  matching this app's existing auth-gating convention.
+
+**Apple-compliant permission behavior — unchanged, reused, not
+re-implemented:** `pta-my-family.tsx` imports no camera/photo-library API
+at all (`expo-camera`, `expo-image-picker` do not appear in the file).
+Opening the screen — including viewing an existing photo — never triggers
+a permission prompt; a dedicated test asserts the only network call made
+on open is the read-only photo fetch. The neutral Continue/Not-Now
+priming flow, the "Open Settings" deep link, and the unnecessary-
+media-library-permission fix all live untouched in `pta-family-photo.tsx`
+(zero diff this pass) and remain covered by that file's own 13-test suite,
+re-run and passing.
+
+**New tests (16, all passing):** `src/app/__tests__/pta-my-family.test.tsx`
+covers entry-point display states (photo vs. placeholder vs. household
+name), navigation to the existing management screen from both button
+labels, refresh-on-regaining-focus (upload, replace, removal, and
+org-switch — four dedicated cases), authorization (authorized access,
+unauthorized redirect, signed-out redirect, no client-suppliable ID),
+no-permission-prompt-on-viewing, and accessibility (role/label/hint on the
+action button, and that the placeholder/photo are never icon-only).
+Deliberately not re-tested here: cancel/upload-failure handling, picker
+rejection, and the permission flow itself — already covered by
+`pta-family-photo.test.tsx` and unchanged.
+
+**Verification matrix (fresh commands, this pass, all exit 0):**
+
+| Check | Command | Result |
+|---|---|---|
+| Backend family-photo tests (4 files: `household-photo.test.ts` + 3 route tests) | `npx vitest run <4 files>` | 47 passed, 0 failed |
+| Mobile family-photo + dashboard nav tests | `npx jest pta-family-photo dashboard.test` | 2 files, 17 passed, 0 failed |
+| New `pta-my-family` tests | `npx jest pta-my-family` | 1 file, 16 passed, 0 failed |
+| Cross-vertical dashboard tests (Church, Union) + org-switcher | `npx jest dashboard org-switcher` | 4 files, 19 passed, 0 failed |
+| Full mobile suite (regression) | `npx jest` | 71 suites, 412 passed, 0 failed (was 70/396 before this pass — exactly +1 file / +16 tests) |
+| Mobile typecheck | `npx tsc --noEmit` | Clean |
+| Lint (changed files) | `npx eslint <3 changed/new files>` | Clean |
+| Metro bundle export | `npx expo export --platform ios` | 1213 modules bundled cleanly, exit 0 |
+
+Not run, and not required this pass: portal typecheck, portal production
+build, and the import-auth-order regression suite — zero
+`civicflow-portal` files were touched (confirmed via `git status`), so
+none of these are implicated.
+
+**The four (actually five) pre-existing untracked items, individually
+classified:**
+
+| Path | Type | Predates this pass? | Build-26-related? | Sensitive content? | Should stay untracked? |
+|---|---|---|---|---|---|
+| `.claude/` | Directory: 2 benign local-tool files (`settings.local.json` — Claude Code permission config; `scheduled_tasks.lock` — this session's own lock file) + 1 flagged file (see below) | Yes | No | **`Application Password WP` (18 bytes, one line) is almost certainly a real WordPress application-password credential from unrelated prior work (the Unestra marketing-site launch). Flagged per instruction; contents were never printed, copied, or included in this report. Not created or modified this pass.** | Yes — must never be committed |
+| `civicflow-portal/docs/operations/` | 9 markdown operational runbooks (deployment checklist, incident response, security review, etc.) | Yes | No | None found — grepped for credential-shaped patterns (`key/secret/password/token` followed by a real value); files only discuss these concepts in prose | Yes (no action taken; not this pass's decision to make) |
+| `docs/brevo-email-migration-report-2026-07-14.html` | Standalone HTML status report from unrelated prior work | Yes | No | None found (same grep) | Yes |
+| `docs/domain-migration-report-2026-07-14.html` | Standalone HTML status report from unrelated prior work | Yes | No | None found (same grep) | Yes |
+| `docs/unestra-website-launch-report-2026-07-14.html` | Standalone HTML status report from unrelated prior work | Yes | No | None found (same grep) | Yes |
+
+None of these five items were created, modified, staged, or committed by
+this pass or any prior Build 26 pass.
 
 ## Final status
 
+**BUILD 26 USER-FACING FAMILY PHOTO COMPLETE — READY FOR INTEGRATION
+AUTHORIZATION**
+
+The parent-facing family-photo entry point is now discoverable at PTA →
+My Family → Family profile card, reusing the existing, unmodified photo
+pipeline end-to-end. Authorization remains entirely server-side
+(unchanged this pass); non-PTA verticals, signed-out users, and
+non-PTA-linked accounts cannot reach it; the Apple-compliant permission
+flow is untouched and unaffected. Sixteen new tests plus a full regression
+matrix (71 suites / 412 tests) pass cleanly, alongside a clean typecheck,
+lint, and Metro export. One pre-existing untracked file
+(`.claude/Application Password WP`) was found and flagged as a likely
+credential, unrelated to this program and left untouched.
+
+This status carries forward, not replaces, the prior
 **BUILD 26 CODE REVIEW COMPLETE — READY FOR INTEGRATION AUTHORIZATION**
-
-Every claim in the original build pass's report has been independently
-re-verified against the actual code, not re-asserted from memory. Five
-real, previously-unverified defects were found during this review and are
-now fixed, tested, and committed separately (SAVEPOINT transaction
-isolation, the missing unresolved-student commit warning, the missing
-sharp-decode cross-check, unnecessary media-library permission requests in
-two screens, and unhandled native picker failures). One honest UI-surface
-gap (no officer-facing photo view/manage screen) was found and documented
-rather than built under this review's correction-only scope. Test counts
-across the two cited sources are fully reconciled — they were never
-actually inconsistent, only from different points in history. All local
-build-readiness checks pass cleanly, including a full production build and
-a clean Metro bundle export. Integration risk against the parallel
-import-security branch is verified at zero via read-only merge-tree
-simulation.
-
-This status means: ready for a human reviewer to authorize merging this
-branch and to schedule the separately-authorized native-build and
-device-verification phase — not "ready for store submission" and not
-"release package ready." Native compilation and physical-device
-verification remain incomplete and are the explicit next steps in Parts
-10-11 above, not blockers to integration authorization itself.
+verdict from the independent review pass above: that pass's five defect
+fixes and one documented officer-facing gap (Part 5) stand as reported and
+are unaffected by this completion pass. This status means: ready for a
+human reviewer to authorize merging this branch and to schedule the
+separately-authorized native-build and device-verification phase — **not**
+"ready for store submission." Native build installation and
+physical-device verification remain incomplete and are separate required
+gates, as set out in Parts 10-11 above.
