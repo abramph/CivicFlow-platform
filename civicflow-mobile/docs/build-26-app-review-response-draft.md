@@ -28,6 +28,11 @@ build 1.0.0 (25). Not sent by anyone other than the account holder.
 >
 > Build 26 includes this correction. We're happy to answer any follow-up
 > questions.
+>
+> **How to find the corrected screen:** Sign in, then from the dashboard's
+> Quick Actions tap "Scan Attendance Code." The camera-permission screen
+> (if permission hasn't already been granted on the test device) appears
+> at that point, not before.
 
 ---
 
@@ -41,10 +46,26 @@ build 1.0.0 (25). Not sent by anyone other than the account holder.
 - The new family-photo feature (`pta-family-photo.tsx`) shipped with the
   corrected pattern from the start — it was never in a rejected build, but
   is mentioned above because it's the same class of UI and a reviewer may
-  reasonably check it too.
+  reasonably check it too. **Navigation path:** sign in as a PTA identity,
+  dashboard → "Family Photo" → "Add Photo" → "Take Photo." A reviewer
+  without a PTA-enrolled test account will not see this button at all
+  (`hasPtaIdentity`-gated) — the corrected `attendance-scan.tsx` path above
+  is reachable by any signed-in member and is the one that was actually
+  rejected.
 - `Info.plist`'s `NSCameraUsageDescription` / `NSPhotoLibraryUsageDescription`
   strings (set via `app.json`'s `expo-camera` / `expo-image-picker` plugin
   config) were updated to describe both real uses of each permission
   (QR scan + family photo; receipt photo + family photo) — a reviewer
   cross-checking the system prompt text against actual app behavior should
   find it accurate for every path that can trigger it.
+- **Found during a subsequent independent code review (not part of the
+  rejection, not mentioned in the submitted text above, but relevant if a
+  reviewer probes further):** two screens — the family-photo picker and
+  the pre-existing payment-receipt-photo picker (`report-payment.tsx`) —
+  were requesting photo-library permission before opening the library
+  picker even though `expo-image-picker`'s own documentation states this
+  is only required on iOS 10. Both now open the system picker directly
+  with no permission prompt at all for that path, further reducing
+  permission requests to exactly what each feature needs. This is a
+  hygiene improvement beyond the original rejection, not a second
+  violation being disclosed.
