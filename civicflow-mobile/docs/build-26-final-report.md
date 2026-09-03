@@ -1144,38 +1144,58 @@ prove no external process uses it — a manual or externally-scheduled
 workflow would leave no trace here — so account-holder confirmation is
 still required before revocation.
 
-**External remediation required (not performed by this review, per its
-explicit boundary) — now blocked only on the one-time-vs-ongoing
-determination:**
-1. ~~Identify the account and service.~~ **Done** — identified by the
-   account holder as the GetUnestra WordPress website-update credential.
-2. **Confirm whether it is still needed** — was it created only for the
-   completed one-time website update, or must an ongoing automation keep
-   using it? The repository cannot answer this (no committed integration
-   consumes it), so only the account holder can. **This is the current
-   blocker.**
-3. If **one-time**: revoke it, create no replacement, then remove the
-   local plaintext file.
-4. If **ongoing**: rotate rather than simply revoke — stand up the
-   replacement in an approved secret manager or protected environment
-   configuration *first*, update only the authorized integration, then
-   revoke the old credential and remove the local file. Never write the
-   replacement into `.claude`, the repository, documentation, terminal
-   output, logs, or chat.
-5. In either case, locate the credential record by its administrative
-   label and account context — never by exposing the secret value — and
-   verify the old credential no longer works only as part of an
-   explicitly authorized operational test.
+### One-time determination and revocation authorization
 
-This review did not authenticate with the credential, attempt to
-determine its validity, revoke it, or create a replacement — all of that
-requires the account holder's direct action and separate authorization.
+**The account holder has confirmed the credential was created for the
+completed one-time GetUnestra WordPress website update, and that no
+ongoing automation or integration needs it.** This matches the
+repository-side finding above (`No repository-controlled ongoing
+integration found.`). Revocation was explicitly authorized, with no
+replacement to be created.
 
-**File removal: still pending.** Per this review's own boundary, the file
-is not deleted until both (a) the credential is confirmed revoked or
-obsolete and (b) any required replacement is confirmed stored through an
-approved secure mechanism. Neither has been confirmed yet. The file
-remains on disk, now gitignored, untouched otherwise.
+**Revocation status: NOT COMPLETED — blocked on an authenticated
+administrative session.**
+
+The authorized revocation could not be carried out. Reaching the
+WordPress profile page where application passwords are managed redirected
+to the login screen (`reauth=1`), confirming **no authenticated WordPress
+administrative session exists in the available browser profile**. The two
+ways past that are both excluded by standing policy and by the
+account holder's own instructions: signing in would require entering
+credentials (never done), and asking the account holder to paste a
+WordPress password or application password was explicitly ruled out. No
+login was attempted, no credential was used or tested, and the browser
+tab opened for this check was closed immediately afterward.
+
+**Consequently, and deliberately, the local plaintext file was NOT
+removed.** Its removal was gated on confirmed revocation; revoking first
+and deleting second is the correct order, because deleting the local copy
+while the credential is still live would destroy the only local record of
+*which* credential needs revoking without reducing the actual risk. The
+file remains in place, ignored, unmodified.
+
+**Remaining steps — for the account holder, directly:**
+1. Sign in to the GetUnestra WordPress admin (Users → Profile →
+   Application Passwords).
+2. Revoke the entry corresponding to this one-time website-update
+   credential, identifying it by its administrative label and creation
+   date — never by pasting the value anywhere.
+3. Create no replacement (confirmed not needed).
+4. Once revoked, the local file at `.claude/Application Password WP` can
+   be deleted; it is referenced by nothing in this repository, so nothing
+   breaks. Deleting the parent `.claude/` directory is neither needed nor
+   advised — it holds unrelated local tooling files.
+
+Until step 2 is done, the credential must still be treated as
+potentially active. Note that the repository-side risk is already fully
+contained regardless: the value is untracked, gitignored, absent from all
+reachable and remote Git history, and cannot be pushed.
+
+**File removal: still pending**, gated on confirmed revocation (see the
+one-time determination section above). No replacement is required. The
+file remains on disk, gitignored, otherwise untouched. No plaintext
+duplicate of the value exists anywhere else in the workspace
+(re-verified: 14 other untracked files scanned, zero matches).
 
 **Build 26 confirmation:** zero PTA progression, family-photo, mobile
 navigation, permission-flow, authentication, payment, subscription,
@@ -1193,11 +1213,14 @@ and never pushed** — classified `UNTRACKED_ONLY` after an exhaustive,
 secret-safe scan of all 13,783 objects in the local git object database,
 every local ref, every `refs/remotes/origin/*` ref, and the one stash.
 The account holder has since identified it as the **GetUnestra WordPress
-website-update credential** (`GETUNESTRA WORDPRESS UPDATE CREDENTIAL —
-CONTINUING USE UNCONFIRMED`); a non-authenticating review found **no
-repository-controlled ongoing integration**, but whether an external
-process still relies on it is unconfirmed, so it is treated as
-potentially active until revoked. One
+website-update credential**, created for a completed **one-time** update
+with no ongoing automation needing it — matching the repository-side
+finding of no committed integration. Revocation was authorized but
+**could not be completed**: no authenticated WordPress administrative
+session exists, and signing in would require entering credentials, which
+is not done. The credential therefore remains potentially active
+externally, and the local plaintext file remains in place (deliberately —
+its removal is gated on confirmed revocation). One
 orphaned, unreachable local blob with matching content exists in
 `.git/objects` (not reachable from anything, structurally unpushable, and
 one of roughly 250 similar unreachable objects this repository's history
