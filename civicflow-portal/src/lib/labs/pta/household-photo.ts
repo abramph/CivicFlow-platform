@@ -69,6 +69,21 @@ function detectImageSignature(buffer: Buffer): string | null {
   return null;
 }
 
+/** sharp/libvips's own format name for each magic-byte-detected type
+ * (verified directly: sharp().metadata().format returns exactly these
+ * lowercase, unprefixed strings — 'heif' covers both HEIC and HEIF). Used
+ * to cross-check the actual DECODE result against the magic-byte
+ * detection, closing the gap where a file's signature bytes match one
+ * format but libvips's own (more thorough) sniffing decodes it as
+ * something else entirely -- declared MIME, magic bytes, and the real
+ * decode must all agree, not just the first two. */
+const EXPECTED_SHARP_FORMAT: Record<string, string> = {
+  "image/jpeg": "jpeg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/heic": "heif",
+};
+
 export interface UploadHouseholdPhotoInput {
   organizationId: string;
   householdId: string;
@@ -119,6 +134,14 @@ export async function uploadHouseholdPhoto(input: UploadHouseholdPhotoInput): Pr
   }
   if (!metadata.width || !metadata.height) {
     throw new PtaError("PTA_VALIDATION_ERROR", "This photo could not be read. It may be corrupted — try a different file.");
+  }
+  // Third leg of the agreement check: declared MIME and magic bytes were
+  // already compared above -- this compares the ACTUAL decode result too,
+  // so a file libvips decodes as a different format than its signature
+  // bytes suggested (not the format it claimed to be at any layer) is
+  // rejected rather than silently re-encoded and stored.
+  if (metadata.format !== EXPECTED_SHARP_FORMAT[detected]) {
+    throw new PtaError("PTA_VALIDATION_ERROR", "This file's content doesn't match its declared type. Please re-export the photo and try again.");
   }
 
   let mainBuffer: Buffer;
