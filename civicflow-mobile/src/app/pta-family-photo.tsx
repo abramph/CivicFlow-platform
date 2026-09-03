@@ -1,12 +1,13 @@
 import * as ImagePicker from 'expo-image-picker';
 import { Redirect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Linking, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { ActivityIndicator, Alert, Image, Linking, ScrollView, StyleSheet } from 'react-native';
 
+import { PrimaryActionButton, SecondaryLinkButton } from '@/components/action-buttons';
 import { LoadErrorBanner } from '@/components/load-error-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { ActionColors, Spacing } from '@/constants/theme';
 import { useScreenTopPadding } from '@/hooks/use-screen-top-padding';
 import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
@@ -203,28 +204,16 @@ export default function PtaFamilyPhotoScreen() {
 
           {stage.kind === 'idle' ? (
             <>
-              <Pressable style={styles.primaryButton} onPress={() => setStage({ kind: 'choosingSource' })} accessibilityRole="button" accessibilityLabel={photo ? 'Replace photo' : 'Add photo'}>
-                <ThemedText style={styles.primaryButtonText}>{photo ? 'Replace Photo' : 'Add Photo'}</ThemedText>
-              </Pressable>
-              {photo ? (
-                <Pressable style={styles.secondaryButton} onPress={confirmRemove} accessibilityRole="button" accessibilityLabel="Remove photo">
-                  <ThemedText type="link" style={styles.removeText}>Remove Photo</ThemedText>
-                </Pressable>
-              ) : null}
+              <PrimaryActionButton label={photo ? 'Replace Photo' : 'Add Photo'} onPress={() => setStage({ kind: 'choosingSource' })} accessibilityLabel={photo ? 'Replace photo' : 'Add photo'} />
+              {photo ? <SecondaryLinkButton label="Remove Photo" danger onPress={confirmRemove} accessibilityLabel="Remove photo" /> : null}
             </>
           ) : null}
 
           {stage.kind === 'choosingSource' ? (
             <ThemedView type="backgroundElement" style={styles.actionCard}>
-              <Pressable style={styles.primaryButton} onPress={() => beginSource('camera')} accessibilityRole="button" accessibilityLabel="Take photo">
-                <ThemedText style={styles.primaryButtonText}>Take Photo</ThemedText>
-              </Pressable>
-              <Pressable style={styles.primaryButton} onPress={() => beginSource('library')} accessibilityRole="button" accessibilityLabel="Choose from library">
-                <ThemedText style={styles.primaryButtonText}>Choose from Library</ThemedText>
-              </Pressable>
-              <Pressable style={styles.secondaryButton} onPress={() => setStage({ kind: 'idle' })} accessibilityRole="button" accessibilityLabel="Cancel">
-                <ThemedText type="link">Cancel</ThemedText>
-              </Pressable>
+              <PrimaryActionButton label="Take Photo" onPress={() => beginSource('camera')} accessibilityLabel="Take photo" />
+              <PrimaryActionButton label="Choose from Library" onPress={() => beginSource('library')} accessibilityLabel="Choose from library" />
+              <SecondaryLinkButton label="Cancel" onPress={() => setStage({ kind: 'idle' })} />
             </ThemedView>
           ) : null}
 
@@ -232,12 +221,8 @@ export default function PtaFamilyPhotoScreen() {
             <ThemedView type="backgroundElement" style={styles.actionCard}>
               <ThemedText type="smallBold">{PRIMING_COPY[stage.source].title}</ThemedText>
               <ThemedText type="small" themeColor="textSecondary">{PRIMING_COPY[stage.source].body}</ThemedText>
-              <Pressable style={styles.primaryButton} onPress={() => confirmPriming(stage.source)} accessibilityRole="button" accessibilityLabel="Continue">
-                <ThemedText style={styles.primaryButtonText}>Continue</ThemedText>
-              </Pressable>
-              <Pressable style={styles.secondaryButton} onPress={() => setStage({ kind: 'idle' })} accessibilityRole="button" accessibilityLabel="Not now">
-                <ThemedText type="link">Not Now</ThemedText>
-              </Pressable>
+              <PrimaryActionButton label="Continue" onPress={() => confirmPriming(stage.source)} />
+              <SecondaryLinkButton label="Not Now" onPress={() => setStage({ kind: 'idle' })} accessibilityLabel="Not now" />
             </ThemedView>
           ) : null}
 
@@ -245,24 +230,16 @@ export default function PtaFamilyPhotoScreen() {
             <ThemedView type="backgroundElement" style={styles.actionCard}>
               <ThemedText type="smallBold">{BLOCKED_COPY[stage.source].title}</ThemedText>
               <ThemedText type="small" themeColor="textSecondary">{BLOCKED_COPY[stage.source].body}</ThemedText>
-              <Pressable style={styles.primaryButton} onPress={() => Linking.openSettings()} accessibilityRole="button" accessibilityLabel="Open Settings">
-                <ThemedText style={styles.primaryButtonText}>Open Settings</ThemedText>
-              </Pressable>
-              <Pressable style={styles.secondaryButton} onPress={() => setStage({ kind: 'idle' })} accessibilityRole="button" accessibilityLabel="Not now">
-                <ThemedText type="link">Not Now</ThemedText>
-              </Pressable>
+              <PrimaryActionButton label="Open Settings" onPress={() => Linking.openSettings()} />
+              <SecondaryLinkButton label="Not Now" onPress={() => setStage({ kind: 'idle' })} accessibilityLabel="Not now" />
             </ThemedView>
           ) : null}
 
           {stage.kind === 'previewing' ? (
             <ThemedView type="backgroundElement" style={styles.actionCard}>
               <Image source={{ uri: stage.asset.uri }} style={styles.photo} accessibilityLabel="Preview of the photo you picked" />
-              <Pressable style={styles.primaryButton} onPress={() => confirmUpload(stage.asset)} accessibilityRole="button" accessibilityLabel="Use this photo">
-                <ThemedText style={styles.primaryButtonText}>Use This Photo</ThemedText>
-              </Pressable>
-              <Pressable style={styles.secondaryButton} onPress={() => setStage({ kind: 'choosingSource' })} accessibilityRole="button" accessibilityLabel="Choose a different photo">
-                <ThemedText type="link">Choose a Different Photo</ThemedText>
-              </Pressable>
+              <PrimaryActionButton label="Use This Photo" onPress={() => confirmUpload(stage.asset)} accessibilityLabel="Use this photo" />
+              <SecondaryLinkButton label="Choose a Different Photo" onPress={() => setStage({ kind: 'choosingSource' })} />
             </ThemedView>
           ) : null}
 
@@ -312,25 +289,7 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
     alignItems: 'stretch',
   },
-  primaryButton: {
-    backgroundColor: '#047857',
-    borderRadius: 10,
-    paddingVertical: Spacing.three,
-    paddingHorizontal: Spacing.five,
-    alignItems: 'center',
-  },
-  primaryButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-  },
-  secondaryButton: {
-    alignItems: 'center',
-    paddingVertical: Spacing.one,
-  },
-  removeText: {
-    color: '#B42318',
-  },
   errorText: {
-    color: '#B42318',
+    color: ActionColors.danger,
   },
 });

@@ -26,6 +26,24 @@ export const Colors = {
 
 export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
 
+/**
+ * Semantic action colors — unlike `Colors` above, these don't branch by
+ * light/dark mode (every screen that uses them today uses the identical
+ * value in both modes already). Introduced because the same handful of
+ * hex values were independently hardcoded across 40+ screens with no
+ * shared source of truth — including two slightly different ambers
+ * (#B54708 in five places, #B45309 as a one-off drift in
+ * attendance-scan.tsx) that were clearly meant to be the same color.
+ * Adoption is deliberately incremental — see mobile-ui-tokens.md.
+ */
+export const ActionColors = {
+  primary: '#047857',
+  primaryText: '#fff',
+  danger: '#B42318',
+  warning: '#B54708',
+  border: '#D0D5DD',
+} as const;
+
 export const Fonts = Platform.select({
   ios: {
     /** iOS `UIFontDescriptorSystemDesignDefault` */

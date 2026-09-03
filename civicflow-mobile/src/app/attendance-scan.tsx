@@ -5,7 +5,7 @@ import { ActivityIndicator, Pressable, StyleSheet } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { ActionColors, Spacing } from '@/constants/theme';
 import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { checkInWithQrToken, type AttendanceCheckInResult } from '@/lib/mobile-api';
@@ -212,7 +212,9 @@ const styles = StyleSheet.create({
     color: '#047857',
   },
   lateBadge: {
-    color: '#B45309',
+    // Was #B45309, a one-off drift from the shared warning token (#B54708)
+    // used everywhere else in the app -- see constants/theme.ts.
+    color: ActionColors.warning,
   },
   overlay: {
     position: 'absolute',
