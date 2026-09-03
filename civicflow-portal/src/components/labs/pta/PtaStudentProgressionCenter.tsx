@@ -155,7 +155,11 @@ export function PtaStudentProgressionCenter({
 
   async function commitBatch() {
     if (!activeBatch?.previewedAt) return;
-    if (!window.confirm(`Commit this progression from ${activeBatch.fromYearLabel} to ${activeBatch.toYearLabel}? This creates real enrollment records for the target year.`)) return;
+    const confirmMessage =
+      needsReviewCount > 0
+        ? `Commit this progression from ${activeBatch.fromYearLabel} to ${activeBatch.toYearLabel}? ${needsReviewCount} student${needsReviewCount === 1 ? "" : "s"} still marked "Needs review" will NOT be enrolled for ${activeBatch.toYearLabel} — resolve them first, or they can only be fixed afterward one at a time via record correction.`
+        : `Commit this progression from ${activeBatch.fromYearLabel} to ${activeBatch.toYearLabel}? This creates real enrollment records for the target year.`;
+    if (!window.confirm(confirmMessage)) return;
     const idempotencyKey = crypto.randomUUID();
     if (
       await call(`/api/labs/pta/student-progression/${activeBatch.id}/commit`, {
@@ -182,6 +186,14 @@ export function PtaStudentProgressionCenter({
     }
     return counts;
   }, [activeBatch]);
+
+  // NEEDS_REVIEW records are silently marked SKIPPED (no target-year
+  // enrollment at all) at commit time — see commitProgressionBatch's own
+  // handling. Nothing else in this UI stops an admin from committing while
+  // some students are still unresolved, so the count is surfaced here and
+  // folded into the confirm dialog below rather than only being visible as
+  // an amber table row that's easy to miss in a long roster.
+  const needsReviewCount = summary.NEEDS_REVIEW ?? 0;
 
   const classroomName = (id: string | null, options: ClassroomOption[]) => {
     if (!id) return "—";
@@ -364,6 +376,13 @@ export function PtaStudentProgressionCenter({
             </table>
           </div>
         </section>
+      ) : null}
+
+      {isPreviewed && needsReviewCount > 0 ? (
+        <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <span className="font-semibold">{needsReviewCount} student{needsReviewCount === 1 ? "" : "s"} need{needsReviewCount === 1 ? "s" : ""} review. </span>
+          Committing now will not enroll {needsReviewCount === 1 ? "this student" : "these students"} for {activeBatch.toYearLabel} — resolve the classroom mapping or set an exception above first, or plan to use record correction afterward.
+        </div>
       ) : null}
 
       <div className="flex gap-2">
