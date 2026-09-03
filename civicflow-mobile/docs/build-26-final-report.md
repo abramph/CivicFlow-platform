@@ -9,20 +9,21 @@ followed by a focused independent code-review-and-correction pass. Branch:
 throughout both passes: no merge, push, deploy, build upload, store
 submission, production setting change, real payment, or real notification.
 
-**HEAD at time of this report:** `7ddbca5857be3f9f691b3bfda94cea6d2305c313`
-(the independent-review pass's closing commit); this report's own Part 13
-was produced one commit later, by a subsequent narrowly-scoped completion
-pass.
-**Working tree:** tracked working tree clean; five pre-existing untracked
-items remain and were not modified (`.claude/` — see Part 13's note on one
-flagged file inside it, `civicflow-portal/docs/operations/`, and three
-unrelated dated HTML report files under `docs/`). Earlier drafts of this
-report described these as "four" items; the actual `git status` count is
-five distinct entries (the three HTML files are each separate) — corrected
-here rather than left inconsistent.
+**HEAD at time of this report:** `ca1fab17c615f7d3ebfa23e719c34976ca610a03`
+(the Part 13 completion pass's closing commit); this report's own Part 14
+was produced by a subsequent, narrower verification pass that added tests
+and documentation only.
+**Working tree:** tracked working tree clean; five untracked paths remain
+(`.claude/` — see Part 13/14 for the one flagged file inside it,
+`civicflow-portal/docs/operations/`, and three unrelated dated HTML report
+files under `docs/`), all confirmed pre-dating the Build 26 program by
+roughly 19 hours (Part 14) and none modified by any pass. Earlier drafts
+of this report described these as "four" items; Part 14 traces this to a
+plain arithmetic error in one sentence, not a real change in the working
+tree.
 **`fix/import-auth-order-and-format-ui`:** unchanged at `e92ffd7`/`983c8e2`,
 re-verified byte-identical at the end of the build pass, the review pass,
-and the Part 13 completion pass.
+the Part 13 completion pass, and this Part 14 verification pass.
 **`main`:** unchanged at `db73f2a`. Nothing has been merged, pushed,
 deployed, built via EAS, or submitted to Apple or Google at any point in
 any pass.
@@ -728,8 +729,9 @@ build, and the import-auth-order regression suite — zero
 `civicflow-portal` files were touched (confirmed via `git status`), so
 none of these are implicated.
 
-**The four (actually five) pre-existing untracked items, individually
-classified:**
+**The five pre-existing untracked items, individually classified** (see
+Part 14 below for the full reconciliation of the earlier "four" wording,
+hard mtime evidence, and gitignore analysis):
 
 | Path | Type | Predates this pass? | Build-26-related? | Sensitive content? | Should stay untracked? |
 |---|---|---|---|---|---|
@@ -742,29 +744,224 @@ classified:**
 None of these five items were created, modified, staged, or committed by
 this pass or any prior Build 26 pass.
 
+## Part 14 — Untracked-item reconciliation and Community/Nonprofit isolation
+
+A second, narrower verification pass following Part 13. Two open items:
+why the untracked-item count read "four" in one place and "five" in
+another, and whether Community/Nonprofit organizations — never previously
+tested with a demonstrably vertical-tagged fixture — can see or reach the
+PTA family-photo feature.
+
+### Four-to-five reconciliation
+
+**Root cause: a plain counting error in the R12 report's own sentence, not
+a change in the working tree.** At commit `7ddbca5`, that report's Part 0
+read: *"clean except four pre-existing untracked paths present... (`.claude/`,
+`civicflow-portal/docs/operations/`, and three unrelated dated HTML report
+files under `docs/`)"* — the sentence says "four" but then enumerates
+1 + 1 + 3 = 5 items. The Part 13 completion pass (commit `ca1fab1`) already
+corrected the headline number to "five" using direct `git status` evidence;
+this pass re-confirms that correction with two additional, independent
+sources of evidence:
+
+1. **Consistent counting method, applied uniformly:** `git status --short`,
+   `git status --porcelain=v1 --untracked-files=all`, and
+   `git ls-files --others --exclude-standard` were run and cross-checked —
+   all three agree on exactly five untracked-and-not-ignored paths. The
+   counting method used throughout this report is "one line in
+   `git status --short`'s default (directory-collapsed) output" — under
+   that method, `.claude/` and `civicflow-portal/docs/operations/` are each
+   one item despite containing multiple files internally, and each of the
+   three HTML reports is its own item. This is the same method both the
+   R12 and Part 13 reports used; the discrepancy was arithmetic, not a
+   difference in counting convention.
+2. **Filesystem timestamp evidence, independent of git history:** every
+   file underlying all five items — the one flagged `.claude/` file, all
+   nine `civicflow-portal/docs/operations/*.md` files, and all three HTML
+   reports (13 files total) — shares the identical modification timestamp
+   `2026-09-01T01:46:43` (sub-second-identical across all 13, consistent
+   with one bulk filesystem event such as a workspace restore, not organic
+   creation over time). This predates this branch's first commit
+   (`a45d142`, authored `2026-09-02T20:43:48`) by roughly 19 hours —
+   independent confirmation that all five items genuinely predate Build 26
+   in its entirety, not merely "untracked since some unknown point."
+
+**Not created by any Build 26 tooling — checked explicitly, not assumed:**
+- Metro/Expo export: this pass's and Part 13's exports both wrote to a
+  scratchpad path outside the repository entirely
+  (`/tmp/build26-c7-export`), already deleted; zero export output exists
+  inside the repo tree.
+- Test execution: this project's Jest config writes no coverage/output
+  files into the repo by default; no such directory appears anywhere in
+  `git status`.
+- Database migration verification (Part 4): performed against entirely
+  separate, disposable local Postgres clusters, never touching the working
+  tree.
+- Documentation generation by this program: Build 26's own docs live under
+  `civicflow-mobile/docs/build-26-*.md` — a different path from all five
+  untracked items.
+- Developer scratchpad or this session specifically: ruled out by the
+  mtime evidence above (predates this branch by ~19 hours).
+- **Actual origin:** leftover artifacts from unrelated prior work sessions
+  — the WordPress credential from an earlier marketing-site launch, and
+  the operations docs / HTML reports from separate earlier documentation
+  work, consistent with this account's own project history.
+
+**Two additional files exist on disk inside `.claude/` but are correctly
+excluded from all five counts and from every `git status` invocation
+above** — `.claude/settings.local.json` (Claude Code's own local
+permission config) and `.claude/scheduled_tasks.lock` (this session's own
+lock file) are both genuinely gitignored: `settings.local.json` via a
+`**/.claude/settings.local.json` rule in the user's global git ignore
+file, `scheduled_tasks.lock` via a `**/.claude/scheduled_tasks.lock` rule
+in this repo's local `.git/info/exclude` (confirmed via
+`git check-ignore -v` against each, individually). Neither appears under
+`--untracked-files=all` or `ls-files --others --exclude-standard`. By
+contrast, **`.claude/Application Password WP` has no ignore rule at all**
+— `git check-ignore -v` returns no match for it — meaning it is the one
+`.claude/`-directory file that a careless `git add -A` or `git add
+.claude/` would actually stage. None of the five counted items (including
+this one) are covered by `.gitignore` or any other ignore mechanism.
+
+**Precise wording, used consistently in this report from here on:**
+"Tracked working tree clean; five untracked paths remain. All five
+predated the Build 26 program by roughly 19 hours (filesystem-timestamp
+evidence, independent of git history). None were modified, staged, or
+committed by any pass."
+
+### Community/Nonprofit isolation
+
+**Server-side (backend) — already explicitly tested against a demonstrably
+COMMUNITY-vertical fixture; nothing was missing here.** Both guards the
+family-photo routes depend on already had a dedicated test using
+`primaryVertical: "COMMUNITY"`, re-run this pass and confirmed passing,
+unchanged:
+- `civicflow-portal/src/lib/labs/pta/__tests__/guard.test.ts` →
+  *"denies a user whose organization isn't PTA-vertical"* — tests
+  `requirePtaHouseholdSelfAccess()` (the guard behind the web
+  `/api/labs/pta/my-household/photo` route), asserting rejection with
+  `PTA_ORGANIZATION_NOT_PTA_VERTICAL` and that the household lookup
+  (`findFirstAdult`) is never even called.
+- `civicflow-portal/src/lib/__tests__/mobile-pta-auth.test.ts` →
+  *"denies access when the organization's primaryVertical is not PTA (PR
+  #40 — no Labs enrollment involved)"* — tests
+  `requireMobilePtaHouseholdAccess()` directly, the exact guard the
+  mobile app's `/api/mobile/pta/household/photo` route calls. A second
+  test, *"throws for a non-PTA organization, even with a real officer
+  permission already granted"*, covers the underlying
+  `requirePtaVerticalForMobile()` check in isolation.
+
+Both files were re-run this pass: `npx vitest run
+src/lib/labs/pta/__tests__/guard.test.ts
+src/lib/__tests__/mobile-pta-auth.test.ts` → 2 files, 36 passed, 0 failed,
+exit 0. No backend test was added — none was missing.
+
+**Client-side (mobile) — genuinely missing before this pass, now added.**
+Prior coverage (`authWith({ householdAdultId: null })` in
+`pta-my-family.test.tsx`, and `conventionalMemberOrg()`/`staffOnlyOrg()`
+in `dashboard.test.tsx`) only proved "no PTA identity" generically — none
+of those fixtures set `capability.primaryVertical`, the field this app's
+own vertical-gating logic actually reads elsewhere (`(tabs)/_layout.tsx`,
+the org switcher). Per this pass's own standard, that's insufficient to
+claim demonstrated Community/Nonprofit isolation. Four new tests, all
+using an explicit `capability: { primaryVertical: 'COMMUNITY' }` fixture:
+
+- `dashboard.test.tsx`, describe `Dashboard -- Community/Nonprofit
+  isolation for the PTA "My Family" entry point`:
+  - *"a Community/Nonprofit organization member never sees the My Family
+    entry point, even with a real member record"* — proves a genuine
+    `memberId` doesn't upgrade a generic member into a PTA identity.
+  - *"switching from a PTA organization to a Community/Nonprofit
+    organization removes the My Family entry point and stops PTA data
+    fetching"*.
+- `pta-my-family.test.tsx`:
+  - *"a Community/Nonprofit organization member (demonstrably non-PTA
+    vertical) is redirected to /dashboard without any family-photo
+    request"* (describe: authorization).
+  - describe `PtaMyFamilyScreen -- organization switching (PTA ->
+    Community/Nonprofit)` → *"clears the displayed family photo and name,
+    redirects away, and never fetches using the new organization id"* —
+    proves `load()`'s `!hasPtaIdentity` guard no-ops regardless of the new
+    organization's id, so no request is ever made with it.
+
+PTA progression controls: confirmed absent by construction, not by a
+mobile UI test — this feature has no mobile surface at all (web-only,
+portal-admin; grepped `civicflow-mobile/src` for `progression`, zero
+matches), so there is nothing to assert against on this platform.
+
+**No isolation defect was found.** All four new tests, and both
+pre-existing backend tests, passed on first run with zero production-code
+changes — this was a coverage-completion pass, confirming behavior that
+already worked (the client-side `hasPtaIdentity` gate and the server-side
+vertical guards were already correct), not a fix for a real gap in
+behavior.
+
+### Verification (this pass, fresh commands, all exit 0)
+
+| Check | Command | Result |
+|---|---|---|
+| `pta-my-family` + `dashboard.test` (targeted) | `npx jest pta-my-family "dashboard.test"` | 2 files, 24 passed, 0 failed |
+| Backend PTA guard + mobile-pta-auth (Community fixture) | `npx vitest run src/lib/labs/pta/__tests__/guard.test.ts src/lib/__tests__/mobile-pta-auth.test.ts` | 2 files, 36 passed, 0 failed |
+| Org-switcher | `npx jest org-switcher` | 1 file, 4 passed, 0 failed |
+| Full mobile suite (regression) | `npx jest` | 71 suites, 416 passed, 0 failed (was 71/412 before this pass — exactly +4 tests, 0 new files) |
+| Mobile typecheck | `npx tsc --noEmit` | Clean |
+| Lint (changed files) | `npx eslint <2 test files>` | Clean |
+
+**Metro export not re-run this pass, deliberately:** only test files
+(`dashboard.test.tsx`, `pta-my-family.test.tsx`) and this documentation
+changed — zero application/production code. A bundle re-verification adds
+no information when nothing bundled could have changed; Part 13's export
+(1213 modules, exit 0) still reflects the current production code exactly.
+Portal typecheck, portal production build, and the import-auth-order
+regression suite remain not required for the same reason as Part 13 —
+zero `civicflow-portal` production files changed (only two portal test
+files were *read*, not modified, to confirm existing coverage).
+
+### Vertical-coverage matrix, all four considered
+
+| Vertical | My Family entry point visible? | Direct navigation | Server-side guard |
+|---|---|---|---|
+| PTA/PTO | Yes, when `pta.householdAdultId` is set | Renders normally | `requirePtaHouseholdSelfAccess` / `requireMobilePtaHouseholdAccess` grant |
+| Community/Nonprofit | No (new tests, this pass) | Redirects to `/dashboard`, no request made (new tests, this pass) | Rejects with `PTA_ORGANIZATION_NOT_PTA_VERTICAL` / "PTA is not available for this organization" (pre-existing tests, re-confirmed) |
+| Church | No (`dashboard-church.test.tsx`, unchanged, re-run in Part 13) | Not separately re-tested this pass — same `hasPtaIdentity`/vertical-guard mechanism as Community, no vertical-specific branching exists in either the screen or the guards | Same guards as above — vertical-agnostic beyond the single `primaryVertical === "PTA"` check |
+| Union | No (`dashboard-union.test.tsx`, unchanged, re-run in Part 13) | Same as Church | Same as Church |
+
+HOA is a fifth `OrganizationVertical` enum value with no PTA-identity
+concept at all (structurally cannot hold a `PtaHouseholdAdult` link); it
+was not separately re-tested here as it was never part of this program's
+named four-vertical scope (PTA, Community, Church, Union — see Part 8/11).
+
 ## Final status
 
-**BUILD 26 USER-FACING FAMILY PHOTO COMPLETE — READY FOR INTEGRATION
+**BUILD 26 CROSS-VERTICAL ISOLATION VERIFIED — READY FOR INTEGRATION
 AUTHORIZATION**
 
-The parent-facing family-photo entry point is now discoverable at PTA →
+The parent-facing family-photo entry point is discoverable at PTA →
 My Family → Family profile card, reusing the existing, unmodified photo
 pipeline end-to-end. Authorization remains entirely server-side
-(unchanged this pass); non-PTA verticals, signed-out users, and
-non-PTA-linked accounts cannot reach it; the Apple-compliant permission
-flow is untouched and unaffected. Sixteen new tests plus a full regression
-matrix (71 suites / 412 tests) pass cleanly, alongside a clean typecheck,
-lint, and Metro export. One pre-existing untracked file
-(`.claude/Application Password WP`) was found and flagged as a likely
-credential, unrelated to this program and left untouched.
+(unchanged across every pass); the four-vs-five untracked-item count is
+reconciled with independent filesystem evidence (Part 14) — it was always
+five, a prose miscount in one earlier report, never a real change in the
+working tree. Community/Nonprofit isolation is now explicitly proven with
+demonstrably vertical-tagged fixtures on both the mobile screen/dashboard
+(4 new tests) and re-confirmed on the server side, where it was already
+covered (2 pre-existing backend tests, re-run and passing) — alongside the
+previously-verified Church and Union isolation. No isolation defect
+existed; zero production code changed in this pass. The Apple-compliant
+permission flow remains untouched and unaffected. One pre-existing
+untracked file (`.claude/Application Password WP`) remains flagged as a
+likely credential, unrelated to this program, unchanged and untouched.
 
 This status carries forward, not replaces, the prior
-**BUILD 26 CODE REVIEW COMPLETE — READY FOR INTEGRATION AUTHORIZATION**
-verdict from the independent review pass above: that pass's five defect
-fixes and one documented officer-facing gap (Part 5) stand as reported and
-are unaffected by this completion pass. This status means: ready for a
+**BUILD 26 CODE REVIEW COMPLETE** and
+**BUILD 26 USER-FACING FAMILY PHOTO COMPLETE** verdicts above: the review
+pass's five defect fixes and one documented officer-facing gap (Part 5),
+and the completion pass's new entry point, stand as reported and are
+unaffected by this verification pass. This status means: ready for a
 human reviewer to authorize merging this branch and to schedule the
 separately-authorized native-build and device-verification phase — **not**
 "ready for store submission." Native build installation and
 physical-device verification remain incomplete and are separate required
-gates, as set out in Parts 10-11 above.
+gates, as set out in Parts 10-11 above. Volunteer-shift QR check-in
+remains fully deferred (Part 7, re-confirmed: zero files under its
+scope touched by this pass).

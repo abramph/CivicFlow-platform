@@ -70,6 +70,26 @@ function authWith(overrides: { householdAdultId?: string | null; householdName?:
   };
 }
 
+/** A demonstrably Community/Nonprofit organization (capability.
+ * primaryVertical: 'COMMUNITY' -- the same field this app's own
+ * vertical-gating logic keys off, see _layout.test.tsx/org-switcher.test.tsx)
+ * with no PTA household link at all. Distinct from
+ * authWith({householdAdultId: null}) above, which represents the broader
+ * "no PTA identity" case (could be a PTA-org staff member with no household
+ * link); this fixture pins the org's own vertical explicitly. */
+function communityMemberOrg(overrides: { organizationId?: string } = {}) {
+  return {
+    status: 'signedIn' as const,
+    selectedOrganizationId: overrides.organizationId ?? 'org-community',
+    selectedOrganization: {
+      organizationId: overrides.organizationId ?? 'org-community',
+      organizationName: 'Riverdale Community Association',
+      pta: null,
+      capability: { primaryVertical: 'COMMUNITY' },
+    },
+  };
+}
+
 /** Simulates the screen (re)gaining focus -- the same mechanism
  * useFocusEffect uses in production for both the initial mount and every
  * later return trip (e.g. from photo management, or after an org switch
@@ -244,6 +264,49 @@ describe('PtaMyFamilyScreen -- authorization', () => {
     // householdId parameter exists anywhere in this screen's code.
     expect(mockGetPtaHouseholdPhoto).toHaveBeenCalledWith('org-1');
     expect(mockGetPtaHouseholdPhoto.mock.calls[0]).toHaveLength(1);
+  });
+
+  it('a Community/Nonprofit organization member (demonstrably non-PTA vertical) is redirected to /dashboard without any family-photo request', async () => {
+    mockUseAuth.mockReturnValue(communityMemberOrg());
+    await render(<PtaMyFamilyScreen />);
+
+    expect(mockRedirectHref).toHaveBeenCalledWith('/dashboard');
+    expect(screen.queryByText('My Family')).toBeNull();
+    // Client-side rejection happens before any data request is made; the
+    // real boundary is server-side regardless (requireMobilePtaHouseholdAccess
+    // / requirePtaVerticalForMobile, portal src/lib/mobile-auth.ts, tested
+    // explicitly against a COMMUNITY-vertical fixture in
+    // mobile-pta-auth.test.ts).
+    expect(mockGetPtaHouseholdPhoto).not.toHaveBeenCalled();
+  });
+});
+
+describe('PtaMyFamilyScreen -- organization switching (PTA -> Community/Nonprofit)', () => {
+  it('clears the displayed family photo and name, redirects away, and never fetches using the new organization id', async () => {
+    mockUseAuth.mockReturnValue(authWith({ organizationId: 'org-pta', householdName: 'The Alvarez Family' }));
+    mockGetPtaHouseholdPhoto.mockResolvedValueOnce({ url: 'https://spaces.example/alvarez-photo', byteSize: 500 });
+    const { rerender } = await render(<PtaMyFamilyScreen />);
+    await triggerFocus();
+    expect(screen.getByText('The Alvarez Family')).toBeTruthy();
+    expect(screen.getByLabelText("Your family's current photo")).toBeTruthy();
+    expect(mockGetPtaHouseholdPhoto).toHaveBeenCalledTimes(1);
+
+    // A real org switch navigates to /dashboard (see org-switcher.test.tsx);
+    // re-rendering this still-mounted screen with the new org's auth state
+    // and triggering a focus event mirrors what happens if it briefly
+    // remains mounted during that transition.
+    mockUseAuth.mockReturnValue(communityMemberOrg({ organizationId: 'org-community' }));
+    await rerender(<PtaMyFamilyScreen />);
+    await triggerFocus();
+
+    expect(mockRedirectHref).toHaveBeenCalledWith('/dashboard');
+    expect(screen.queryByText('The Alvarez Family')).toBeNull();
+    expect(screen.queryByLabelText("Your family's current photo")).toBeNull();
+    // load() no-ops on !hasPtaIdentity regardless of organizationId, so the
+    // call count stays at exactly the one PTA-org fetch from before the
+    // switch -- never a second call, and never one using 'org-community'.
+    expect(mockGetPtaHouseholdPhoto).toHaveBeenCalledTimes(1);
+    expect(mockGetPtaHouseholdPhoto).not.toHaveBeenCalledWith('org-community');
   });
 });
 
