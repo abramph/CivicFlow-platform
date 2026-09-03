@@ -256,6 +256,12 @@ export const PERMISSIONS = {
   // "re-scopes what 'current' means org-wide" reason as that permission.
   PTA_STUDENT_PROGRESSION_PREVIEW: "pta:student-progression:preview",
   PTA_STUDENT_PROGRESSION_COMMIT:  "pta:student-progression:commit",
+  // Separate from COMMIT on purpose: committing is an internal, private
+  // data change, while publishing is an irreversible *disclosure* to every
+  // affected family. Same ORG_ADMIN/ORG_OWNER tier, but distinct so an
+  // organization can audit (and, via custom role permission sets, withhold)
+  // the disclosure step independently of the data step.
+  PTA_STUDENT_PROGRESSION_PUBLISH: "pta:student-progression:publish",
   // PTA Vertical 2.0, PR PTA-E — Concerns & Grievances. Deliberately granted
   // to NO role bundle below ORG_ADMIN: a case must never be visible merely
   // because someone helps run events or finances. Even holders of these
@@ -513,6 +519,7 @@ const ORG_OWNER_PERMISSIONS: Permission[] = [
   PERMISSIONS.PTA_BOARD_MANAGE,
   PERMISSIONS.PTA_SCHOOL_YEARS_MANAGE,
   PERMISSIONS.PTA_STUDENT_PROGRESSION_COMMIT,
+  PERMISSIONS.PTA_STUDENT_PROGRESSION_PUBLISH,
   PERMISSIONS.PTA_CONCERNS_VIEW,
   PERMISSIONS.PTA_CONCERNS_MANAGE,
   PERMISSIONS.PTA_CONCERNS_ASSIGN,
@@ -662,6 +669,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.PTA_BOARD_MANAGE,
     PERMISSIONS.PTA_SCHOOL_YEARS_MANAGE,
     PERMISSIONS.PTA_STUDENT_PROGRESSION_COMMIT,
+    PERMISSIONS.PTA_STUDENT_PROGRESSION_PUBLISH,
     PERMISSIONS.PTA_CONCERNS_VIEW,
     PERMISSIONS.PTA_CONCERNS_MANAGE,
     PERMISSIONS.PTA_CONCERNS_ASSIGN,

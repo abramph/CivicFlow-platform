@@ -5078,6 +5078,19 @@ enum PtaStudentProgressionBatchStatus {
   ROLLED_BACK
 }
 
+/// Whether a COMMITTED batch's results have been disclosed to families.
+/// Deliberately separate from the batch status above: committing is an
+/// internal data change, publishing is an irreversible disclosure. A
+/// committed-but-UNPUBLISHED batch is invisible to families even though its
+/// target enrollments already exist and are ACTIVE.
+enum PtaProgressionPublicationStatus {
+  UNPUBLISHED
+  PUBLISHED
+  /// Previously published, then withdrawn. Distinct from UNPUBLISHED so the
+  /// record itself shows a disclosure already happened and cannot be undone.
+  WITHDRAWN
+}
+
 enum PtaStudentProgressionOutcome {
   PROMOTE
   RETAIN
@@ -5098,29 +5111,47 @@ enum PtaStudentProgressionRecordStatus {
 
 /// One academic-year student-progression rollover: fromYear -> toYear.
 model PtaStudentProgressionBatch {
-  id                   String                           @id @default(cuid())
-  organizationId       String
-  fromSchoolYearId     String
-  toSchoolYearId       String
-  status               PtaStudentProgressionBatchStatus @default(PREPARING)
-  notes                String?
+  id                    String                           @id @default(cuid())
+  organizationId        String
+  fromSchoolYearId      String
+  toSchoolYearId        String
+  status                PtaStudentProgressionBatchStatus @default(PREPARING)
+  notes                 String?
   /// Client-supplied idempotency key for the commit request specifically
   /// (Section 5: "a unique idempotency key" on Step 4/Confirm) -- distinct
   /// from the @@unique year-pair constraint below, which prevents a second
   /// batch from ever being CREATED for the same two years at all. This key
   /// protects the commit call itself against a retried/duplicated HTTP
   /// request against the SAME already-created batch.
-  commitIdempotencyKey String?                          @unique
-  preparedByUserId     String?
-  previewedAt          DateTime?
-  committedByUserId    String?
-  committedAt          DateTime?
-  correctedByUserId    String?
-  correctedAt          DateTime?
-  rolledBackByUserId   String?
-  rolledBackAt         DateTime?
-  createdAt            DateTime                         @default(now())
-  updatedAt            DateTime                         @updatedAt
+  commitIdempotencyKey  String?                          @unique
+  preparedByUserId      String?
+  previewedAt           DateTime?
+  committedByUserId     String?
+  committedAt           DateTime?
+  correctedByUserId     String?
+  correctedAt           DateTime?
+  rolledBackByUserId    String?
+  rolledBackAt          DateTime?
+  /// Publication (disclosure-to-families) state. Additive and defaulted to
+  /// UNPUBLISHED, so every pre-existing committed batch stays private until
+  /// an administrator explicitly publishes it. Family visibility of a
+  /// FUTURE-year placement is gated on this alone -- an ACTIVE target
+  /// enrollment is necessary but no longer sufficient.
+  publicationStatus     PtaProgressionPublicationStatus  @default(UNPUBLISHED)
+  publishedAt           DateTime?
+  publishedByUserId     String?
+  unpublishedAt         DateTime?
+  unpublishedByUserId   String?
+  /// Optimistic-concurrency guard for publish/unpublish. Incremented on
+  /// every publication transition; callers send the version they last saw,
+  /// so two concurrent publish requests cannot both apply.
+  publicationVersion    Int                              @default(0)
+  /// Mirrors commitIdempotencyKey's purpose for the publish call, so a
+  /// retried HTTP publish is a safe no-op rather than a second disclosure
+  /// event.
+  publishIdempotencyKey String?                          @unique
+  createdAt             DateTime                         @default(now())
+  updatedAt             DateTime                         @updatedAt
 
   organization      Organization                     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   fromSchoolYear    PtaSchoolYear                    @relation("PtaProgressionFromYear", fields: [fromSchoolYearId], references: [id], onDelete: Restrict)
@@ -5131,6 +5162,9 @@ model PtaStudentProgressionBatch {
   @@unique([organizationId, fromSchoolYearId, toSchoolYearId])
   @@index([organizationId])
   @@index([organizationId, status])
+  /// Target-year publication lookups: "what is published for this year in
+  /// this organization" (portal panel) and the mobile read's join.
+  @@index([organizationId, toSchoolYearId, publicationStatus])
 }
 
 /// One student's outcome within a progression batch. Cascade on student —
