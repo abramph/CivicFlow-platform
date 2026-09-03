@@ -9,12 +9,13 @@ followed by a focused independent code-review-and-correction pass. Branch:
 throughout both passes: no merge, push, deploy, build upload, store
 submission, production setting change, real payment, or real notification.
 
-**HEAD at time of this report:** `ca1fab17c615f7d3ebfa23e719c34976ca610a03`
-(the Part 13 completion pass's closing commit); this report's own Part 14
-was produced by a subsequent, narrower verification pass that added tests
-and documentation only.
+**HEAD at time of this report:** `01b95aad491a7e06dcf8cdcc9a6590cda19b8b55`
+(the Part 14 verification pass's closing commit); this report's own Part 15
+was produced by a subsequent, narrower credential-containment review that
+added a `.gitignore` rule and documentation only.
 **Working tree:** tracked working tree clean; five untracked paths remain
-(`.claude/` — see Part 13/14 for the one flagged file inside it,
+(`.claude/` — see Part 15 for the one flagged file inside it, now
+gitignored but not yet removed, pending external revocation,
 `civicflow-portal/docs/operations/`, and three unrelated dated HTML report
 files under `docs/`), all confirmed pre-dating the Build 26 program by
 roughly 19 hours (Part 14) and none modified by any pass. Earlier drafts
@@ -931,37 +932,173 @@ concept at all (structurally cannot hold a `PtaHouseholdAdult` link); it
 was not separately re-tested here as it was never part of this program's
 named four-vertical scope (PTA, Community, Church, Union — see Part 8/11).
 
+## Part 15 — Credential-containment review: `.claude/Application Password WP`
+
+A narrowly scoped review, separate from Build 26's own functionality,
+prompted by the flagged file first noted in Part 13. **No credential value,
+username, or site address is reproduced anywhere in this section or was at
+any point printed, logged, staged, or committed during this review.**
+
+**Sanitized classification** (metadata only — content was never read for
+this purpose beyond safe boolean/structural checks):
+- Path: `.claude/Application Password WP` (18 bytes on disk, one line,
+  regular file, not a symlink, `-rw-r--r--` permissions).
+- Structural content check: does **not** match WordPress's standard
+  generated Application Password format (six lowercase-alphanumeric
+  groups of four, space-separated, 29 characters). It more closely
+  resembles a general strong password (mixed case, digits, and at least
+  one non-alphanumeric symbol, 16 characters, no internal separators).
+  **Revised from Part 13/14's earlier, more confident characterization**
+  ("almost certainly a real WordPress application-password credential")
+  — that assessment was a filename-and-shape heuristic, not a structural
+  check; this pass's closer, still content-blind inspection found the
+  shape doesn't match WordPress's own format. The filename strongly
+  suggests WordPress-related credential material of *some* kind; the
+  exact credential type (application password vs. account password vs.
+  something else) cannot be confirmed without reading the value, which
+  this review does not do.
+- `WordPress application password detected: uncertain (shape mismatch — see above)`
+- `Associated username detected: no` (single value, no separator embedded)
+- `Site identifier detected: no` (no URL, no `@`, no `:` in the content)
+- `git check-ignore`: not ignored prior to this pass (now ignored — see
+  Repository protection below).
+- Predates Build 26: yes — mtime `2026-09-01T01:46:43`, ~19 hours before
+  this branch's first commit (Part 14).
+
+**Git-history exposure review — exhaustive, secret-safe, all local refs
+plus reflog plus stash plus the raw object store:**
+- The exact file **path** was never tracked at any point on any ref
+  (`git log --all --full-history` for this path: 0 results); neither was
+  any file anywhere under `.claude/`.
+- An exhaustive scan of **every object in the repository's local object
+  database** (13,783 objects — every blob, tree, commit, and tag ever
+  created, reachable or not) for the file's exact content, using a
+  pattern-file-based `grep -f` so the value never touched a shell
+  argument, environment variable, or history: **exactly one match.**
+- That one match is a single **blob object, unreachable from every local
+  branch, every tag, every `refs/remotes/origin/*` remote-tracking ref,
+  and the one existing stash** (confirmed via `git rev-list --objects`
+  against each category and `git fsck --unreachable`). `git log --all
+  --find-object=<hash>` returns zero commits — no commit, past or
+  present, on any ref this repository knows about, was ever built from a
+  tree containing this blob.
+- The loose object's own filesystem mtime (`2026-09-01T01:45:48`) is
+  about 55 seconds before the working-tree file's own mtime — consistent
+  with a `git add` of this same content during the same 2026-09-01
+  bulk event identified in Part 14, immediately followed by an unstage
+  (`git reset`) or equivalent, before any commit was ever made. This
+  repository's object store also contains roughly 250 other unreachable
+  objects from ordinary rebase/amend activity across its many feature
+  branches — this blob is one of many, not a uniquely anomalous entry.
+- Because `git push` only ever transmits objects reachable from the
+  ref(s) being pushed, and this blob is reachable from **none** of this
+  repository's local refs, none of its remote-tracking refs, and no
+  commit anywhere — it is not structurally possible for a normal push
+  from this clone to have ever transmitted it. Combined with zero matches
+  against every `refs/remotes/origin/*` ref (which mirror the last-fetched
+  state of the actual GitHub remote), there is no evidence of remote
+  exposure.
+- **Classification: `UNTRACKED_ONLY`** — the credential was never part of
+  any tracked commit and was never pushed. The one caveat beyond a pure
+  "never touched by git" reading: a single orphaned, unreachable blob with
+  this content still physically exists in the local `.git/objects` store
+  on this machine. It carries no history/graph exposure (nothing points
+  to it), but it is a real local artifact worth clearing — `git gc
+  --prune=now` (or the default ~2-week automatic prune expiry) would
+  remove it non-destructively, since it is not reachable from, and does
+  not need to be preserved by, any current branch, tag, or the stash.
+  **This specific cleanup step was not run in this pass** — it touches
+  `.git` internals, and per this session's standing caution around
+  git-destructive operations, is flagged for explicit authorization
+  rather than performed automatically.
+
+**Other untracked artifacts checked for duplication:** all 9
+`civicflow-portal/docs/operations/*.md` files, all 3 dated HTML reports
+under `docs/`, and the two other `.claude/` files (`settings.local.json`,
+`scheduled_tasks.lock`) — 14 files total, direct on-disk content scan
+using the same pattern-file `grep -f` approach. **Zero contain the exact
+credential value.** No affected item beyond the one already identified.
+
+**Repository protection added:** `.gitignore` now excludes the exact path
+`.claude/Application Password WP` (narrowest option — the project has no
+existing dedicated local-secrets directory convention to reuse, and a
+broader `.claude/`-wide rule was deliberately not added, since nothing
+established that the rest of `.claude/`'s current or future contents
+should always be excluded; the existing precedent in this file, a
+"Local keys" section with narrowly-scoped individual paths, was followed
+directly). Verified: the file no longer appears in `git status --short`
+or `--porcelain=v1 --untracked-files=all`; the other four legitimate
+untracked items still appear normally, unaffected; `git diff --check`
+passed with no whitespace/conflict-marker issues.
+
+**External remediation required (not performed by this review, per its
+explicit boundary):**
+1. Sign in to the WordPress administrative account this credential
+   belongs to. **Not confirmed by this file's contents** (never read for
+   this purpose) — based on this project's own prior work history (the
+   getunestra.com marketing-site launch, which used WordPress's REST API
+   with application-password authentication), that site is the most
+   plausible association, but the human operator must verify the correct
+   account and site directly rather than relying on this inference.
+2. Locate Users → Profile → Application Passwords (or the account's login
+   credential, if this turns out not to be an application password
+   specifically) for the associated user.
+3. Revoke the exposed credential.
+4. If an active integration still needs it, create a replacement scoped
+   to the minimum required purpose, and store it only in the deployment
+   secret manager or protected environment configuration — never back
+   into a repository file.
+5. Verify the old credential no longer works only as part of an
+   explicitly authorized operational test.
+
+This review did not authenticate with the credential, attempt to
+determine its validity, revoke it, or create a replacement — all of that
+requires the account holder's direct action.
+
+**File removal: still pending.** Per this review's own boundary, the file
+is not deleted until both (a) the credential is confirmed revoked or
+obsolete and (b) any required replacement is confirmed stored through an
+approved secure mechanism. Neither has been confirmed yet. The file
+remains on disk, now gitignored, untouched otherwise.
+
+**Build 26 confirmation:** zero PTA progression, family-photo, mobile
+navigation, permission-flow, authentication, payment, subscription,
+Stripe Connect, QR, or migration files were touched by this review — only
+`.gitignore` and this documentation section changed.
+
 ## Final status
 
-**BUILD 26 CROSS-VERTICAL ISOLATION VERIFIED — READY FOR INTEGRATION
-AUTHORIZATION**
+**REPOSITORY CREDENTIAL RISK CONTAINED — EXTERNAL ROTATION/REMOVAL STILL
+REQUIRED**
 
-The parent-facing family-photo entry point is discoverable at PTA →
-My Family → Family profile card, reusing the existing, unmodified photo
-pipeline end-to-end. Authorization remains entirely server-side
-(unchanged across every pass); the four-vs-five untracked-item count is
-reconciled with independent filesystem evidence (Part 14) — it was always
-five, a prose miscount in one earlier report, never a real change in the
-working tree. Community/Nonprofit isolation is now explicitly proven with
-demonstrably vertical-tagged fixtures on both the mobile screen/dashboard
-(4 new tests) and re-confirmed on the server side, where it was already
-covered (2 pre-existing backend tests, re-run and passing) — alongside the
-previously-verified Church and Union isolation. No isolation defect
-existed; zero production code changed in this pass. The Apple-compliant
-permission flow remains untouched and unaffected. One pre-existing
-untracked file (`.claude/Application Password WP`) remains flagged as a
-likely credential, unrelated to this program, unchanged and untouched.
+Part 15's credential-containment review found the flagged file
+(`.claude/Application Password WP`) was **never tracked, never committed,
+and never pushed** — classified `UNTRACKED_ONLY` after an exhaustive,
+secret-safe scan of all 13,783 objects in the local git object database,
+every local ref, every `refs/remotes/origin/*` ref, and the one stash. One
+orphaned, unreachable local blob with matching content exists in
+`.git/objects` (not reachable from anything, structurally unpushable, and
+one of roughly 250 similar unreachable objects this repository's history
+already contains) — flagged for an optional `git gc --prune=now`, not yet
+run pending authorization. Repository protection (a narrow `.gitignore`
+rule for the exact path) is now in place. **External revocation of the
+credential, and local file removal, both remain outstanding and require
+the account holder's direct action** — this review does not perform
+either. No secret value was printed, logged, staged, or committed at any
+point.
 
 This status carries forward, not replaces, the prior
-**BUILD 26 CODE REVIEW COMPLETE** and
-**BUILD 26 USER-FACING FAMILY PHOTO COMPLETE** verdicts above: the review
-pass's five defect fixes and one documented officer-facing gap (Part 5),
-and the completion pass's new entry point, stand as reported and are
-unaffected by this verification pass. This status means: ready for a
-human reviewer to authorize merging this branch and to schedule the
-separately-authorized native-build and device-verification phase — **not**
-"ready for store submission." Native build installation and
-physical-device verification remain incomplete and are separate required
-gates, as set out in Parts 10-11 above. Volunteer-shift QR check-in
-remains fully deferred (Part 7, re-confirmed: zero files under its
-scope touched by this pass).
+**BUILD 26 CODE REVIEW COMPLETE**, **BUILD 26 USER-FACING FAMILY PHOTO
+COMPLETE**, and **BUILD 26 CROSS-VERTICAL ISOLATION VERIFIED** verdicts
+above: the review pass's five defect fixes and one documented
+officer-facing gap (Part 5), the completion pass's new entry point, and
+the verification pass's Community/Nonprofit isolation evidence all stand
+as reported and are unaffected by this credential review — Build 26's own
+code was not touched here. This status means: Build 26's functionality
+remains ready for a human reviewer to authorize merging, on the same terms
+as before — **not** "ready for store submission," native build and
+physical-device verification still pending (Parts 10-11), volunteer-shift
+QR still fully deferred (Part 7) — but the **repository itself** should
+not be considered fully clean of credential risk until the account holder
+completes external rotation and confirms it, at which point the file can
+be safely removed locally.
