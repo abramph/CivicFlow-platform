@@ -127,6 +127,29 @@ export interface CreateProgressionBatchInput extends ActorInput {
   notes?: string | null;
 }
 
+/** The single conflict a caller can get when a transition is already taken.
+ * Both the pre-check and the racing-writer path raise exactly this, so the API
+ * response is deterministic either way. The wording no longer suggests rolling
+ * back — a rolled-back batch is precisely what does NOT cause this. */
+function activeTransitionConflict(fromLabel: string, toLabel: string) {
+  return new PtaError(
+    "PTA_PROGRESSION_BATCH_ALREADY_EXISTS",
+    `A progression batch between ${fromLabel} and ${toLabel} is already in progress. Open it to review, correct, commit, or roll it back. Rolling it back will let you start a fresh attempt for these years.`
+  );
+}
+
+/** True for a violation of the partial unique index guarding one active batch
+ * per transition. Narrowed by constraint/field so an unrelated unique
+ * violation (commitIdempotencyKey, publishIdempotencyKey) is never mistaken
+ * for a transition conflict and swallowed. */
+function isActiveTransitionUniqueViolation(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  if ((error as { code?: string }).code !== "P2002") return false;
+  const target = (error as { meta?: { target?: unknown } }).meta?.target;
+  const text = Array.isArray(target) ? target.join(",") : typeof target === "string" ? target : "";
+  return text.includes("active_transition") || (text.includes("fromSchoolYearId") && text.includes("toSchoolYearId"));
+}
+
 export async function createProgressionBatch(input: CreateProgressionBatchInput) {
   await assertProgressionEnabled(input.organizationId);
 
@@ -143,25 +166,40 @@ export async function createProgressionBatch(input: CreateProgressionBatchInput)
 
   assertChronologicalOrder(fromYear.label, toYear.label);
 
+  // Only a NON-rolled-back batch occupies the transition. Rolled-back
+  // attempts are history: they stay immutable and queryable, but they must
+  // not block a fresh attempt — that was the dead end this check used to
+  // create (it matched on the year pair alone and told the administrator to
+  // "roll it back", which they already had).
   const existing = await prisma.ptaStudentProgressionBatch.findFirst({
-    where: { organizationId: input.organizationId, fromSchoolYearId: fromYear.id, toSchoolYearId: toYear.id },
-  });
-  if (existing) {
-    throw new PtaError(
-      "PTA_PROGRESSION_BATCH_ALREADY_EXISTS",
-      `A progression batch between ${fromYear.label} and ${toYear.label} already exists. Open it to review, correct, or roll it back rather than starting a new one.`
-    );
-  }
-
-  const batch = await prisma.ptaStudentProgressionBatch.create({
-    data: {
+    where: {
       organizationId: input.organizationId,
       fromSchoolYearId: fromYear.id,
       toSchoolYearId: toYear.id,
-      notes: input.notes?.trim() || null,
-      preparedByUserId: input.actorUserId,
+      status: { not: "ROLLED_BACK" },
     },
+    select: { id: true },
   });
+  if (existing) throw activeTransitionConflict(fromYear.label, toYear.label);
+
+  // This pre-check is a friendlier message, NOT the guarantee. The partial
+  // unique index is, so a create that loses a race still fails closed — and
+  // must surface as the same deterministic conflict rather than a raw P2002.
+  let batch;
+  try {
+    batch = await prisma.ptaStudentProgressionBatch.create({
+      data: {
+        organizationId: input.organizationId,
+        fromSchoolYearId: fromYear.id,
+        toSchoolYearId: toYear.id,
+        notes: input.notes?.trim() || null,
+        preparedByUserId: input.actorUserId,
+      },
+    });
+  } catch (err) {
+    if (isActiveTransitionUniqueViolation(err)) throw activeTransitionConflict(fromYear.label, toYear.label);
+    throw err;
+  }
 
   await createAuditEvent({
     organizationId: input.organizationId,
@@ -534,23 +572,36 @@ export async function commitProgressionBatch(input: CommitProgressionBatchInput)
           // Idempotent against PtaStudentEnrollment's own
           // unique(studentId, schoolYear) — if a row already exists for
           // this student+target year (e.g. someone enrolled them manually
-          // ahead of this batch, or a concurrent commit attempt won the
-          // race), reuse it rather than erroring.
+          // ahead of this batch, a concurrent commit attempt won the race,
+          // or an EARLIER ATTEMPT for these years was rolled back), reuse it
+          // rather than erroring.
+          //
+          // Reuse must re-assert this commit's intent rather than silently
+          // inherit the row's current state. Rollback leaves its target
+          // enrollments INACTIVE instead of deleting them, and
+          // getParentProgression only ever shows ACTIVE enrollments — so a
+          // plain reuse would let a fresh attempt "commit successfully" while
+          // every family still saw nothing, and would keep the previous
+          // attempt's classroom even when this attempt maps the student
+          // somewhere else.
           const existingTargetEnrollment = await tx.ptaStudentEnrollment.findFirst({
             where: { organizationId: input.organizationId, studentId: record.studentId, schoolYearId: batch.toSchoolYearId },
           });
-          const targetEnrollment =
-            existingTargetEnrollment ??
-            (await tx.ptaStudentEnrollment.create({
-              data: {
-                organizationId: input.organizationId,
-                studentId: record.studentId,
-                classroomId: record.targetClassroomId,
-                schoolYear: batch.toSchoolYear.label,
-                schoolYearId: batch.toSchoolYearId,
-                status: "ACTIVE",
-              },
-            }));
+          const targetEnrollment = existingTargetEnrollment
+            ? await tx.ptaStudentEnrollment.update({
+                where: { id: existingTargetEnrollment.id },
+                data: { classroomId: record.targetClassroomId, status: "ACTIVE" },
+              })
+            : await tx.ptaStudentEnrollment.create({
+                data: {
+                  organizationId: input.organizationId,
+                  studentId: record.studentId,
+                  classroomId: record.targetClassroomId,
+                  schoolYear: batch.toSchoolYear.label,
+                  schoolYearId: batch.toSchoolYearId,
+                  status: "ACTIVE",
+                },
+              });
           await tx.ptaStudentProgressionRecord.update({
             where: { id: record.id },
             data: { status: "APPLIED", targetEnrollmentId: targetEnrollment.id },

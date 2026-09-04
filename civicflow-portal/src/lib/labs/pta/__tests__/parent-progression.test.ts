@@ -384,3 +384,70 @@ describe("parent progression — family shapes and statuses", () => {
     expect(summary.students[0].currentGrade).toBe("1st Grade");
   });
 });
+
+/**
+ * Rerun after rollback (Build 26 remediation): a transition can now have one
+ * rolled-back attempt in history plus one live attempt. A family must never
+ * see anything from the abandoned attempt, and must see the second attempt's
+ * placement only once IT is published.
+ *
+ * Note the row shape these exercise: rollback sets its records to PLANNED
+ * with targetEnrollmentId null and leaves the target enrollment INACTIVE, and
+ * the second attempt's commit reactivates and retargets that same enrollment
+ * row (see commitProgressionBatch). So there is one enrollment row whose
+ * disclosure is governed solely by the SECOND attempt's publication state.
+ */
+describe("parent progression — a rolled-back attempt followed by a new one", () => {
+  beforeEach(() => {
+    findManyStudent.mockResolvedValue([{ id: "s-1", displayName: "Ada" }]);
+    findManyEnrollment.mockResolvedValue([
+      enrollment("e-cur", "s-1", "y-cur", "2026-2027", "5th Grade", "Room 12"),
+      // reactivated and retargeted by attempt two's commit
+      enrollment("e-next", "s-1", "y-next", "2027-2028", "6th Grade", "Room 30"),
+    ]);
+  });
+
+  it("shows nothing while attempt one is rolled back and attempt two is not yet published", async () => {
+    published(); // attempt one's record is PLANNED/withdrawn; attempt two is UNPUBLISHED
+    const summary = await getPtaParentProgressionSummary(ORG, HOUSEHOLD);
+    expect(summary.students[0]).toMatchObject({
+      currentGrade: "5th Grade",
+      nextGrade: null,
+      nextClassroom: null,
+      status: "NOT_YET_AVAILABLE",
+      publicationStatus: "NOT_AVAILABLE",
+    });
+  });
+
+  it("shows only attempt two's placement once attempt two is published", async () => {
+    published("e-next");
+    const summary = await getPtaParentProgressionSummary(ORG, HOUSEHOLD);
+    expect(summary.students[0]).toMatchObject({
+      nextGrade: "6th Grade",
+      // attempt two's classroom, not the abandoned attempt's
+      nextClassroom: "Room 30",
+      status: "CONFIRMED",
+      publicationStatus: "PUBLISHED",
+    });
+  });
+
+  it("cannot leak a placement that attempt one had published before it was rolled back", async () => {
+    // Attempt one WAS published at one point. After withdrawal + rollback its
+    // record is PLANNED with a null targetEnrollmentId, so the publication
+    // join can no longer return it no matter what its batch once said.
+    published();
+    const summary = await getPtaParentProgressionSummary(ORG, HOUSEHOLD);
+    expect(summary.students[0].nextGrade).toBeNull();
+    expect(summary.students[0].nextClassroom).toBeNull();
+    expect(summary.students[0].publicationStatus).toBe("NOT_AVAILABLE");
+    // and the gate really is the record->batch join, not the enrollment alone
+    expect(findManyRecord).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: "APPLIED",
+          batch: expect.objectContaining({ publicationStatus: "PUBLISHED" }),
+        }),
+      })
+    );
+  });
+});

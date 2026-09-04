@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react-native';
+import { act, render, waitFor, screen } from '@testing-library/react-native';
 
 import PtaProgressionScreen from '../pta-progression';
 
@@ -321,7 +321,7 @@ describe('PtaProgressionScreen — feature flags and failure handling', () => {
     mockGetPtaProgression.mockRejectedValue(new ApiError('Student progression is not enabled on this platform.', 403));
     await openScreen();
     expect(screen.getByText('Student progression is not available for this organization.')).toBeTruthy();
-    expect(screen.queryByLabelText('Retry loading')).toBeNull();
+    expect(screen.queryByLabelText('Retry loading student progression')).toBeNull();
     // The refusal reason is never echoed to the family.
     expect(screen.queryByText(/platform/i)).toBeNull();
   });
@@ -331,7 +331,7 @@ describe('PtaProgressionScreen — feature flags and failure handling', () => {
     mockGetPtaProgression.mockRejectedValueOnce(new ApiError('Network request failed.', 0));
     await openScreen();
     expect(screen.getByText('Unable to load student progression. Check your connection and try again.')).toBeTruthy();
-    expect(screen.getByLabelText('Retry loading')).toBeTruthy();
+    expect(screen.getByLabelText('Retry loading student progression')).toBeTruthy();
 
     mockGetPtaProgression.mockResolvedValueOnce(summary([student({ nextGrade: '6th Grade', status: 'CONFIRMED' })]));
     await triggerFocus();
@@ -342,7 +342,7 @@ describe('PtaProgressionScreen — feature flags and failure handling', () => {
     mockUseAuth.mockReturnValue(ptaAuth());
     mockGetPtaProgression.mockRejectedValue(new ApiError('Request failed', 500));
     await openScreen();
-    expect(screen.getByLabelText('Retry loading')).toBeTruthy();
+    expect(screen.getByLabelText('Retry loading student progression')).toBeTruthy();
   });
 });
 
@@ -533,7 +533,7 @@ describe('PtaProgressionScreen — publication gating (what families may see)', 
     mockGetPtaProgression.mockRejectedValueOnce(new ApiError('Network request failed.', 0));
     await triggerFocus();
     expect(screen.queryByText('5th Grade → 6th Grade')).toBeNull();
-    expect(screen.getByLabelText('Retry loading')).toBeTruthy();
+    expect(screen.getByLabelText('Retry loading student progression')).toBeTruthy();
   });
 
   it('never renders publication internals even when a placement is published', async () => {
@@ -543,5 +543,31 @@ describe('PtaProgressionScreen — publication gating (what families may see)', 
     for (const forbidden of [/publish/i, /batch/i, /idempotenc/i, /version/i, /audit/i, /administrator/i]) {
       expect(screen.queryByText(forbidden)).toBeNull();
     }
+  });
+});
+
+describe('PtaProgressionScreen — Build 26 accessibility remediation', () => {
+  it('marks the screen title as a header', async () => {
+    mockUseAuth.mockReturnValue(ptaAuth());
+    mockGetPtaProgression.mockResolvedValue(summary([student()]));
+    await openScreen();
+    expect(screen.getByRole('header', { name: 'Student Progression' })).toBeTruthy();
+  });
+
+  it('announces the initial load as busy rather than only spinning', async () => {
+    mockUseAuth.mockReturnValue(ptaAuth());
+    // never settles, so the screen stays in its loading state
+    mockGetPtaProgression.mockImplementation(() => new Promise(() => {}));
+    await render(<PtaProgressionScreen />);
+    const busy = await waitFor(() => screen.getByLabelText('Loading student progression'));
+    expect(busy.props.accessibilityRole).toBe('progressbar');
+    expect(busy.props.accessibilityState).toMatchObject({ busy: true });
+  });
+
+  it('names what the retry reloads, not a bare "Retry loading"', async () => {
+    mockUseAuth.mockReturnValue(ptaAuth());
+    mockGetPtaProgression.mockRejectedValue(new Error('offline'));
+    await openScreen();
+    expect(screen.getByLabelText('Retry loading student progression')).toBeTruthy();
   });
 });

@@ -60,6 +60,7 @@ vi.mock("@/lib/env", () => ({ isPtaStudentProgressionPlatformEnabled: vi.fn().mo
 import {
   commitProgressionBatch,
   createProgressionBatch,
+  listProgressionBatches,
   generateProgressionPreview,
   getProgressionBatchDetail,
   rollbackProgressionBatch,
@@ -353,12 +354,20 @@ describe("commitProgressionBatch", () => {
     findFirstBatch.mockResolvedValueOnce(
       batchWithRecords([{ id: "r1", studentId: "s1", outcome: "PROMOTE", targetGradeId: "g2", targetClassroomId: "c2" }])
     );
-    findFirstEnrollment.mockResolvedValueOnce({ id: "already-there" });
+    findFirstEnrollment.mockResolvedValueOnce({ id: "already-there", status: "ACTIVE", classroomId: "c2" });
+    updateEnrollment.mockResolvedValueOnce({ id: "already-there" });
     findFirstBatch.mockResolvedValueOnce({ id: "batch-1", status: "COMMITTED", records: [] });
 
     const result = await commitProgressionBatch({ organizationId: ORG, batchId: "batch-1", previewVersion: PREVIEW_TIME.toISOString(), idempotencyKey: "k1", ...actor });
 
     expect(createEnrollment).not.toHaveBeenCalled();
+    // Reuse now re-asserts this commit's own placement rather than
+    // inheriting whatever state the row was in -- a rolled-back attempt
+    // leaves its enrollments INACTIVE, and families only ever see ACTIVE
+    // ones. See the "reusing a target-year enrollment" suite.
+    expect(updateEnrollment).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "already-there" }, data: expect.objectContaining({ status: "ACTIVE", classroomId: "c2" }) })
+    );
     expect(result.promoted).toBe(1);
   });
 
@@ -655,5 +664,183 @@ describe("progression lifecycle — committed batches are immutable", () => {
     await expect(
       saveProgressionClassroomMappings({ organizationId: ORG, batchId: "other-org-batch", mappings: [], ...actor } as never)
     ).rejects.toMatchObject({ code: "PTA_PROGRESSION_BATCH_NOT_FOUND" });
+  });
+});
+
+/**
+ * Rerun-after-rollback (Build 26 remediation).
+ *
+ * The original design put an unconditional unique index on
+ * (organizationId, fromSchoolYearId, toSchoolYearId), which made rollback a
+ * dead end -- the rolled-back batch kept occupying the year pair forever.
+ * These cover the service half of the fix. Per-status conflict behaviour, the
+ * partial index itself and true concurrency are proven against a real
+ * PostgreSQL database by scripts/verify-progression-constraint.mjs, which the
+ * Migrations CI job runs; a mocked Prisma cannot enforce an index.
+ */
+describe("progression rerun after rollback", () => {
+  const years = () =>
+    findFirstYear.mockResolvedValueOnce({ id: "y1", label: "2026-2027" }).mockResolvedValueOnce({ id: "y2", label: "2027-2028" });
+
+  it("only a NON-rolled-back batch blocks a new attempt (the query excludes ROLLED_BACK)", async () => {
+    years();
+    findFirstBatch.mockResolvedValueOnce(null);
+    createBatch.mockResolvedValueOnce({ id: "batch-2" });
+
+    await createProgressionBatch({ organizationId: ORG, fromSchoolYearId: "y1", toSchoolYearId: "y2", ...actor });
+
+    expect(findFirstBatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          organizationId: ORG,
+          fromSchoolYearId: "y1",
+          toSchoolYearId: "y2",
+          status: { not: "ROLLED_BACK" },
+        }),
+      })
+    );
+  });
+
+  it("creates a second attempt with a distinct id once the first was rolled back", async () => {
+    years();
+    findFirstBatch.mockResolvedValueOnce(null); // the rolled-back attempt is filtered out
+    createBatch.mockResolvedValueOnce({ id: "batch-2" });
+
+    const batch = await createProgressionBatch({ organizationId: ORG, fromSchoolYearId: "y1", toSchoolYearId: "y2", ...actor });
+
+    expect(batch.id).toBe("batch-2");
+    expect(createBatch).toHaveBeenCalledOnce();
+  });
+
+  it("still refuses a second attempt while one is active", async () => {
+    years();
+    findFirstBatch.mockResolvedValueOnce({ id: "active-batch" });
+
+    await expect(
+      createProgressionBatch({ organizationId: ORG, fromSchoolYearId: "y1", toSchoolYearId: "y2", ...actor })
+    ).rejects.toMatchObject({ code: "PTA_PROGRESSION_BATCH_ALREADY_EXISTS" });
+    expect(createBatch).not.toHaveBeenCalled();
+  });
+
+  it("no longer advises rolling back a batch that may already be rolled back", async () => {
+    years();
+    findFirstBatch.mockResolvedValueOnce({ id: "active-batch" });
+
+    const error = await createProgressionBatch({ organizationId: ORG, fromSchoolYearId: "y1", toSchoolYearId: "y2", ...actor }).catch(
+      (e: Error) => e
+    );
+
+    expect(error).toBeInstanceOf(PtaError);
+    expect((error as Error).message).toMatch(/already in progress/i);
+    // The old copy said "roll it back rather than starting a new one", which
+    // is the one action that cannot resolve this conflict.
+    expect((error as Error).message).not.toMatch(/rather than starting a new one/i);
+    expect((error as Error).message).toMatch(/fresh attempt/i);
+  });
+
+  it("translates a lost create race (partial-index P2002) into the same deterministic conflict", async () => {
+    years();
+    findFirstBatch.mockResolvedValueOnce(null); // pre-check passed, then another writer won
+    createBatch.mockRejectedValueOnce(
+      Object.assign(new Error("Unique constraint failed"), {
+        code: "P2002",
+        meta: { target: ["PtaStudentProgressionBatch_active_transition_key"] },
+      })
+    );
+
+    await expect(
+      createProgressionBatch({ organizationId: ORG, fromSchoolYearId: "y1", toSchoolYearId: "y2", ...actor })
+    ).rejects.toMatchObject({ code: "PTA_PROGRESSION_BATCH_ALREADY_EXISTS" });
+  });
+
+  it("does not swallow an unrelated unique violation as a transition conflict", async () => {
+    years();
+    findFirstBatch.mockResolvedValueOnce(null);
+    createBatch.mockRejectedValueOnce(
+      Object.assign(new Error("Unique constraint failed"), {
+        code: "P2002",
+        meta: { target: ["PtaStudentProgressionBatch_commitIdempotencyKey_key"] },
+      })
+    );
+
+    await expect(
+      createProgressionBatch({ organizationId: ORG, fromSchoolYearId: "y1", toSchoolYearId: "y2", ...actor })
+    ).rejects.not.toMatchObject({ code: "PTA_PROGRESSION_BATCH_ALREADY_EXISTS" });
+  });
+
+  it("history lists every attempt, newest first, so a rolled-back one stays queryable", async () => {
+    findManyBatch.mockResolvedValueOnce([{ id: "batch-2" }, { id: "batch-1" }]);
+
+    const all = await listProgressionBatches(ORG);
+
+    expect(all.map((b: { id: string }) => b.id)).toEqual(["batch-2", "batch-1"]);
+    expect(findManyBatch).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { organizationId: ORG }, orderBy: { createdAt: "desc" } })
+    );
+  });
+});
+
+/**
+ * D1b: committing a fresh attempt must re-assert its own placement.
+ *
+ * rollbackProgressionBatch sets its target enrollments INACTIVE rather than
+ * deleting them, and getParentProgression only ever shows ACTIVE enrollments.
+ * Before this fix the commit path reused an existing target-year enrollment
+ * verbatim, so a second attempt committed "successfully" while every family
+ * still saw nothing -- and kept the first attempt's classroom.
+ */
+describe("commitProgressionBatch — reusing a target-year enrollment", () => {
+  const PREVIEW_TIME = new Date("2027-06-01T00:00:00Z");
+  const previewed = (records: Record<string, unknown>[]) => ({
+    id: "batch-2",
+    organizationId: ORG,
+    status: "PREVIEWED",
+    previewedAt: PREVIEW_TIME,
+    toSchoolYearId: "y2",
+    toSchoolYear: { id: "y2", label: "2027-2028" },
+    records,
+  });
+
+  it("reactivates and retargets an INACTIVE enrollment left behind by a rolled-back attempt", async () => {
+    findFirstBatch.mockResolvedValueOnce(
+      previewed([{ id: "r1", studentId: "s1", outcome: "PROMOTE", targetGradeId: "g2", targetClassroomId: "c-new" }])
+    );
+    // left over from attempt one: INACTIVE, and pointing at the OLD classroom
+    findFirstEnrollment.mockResolvedValueOnce({ id: "stale-enrollment", status: "INACTIVE", classroomId: "c-old" });
+    updateEnrollment.mockResolvedValueOnce({ id: "stale-enrollment" });
+    findFirstBatch.mockResolvedValueOnce({ id: "batch-2", status: "COMMITTED", records: [] });
+
+    const result = await commitProgressionBatch({
+      organizationId: ORG, batchId: "batch-2", previewVersion: PREVIEW_TIME.toISOString(), idempotencyKey: "k2", ...actor,
+    });
+
+    expect(updateEnrollment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "stale-enrollment" },
+        data: expect.objectContaining({ status: "ACTIVE", classroomId: "c-new" }),
+      })
+    );
+    expect(createEnrollment).not.toHaveBeenCalled();
+    expect(result.promoted).toBe(1);
+  });
+
+  it("still creates a fresh enrollment when the student has none for the target year", async () => {
+    findFirstBatch.mockResolvedValueOnce(
+      previewed([{ id: "r1", studentId: "s1", outcome: "PROMOTE", targetGradeId: "g2", targetClassroomId: "c2" }])
+    );
+    findFirstEnrollment.mockResolvedValueOnce(null);
+    createEnrollment.mockResolvedValueOnce({ id: "new-enrollment" });
+    findFirstBatch.mockResolvedValueOnce({ id: "batch-2", status: "COMMITTED", records: [] });
+
+    await commitProgressionBatch({
+      organizationId: ORG, batchId: "batch-2", previewVersion: PREVIEW_TIME.toISOString(), idempotencyKey: "k3", ...actor,
+    });
+
+    expect(createEnrollment).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ classroomId: "c2", status: "ACTIVE" }) })
+    );
+    expect(updateEnrollment).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "ACTIVE", classroomId: "c2" }) })
+    );
   });
 });
