@@ -11,6 +11,14 @@
     "preview": {
       "distribution": "internal"
     },
+    "build26-staging": {
+      "distribution": "internal",
+      "ios": { "resourceClass": "m-medium" },
+      "env": {
+        "APP_VARIANT": "preview",
+        "EXPO_PUBLIC_API_BASE_URL": "https://build26-staging.187-77-222-173.sslip.io"
+      }
+    },
     "production": {
       "autoIncrement": true
     }
