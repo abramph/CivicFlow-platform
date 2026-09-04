@@ -1,7 +1,7 @@
 import sharp, { type Metadata, type OutputInfo } from "sharp";
 import { prisma } from "@/lib/prisma";
 import { createAuditEvent } from "@/lib/audit";
-import { buildSafeObjectKey, uploadBufferToSpaces, deleteObjectFromSpaces } from "@/lib/storage";
+import { buildSafeObjectKey, uploadBufferToSpaces, deleteObjectFromSpaces, getObjectBuffer } from "@/lib/storage";
 import { PtaError } from "./errors";
 
 /**
@@ -191,9 +191,22 @@ export async function uploadHouseholdPhoto(input: UploadHouseholdPhotoInput): Pr
   // Clean up the previous photo only after the new one is fully committed
   // — a failure above never reaches this point, so the old photo (and its
   // Attachment row / storage object) is untouched on any failure path.
+  //
+  // The superseded object's deletion failure used to be swallowed
+  // (.catch(() => {})), which is how a replacement could leave a previous
+  // family image in the bucket indefinitely with nothing recording it. The
+  // new photo is already live and correct at this point, so failing the whole
+  // request would be wrong — instead the failure is made OBSERVABLE and
+  // RETRYABLE: an audit event names the orphaned attachment, and
+  // purgeOrphanedHouseholdPhotoObjects re-attempts it (removal also sweeps).
+  let supersededObjectOrphaned = false;
   if (previousAttachment) {
     await prisma.attachment.update({ where: { id: previousAttachment.id }, data: { deletedAt: new Date(), deletedByUserId: input.actorUserId } });
-    await deleteObjectFromSpaces(previousAttachment.objectKey).catch(() => {});
+    try {
+      await deleteObjectFromSpaces(previousAttachment.objectKey);
+    } catch {
+      supersededObjectOrphaned = true;
+    }
   }
 
   // Never logs image bytes or EXIF/GPS metadata -- only non-sensitive
@@ -208,6 +221,21 @@ export async function uploadHouseholdPhoto(input: UploadHouseholdPhotoInput): Pr
     metadata: { attachmentId: attachment.id, byteSize: mainBuffer.byteLength, width: outputInfo.width, height: outputInfo.height },
   });
 
+  // A separate, findable record so a superseded image left in storage is
+  // never invisible. Carries the attachment id only -- no bytes, no storage
+  // key -- which is all a retry needs to re-derive the object server-side.
+  if (supersededObjectOrphaned && previousAttachment) {
+    await createAuditEvent({
+      organizationId: input.organizationId,
+      actorUserId: input.actorUserId,
+      actorEmail: input.actorEmail ?? null,
+      action: "pta.household.photo_object_cleanup_failed",
+      entityType: "pta_household",
+      entityId: input.householdId,
+      metadata: { attachmentId: previousAttachment.id, retryable: true },
+    });
+  }
+
   return { photoUrl, byteSize: mainBuffer.byteLength, width: outputInfo.width, height: outputInfo.height };
 }
 
@@ -218,14 +246,47 @@ export async function deleteHouseholdPhoto(input: { organizationId: string; hous
   const attachment = await prisma.attachment.findFirst({
     where: { organizationId: input.organizationId, entityType: "PTA_HOUSEHOLD", entityId: input.householdId, purpose: "FAMILY_PHOTO", deletedAt: null },
   });
-  if (!attachment) return; // no photo to remove -- a safe no-op, not an error
+  // Repeat removal is a safe no-op. Any tombstoned object left behind by an
+  // earlier partial failure is still swept up, so retrying is always useful
+  // rather than silently doing nothing.
+  if (!attachment) {
+    await purgeOrphanedHouseholdPhotoObjects(input.organizationId);
+    return;
+  }
+
+  // ORDER MATTERS. The storage object is deleted FIRST, and its failure is
+  // NOT swallowed.
+  //
+  // Previously this tombstoned the row and then called
+  // deleteObjectFromSpaces(...).catch(() => {}), so a storage outage reported
+  // a successful removal to the parent while their family's photo remained in
+  // the bucket. "Remove" has to mean the bytes are gone, and a caller must
+  // never be told they are gone when they are not.
+  //
+  // Deleting first also makes the failure modes safe in both directions:
+  //   * storage delete fails  -> nothing changed, photo still consistently
+  //     present, caller gets a retryable error and can try again;
+  //   * database update fails -> the object is already gone, so the image
+  //     cannot be served no matter what the row says. getHouseholdPhotoBytes
+  //     treats a missing object as "no photo", so this is a recoverable
+  //     missing-object state, never a way to see the image again.
+  try {
+    await deleteObjectFromSpaces(attachment.objectKey);
+  } catch {
+    throw new PtaError(
+      "PTA_HOUSEHOLD_PHOTO_DELETE_FAILED",
+      "The photo could not be removed right now. Nothing was changed — please try again in a moment."
+    );
+  }
 
   await prisma.$transaction([
     prisma.attachment.update({ where: { id: attachment.id }, data: { deletedAt: new Date(), deletedByUserId: input.actorUserId } }),
     prisma.ptaHousehold.update({ where: { id: input.householdId }, data: { photoUrl: null } }),
   ]);
-  await deleteObjectFromSpaces(attachment.objectKey).catch(() => {});
 
+  // Records who and when. Deliberately carries no image bytes, no dimensions
+  // of the removed image, and no storage key -- attachmentId is enough to
+  // re-derive anything an operator needs, server-side.
   await createAuditEvent({
     organizationId: input.organizationId,
     actorUserId: input.actorUserId,
@@ -233,7 +294,7 @@ export async function deleteHouseholdPhoto(input: { organizationId: string; hous
     action: "pta.household.photo_deleted",
     entityType: "pta_household",
     entityId: input.householdId,
-    metadata: {},
+    metadata: { attachmentId: attachment.id },
   });
 }
 
@@ -242,4 +303,85 @@ export async function getHouseholdPhotoAttachment(organizationId: string, househ
   return prisma.attachment.findFirst({
     where: { organizationId, entityType: "PTA_HOUSEHOLD", entityId: householdId, purpose: "FAMILY_PHOTO", deletedAt: null },
   });
+}
+
+export interface HouseholdPhotoBytes {
+  buffer: Buffer;
+  /** The server's own normalized type. Never the client's declared type: every
+   * stored family photo is re-encoded to JPEG by uploadHouseholdPhoto. */
+  contentType: string;
+  byteSize: number;
+}
+
+/**
+ * Reads a household's family photo as BYTES, for routes that serve the image
+ * to an already-authorized caller.
+ *
+ * This exists because family photos are household and children's data, and a
+ * signed object-storage URL is a bearer credential: once issued it works for
+ * anyone who obtains it, from any client, with no further authorization and no
+ * way to revoke it before it expires. Callers must therefore never receive a
+ * storage URL, a redirect to storage, or an object key — they receive bytes
+ * from an endpoint that authorized them first.
+ *
+ * Every caller MUST have completed its own authorization before calling this.
+ * The organizationId/householdId pair must already be server-resolved; this
+ * function deliberately performs no access control of its own so that no route
+ * can mistake it for a guard.
+ *
+ * Returns null when there is no active photo, and also when the metadata row
+ * exists but its object does not — the recoverable state a removal can leave
+ * behind if the database update fails after the object is deleted. Both are
+ * "no photo" to a caller; neither is a server error.
+ */
+export async function getHouseholdPhotoBytes(
+  organizationId: string,
+  householdId: string
+): Promise<HouseholdPhotoBytes | null> {
+  const attachment = await getHouseholdPhotoAttachment(organizationId, householdId);
+  if (!attachment) return null;
+
+  let buffer: Buffer;
+  try {
+    buffer = await getObjectBuffer(attachment.objectKey);
+  } catch {
+    // Deliberately swallows the storage error's detail rather than
+    // propagating it: the message can carry the bucket and object key, and
+    // this value is on its way to an HTTP response. A missing object is
+    // reported to the caller as "no photo", never as a 5xx carrying storage
+    // internals.
+    return null;
+  }
+
+  return { buffer, contentType: attachment.contentType, byteSize: buffer.byteLength };
+}
+
+/**
+ * Re-attempts object deletion for family-photo attachments that were
+ * tombstoned but whose storage object may still exist — the state a
+ * replacement leaves behind when its cleanup delete fails.
+ *
+ * Deliberately small and callable rather than a scheduled job: the operation
+ * is idempotent (deleting an absent key succeeds), so re-running it is always
+ * safe, and introducing a queue/worker framework for one cleanup path would be
+ * a much larger change than the problem warrants.
+ *
+ * Returns the number of objects it successfully deleted or confirmed absent.
+ */
+export async function purgeOrphanedHouseholdPhotoObjects(organizationId: string): Promise<{ attempted: number; purged: number }> {
+  const tombstoned = await prisma.attachment.findMany({
+    where: { organizationId, entityType: "PTA_HOUSEHOLD", purpose: "FAMILY_PHOTO", deletedAt: { not: null } },
+    select: { id: true, objectKey: true },
+  });
+  let purged = 0;
+  for (const row of tombstoned) {
+    try {
+      await deleteObjectFromSpaces(row.objectKey);
+      purged += 1;
+    } catch {
+      // Left for the next run; never throws, so one unreachable object cannot
+      // block cleanup of the rest.
+    }
+  }
+  return { attempted: tombstoned.length, purged };
 }
