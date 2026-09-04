@@ -5159,7 +5159,31 @@ model PtaStudentProgressionBatch {
   records           PtaStudentProgressionRecord[]
   classroomMappings PtaProgressionClassroomMapping[]
 
-  @@unique([organizationId, fromSchoolYearId, toSchoolYearId])
+  /// "One batch per transition" is enforced by a PostgreSQL PARTIAL unique
+  /// index that Prisma cannot express, created by hand in migration
+  /// `20260904150000_pta_progression_active_transition_unique`:
+  ///
+  ///   CREATE UNIQUE INDEX "PtaStudentProgressionBatch_active_transition_key"
+  ///     ON "PtaStudentProgressionBatch"
+  ///     ("organizationId", "fromSchoolYearId", "toSchoolYearId")
+  ///     WHERE "status" <> 'ROLLED_BACK';
+  ///
+  /// It replaces an unconditional @@unique on the same three columns. That
+  /// version made rollback a dead end: a rolled-back batch kept occupying the
+  /// year pair, so a school that used the product's own undo could never run
+  /// that transition again.
+  ///
+  /// The partial index preserves every guarantee the unconditional one gave
+  /// the publication model. A batch reaches ROLLED_BACK only from COMMITTED or
+  /// CORRECTED, and `assertNotPublishedForRollback` refuses to roll back a
+  /// PUBLISHED batch, so a ROLLED_BACK row is never PUBLISHED. At most one
+  /// non-rolled-back batch exists per transition, so at most one batch can
+  /// ever be PUBLISHED for it — two batches still cannot disagree about
+  /// whether the same transition is disclosed.
+  ///
+  /// Enforcement stays in the database, not only in the service: two
+  /// concurrent create requests must not both succeed.
+  @@index([organizationId, fromSchoolYearId, toSchoolYearId])
   @@index([organizationId])
   @@index([organizationId, status])
   /// Target-year publication lookups: "what is published for this year in
