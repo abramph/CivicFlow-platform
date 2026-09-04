@@ -1219,6 +1219,795 @@ navigation, permission-flow, authentication, payment, subscription,
 Stripe Connect, QR, or migration files were touched by this review — only
 `.gitignore` and this documentation section changed.
 
+## Part 16 — Local integration into `main`
+
+Authorized local integration of both completed workstreams. **Nothing was
+pushed, deployed, externally built, uploaded, activated, or submitted**;
+no production migration was run and no feature flag was enabled.
+
+### Starting branch heads (all verified before acting)
+
+| Ref | Hash |
+|---|---|
+| `main` | `db73f2a` (== `origin/main`) |
+| `fix/import-auth-order-and-format-ui` | `e92ffd7` (preceded by `983c8e2`) |
+| `feature/pta-progression-mobile-ui-build26` | `66b74a3` |
+
+Merge base of both feature branches: `db73f2a` for each. `983c8e2` is an
+ancestor of `e92ffd7`. Neither branch had been merged into `main`.
+One factual note: the **import branch had already been pushed**
+(`origin/fix/import-auth-order-and-format-ui` == `e92ffd7`) — expected,
+since it carries an open PR from earlier work. Build 26 has no upstream
+and has never been pushed. A recovery point was recorded before any
+merge: **`db73f2a`**. No branch was deleted, rebased, amended, squashed,
+reset, or force-updated at any point; no `git gc`/`prune`/reflog
+expiry/history rewriting was run.
+
+### Merge-conflict analysis (read-only, before any merge)
+
+- **Zero file overlap** between the two branches' changed-file sets.
+- `git merge-tree --write-tree` run three ways (import→main,
+  build26→main, and the two branches against each other): **exit 0, no
+  conflicts** in all three.
+- Only Build 26 touches `prisma/migrations/` (one additive migration),
+  `civicflow-portal/package.json`, and `civicflow-mobile/app.json`. The
+  import branch touches none of them, so no migration-ordering,
+  dependency, or store-config contention exists.
+- No shared route, upload, authorization, parser, or test utility is
+  modified by both branches, so neither can regress the other:
+  auth-before-parse belongs solely to the import routes, and the
+  family-photo upload pipeline is a separate module.
+
+### Import-security preflight (on `e92ffd7`, before merging)
+
+| Check | Result |
+|---|---|
+| 7 targeted import test files | 147 passed, 0 failed, exit 0 |
+| Full portal suite | 407 files / 4,565 tests passed, 178 skipped, 0 failed, exit 0 |
+| Portal typecheck | Clean, exit 0 |
+| Portal production build | Exit 0 |
+| Lint (8 affected files) | 1 error — **pre-existing on `main`** (`migration/page.tsx`'s `<a href="/members">`, `@next/next/no-html-link-for-pages`), untouched by this branch and merely line-shifted; not introduced by the import work |
+| Shared legacy `.xls` message | Unchanged — single exported constant `LEGACY_XLS_MESSAGE` in `spreadsheet-parser.ts` with reason code `LEGACY_XLS_UNSUPPORTED`, asserted by the route tests |
+
+**Environment correction worth recording:** the first typecheck run on
+this branch reported ~20 errors. All were stale-artifact contamination
+from branch switching, not code defects — a `.next/types/*` tree
+generated while on Build 26 (referencing progression/photo routes absent
+from this branch) plus a Prisma client generated from Build 26's schema
+(so `AttachmentEntityType` carried `PTA_HOUSEHOLD`, which this branch's
+`attachments.ts` correctly does not map). Clearing `.next` and running
+`prisma generate` produced a clean `exit 0`. Also confirmed while
+diagnosing: `main`'s two `PTA_HOUSEHOLD` grep hits are the **plural**
+`PTA_HOUSEHOLDS` of a different enum (`ImportEntityType`); the singular
+`AttachmentEntityType.PTA_HOUSEHOLD` is genuinely added by Build 26.
+
+### Merge 1 — import-security into `main`
+
+- **Merge commit: `8ba7957`** (`--no-ff`), **zero conflicts**, no manual
+  resolution required.
+- Merged `main` tree `f338d4c` is **byte-identical** to `e92ffd7`'s tree,
+  proving the merged content is exactly what was preflighted.
+- Re-verified on merged `main`: 7 import test files 147/147 passed;
+  typecheck exit 0; production build exit 0.
+
+### Merge 2 — updated `main` into Build 26
+
+- **Merge commit: `d2f74ce`** (`--no-ff`), **zero conflicts**. Build 26's
+  pre-merge head was confirmed still `66b74a3`. History was not rebased
+  or rewritten.
+
+### Integrated database verification (disposable databases only)
+
+Run against the local disposable cluster on port 5433. **No production
+database, storage bucket, or organization was touched**, and no
+production credentials or data were used. The source `civicflow_dev` was
+only ever used as a `CREATE DATABASE … TEMPLATE` source, never migrated
+in place.
+
+| Case | Result |
+|---|---|
+| Clean empty DB (`civicflow_int_empty`) | All **124** migrations applied from scratch, exit 0 |
+| Populated copy (`civicflow_int_pop`, template copy of `civicflow_dev`) | 3 pending migrations applied cleanly, exit 0 |
+| Pre-existing rows intact | **Yes** — the only row-count change across every table was `_prisma_migrations` 121 → 124. `OrgSettings`, `Organization`, `OrganizationMembership`, `PlatformAccess`, `User`, `WhatsAppTemplate` all unchanged |
+| Migrations edited after prior application | **No** — 124 applied, 0 failed, 0 rolled back (a checksum mismatch would have failed `migrate deploy`) |
+| Progression schema additive | `PtaStudentProgressionBatch` + `PtaStudentProgressionRecord` created; `PtaProfile.studentProgressionEnabled` added `NOT NULL DEFAULT false`; `PtaHousehold.photoUrl` added nullable with no default; `AttachmentEntityType.PTA_HOUSEHOLD` enum value added |
+| **Feature flag default** | **OFF** — `studentProgressionEnabled` default is `false` |
+| Unique constraints / indexes | Present as Prisma unique indexes: batch year-pair `…_organizationId_fromSchoolYearId__key`, `…_commitIdempotencyKey_key`, record `…_batchId_studentId_key`; plus `organizationId`, `(organizationId,status)`, `(batchId,outcome)`, `studentId` indexes. The concurrency guard `PtaStudentEnrollment_studentId_schoolYear_key` (UNIQUE) is present |
+| Side effects | None — no payments, assessments, buyouts, notifications, or messages were triggered |
+
+Both disposable databases were dropped immediately afterward.
+
+### Integrated regression (on `d2f74ce`)
+
+**Portal**
+
+| Command | Result |
+|---|---|
+| `npx vitest run` (full) | 413 files passed / 31 skipped; **4,666 passed, 0 failed, 178 skipped**; exit 0 |
+| `npx tsc --noEmit -p tsconfig.json` | Exit 0 |
+| `npm run build` | Exit 0 |
+
+**One transient failure, honestly recorded:** the *first* integrated full
+run reported 1 failed file / 1 failed test. It did **not** reproduce
+across three subsequent full-suite runs (0 failed each, 4,666 passed) or
+three targeted runs of the timing-sensitive rate-limiter suites (2 files
+/ 35 tests passed each). Its identity was not captured — only the tail of
+that first run was retained — so it is reported as an **unidentified,
+non-reproducing flake**, not as a clean sweep. The most likely candidate
+is one of the wall-clock rate-limit window tests, but that is a
+hypothesis, not a confirmed finding. Worth watching in CI; not treated as
+a resolved issue.
+
+**Mobile**
+
+| Command | Result |
+|---|---|
+| `npx jest` (full) | **71 suites / 416 tests passed, 0 failed, 0 skipped** |
+| `npx jest pta-my-family pta-family-photo dashboard org-switcher attendance-scan report-payment` | 9 suites / 64 tests passed, 0 failed |
+| `npx tsc --noEmit` | Exit 0 |
+| `npx expo lint` | 0 errors, 2 pre-existing warnings in an unrelated test file |
+| `npx expo export --platform ios` | Exit 0 |
+| `npx expo export --platform android` | Exit 0 (local bundle only; no cloud/EAS service used) |
+
+**Behavioural confirmations**
+
+- **No directive camera-permission wording** in rendered UI copy —
+  repo-wide search returns only two hits, both *code comments*
+  documenting the historical wording that was corrected.
+- **`Open Settings` functional** — both `attendance-scan.tsx` and
+  `pta-family-photo.tsx` call `Linking.openSettings()`.
+- **Family-photo entry point discoverable** — the dashboard's "My Family"
+  action routes to `/pta-my-family`.
+- **Community/Church/Union cannot reach PTA family-photo or
+  progression** — covered by the vertical-tagged isolation tests; PTA
+  progression has no mobile surface at all.
+- **Organization switching clears stale PTA data** — dedicated tests.
+- **Authentication and payment behaviour unchanged** — no such file is
+  touched by either branch.
+- **Volunteer-shift QR remains deferred** and is not represented as
+  implemented; the only QR code present is the pre-existing *meeting
+  attendance* `checkInWithQrToken`.
+- **Import auth-before-parse regression suite green** throughout.
+
+### Merge 3 — Build 26 into `main`
+
+- **Merge commit / final local `main`: `2d88759`** (`--no-ff`), **zero
+  conflicts**.
+- `main` was confirmed still at the import merge `8ba7957` immediately
+  before merging.
+- **Final `main` tree `9c48bfe` is byte-identical to the tested Build 26
+  branch tree `9c48bfe`** — the strongest available proof that what
+  landed on `main` is exactly what was verified, with no drift.
+
+### Post-merge verification from final `main` (`2d88759`)
+
+| Check | Result |
+|---|---|
+| Portal typecheck | Exit 0 |
+| Portal production build | Exit 0 |
+| Targeted security + feature suites (14 files: import ×7, progression, family-photo ×4, PTA/mobile guards ×2) | **259 passed, 0 failed**, exit 0 |
+| Mobile typecheck | Exit 0 |
+| Mobile full suite | 71 suites / 416 tests passed |
+| Metro iOS export | Exit 0 |
+| `prisma migrate deploy` + `migrate status` vs a fresh disposable DB | All 124 applied; "Database schema is up to date"; DB dropped afterward |
+| Secret scan of tracked content | No real key material — the only hits are the CI scanner's own pattern, `DEPLOYMENT.md` documentation, a `sk_live_REPLACE_ME` placeholder in `.env.example`, and two script usage comments |
+| Revoked credential file | **Absent**, and the exact-path `.gitignore` rule remains |
+| Unreachable orphan blob | **Not pruned**, still unreachable from every ref |
+| Working tree | Tracked clean; the same four legitimate untracked items remain, unmodified |
+
+No EAS build, native store binary, TestFlight upload, Play Console
+upload, or store submission was created at any point.
+
+### Conflicts and resolutions
+
+**None.** All three merges completed with zero conflicts and required no
+manual resolution, so no files were touched by conflict resolution and no
+resolution-driven tests were needed. This matches the pre-merge
+merge-tree analysis exactly.
+
+### Remaining gates
+
+Native build installation and **physical-device verification remain
+mandatory and outstanding** before any store submission (see Parts
+10–11). Volunteer-shift QR check-in remains deferred (Part 7). PTA
+progression stays flag-gated OFF by default and is not activated by this
+integration.
+
+## Part 17 — Read-only mobile student progression
+
+A follow-on feature built on the Build 26 branch and locally integrated
+into `main`. **Nothing was pushed, deployed, externally built, uploaded,
+activated, or submitted**; no production migration was run and **no
+feature flag was enabled**.
+
+### Scope: read-only, and why administration stays portal-only
+
+Families can now see each child's current placement and any confirmed
+next-year placement in the mobile app. Everything that *changes*
+progression — preview, classroom mapping, commit, correction, exclusion,
+retain/withdraw/transfer, rollback and audit — remains portal-only,
+unchanged, behind `requirePtaAccess` and the progression permissions
+(`PTA_STUDENT_PROGRESSION_PREVIEW` is staff-and-above;
+`..._COMMIT` is `ORG_ADMIN`/`ORG_OWNER` only). The mobile route exposes
+**no write verb at all**, asserted by a dedicated test.
+
+Keeping administration portal-only is deliberate: those operations are
+multi-step, irreversible-in-practice, and need the batch preview,
+conflict resolution and audit context that only the full admin UI
+provides. A phone-sized surface invites exactly the kind of partial,
+under-informed commit that the SAVEPOINT and unresolved-student-warning
+work earlier in this program existed to prevent.
+
+### Publication rule
+
+`PtaEnrollmentStatus` has only `ACTIVE`/`INACTIVE` — **there is no
+explicit publish/visibility state**, and none was added (no schema change
+was required or made). The safest existing signal is used instead, and it
+was *verified against `student-progression.ts`*, not assumed:
+
+- `previewProgressionBatch` only **reads** enrollments; it writes
+  `PtaStudentProgressionRecord` rows in `PLANNED` state and creates no
+  enrollment.
+- Target-year `PtaStudentEnrollment` rows are created in exactly two
+  places, both inside commit/correction, always with `status: "ACTIVE"`.
+- Correcting a student away from an enrolling outcome, and rolling a
+  batch back, both set that row to `INACTIVE` rather than deleting it.
+
+So **"an ACTIVE target-year enrollment exists" ≡ "committed and not
+rolled back"**, which is exactly the publication rule required. A preview
+alone never publishes anything.
+
+The structural privacy guarantee is stronger than filtering:
+`parent-progression.ts` **never queries the progression batch or record
+tables at all.** Preview calculations, draft mappings, `NEEDS_REVIEW`
+state, administrator notes, conflict details, audit actors, batch
+idempotency keys and outcome codes are therefore unreachable from the
+family surface by construction — no future edit to that file can leak one
+by accident. The service test enforces this by wiring both tables to
+**throw** on any access.
+
+Students who are `NEEDS_REVIEW`, skipped, excluded, graduated,
+transferred or withdrawn all have no ACTIVE target-year enrollment and
+are reported **identically** as "not yet available" — indistinguishable
+to the family, by design. **No graduation/transfer/withdrawal wording was
+invented**: those outcomes mark only the progression record `APPLIED`,
+they do not deactivate the student, and the product has no existing
+family-visible convention for announcing them. Inventing one risked
+telling a family something sensitive before an administrator had.
+
+### Family-facing statuses
+
+| Status | Meaning |
+|---|---|
+| `Confirmed` | Committed, non-rolled-back next-year placement |
+| `Not yet available` | No publishable future placement (covers every administrative reason, indistinguishably) |
+| `Completed` | Rolled into the active year with no later year defined |
+| `Current` | Current placement, no prior history and no later year defined |
+
+Internal statuses and outcome codes are never rendered. `Ready` (an
+administrator preview concept) is deliberately absent.
+
+### API contract
+
+`GET /api/mobile/pta/progression?organizationId=…` → `{ ok, data }` with
+`currentSchoolYear`, `nextSchoolYear`, and `students[]` of
+`{ studentId, displayName, currentGrade, currentClassroom, nextGrade,
+nextClassroom, status }`. Additive, minimal, stable; no other field is
+returned.
+
+Authorization, in order, via the existing shared guard
+`requireMobilePtaHouseholdAccess` (no new auth path invented): bearer
+authentication → PTA vertical + active organization
+(`requirePtaVerticalForMobile`) → the caller's own **active** household
+linkage → organization access. Then `assertProgressionEnabled` — the
+*same* helper the administrative entry points use, exported rather than
+duplicated so the two cannot drift — enforces both feature flags.
+
+**The client never supplies a household or student id.** The household
+comes only from the caller's own `PtaHouseholdAdult` linkage, and the
+guard's *verified* organization id is used rather than the raw query
+value. Extra `householdId`/`studentId` query parameters are ignored
+entirely (tested). Queries are bounded at three regardless of family
+size; student ordering is deterministic (`displayName`, then `id`).
+
+### Entry point and screen
+
+`PTA → My Family → Progression` card → `Student Progression` screen.
+The card is rendered **only when the server confirms availability**: My
+Family probes the flag-gated endpoint and shows the card only on success,
+so it is absent whenever either flag is OFF, absent for non-PTA
+identities, and absent for Community/Nonprofit, Church and Union. The
+probe fails closed and stays silent, so an unavailable optional card
+never raises an error over the screen's primary family-photo content.
+
+The screen is read-only — no editable control and no administrative
+action — and covers loading, empty, network-error-with-retry, a distinct
+feature-unavailable state, unauthorized redirect, and organization-switch
+clearing. Each child's card carries one composed accessibility sentence
+rather than fragments. **No new device permission of any kind** (camera,
+photo library, location, notification, tracking) is requested.
+
+### Feature-flag behavior
+
+Both flags remain **OFF by default** and were **not** enabled for Pine
+Grove or any production organization. With either OFF the entry point is
+hidden, no progression data is fetched, direct navigation exposes
+nothing, and the endpoint returns the application's standard 403 with the
+existing `PTA_STUDENT_PROGRESSION_PLATFORM_DISABLED` /
+`PTA_STUDENT_PROGRESSION_DISABLED` codes. Tests use synthetic
+organizations with the flags enabled.
+
+### Tests added (70)
+
+| File | Tests |
+|---|---|
+| `civicflow-portal/src/lib/labs/pta/__tests__/parent-progression.test.ts` | 21 |
+| `civicflow-portal/src/app/api/mobile/pta/progression/__tests__/route.test.ts` | 12 |
+| `civicflow-mobile/src/app/__tests__/pta-progression.test.tsx` | 25 |
+| `civicflow-mobile/src/app/__tests__/pta-my-family.test.tsx` (extended) | +6 (24 total) |
+
+Covering both flags off, tenant/household scoping, cross-tenant household
+ids, client-supplied id rejection, unauthenticated and staff-only denial,
+Community/Nonprofit + Church + Union denial with vertical-tagged
+fixtures, the publication rule, indistinguishability of all withheld
+administrative outcomes, multiple children progressing differently in
+deterministic order, no students, no current placement, missing academic
+year, year gaps, non-canonical labels, bounded query count, every UI
+state, organization switching, and accessibility.
+
+### Verification
+
+| Check | Commit | Result |
+|---|---|---|
+| Portal full suite | `18aa539` | 4,701 passed, **0 failed**, 178 skipped, exit 0 |
+| Mobile full suite | `18aa539` | 72 suites / **447 passed**, 0 failed |
+| New progression tests (portal) | `18aa539` | 2 files / 33 passed |
+| New progression tests (mobile) | `18aa539` | 25 passed |
+| Import auth-order + family-photo + guards (targeted) | `18aa539` | 14 files / 259 passed |
+| Portal typecheck / mobile typecheck | `18aa539` | Both exit 0 |
+| Lint (changed files, both packages) | `18aa539` | Exit 0 |
+| Portal production build | `18aa539` | Exit 0 |
+| Metro iOS / Android export | `18aa539` | Both exit 0 |
+| Post-merge targeted suite | `30584c2` | 14 files / **274 passed** |
+| Post-merge portal typecheck / build | `30584c2` | Exit 0 / exit 0 |
+| Post-merge mobile typecheck / full suite / iOS export | `30584c2` | Exit 0 / 72 suites / 447 passed / exit 0 |
+| Secret scan of tracked content | `30584c2` | No real key material (hits are AWS's public `AKIAIOSFODNN7EXAMPLE` doc value in a sanitizer test, and a prose paragraph describing a past scan) |
+
+**Failures and flakes:** none in this pass. Every failure encountered
+during development was deterministic, identified, and fixed at the source
+rather than retried — a Vitest mock-factory hoisting error, a Jest
+mock-factory rejection of TypeScript parameter properties, a
+`clearAllMocks`-does-not-reset-implementations leak between tests, and a
+pending fetch promise held across a test boundary that corrupted React
+19's process-global `act()` nesting counter (the same failure mode
+documented in `dashboard.test.tsx`). The unidentified non-reproducing
+portal flake recorded in Part 16 **did not recur** in any run here.
+
+### Commits and integration
+
+| Item | Hash |
+|---|---|
+| `feat(pta): add family-safe mobile progression API` | `1b2d71d` |
+| `feat(mobile): add read-only PTA progression screen` | `2c95bfd` |
+| `test(pta): verify mobile progression privacy and isolation` | `18aa539` |
+| Local merge into `main` (`--no-ff`, **zero conflicts**) | `30584c2` |
+
+Feature branch before this work: `d2f74ce`; after: `18aa539`. Local
+`main` before: `9cfab2f`; after the merge: `30584c2`.
+
+The merged `main` tree differs from the tested feature tree by exactly
+one file — `build-26-final-report.md` (+194 lines), the Part 16
+integration documentation already committed on `main` and deliberately
+preserved. **Zero application-code difference** between what was verified
+and what landed.
+
+### Preserved unchanged
+
+Administrative progression execution, commit/rollback rules,
+family-photo upload security, the Apple camera-permission correction and
+`Open Settings`, payments, authentication, subscription billing, Stripe
+Connect, import security, the volunteer-shift QR deferral (still
+deferred, still not represented as implemented), and the credential
+remediation (revoked file still absent, `.gitignore` rule intact, orphan
+blob still unreachable and **not pruned**).
+
+### Remaining gates
+
+Native build installation and **physical-device verification remain
+mandatory and outstanding**, as does remote CI, before any store
+submission.
+
+## Part 18 — Progression publication control (Publish to Families)
+
+An explicit, audited disclosure step separating "the office finished the
+data work" from "the school is ready to tell families." **Nothing was
+pushed, deployed, externally built, uploaded, submitted, or activated; no
+production migration was run and no feature flag was enabled.**
+
+### The problem this fixes
+
+Part 17 shipped the read-only mobile progression screen, but it treated a
+committed `ACTIVE` target-year enrollment as *immediately* family-visible.
+That conflated two different decisions, made at different times by
+different people. An administrator finishing a rollover on a Tuesday had
+no way to review the result privately before every affected family could
+see it.
+
+### Publication architecture
+
+Publication state lives on **`PtaStudentProgressionBatch`**, because
+`@@unique([organizationId, fromSchoolYearId, toSchoolYearId])` already
+makes one batch the unique representation of a single source-to-target
+transition — so two batches can never disagree about whether the same
+transition is disclosed. No generic school-year or enrollment model was
+touched, so **no other vertical is affected**.
+
+The five states are now distinct:
+
+| State | Meaning | Family-visible? |
+|---|---|---|
+| Previewed | Proposed movement; no enrollments written | No |
+| Committed | Target enrollments exist and are ACTIVE | **No — private** |
+| Published | Eligible committed results disclosed | Yes |
+| Withdrawn | Previously published, now hidden from future reads | No |
+| Rolled back | Target enrollments INACTIVE | No |
+
+`WITHDRAWN` is deliberately distinct from `UNPUBLISHED`: withdrawal hides
+future results from later reads but **cannot undo a disclosure that
+already happened**, and the record should show that.
+
+### Migration
+
+`20260903120000_pta_progression_publication`, strictly additive: the enum
+is created before any column references it; every column is nullable or
+has a constant `DEFAULT` (metadata-only on PG11+, no table rewrite);
+nothing is dropped, renamed or narrowed; old clients that never select
+these columns keep working. New: `PtaProgressionPublicationStatus` enum,
+`publicationStatus` (default `UNPUBLISHED`), `publishedAt/By`,
+`unpublishedAt/By`, `publicationVersion` (default 0), unique
+`publishIdempotencyKey`, and an
+`(organizationId, toSchoolYearId, publicationStatus)` index.
+
+Verified on **disposable databases only** — production untouched, source
+`civicflow_dev` used only as a `TEMPLATE` copy source:
+
+| Case | Result |
+|---|---|
+| Empty DB | All 125 migrations applied from scratch, exit 0 |
+| Populated copy | Applied cleanly; **every pre-existing row intact** (only `_prisma_migrations` moved 121 → 125) |
+| **Existing committed batch defaults unpublished** | **Proven** — reconstructed the pre-migration table shape, inserted a legacy `COMMITTED` batch, re-applied the `ALTER`: it landed `publicationStatus=UNPUBLISHED`, `publicationVersion=0`, `publishedAt=NULL` |
+| Defaults, enum values, indexes | All verified directly against `information_schema`/`pg_indexes` |
+| Final `main` re-verification | `migrate deploy` + `migrate status` → "Database schema is up to date" |
+
+### Administrator workflow
+
+Portal-only, in `PtaStudentProgressionCenter`. After a commit the batch
+now **stays active** (it previously dropped straight into history, which
+made the workflow appear to end at commit) until it is published or
+rolled back. A "Family visibility" panel shows status, the year pair,
+eligible and unresolved/excluded counts, and — once published — the
+timestamp and publishing administrator, above the line:
+*"Committed progression results remain private until you publish them to
+families."*
+
+`Publish to Families` confirms with the exact disclosure, not a generic
+prompt: *"Publish progression results? Families will be able to see
+confirmed next-year grade and classroom information in the Unestra mobile
+app. Draft, unresolved, and excluded records will not be shown."*
+Withdrawal is labelled `Hide Future Results from Families` and warns
+*"Families may already have viewed these results. Hiding them does not
+undo prior disclosure."*
+
+### Blocking-validation behavior — chosen policy
+
+**Publication is blocked, never partial.** Any record that is
+`NEEDS_REVIEW` and not applied, `FAILED`, or `APPLIED` with no target
+enrollment blocks the whole publish with
+`PTA_PROGRESSION_PUBLISH_BLOCKED` and a reason string carrying counts
+only. A family shown "Confirmed" for a student the office has not
+actually resolved is worse than a family shown nothing yet, and a partial
+publish gives no signal that anything is missing.
+Graduated/transferred/withdrawn/excluded records are counted as
+**excluded, not blocking** — there is simply nothing to disclose for
+them.
+
+### Mobile visibility rule
+
+A **current-year** placement is always shown — it is the student's
+ordinary official enrollment and has nothing to do with disclosure. A
+**future-year** placement appears only when all of: an ACTIVE target-year
+enrollment exists, the linking record is `APPLIED` with a real placement
+outcome, and its batch is `PUBLISHED`.
+
+`parent-progression.ts` must now read publication state, so Part 17's
+"never touches the progression tables at all" guarantee is replaced by a
+stricter, more useful **minimal-access** guarantee, enforced by tests: it
+reaches publication only through the record→batch relation (never a
+direct batch query), selects exactly `{ targetEnrollmentId }` from the
+record, and filters on organization, `APPLIED`, real outcomes and
+`publicationStatus: PUBLISHED`. No batch id, actor, timestamp,
+idempotency key, outcome code, exception reason or audit field can reach
+the response. Committed-but-unpublished, withdrawn, rolled-back,
+unresolved and excluded are **byte-identical** to the family. A safe
+`publicationStatus: "NOT_AVAILABLE" | "PUBLISHED"` field is returned that
+never explains *why*.
+
+### Correction and rollback
+
+- **Correction after publication is allowed**, because blocking it would
+  leave families looking at a placement the office knows is wrong. The
+  live enrollment is the source of truth, so the family view updates on
+  the next read. It is flagged in the per-record audit metadata
+  (`correctedAfterPublication`) and in a batch-level
+  `pta.progression.corrected_after_publication` event recording that
+  families may have seen the previous result.
+- **Rollback is blocked while published**
+  (`PTA_PROGRESSION_ROLLBACK_BLOCKED_PUBLISHED`) rather than
+  transactionally unpublishing as a side effect. Withdrawing a disclosure
+  should be a deliberate, separately-audited act the administrator
+  performs and sees. The portal disables the Roll back button and explains
+  why.
+
+### Authorization, concurrency and audit
+
+New `PTA_STUDENT_PROGRESSION_PUBLISH` permission (`ORG_ADMIN`/`ORG_OWNER`,
+same tier as commit but **separate**, so an organization can audit and
+withhold the disclosure step independently of the data step). Status and
+history use the existing PREVIEW permission. Every verb authorizes before
+parsing the body; the organization id is always server-resolved.
+
+Publication is transactional, guarded by an optimistic
+`publicationVersion` (a losing concurrent publisher gets
+`PTA_PROGRESSION_PUBLICATION_STALE` rather than double-publishing), and
+idempotent on `publishIdempotencyKey` (a retried HTTP publish is a
+recorded replay, not a second disclosure). Audit events cover publish,
+idempotent replay, blocked attempt, withdrawal, and post-publication
+correction — carrying counts and year labels but **never student names**.
+**No notification is sent by any of this.**
+
+### Feature flags
+
+Both progression flags remain **OFF by default** and were **not** enabled
+for Pine Grove or any production organization. With either flag off, the
+publication service denies before doing any work and the mobile entry
+point stays hidden.
+
+### Tests and results
+
+| Check | Commit | Result |
+|---|---|---|
+| Portal full suite | `1cb34a7` | **4,749 passed, 0 failed**, 178 skipped |
+| Mobile full suite | `1cb34a7` | 72 suites / **456 passed, 0 failed** |
+| Publication service | `1cb34a7` | 26 passed |
+| Publication routes | `1cb34a7` | 12 passed |
+| Parent-progression (rewritten for publication) | `1cb34a7` | 28 passed |
+| Progression service (incl. 3 new rollback-publication tests) | `1cb34a7` | 32 passed |
+| Mobile progression screen (incl. 9 new publication tests) | `1cb34a7` | 34 passed |
+| Portal + mobile typecheck | `1cb34a7` | Both exit 0 |
+| Lint (changed files) | `1cb34a7` | **0 errors** (1 unused-arg warning in a test) |
+| Portal production build | `1cb34a7` | Exit 0 |
+| Metro iOS / Android export | `1cb34a7` | Both exit 0 |
+| Post-merge targeted suite | `f7754ce` | 12 files / **246 passed** |
+| Post-merge portal typecheck / build | `f7754ce` | Exit 0 / exit 0 |
+| Post-merge mobile typecheck / suite / iOS export | `f7754ce` | Exit 0 / 72 suites / 456 passed / exit 0 |
+| Post-merge migration verification | `f7754ce` | Applied + "schema is up to date", DB dropped |
+| Secret scan | `f7754ce` | No real key material |
+
+**Failures and flakes: none in this pass.** Three expected failures
+appeared mid-implementation — the parent-progression tests that asserted
+the *old* rule (committed ⇒ visible). Those were not flakes; they were
+the change being detected correctly, and the directive required replacing
+them. Each was identified by name and rewritten. Full JSON reporter
+output was captured for both suites rather than tailed. The unidentified
+non-reproducing portal flake recorded in Part 16 **did not recur**.
+
+### Commits and integration
+
+| Item | Hash |
+|---|---|
+| `feat(pta): add progression publication state` | `b036519` |
+| `feat(pta): add publish-to-families workflow` | `002fdfa` |
+| `fix(mobile): gate future progression on publication` | `1cb34a7` |
+| Local merge into `main` (`--no-ff`, **zero conflicts**) | `f7754ce` |
+
+Feature branch before: `18aa539`; after: `1cb34a7`. Local `main` before:
+`3da678c`; after the merge: `f7754ce`. The merged `main` tree differs from
+the tested feature tree by exactly one file — `build-26-final-report.md`
+(the Part 17 documentation already on `main`, preserved) — so there is
+**zero application-code difference** between what was verified and what
+landed.
+
+### Confirmations
+
+- **Current placements remain visible** regardless of publication state.
+- **Committed but unpublished future placements remain hidden.**
+- **Only published future placements appear.**
+- Credential remediation intact: revoked file absent, `.gitignore` rule
+  present, orphan blob still unreachable and **not pruned**.
+- Physical-device verification and **remote CI** remain outstanding gates.
+
+## Part 19 — Progression lifecycle and mutability audit
+
+Triggered by the Part 18 change that keeps a committed-but-unpublished
+batch in the "active" grouping so the publication panel stays reachable.
+The question: does that leave committed data editable, or change
+history/reporting behavior? **Nothing was pushed, deployed, externally
+built, uploaded, activated, or submitted.**
+
+### Audit conclusion
+
+The active-grouping change is **safe and retained (Outcome A)** — but the
+audit found a **real, pre-existing immutability defect** elsewhere,
+unrelated to that change, which is now fixed.
+
+### Exact lifecycle states (repository values, not invented)
+
+`PtaStudentProgressionBatchStatus`: `PREPARING`, `PREVIEWED`,
+`COMMITTED`, `CORRECTED`, `ROLLED_BACK`.
+`PtaProgressionPublicationStatus`: `UNPUBLISHED`, `PUBLISHED`,
+`WITHDRAWN`.
+
+### Editable vs actionable vs family-visible vs historical vs terminal
+
+These are five separate concepts and no single flag decides them:
+
+- **Editable** — the *plan* may still change (mappings, exceptions,
+  preview regeneration). Decided **only** by `assertBatchEditable()`
+  server-side: `PREPARING` or `PREVIEWED`, and never `PUBLISHED`.
+- **Actionable** — some valid next administrative action exists (publish,
+  correct, withdraw, roll back). This is what the portal's "active"
+  grouping means. **Actionable ≠ editable.**
+- **Family-visible** — future placements only when
+  `publicationStatus = PUBLISHED`; current placements always.
+- **Historical** — appears in the history list (published or rolled back).
+- **Terminal** — `ROLLED_BACK`: no further action.
+
+### Transition table
+
+| Starting state | Action | Permitted? | Resulting state | Editable? | Family-visible? |
+|---|---|---|---|---|---|
+| PREPARING / PREVIEWED | Edit mappings / exceptions / regenerate preview | Yes | Unchanged (PREVIEWED after preview) | Yes | No |
+| PREVIEWED | Commit | Yes (fresh preview + idempotency key) | COMMITTED, UNPUBLISHED | **No** | No |
+| COMMITTED, unpublished | Edit mappings / exceptions / preview | **No** — `PTA_PROGRESSION_BATCH_NOT_CORRECTABLE` | Unchanged | No | No |
+| COMMITTED, unpublished | Commit again, same key | Idempotent replay of prior result | Unchanged | No | No |
+| COMMITTED, unpublished | Commit again, different key | Rejected — `PTA_PROGRESSION_BATCH_ALREADY_COMMITTED` | Unchanged | No | No |
+| COMMITTED, unpublished | Publish | Yes (PUBLISH permission, blocked if unresolved records) | PUBLISHED | No | **Yes** |
+| COMMITTED, unpublished | Roll back | Yes (unless dependent volunteer-ledger activity) | ROLLED_BACK | No | No |
+| PUBLISHED | Edit mappings / exceptions / preview | **No** — status *and* publication both refuse | Unchanged | No | Yes |
+| PUBLISHED | Correct via correction service | Yes, audited twice (record + batch-level) | CORRECTED, still PUBLISHED | No | Yes (updated) |
+| PUBLISHED | Roll back directly | **No** — `PTA_PROGRESSION_ROLLBACK_BLOCKED_PUBLISHED` | Unchanged | No | Yes |
+| PUBLISHED | Unpublish | Yes (PUBLISH permission, audited) | WITHDRAWN | No | No |
+| WITHDRAWN | Roll back | Yes | ROLLED_BACK | No | No |
+| WITHDRAWN | Publish again | Yes (new disclosure; replay key cleared) | PUBLISHED | No | Yes |
+| ROLLED_BACK | Publish | **No** — `PTA_PROGRESSION_ROLLED_BACK` | Unchanged | No | No |
+| ROLLED_BACK | Edit or recommit | **No** | Unchanged | No | No |
+| Any | Concurrent publish (stale version) | Rejected — `PTA_PROGRESSION_PUBLICATION_STALE` | Unchanged | — | — |
+| Any | Cross-organization batch id | Rejected — `PTA_PROGRESSION_BATCH_NOT_FOUND` | Unchanged | — | — |
+
+### Defect found and fixed
+
+**All three plan-editing services used a denylist, not an allowlist:**
+
+```
+if (batch.status === "COMMITTED" || batch.status === "ROLLED_BACK") throw …
+```
+
+That omits `CORRECTED` — the status `correctProgressionRecord` itself
+sets. So **one correction re-opened a committed batch for wholesale
+editing.** Reproduced before fixing with a probe: a `CORRECTED` batch's
+classroom mappings were **deleted and recreated with no error raised**,
+while a `COMMITTED` batch was correctly rejected. `generateProgressionPreview`
+would likewise have overwritten committed records outright — including
+while results were published to families.
+
+This predates the publication work; the active-grouping change did not
+cause it, but the audit is what surfaced it.
+
+**Fix:** a shared `assertBatchEditable()` allowlist —
+`EDITABLE_BATCH_STATUSES = ["PREPARING", "PREVIEWED"]` — plus an
+independent refusal of any `PUBLISHED` batch as defence in depth. An
+allowlist cannot fail the same way when a state is added later. Re-probed
+after the fix: `CORRECTED` now throws and writes nothing.
+
+### Active-batch consumer matrix
+
+| File / function | R/W | Meaning of "active" | Includes committed-unpublished? | Includes published? | Permits mutation? | Guard | Tests |
+|---|---|---|---|---|---|---|---|
+| `student-progression/page.tsx` (`active` / `history`) | Read | Has a valid next action | **Yes** | No (→ history) | **No** — display only | n/a | Page-level |
+| `PtaStudentProgressionCenter` `canEditMappings` | Read | Editable | No | No | No (UI only) | `PREPARING`/`PREVIEWED` allowlist | Component |
+| `saveProgressionClassroomMappings` | **Write** | — | No | No | Yes | `assertBatchEditable` | 3 new |
+| `generateProgressionPreview` | **Write** | — | No | No | Yes | `assertBatchEditable` | 3 new |
+| `saveProgressionException` | **Write** | — | No | No | Yes | `assertBatchEditable` | 3 new |
+| `commitProgressionBatch` | **Write** | — | Idempotent replay only | No | Yes | `PREVIEWED` required | Existing |
+| `correctProgressionRecord` | **Write** | — | Yes | Yes | Yes | `COMMITTED`/`CORRECTED` only | Existing + audit |
+| `rollbackProgressionBatch` | **Write** | — | Yes | **Blocked** | Yes | status + `assertNotPublishedForRollback` | 3 existing |
+| `publish/unpublishProgressionResults` | **Write** | — | Yes | Yes | Publication only | state + version + idempotency | 26 |
+| `listProgressionBatches` / `GET .../student-progression` | Read | **No split — returns all** | Yes | Yes | No | flags | Route tests |
+| `getProgressionBatchDetail` | Read | Single batch | Yes | Yes | No | org-scoped | Existing |
+| `parent-progression.ts` (mobile) | Read | n/a | Hidden | Shown | No | publication join | 28 |
+
+**No dashboard, report, export, scheduled job, or data-health check
+consumes batch state** — verified by a repo-wide search, not just changed
+files. The only remaining "progression" matches are the feature flag
+(profile/settings/env/rbac/layout).
+
+### History and reporting
+
+Unchanged. The list API returns **all** batches with no active/history
+split, so reporting, counts, exports and audit views are unaffected. The
+grouping change is confined to one page's display. No lifecycle state
+disappears from all administrator views: draft/committed-unpublished/
+corrected-unpublished appear in the working view; published and
+rolled-back appear in history; published remains discoverable for
+auditing and withdrawal.
+
+### Authorization
+
+Separate server-side enforcement confirmed for preview/edit
+(`…:preview`), commit (`…:commit`), publish/unpublish (`…:publish`),
+rollback (`…:commit`), and family mobile read (household self-access).
+`PTA_STUDENT_PROGRESSION_PUBLISH` remains distinct from commit; holding it
+grants no edit or commit rights. Every route enforces the PTA vertical,
+organization scope, and both flags. Frontend visibility is never the sole
+control — the probe exercised the services directly, bypassing the UI.
+
+### Lint warning
+
+The unused `_args` parameter in `parent-progression.test.ts` (introduced
+in Part 17) was removed by dropping the parameter **and** its spread call
+sites, not by suppression and without weakening the test. Build 26 now
+produces **zero new warnings**. Pre-existing, unrelated: 2
+`no-require-imports` warnings in `(tabs)/__tests__/_layout.test.tsx`.
+
+### Tests added
+
+13 lifecycle regression tests: mapping edits, preview regeneration and
+per-student overrides each denied for `COMMITTED`, `CORRECTED` and
+`ROLLED_BACK` (9); published batches non-editable regardless of status
+(1); `PREPARING`/`PREVIEWED` still editable (2); cross-organization batch
+id not found (1). Progression suite 32 → 45.
+
+### Verification
+
+| Check | Commit | Result |
+|---|---|---|
+| Portal full suite | `ac0b6ae` | **4,762 passed, 0 failed**, 178 skipped |
+| Mobile full suite | `ac0b6ae` | 72 suites / **456 passed, 0 failed** |
+| Portal + mobile typecheck | `ac0b6ae` | Both exit 0 |
+| Lint — all 15 Build 26 files | `ac0b6ae` | **0 errors, 0 warnings** |
+| Portal production build | `ac0b6ae` | Exit 0 |
+| Metro iOS / Android | `ac0b6ae` | Both exit 0 |
+| Post-merge targeted (14 files: lifecycle, publication, import, family-photo, cross-vertical) | `d0fc194` | **285 passed** |
+| Post-merge portal typecheck / build | `d0fc194` | Exit 0 / exit 0 |
+| Post-merge mobile typecheck / suite / iOS | `d0fc194` | Exit 0 / 72 suites / 456 passed / exit 0 |
+| Secret scan | `d0fc194` | No real key material |
+
+**Failures and flakes: none.** No schema or query change was made, so
+disposable-database migration re-verification was not required.
+
+### Commits
+
+| Item | Hash |
+|---|---|
+| `fix(pta): separate editable and publishable progression states` | `ac0b6ae` |
+| Local merge into `main` (`--no-ff`, zero conflicts) | `d0fc194` |
+
+Feature `1cb34a7` → `ac0b6ae`; main `64cdd30` → `d0fc194`. The merged tree
+differs from the tested feature tree by exactly one file
+(`build-26-final-report.md`, already on `main`) — zero application-code
+drift.
+
+### Confirmations
+
+- Committed-unpublished batches are **actionable but not editable**.
+- Publication panel reachable after commit, reload, re-login, direct
+  authorized navigation, correction, and withdrawal; **not** shown for
+  draft-only, rolled-back, wrong-organization, non-PTA verticals,
+  flag-disabled, or users without publish permission — and reachability
+  was achieved without weakening any status validation.
+- No progression flag was activated.
+- Credential remediation intact; orphan blob unreachable and not pruned.
+
 ## Final status
 
 **GETUNESTRA WORDPRESS CREDENTIAL REMEDIATED — BUILD 26 READY FOR
