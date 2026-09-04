@@ -166,38 +166,6 @@ export async function getObjectBuffer(key: string): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
-export interface ObjectStream {
-  /** Web ReadableStream, ready to hand straight to a Response body. */
-  body: ReadableStream<Uint8Array>;
-  /** Storage's own reported length, when it reports one. */
-  contentLength: number | null;
-}
-
-/**
- * Opens an object for streaming rather than reading it into memory.
- *
- * getObjectBuffer() concatenates the whole object first, which is fine for a
- * family photo (re-encoded, ~30KB) but not for this app's largest attachments
- * — meeting recordings go up to MAX_FILE_SIZE_BYTES (150MB). Buffering those
- * would hold the entire file in the server's heap for every concurrent
- * download.
- *
- * Callers MUST have authorized the request before calling this: it performs no
- * access control, deliberately, so that no route can mistake it for a guard.
- */
-export async function getObjectStream(key: string): Promise<ObjectStream> {
-  const env = getServerEnv();
-  const s3 = createS3Client();
-
-  const result = await s3.send(new GetObjectCommand({ Bucket: env.DO_SPACES_BUCKET, Key: key }));
-  if (!result.Body) throw new Error("Object body was empty");
-
-  // The AWS SDK v3 Node stream exposes transformToWebStream(); Response only
-  // accepts a web stream, so this is the conversion point.
-  const body = (result.Body as { transformToWebStream: () => ReadableStream<Uint8Array> }).transformToWebStream();
-  return { body, contentLength: typeof result.ContentLength === "number" ? result.ContentLength : null };
-}
-
 export async function getSignedObjectUrl(key: string, expiresInSeconds = 600) {
   const env = getServerEnv();
   const s3 = createS3Client();
