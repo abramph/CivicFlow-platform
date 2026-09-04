@@ -1,0 +1,187 @@
+name: PR Validation
+
+# Portal and mobile pull-request validation.
+#
+# Before this workflow existed, portal and mobile pull requests ran NO checks
+# at all: the repository's only `pull_request` workflow
+# (macos-signing-notarization.yml) is path-filtered to Electron desktop files
+# (src/main/**, forge.config.js, build/**), so a PR touching only
+# civicflow-portal/** or civicflow-mobile/** reported zero checks and could be
+# merged with nothing verified.
+#
+# Deliberately NOT path-filtered. Correct filters for a monorepo like this
+# would have to cover portal code, mobile code, both lockfiles, the Prisma
+# schema and migrations, shared config, and the workflows themselves — and
+# getting that wrong is precisely the failure mode described above. Running
+# every job on every PR to `main` is a few minutes of CI in exchange for a
+# gate that cannot silently exclude the thing it was meant to check.
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+# Read-only. Nothing here publishes, deploys, or writes to the repository.
+permissions:
+  contents: read
+
+# Superseded runs on the same PR are cancelled; pushes to main-targeted
+# branches queue rather than pile up.
+concurrency:
+  group: pr-validation-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portal:
+    name: Portal (test, typecheck, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: civicflow-portal
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: civicflow-portal/package-lock.json
+
+      - name: Install dependencies (locked)
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Portal lint is deliberately NOT a step here yet.
+      #
+      # Repo-wide `npm run lint` currently fails on `main` with 10 pre-existing
+      # errors that predate this workflow and are unrelated to any open PR:
+      # four CommonJS `require()` calls in scripts/*.js, three unescaped JSX
+      # entities, one raw <a> where <Link> is required, and one genuine
+      # react-hooks/set-state-in-effect in SmsOptInBanner.tsx.
+      #
+      # Adding it now would mean either shipping a permanently-red job (which
+      # trains people to ignore CI) or fixing ten unrelated files inside an
+      # infrastructure PR — including a real React effect bug that deserves its
+      # own review. Neither is worth blocking the rest of the gate on.
+      #
+      # Tracked as follow-up: fix the pre-existing portal lint errors, then add
+      # `- name: Lint / run: npm run lint` here and make it a required check.
+      # Mobile lint IS enforced below; it passes clean today.
+
+      - name: Build worker artifact (required by the test suite)
+        # `dist-workers/` is gitignored build output, so a fresh checkout does
+        # not have it. The spreadsheet-parser fail-closed tests assert the
+        # compiled worker artifact really exists before checking the
+        # missing-artifact paths, so they fail on a clean machine unless it is
+        # built first. This is the same script `npm run build` invokes; it is
+        # hoisted here so the tests see the same state a developer's machine
+        # has after a build.
+        run: node ./scripts/build-worker.mjs
+
+      - name: Test
+        run: npm test
+
+      - name: Production build
+        # Synthetic, non-routable placeholder. Prisma requires DATABASE_URL to
+        # be parseable at build time; nothing in the build connects to it, and
+        # this value points at no real host.
+        env:
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/ci_placeholder?schema=public
+          NODE_ENV: production
+        run: npm run build
+
+  mobile:
+    name: Mobile (test, typecheck, lint, export)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: civicflow-mobile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: civicflow-mobile/package-lock.json
+
+      - name: Install dependencies (locked)
+        run: npm ci
+
+      - name: Typecheck
+        # No `typecheck` package script exists in this workspace; this is the
+        # exact command used for local verification.
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Metro export (iOS)
+        # Local JS bundle only — no native toolchain, no signing credentials,
+        # and no EAS/cloud build is involved.
+        run: npx expo export --platform ios --output-dir "$RUNNER_TEMP/export-ios"
+
+      - name: Metro export (Android)
+        run: npx expo export --platform android --output-dir "$RUNNER_TEMP/export-android"
+
+  migrations:
+    name: Migrations (isolated Postgres)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: civicflow-portal
+    services:
+      postgres:
+        # Throwaway container, created and destroyed with the job. Credentials
+        # below are synthetic CI-only values; no development, staging, or
+        # production database is ever reachable from this job.
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci_migrations
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: civicflow-portal/package-lock.json
+
+      - name: Install dependencies (locked)
+        run: npm ci
+
+      - name: Apply every migration from scratch
+        env:
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/ci_migrations?schema=public
+        run: npm run db:migrate:deploy
+
+      - name: Verify no migration is pending
+        env:
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/ci_migrations?schema=public
+        run: npx prisma migrate status
