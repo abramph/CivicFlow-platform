@@ -178,3 +178,76 @@ describe('Dashboard "Report a Payment" quick action', () => {
     expect(mockGetPtaDues).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Community/Nonprofit isolation for the "My Family" (family-photo) entry
+ * point. Existing coverage above (conventionalMemberOrg/staffOnlyOrg) only
+ * proves the button is absent for "no PTA identity" generically -- it never
+ * tags the fixture as a demonstrable Community/Nonprofit organization
+ * (capability.primaryVertical), which is the field this app's own
+ * vertical-gating logic actually keys off elsewhere (see
+ * (tabs)/__tests__/_layout.test.tsx, __tests__/org-switcher.test.tsx). This
+ * block closes that gap explicitly, mirroring dashboard-church.test.tsx and
+ * dashboard-union.test.tsx's per-vertical pattern.
+ */
+function communityMemberOrg() {
+  return {
+    organizationId: 'org-community',
+    organizationName: 'Riverdale Community Association',
+    memberId: 'member-9',
+    firstName: 'Alex',
+    lastName: 'Rivera',
+    pta: null,
+    capability: { primaryVertical: 'COMMUNITY' },
+  };
+}
+
+describe('Dashboard -- Community/Nonprofit isolation for the PTA "My Family" entry point', () => {
+  beforeEach(() => {
+    mockRouterPush.mockReset();
+    mockGetAnnouncementsForIdentity.mockReset().mockResolvedValue([]);
+    mockGetEventsForOrganization.mockReset().mockResolvedValue([]);
+    mockGetDues.mockReset().mockResolvedValue({ outstandingBalance: 0, isDelinquent: false, delinquentSince: null, charges: [] });
+    mockGetPaymentHistory.mockReset().mockResolvedValue({ payments: [], reports: [] });
+    mockGetPtaDues.mockReset().mockResolvedValue({
+      currentSchoolYear: null,
+      currentCharge: null,
+      hasBillingIdentity: true,
+      priorCharges: [],
+      onlinePaymentLinkSlug: null,
+    });
+    mockGetPtaVolunteerHours.mockReset().mockResolvedValue({ approvedMinutes: 0, requiredMinutes: null, remainingMinutes: null });
+    mockGetPtaVolunteerCommitments.mockReset().mockResolvedValue([]);
+    mockGetGiving.mockReset().mockResolvedValue({ enabled: false });
+    mockGetUnionCases.mockReset().mockResolvedValue([]);
+  });
+
+  it('a Community/Nonprofit organization member never sees the My Family entry point, even with a real member record', async () => {
+    mockUseAuth.mockReturnValue({ selectedOrganization: communityMemberOrg(), selectedOrganizationId: 'org-community' });
+
+    await render(<DashboardScreen />);
+    await waitFor(() => expect(mockGetDues).toHaveBeenCalled());
+
+    expect(screen.queryByLabelText('My family')).toBeNull();
+    expect(screen.queryByText('My Family')).toBeNull();
+    expect(mockRouterPush).not.toHaveBeenCalledWith('/pta-my-family');
+    // A real memberId/member-record presence doesn't upgrade a generic
+    // member into a PTA identity -- only a PtaHouseholdAdult link does.
+    expect(mockGetPtaDues).not.toHaveBeenCalled();
+  });
+
+  it('switching from a PTA organization to a Community/Nonprofit organization removes the My Family entry point and stops PTA data fetching', async () => {
+    mockUseAuth.mockReturnValue({ selectedOrganization: ptaParentOrg(), selectedOrganizationId: 'org-pta' });
+    const { rerender } = await render(<DashboardScreen />);
+    await waitFor(() => expect(mockGetPtaDues).toHaveBeenCalled());
+    expect(screen.getByLabelText('My family')).toBeTruthy();
+
+    mockGetPtaDues.mockClear();
+    mockUseAuth.mockReturnValue({ selectedOrganization: communityMemberOrg(), selectedOrganizationId: 'org-community' });
+    await rerender(<DashboardScreen />);
+    await waitFor(() => expect(mockGetDues).toHaveBeenCalled());
+
+    expect(screen.queryByLabelText('My family')).toBeNull();
+    expect(mockGetPtaDues).not.toHaveBeenCalled();
+  });
+});

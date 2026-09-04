@@ -76,8 +76,22 @@ describe("isAllowedAttachmentContentType", () => {
 
   it("every other entity type keeps its unrestricted contract (no entry = no restriction)", async () => {
     const { isAllowedAttachmentContentType, attachmentEntityTypes } = await import("../attachments");
-    for (const entityType of attachmentEntityTypes.filter((type) => type !== "REIMBURSEMENT")) {
+    for (const entityType of attachmentEntityTypes.filter((type) => type !== "REIMBURSEMENT" && type !== "PTA_HOUSEHOLD")) {
       expect(isAllowedAttachmentContentType(entityType, "application/x-msdownload")).toBe(true);
+    }
+  });
+
+  it("PTA_HOUSEHOLD (family photo) accepts JPEG/PNG/HEIC/HEIF/WEBP only", async () => {
+    const { isAllowedAttachmentContentType } = await import("../attachments");
+    for (const type of ["image/jpeg", "image/png", "image/heic", "image/heif", "image/webp"]) {
+      expect(isAllowedAttachmentContentType("PTA_HOUSEHOLD", type)).toBe(true);
+    }
+  });
+
+  it("PTA_HOUSEHOLD (family photo) blocks executables, HTML, scripts, PDFs, and arbitrary MIME types", async () => {
+    const { isAllowedAttachmentContentType } = await import("../attachments");
+    for (const type of ["application/x-msdownload", "text/html", "application/javascript", "application/octet-stream", "text/plain", "application/pdf"]) {
+      expect(isAllowedAttachmentContentType("PTA_HOUSEHOLD", type)).toBe(false);
     }
   });
 });

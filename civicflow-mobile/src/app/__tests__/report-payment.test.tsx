@@ -21,6 +21,15 @@ jest.mock('@/lib/mobile-api', () => ({
   submitPaymentReport: (...args: unknown[]) => mockSubmitPaymentReport(...args),
 }));
 
+const mockGetMediaLibraryPermissionsAsync = jest.fn();
+const mockRequestMediaLibraryPermissionsAsync = jest.fn();
+const mockLaunchImageLibraryAsync = jest.fn();
+jest.mock('expo-image-picker', () => ({
+  getMediaLibraryPermissionsAsync: (...args: unknown[]) => mockGetMediaLibraryPermissionsAsync(...args),
+  requestMediaLibraryPermissionsAsync: (...args: unknown[]) => mockRequestMediaLibraryPermissionsAsync(...args),
+  launchImageLibraryAsync: (...args: unknown[]) => mockLaunchImageLibraryAsync(...args),
+}));
+
 // memberId is required: the screen now redirects a caller with no constituent
 // identity to /dues (a staff/owner login would otherwise 403 on submit), so a
 // fixture without it never renders the org switcher these tests assert on.
@@ -68,5 +77,33 @@ describe('Report-payment screen — org switcher discoverability (GitHub #71)', 
 
     await fireEvent.press(screen.getByLabelText('Change organization'));
     expect(mockPush).toHaveBeenCalledWith('/org-switcher');
+  });
+});
+
+describe('Report-payment screen — receipt photo picker (build-26 review, Section 6)', () => {
+  beforeEach(() => {
+    mockUseAuth.mockReturnValue(authWith(1));
+    mockGetDues.mockReset().mockResolvedValue({ charges: [] });
+    mockGetMediaLibraryPermissionsAsync.mockReset();
+    mockRequestMediaLibraryPermissionsAsync.mockReset();
+    mockLaunchImageLibraryAsync.mockReset().mockResolvedValue({
+      canceled: false,
+      assets: [{ uri: 'file:///tmp/receipt.jpg', width: 10, height: 10, fileName: 'receipt.jpg', mimeType: 'image/jpeg' }],
+    });
+  });
+
+  it('launches the system library picker directly, never requesting media-library permission', async () => {
+    // launchImageLibraryAsync's own doc comment: "Requires
+    // Permissions.MEDIA_LIBRARY on iOS 10 only" -- no runtime permission is
+    // needed on any platform this app actually supports.
+    await render(<ReportPaymentScreen />);
+    await waitFor(() => expect(screen.getByLabelText('Attach receipt photo, optional')).toBeTruthy());
+
+    await fireEvent.press(screen.getByLabelText('Attach receipt photo, optional'));
+
+    expect(mockGetMediaLibraryPermissionsAsync).not.toHaveBeenCalled();
+    expect(mockRequestMediaLibraryPermissionsAsync).not.toHaveBeenCalled();
+    expect(mockLaunchImageLibraryAsync).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.getByLabelText('Receipt photo preview')).toBeTruthy());
   });
 });

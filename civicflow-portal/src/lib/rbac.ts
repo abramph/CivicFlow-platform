@@ -248,6 +248,20 @@ export const PERMISSIONS = {
   PTA_BOARD_VIEW:          "pta:board:view",
   PTA_BOARD_MANAGE:        "pta:board:manage",
   PTA_SCHOOL_YEARS_MANAGE: "pta:school-years:manage",
+  // Academic-year student progression. Split the same way volunteer
+  // assessments split preview from posting: PREVIEW (compute a rollover
+  // plan, no writes) sits at PTA_STUDENTS_MANAGE's STAFF tier; COMMIT (an
+  // org-wide, hard-to-fully-undo write across every household) sits at
+  // PTA_SCHOOL_YEARS_MANAGE's ORG_ADMIN/ORG_OWNER-only tier, for the same
+  // "re-scopes what 'current' means org-wide" reason as that permission.
+  PTA_STUDENT_PROGRESSION_PREVIEW: "pta:student-progression:preview",
+  PTA_STUDENT_PROGRESSION_COMMIT:  "pta:student-progression:commit",
+  // Separate from COMMIT on purpose: committing is an internal, private
+  // data change, while publishing is an irreversible *disclosure* to every
+  // affected family. Same ORG_ADMIN/ORG_OWNER tier, but distinct so an
+  // organization can audit (and, via custom role permission sets, withhold)
+  // the disclosure step independently of the data step.
+  PTA_STUDENT_PROGRESSION_PUBLISH: "pta:student-progression:publish",
   // PTA Vertical 2.0, PR PTA-E — Concerns & Grievances. Deliberately granted
   // to NO role bundle below ORG_ADMIN: a case must never be visible merely
   // because someone helps run events or finances. Even holders of these
@@ -488,6 +502,7 @@ const ORG_OWNER_PERMISSIONS: Permission[] = [
   PERMISSIONS.PTA_DIRECTORY_READ,
   PERMISSIONS.PTA_HOUSEHOLDS_MANAGE,
   PERMISSIONS.PTA_STUDENTS_MANAGE,
+  PERMISSIONS.PTA_STUDENT_PROGRESSION_PREVIEW,
   PERMISSIONS.PTA_DUES_MANAGE,
   PERMISSIONS.PTA_EVENTS_MANAGE,
   PERMISSIONS.PTA_VOLUNTEERS_MANAGE,
@@ -503,6 +518,8 @@ const ORG_OWNER_PERMISSIONS: Permission[] = [
   PERMISSIONS.PTA_BOARD_VIEW,
   PERMISSIONS.PTA_BOARD_MANAGE,
   PERMISSIONS.PTA_SCHOOL_YEARS_MANAGE,
+  PERMISSIONS.PTA_STUDENT_PROGRESSION_COMMIT,
+  PERMISSIONS.PTA_STUDENT_PROGRESSION_PUBLISH,
   PERMISSIONS.PTA_CONCERNS_VIEW,
   PERMISSIONS.PTA_CONCERNS_MANAGE,
   PERMISSIONS.PTA_CONCERNS_ASSIGN,
@@ -635,6 +652,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.PTA_DIRECTORY_READ,
     PERMISSIONS.PTA_HOUSEHOLDS_MANAGE,
     PERMISSIONS.PTA_STUDENTS_MANAGE,
+    PERMISSIONS.PTA_STUDENT_PROGRESSION_PREVIEW,
     PERMISSIONS.PTA_DUES_MANAGE,
     PERMISSIONS.PTA_EVENTS_MANAGE,
     PERMISSIONS.PTA_VOLUNTEERS_MANAGE,
@@ -650,6 +668,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.PTA_BOARD_VIEW,
     PERMISSIONS.PTA_BOARD_MANAGE,
     PERMISSIONS.PTA_SCHOOL_YEARS_MANAGE,
+    PERMISSIONS.PTA_STUDENT_PROGRESSION_COMMIT,
+    PERMISSIONS.PTA_STUDENT_PROGRESSION_PUBLISH,
     PERMISSIONS.PTA_CONCERNS_VIEW,
     PERMISSIONS.PTA_CONCERNS_MANAGE,
     PERMISSIONS.PTA_CONCERNS_ASSIGN,
@@ -828,6 +848,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     PERMISSIONS.PTA_DIRECTORY_READ,
     PERMISSIONS.PTA_HOUSEHOLDS_MANAGE,
     PERMISSIONS.PTA_STUDENTS_MANAGE,
+    PERMISSIONS.PTA_STUDENT_PROGRESSION_PREVIEW,
     PERMISSIONS.PTA_EVENTS_MANAGE,
     PERMISSIONS.PTA_VOLUNTEERS_MANAGE,
   PERMISSIONS.PTA_VOLUNTEERS_CHECKIN,
