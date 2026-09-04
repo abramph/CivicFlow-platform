@@ -76,7 +76,7 @@ describe('PtaFamilyPhotoScreen', () => {
   });
 
   it('shows the current photo and a Remove option when one is on file', async () => {
-    mockGetPtaHouseholdPhoto.mockResolvedValue({ url: 'https://spaces.example/signed', byteSize: 1000 });
+    mockGetPtaHouseholdPhoto.mockResolvedValue({ uri: 'data:image/jpeg;base64,signed', byteSize: 1000 });
     render(<PtaFamilyPhotoScreen />);
     await waitFor(() => expect(screen.getByLabelText('Replace photo')).toBeTruthy());
     expect(screen.getByLabelText('Remove photo')).toBeTruthy();
@@ -205,7 +205,7 @@ describe('PtaFamilyPhotoScreen', () => {
       assets: [{ uri: 'file:///tmp/photo.jpg', width: 10, height: 10, fileName: 'photo.jpg', mimeType: 'image/jpeg' }],
     });
     mockUploadPtaHouseholdPhoto.mockResolvedValue({ photoUrl: '/x', byteSize: 100, width: 10, height: 10 });
-    mockGetPtaHouseholdPhoto.mockResolvedValueOnce(null).mockResolvedValueOnce({ url: 'https://spaces.example/new', byteSize: 100 });
+    mockGetPtaHouseholdPhoto.mockResolvedValueOnce(null).mockResolvedValueOnce({ uri: 'data:image/jpeg;base64,new', byteSize: 100 });
 
     render(<PtaFamilyPhotoScreen />);
     await openTakePhoto();
@@ -221,7 +221,7 @@ describe('PtaFamilyPhotoScreen', () => {
   });
 
   it('Remove Photo asks for confirmation via Alert before deleting anything', async () => {
-    mockGetPtaHouseholdPhoto.mockResolvedValue({ url: 'https://spaces.example/signed', byteSize: 1000 });
+    mockGetPtaHouseholdPhoto.mockResolvedValue({ uri: 'data:image/jpeg;base64,signed', byteSize: 1000 });
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
     render(<PtaFamilyPhotoScreen />);
     await waitFor(() => expect(screen.getByLabelText('Remove photo')).toBeTruthy());
@@ -231,7 +231,7 @@ describe('PtaFamilyPhotoScreen', () => {
   });
 
   it('deletes and refreshes once the destructive Alert action is confirmed', async () => {
-    mockGetPtaHouseholdPhoto.mockResolvedValueOnce({ url: 'https://spaces.example/signed', byteSize: 1000 }).mockResolvedValueOnce(null);
+    mockGetPtaHouseholdPhoto.mockResolvedValueOnce({ uri: 'data:image/jpeg;base64,signed', byteSize: 1000 }).mockResolvedValueOnce(null);
     mockDeletePtaHouseholdPhoto.mockResolvedValue(undefined);
     let confirmedRemove: (() => void) | undefined;
     jest.spyOn(Alert, 'alert').mockImplementation((_title, _msg, buttons) => {
@@ -326,7 +326,7 @@ describe('PtaFamilyPhotoScreen — accessibility and presentation', () => {
   });
 
   it('labels the current photo and the empty placeholder as images, never bare decoration', async () => {
-    mockGetPtaHouseholdPhoto.mockResolvedValue({ url: 'https://spaces.example/signed', byteSize: 10 });
+    mockGetPtaHouseholdPhoto.mockResolvedValue({ uri: 'data:image/jpeg;base64,signed', byteSize: 10 });
     render(<PtaFamilyPhotoScreen />);
     await waitFor(() => expect(screen.getByLabelText('Your current family photo')).toBeTruthy());
     expect(screen.getByLabelText('Your current family photo').props.accessibilityRole).toBe('image');
