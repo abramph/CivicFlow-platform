@@ -205,6 +205,9 @@ function isKnownReason(reason: string): reason is SpreadsheetRejectionReason {
     // itself, but included here for completeness/consistency since it's
     // part of the same SpreadsheetRejectionReason union.
     "PARSER_UNAVAILABLE",
+    // Auth-ordering follow-up (.xls message unification) -- thrown inside
+    // the worker's parseSpreadsheetBuffer() for a claimed .xls extension.
+    "LEGACY_XLS_UNSUPPORTED",
   ]);
   return known.has(reason);
 }
