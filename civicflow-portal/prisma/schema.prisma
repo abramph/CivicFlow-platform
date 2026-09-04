@@ -523,6 +523,17 @@ enum AttachmentEntityType {
   /// every other entity type here -- a file is only ever member-visible when
   /// a caller explicitly sets it, never the reverse.
   UNION_CASE
+  /// PTA family-photo upload: entityId is the PtaHouseholdId; purpose is
+  /// always "FAMILY_PHOTO". Mirrors the ORGANIZATION+purpose:"LOGO" special
+  /// case in POST /api/attachments (denormalized PtaHousehold.photoUrl
+  /// pointer set to an authenticated download route on successful upload).
+  /// Parent self-service uploads do NOT go through the generic
+  /// RBAC-permission-gated /api/attachments route at all -- household-adult
+  /// authorization is linkage-based (requirePtaHouseholdSelfAccess), not a
+  /// Permission grant, matching this codebase's parent-self-service rule
+  /// (see PtaHousehold's own doc comment and docs/pta-vertical-2.md) — so
+  /// this entity type is served by a dedicated route, not the shared one.
+  PTA_HOUSEHOLD
   OTHER
 }
 
@@ -749,6 +760,9 @@ model Organization {
   ptaClassrooms                      PtaClassroom[]
   ptaTeachers                        PtaTeacher[]
   ptaStudentEnrollments              PtaStudentEnrollment[]
+  ptaStudentProgressionBatches       PtaStudentProgressionBatch[]
+  ptaStudentProgressionRecords       PtaStudentProgressionRecord[]
+  ptaProgressionClassroomMappings    PtaProgressionClassroomMapping[]
   ptaVolunteerOpportunities          PtaVolunteerOpportunity[]
   ptaVolunteerSlots                  PtaVolunteerSlot[]
   ptaVolunteerSignups                PtaVolunteerSignup[]
@@ -4753,6 +4767,12 @@ model PtaProfile {
   /// category, not a whole surface), default false per spec §10 ("if enabled
   /// by the organization").
   donatedGoodsAsHoursEnabled       Boolean            @default(false)
+  /// Academic-year student progression rollover. Dark by default, like
+  /// electionsEnabled — an org-wide, hard-to-fully-undo operation must be
+  /// deliberately turned on, never assumed. A platform-wide env kill-switch
+  /// (isPtaStudentProgressionPlatformEnabled, mirroring the volunteer-hours
+  /// pattern) is also checked first in the guard, ahead of this org flag.
+  studentProgressionEnabled        Boolean            @default(false)
   createdAt                        DateTime           @default(now())
   updatedAt                        DateTime           @updatedAt
 
@@ -4787,6 +4807,12 @@ model PtaHousehold {
   secondaryContactAdultId String?
   volunteerInterests      String[]           @default([])
   notes                   String?
+  /// Optional family photo. Never a raw storage URL or object key — always
+  /// an authenticated download route path (mirrors Organization.logoUrl's
+  /// same convention), re-checked for authorization on every request. Null
+  /// means "no photo" (the UI shows a neutral default, never treats this as
+  /// required for any household action).
+  photoUrl                String?
   createdAt               DateTime           @default(now())
   updatedAt               DateTime           @updatedAt
 
@@ -4921,9 +4947,10 @@ model PtaStudent {
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 
-  organization Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  household    PtaHousehold           @relation(fields: [householdId], references: [id], onDelete: Cascade)
-  enrollments  PtaStudentEnrollment[]
+  organization       Organization                  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  household          PtaHousehold                  @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  enrollments        PtaStudentEnrollment[]
+  progressionRecords PtaStudentProgressionRecord[]
 
   @@index([organizationId])
   @@index([householdId])
@@ -5005,15 +5032,224 @@ model PtaStudentEnrollment {
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
 
-  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  schoolYearRef PtaSchoolYear? @relation(fields: [schoolYearId], references: [id], onDelete: SetNull)
-  student       PtaStudent     @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  classroom     PtaClassroom   @relation(fields: [classroomId], references: [id], onDelete: Restrict)
+  organization               Organization                  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  schoolYearRef              PtaSchoolYear?                @relation(fields: [schoolYearId], references: [id], onDelete: SetNull)
+  student                    PtaStudent                    @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  classroom                  PtaClassroom                  @relation(fields: [classroomId], references: [id], onDelete: Restrict)
+  progressionRecordsAsSource PtaStudentProgressionRecord[] @relation("PtaProgressionRecordSourceEnrollment")
+  progressionRecordsAsTarget PtaStudentProgressionRecord[] @relation("PtaProgressionRecordTargetEnrollment")
 
   @@unique([studentId, schoolYear])
   @@index([organizationId])
   @@index([classroomId])
   @@index([schoolYearId])
+}
+
+// ─── PTA/PTO Academic-Year Student Progression ───────────────────────────────
+// Mirrors PtaBoardTransition/PtaOfficerHandoff's shape (see below in this
+// file): a batch record per fromYear->toYear rollover, Restrict deletes
+// (governance record), and a DB-level unique on the year pair -- the same
+// mechanism that already prevents a board transition from being run twice
+// for the same two years prevents a student-progression batch from being
+// committed twice. Correction/rollback operate on THIS SAME batch's records
+// (via new AuditEvent rows + the batch's own corrected/rolledBack
+// timestamps) rather than allowing a second batch for the same year pair.
+//
+// Actor fields (preparedByUserId/committedByUserId/correctedByUserId/
+// rolledBackByUserId) are deliberately plain, non-relational strings rather
+// than Prisma relations to User -- AuditEvent (createAuditEvent) is this
+// codebase's established source of truth for "who did what and when";
+// duplicating that as four new named relations (each requiring its own
+// back-relation array on the already-large User model) would be schema
+// bloat for a fact the audit trail already records durably.
+//
+// Grade/classroom fields on PtaStudentProgressionRecord are denormalized
+// planning snapshots (source/target grade and classroom for THIS record),
+// matching PtaOfficerAssignment.schoolYearLabel's "snapshot, not a hard
+// relation" convention -- they exist during PREVIEW, before any enrollment
+// row is created, and remain a stable record of what was proposed/decided
+// even if the underlying PtaGrade/PtaClassroom row is later renamed.
+
+enum PtaStudentProgressionBatchStatus {
+  PREPARING
+  PREVIEWED
+  COMMITTED
+  CORRECTED
+  ROLLED_BACK
+}
+
+/// Whether a COMMITTED batch's results have been disclosed to families.
+/// Deliberately separate from the batch status above: committing is an
+/// internal data change, publishing is an irreversible disclosure. A
+/// committed-but-UNPUBLISHED batch is invisible to families even though its
+/// target enrollments already exist and are ACTIVE.
+enum PtaProgressionPublicationStatus {
+  UNPUBLISHED
+  PUBLISHED
+  /// Previously published, then withdrawn. Distinct from UNPUBLISHED so the
+  /// record itself shows a disclosure already happened and cannot be undone.
+  WITHDRAWN
+}
+
+enum PtaStudentProgressionOutcome {
+  PROMOTE
+  RETAIN
+  GRADUATE
+  TRANSFER
+  WITHDRAW
+  EXCLUDE
+  MANUAL
+  NEEDS_REVIEW
+}
+
+enum PtaStudentProgressionRecordStatus {
+  PLANNED
+  APPLIED
+  SKIPPED
+  FAILED
+}
+
+/// One academic-year student-progression rollover: fromYear -> toYear.
+model PtaStudentProgressionBatch {
+  id                    String                           @id @default(cuid())
+  organizationId        String
+  fromSchoolYearId      String
+  toSchoolYearId        String
+  status                PtaStudentProgressionBatchStatus @default(PREPARING)
+  notes                 String?
+  /// Client-supplied idempotency key for the commit request specifically
+  /// (Section 5: "a unique idempotency key" on Step 4/Confirm) -- distinct
+  /// from the @@unique year-pair constraint below, which prevents a second
+  /// batch from ever being CREATED for the same two years at all. This key
+  /// protects the commit call itself against a retried/duplicated HTTP
+  /// request against the SAME already-created batch.
+  commitIdempotencyKey  String?                          @unique
+  preparedByUserId      String?
+  previewedAt           DateTime?
+  committedByUserId     String?
+  committedAt           DateTime?
+  correctedByUserId     String?
+  correctedAt           DateTime?
+  rolledBackByUserId    String?
+  rolledBackAt          DateTime?
+  /// Publication (disclosure-to-families) state. Additive and defaulted to
+  /// UNPUBLISHED, so every pre-existing committed batch stays private until
+  /// an administrator explicitly publishes it. Family visibility of a
+  /// FUTURE-year placement is gated on this alone -- an ACTIVE target
+  /// enrollment is necessary but no longer sufficient.
+  publicationStatus     PtaProgressionPublicationStatus  @default(UNPUBLISHED)
+  publishedAt           DateTime?
+  publishedByUserId     String?
+  unpublishedAt         DateTime?
+  unpublishedByUserId   String?
+  /// Optimistic-concurrency guard for publish/unpublish. Incremented on
+  /// every publication transition; callers send the version they last saw,
+  /// so two concurrent publish requests cannot both apply.
+  publicationVersion    Int                              @default(0)
+  /// Mirrors commitIdempotencyKey's purpose for the publish call, so a
+  /// retried HTTP publish is a safe no-op rather than a second disclosure
+  /// event.
+  publishIdempotencyKey String?                          @unique
+  createdAt             DateTime                         @default(now())
+  updatedAt             DateTime                         @updatedAt
+
+  organization      Organization                     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  fromSchoolYear    PtaSchoolYear                    @relation("PtaProgressionFromYear", fields: [fromSchoolYearId], references: [id], onDelete: Restrict)
+  toSchoolYear      PtaSchoolYear                    @relation("PtaProgressionToYear", fields: [toSchoolYearId], references: [id], onDelete: Restrict)
+  records           PtaStudentProgressionRecord[]
+  classroomMappings PtaProgressionClassroomMapping[]
+
+  /// "One batch per transition" is enforced by a PostgreSQL PARTIAL unique
+  /// index that Prisma cannot express, created by hand in migration
+  /// `20260904150000_pta_progression_active_transition_unique`:
+  ///
+  ///   CREATE UNIQUE INDEX "PtaStudentProgressionBatch_active_transition_key"
+  ///     ON "PtaStudentProgressionBatch"
+  ///     ("organizationId", "fromSchoolYearId", "toSchoolYearId")
+  ///     WHERE "status" <> 'ROLLED_BACK';
+  ///
+  /// It replaces an unconditional @@unique on the same three columns. That
+  /// version made rollback a dead end: a rolled-back batch kept occupying the
+  /// year pair, so a school that used the product's own undo could never run
+  /// that transition again.
+  ///
+  /// The partial index preserves every guarantee the unconditional one gave
+  /// the publication model. A batch reaches ROLLED_BACK only from COMMITTED or
+  /// CORRECTED, and `assertNotPublishedForRollback` refuses to roll back a
+  /// PUBLISHED batch, so a ROLLED_BACK row is never PUBLISHED. At most one
+  /// non-rolled-back batch exists per transition, so at most one batch can
+  /// ever be PUBLISHED for it — two batches still cannot disagree about
+  /// whether the same transition is disclosed.
+  ///
+  /// Enforcement stays in the database, not only in the service: two
+  /// concurrent create requests must not both succeed.
+  @@index([organizationId, fromSchoolYearId, toSchoolYearId])
+  @@index([organizationId])
+  @@index([organizationId, status])
+  /// Target-year publication lookups: "what is published for this year in
+  /// this organization" (portal panel) and the mobile read's join.
+  @@index([organizationId, toSchoolYearId, publicationStatus])
+}
+
+/// One student's outcome within a progression batch. Cascade on student —
+/// if a student record is ever deleted, its progression history goes with
+/// it, matching PtaStudentEnrollment's own studentId Cascade. SetNull on
+/// both enrollment references so this record survives an enrollment being
+/// edited/removed independently.
+model PtaStudentProgressionRecord {
+  id                 String                            @id @default(cuid())
+  organizationId     String
+  batchId            String
+  studentId          String
+  sourceEnrollmentId String?
+  targetEnrollmentId String?
+  outcome            PtaStudentProgressionOutcome
+  sourceGradeId      String?
+  targetGradeId      String?
+  sourceClassroomId  String?
+  targetClassroomId  String?
+  exceptionReason    String?
+  status             PtaStudentProgressionRecordStatus @default(PLANNED)
+  createdAt          DateTime                          @default(now())
+  updatedAt          DateTime                          @updatedAt
+
+  organization     Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  batch            PtaStudentProgressionBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  student          PtaStudent                 @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  sourceEnrollment PtaStudentEnrollment?      @relation("PtaProgressionRecordSourceEnrollment", fields: [sourceEnrollmentId], references: [id], onDelete: SetNull)
+  targetEnrollment PtaStudentEnrollment?      @relation("PtaProgressionRecordTargetEnrollment", fields: [targetEnrollmentId], references: [id], onDelete: SetNull)
+
+  // A student can appear at most once per batch -- prevents "a student from
+  // being promoted twice" within a single rollover run (Section 3).
+  @@unique([batchId, studentId])
+  @@index([organizationId])
+  @@index([batchId, outcome])
+  @@index([studentId])
+}
+
+/// Per-batch classroom mapping (source classroom -> target classroom),
+/// configured by an administrator for THIS rollover only. Classroom
+/// mappings are not assumed to repeat year over year (different
+/// teachers/rooms each year), so this is scoped to the batch rather than a
+/// standing organization-wide rule -- see Section 3's "classroom assignment
+/// must come from an administrator-configured mapping or a manual
+/// selection," never an automatic guess. Grade progression, by contrast, is
+/// computed deterministically from PtaGrade.sortOrder at preview time and
+/// needs no equivalent standing/mapping table.
+model PtaProgressionClassroomMapping {
+  id                String   @id @default(cuid())
+  organizationId    String
+  batchId           String
+  sourceClassroomId String
+  targetClassroomId String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  organization Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  batch        PtaStudentProgressionBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@unique([batchId, sourceClassroomId])
+  @@index([organizationId])
 }
 
 enum PtaVolunteerOpportunityStatus {
@@ -6533,15 +6769,17 @@ model PtaSchoolYear {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  organization           Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization           Organization                 @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   households             PtaHousehold[]
   classrooms             PtaClassroom[]
   studentEnrollments     PtaStudentEnrollment[]
   volunteerOpportunities PtaVolunteerOpportunity[]
   officerAssignments     PtaOfficerAssignment[]
-  transitionsFrom        PtaBoardTransition[]      @relation("PtaTransitionFromYear")
-  transitionsTo          PtaBoardTransition[]      @relation("PtaTransitionToYear")
+  transitionsFrom        PtaBoardTransition[]         @relation("PtaTransitionFromYear")
+  transitionsTo          PtaBoardTransition[]         @relation("PtaTransitionToYear")
   committees             PtaCommittee[]
+  progressionBatchesFrom PtaStudentProgressionBatch[] @relation("PtaProgressionFromYear")
+  progressionBatchesTo   PtaStudentProgressionBatch[] @relation("PtaProgressionToYear")
 
   @@unique([organizationId, label])
   @@index([organizationId])

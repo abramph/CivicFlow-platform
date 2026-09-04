@@ -1,4 +1,4 @@
-import { apiFetch } from '@/lib/api-client';
+import { apiFetch, apiFetchImageDataUri } from '@/lib/api-client';
 
 export interface DuesCharge {
   id: string;
@@ -699,6 +699,43 @@ export function getPtaDues(organizationId: string) {
   return apiFetch<PtaDuesSummary>(`/api/mobile/pta/dues?organizationId=${encodeURIComponent(organizationId)}`);
 }
 
+// ── PTA parent — read-only student progression ───────────────────────────
+// Backed by /api/mobile/pta/progression. Family-scoped and read-only: the
+// household is resolved server-side from the caller's own
+// PtaHouseholdAdult linkage, never sent by the client, and the response
+// carries no administrative preview, batch, outcome, or audit data (see
+// parent-progression.ts). Administrative progression stays portal-only.
+
+/** Family-facing status vocabulary — deliberately small and safe; never a
+ * raw internal progression record status or outcome code. */
+export type PtaProgressionStatus = 'CURRENT' | 'CONFIRMED' | 'NOT_YET_AVAILABLE' | 'COMPLETED';
+
+export interface PtaProgressionStudent {
+  studentId: string;
+  displayName: string;
+  currentGrade: string | null;
+  currentClassroom: string | null;
+  /** Populated only once an administrator has explicitly PUBLISHED the
+   * progression results. A committed-but-unpublished placement arrives as
+   * null, exactly like an unresolved or excluded one. */
+  nextGrade: string | null;
+  nextClassroom: string | null;
+  status: PtaProgressionStatus;
+  /** Never explains why a placement is unavailable — unpublished,
+   * withdrawn, unresolved, excluded and rolled-back are indistinguishable. */
+  publicationStatus: 'NOT_AVAILABLE' | 'PUBLISHED';
+}
+
+export interface PtaProgressionSummary {
+  currentSchoolYear: string | null;
+  nextSchoolYear: string | null;
+  students: PtaProgressionStudent[];
+}
+
+export function getPtaProgression(organizationId: string) {
+  return apiFetch<PtaProgressionSummary>(`/api/mobile/pta/progression?organizationId=${encodeURIComponent(organizationId)}`);
+}
+
 export interface ReportPtaDuesPaymentInput {
   organizationId: string;
   duesChargeId?: string | null;
@@ -737,6 +774,75 @@ export interface PtaDocument {
 
 export function getPtaDocuments(organizationId: string) {
   return apiFetch<PtaDocument[]>(`/api/mobile/pta/documents?organizationId=${encodeURIComponent(organizationId)}`);
+}
+
+// ── PTA parent — family photo ────────────────────────────────────────────
+// Backed by /api/mobile/pta/household/photo, a bearer-token bridge over the
+// same household-photo.ts security pipeline (magic-byte validation, sharp
+// re-encode, EXIF strip) the web parent self-service route uses. The
+// household id is never sent by the client — the server resolves it from
+// the caller's own PtaHouseholdAdult linkage on every call.
+
+export interface PtaHouseholdPhoto {
+  /** A local `data:` URI holding the bytes this device fetched with its own
+   * bearer token — never a storage URL. The API stopped returning signed
+   * object-storage URLs for family photos: they are a shareable, unrevocable
+   * bearer credential for children's/household data. */
+  uri: string;
+  byteSize: number;
+}
+
+/**
+ * Returns the family photo for the CALLER'S OWN household. No household,
+ * attachment or student id is sent: the server resolves the household from
+ * the bearer token's linkage, so there is nothing here for a client to forge.
+ *
+ * Resolves to null when there is no photo (HTTP 404), which is a normal state.
+ */
+export async function getPtaHouseholdPhoto(organizationId: string): Promise<PtaHouseholdPhoto | null> {
+  const uri = await apiFetchImageDataUri(
+    `/api/mobile/pta/household/photo?organizationId=${encodeURIComponent(organizationId)}`
+  );
+  if (!uri) return null;
+  // Approximate decoded size from the base64 payload; used only for display
+  // and diagnostics, never for any security decision.
+  const base64 = uri.slice(uri.indexOf(',') + 1);
+  return { uri, byteSize: Math.floor((base64.length * 3) / 4) };
+}
+
+export interface UploadPtaHouseholdPhotoAsset {
+  uri: string;
+  fileName: string;
+  mimeType: string;
+}
+
+export interface PtaHouseholdPhotoUploadResult {
+  photoUrl: string;
+  byteSize: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * React Native's fetch/FormData accepts a {uri, name, type} object in place
+ * of a web File/Blob to reference a local file by its on-device URI --
+ * there's no Blob to construct from an asset URI without reading the whole
+ * file into memory first, which this deliberately avoids. The DOM lib's
+ * FormData.append() type only knows about `Blob`, hence the cast; this is
+ * the standard React Native pattern for multipart file uploads. apiFetch()
+ * already skips forcing a JSON Content-Type whenever the body is FormData.
+ */
+export function uploadPtaHouseholdPhoto(organizationId: string, asset: UploadPtaHouseholdPhotoAsset) {
+  const form = new FormData();
+  form.append('file', { uri: asset.uri, name: asset.fileName, type: asset.mimeType } as unknown as Blob);
+  return apiFetch<PtaHouseholdPhotoUploadResult>(`/api/mobile/pta/household/photo?organizationId=${encodeURIComponent(organizationId)}`, {
+    method: 'POST',
+    body: form,
+  });
+}
+
+export function deletePtaHouseholdPhoto(organizationId: string) {
+  return apiFetch<void>(`/api/mobile/pta/household/photo?organizationId=${encodeURIComponent(organizationId)}`, { method: 'DELETE' });
 }
 
 // ── Admin ─────────────────────────────────────────────────────────────────

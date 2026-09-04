@@ -185,3 +185,13 @@ jobs:
         env:
           DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/ci_migrations?schema=public
         run: npx prisma migrate status
+
+      # The "one active progression batch per transition" rule is a PostgreSQL
+      # PARTIAL unique index that Prisma's schema language cannot express, so
+      # the unit suite (which mocks Prisma) cannot prove it holds. This is the
+      # only job with a real database, so the constraint and its concurrency
+      # behaviour are proven here.
+      - name: Verify the progression active-transition constraint
+        env:
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/ci_migrations?schema=public
+        run: npm run db:verify:progression

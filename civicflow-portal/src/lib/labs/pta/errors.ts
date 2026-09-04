@@ -13,6 +13,7 @@ export const PTA_ERROR_CODES = [
   "PTA_ORGANIZATION_INACTIVE",
   "PTA_PROFILE_NOT_FOUND",
   "PTA_HOUSEHOLD_NOT_FOUND",
+  "PTA_HOUSEHOLD_PHOTO_DELETE_FAILED",
   "PTA_STUDENT_NOT_FOUND",
   "PTA_GRADE_NOT_FOUND",
   "PTA_CLASSROOM_NOT_FOUND",
@@ -182,6 +183,60 @@ export const PTA_ERROR_CODES = [
    * the remedy is for an admin to add a name to the household adult
    * record, not for the system to invent one. */
   "PTA_VOLUNTEER_AGREEMENT_SIGNER_UNRESOLVED",
+  // Academic-year student progression.
+  /** Platform-wide env kill-switch is off — checked before any org flag,
+   * covers both preview and commit (unlike the volunteer-hours program,
+   * this one switch covers the whole feature, since even a preview reads
+   * and displays real cross-household student data). */
+  "PTA_STUDENT_PROGRESSION_PLATFORM_DISABLED",
+  /** PtaProfile.studentProgressionEnabled is false for this org. */
+  "PTA_STUDENT_PROGRESSION_DISABLED",
+  "PTA_PROGRESSION_BATCH_NOT_FOUND",
+  "PTA_PROGRESSION_RECORD_NOT_FOUND",
+  /** A batch already exists for this exact (fromYear, toYear) pair — the
+   * DB-level unique constraint's friendly front door. Use the correction
+   * workflow on the existing batch instead of creating a second one. */
+  "PTA_PROGRESSION_BATCH_ALREADY_EXISTS",
+  /** Commit was requested before any preview exists for this batch. */
+  "PTA_PROGRESSION_BATCH_NOT_PREVIEWED",
+  /** Commit was requested with a previewVersion that no longer matches the
+   * batch's current previewedAt — the preview was regenerated (or the
+   * batch's state changed) since the caller last fetched it. Re-fetch the
+   * preview and confirm again before retrying commit. */
+  "PTA_PROGRESSION_BATCH_STALE_PREVIEW",
+  /** Commit was requested with a NEW idempotency key against a batch that
+   * is already COMMITTED under a different key — a genuinely new commit
+   * attempt, not a safe retry of the original one. */
+  "PTA_PROGRESSION_BATCH_ALREADY_COMMITTED",
+  /** A completed/committed batch's records are historical — corrections go
+   * through the dedicated correction endpoint, never a raw record edit. */
+  "PTA_PROGRESSION_BATCH_NOT_CORRECTABLE",
+  /** Rollback blocked: at least one target-year enrollment created by this
+   * batch already has dependent volunteer-ledger activity recorded against
+   * it. Use the correction workflow for individual records instead. */
+  "PTA_PROGRESSION_ROLLBACK_BLOCKED_DEPENDENT_ACTIVITY",
+  /** toSchoolYearId must chronologically follow fromSchoolYearId (by parsed
+   * "YYYY-YYYY" label) — a rollover can't progress a student into the past. */
+  "PTA_PROGRESSION_INVALID_YEAR_ORDER",
+  /** Publication requires a committed (or corrected) batch — a merely
+   * previewed batch has no real target enrollments to disclose. */
+  "PTA_PROGRESSION_NOT_COMMITTED",
+  /** A rolled-back batch's target enrollments are INACTIVE; there is
+   * nothing valid left to publish. */
+  "PTA_PROGRESSION_ROLLED_BACK",
+  /** Unresolved records (NEEDS_REVIEW still PLANNED, or FAILED) remain.
+   * Publication is blocked rather than partial — see parent-progression's
+   * rationale: a family shown "Confirmed" for a student the office has not
+   * actually resolved is worse than a family shown nothing yet. */
+  "PTA_PROGRESSION_PUBLISH_BLOCKED",
+  /** The caller's publicationVersion is not the current one — someone else
+   * published/unpublished in between. */
+  "PTA_PROGRESSION_PUBLICATION_STALE",
+  /** Rollback attempted while results are still published to families.
+   * Unpublish first, so the disclosure change is an explicit, audited act. */
+  "PTA_PROGRESSION_ROLLBACK_BLOCKED_PUBLISHED",
+  /** Unpublish attempted on a batch that is not currently published. */
+  "PTA_PROGRESSION_NOT_PUBLISHED",
 ] as const;
 
 export type PtaErrorCode = (typeof PTA_ERROR_CODES)[number];
@@ -192,6 +247,10 @@ const STATUS_FOR_CODE: Record<PtaErrorCode, number> = {
   PTA_ORGANIZATION_INACTIVE: 403,
   PTA_PROFILE_NOT_FOUND: 404,
   PTA_HOUSEHOLD_NOT_FOUND: 404,
+  // Retryable on purpose: the storage object could not be deleted, so
+  // nothing was changed and the caller should try again rather than be
+  // told the photo was removed when it was not.
+  PTA_HOUSEHOLD_PHOTO_DELETE_FAILED: 503,
   PTA_STUDENT_NOT_FOUND: 404,
   PTA_GRADE_NOT_FOUND: 404,
   PTA_CLASSROOM_NOT_FOUND: 404,
@@ -258,6 +317,23 @@ const STATUS_FOR_CODE: Record<PtaErrorCode, number> = {
   PTA_VOLUNTEER_AGREEMENT_ACTIVELY_REQUIRED: 409,
   PTA_VOLUNTEER_AGREEMENT_CONTENT_HASH_MISMATCH: 500,
   PTA_VOLUNTEER_AGREEMENT_SIGNER_UNRESOLVED: 400,
+  PTA_STUDENT_PROGRESSION_PLATFORM_DISABLED: 403,
+  PTA_STUDENT_PROGRESSION_DISABLED: 403,
+  PTA_PROGRESSION_BATCH_NOT_FOUND: 404,
+  PTA_PROGRESSION_RECORD_NOT_FOUND: 404,
+  PTA_PROGRESSION_BATCH_ALREADY_EXISTS: 409,
+  PTA_PROGRESSION_BATCH_NOT_PREVIEWED: 409,
+  PTA_PROGRESSION_BATCH_STALE_PREVIEW: 409,
+  PTA_PROGRESSION_BATCH_ALREADY_COMMITTED: 409,
+  PTA_PROGRESSION_BATCH_NOT_CORRECTABLE: 409,
+  PTA_PROGRESSION_ROLLBACK_BLOCKED_DEPENDENT_ACTIVITY: 409,
+  PTA_PROGRESSION_INVALID_YEAR_ORDER: 400,
+  PTA_PROGRESSION_NOT_COMMITTED: 409,
+  PTA_PROGRESSION_ROLLED_BACK: 409,
+  PTA_PROGRESSION_PUBLISH_BLOCKED: 409,
+  PTA_PROGRESSION_PUBLICATION_STALE: 409,
+  PTA_PROGRESSION_ROLLBACK_BLOCKED_PUBLISHED: 409,
+  PTA_PROGRESSION_NOT_PUBLISHED: 409,
 };
 
 export class PtaError extends Error {

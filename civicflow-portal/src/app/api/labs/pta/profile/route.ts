@@ -1,5 +1,5 @@
 import { withApiErrorHandling } from "@/lib/api-route";
-import { isPtaVolunteerHoursOrgAllowed, isPtaVolunteerHoursPlatformEnabled } from "@/lib/env";
+import { isPtaVolunteerHoursOrgAllowed, isPtaVolunteerHoursPlatformEnabled, isPtaStudentProgressionPlatformEnabled } from "@/lib/env";
 import { PtaError } from "@/lib/labs/pta/errors";
 import { requirePtaAccess } from "@/lib/labs/pta/guard";
 import { getPtaProfile, upsertPtaProfile } from "@/lib/labs/pta/profile";
@@ -30,6 +30,7 @@ const bodySchema = z.object({
   concernsEnabled: z.boolean().optional(),
   concernsLabel: z.string().max(80).nullable().optional(),
   electionsEnabled: z.boolean().optional(),
+  studentProgressionEnabled: z.boolean().optional(),
   ptaVolunteerRequirementsEnabled: z.boolean().optional(),
   ptaVolunteerBuyoutEnabled: z.boolean().optional(),
   ptaVolunteerAssessmentsEnabled: z.boolean().optional(),
@@ -73,6 +74,18 @@ export async function PUT(request: Request) {
     // PTA-L: the elections switch is election-management authority.
     if (input.electionsEnabled !== undefined) {
       await requirePtaAccess("pta:elections:manage");
+    }
+    // Turning the whole progression feature on/off for this org is itself
+    // the same higher-risk, org-wide class of action as committing a
+    // rollover — held to the commit-tier permission, not the preview-tier
+    // one. Also fails closed if the platform kill-switch is off, mirroring
+    // the volunteer-hours flags above, so a caller can never pre-stage the
+    // org flag ahead of a platform rollout.
+    if (input.studentProgressionEnabled !== undefined) {
+      if (!isPtaStudentProgressionPlatformEnabled()) {
+        throw new PtaError("PTA_STUDENT_PROGRESSION_PLATFORM_DISABLED", "Student progression is not enabled on this platform.");
+      }
+      await requirePtaAccess("pta:student-progression:commit");
     }
     // Volunteer Hour Requirements & Buyout program (docs/pta-volunteer-hours.md):
     // each of the six flags is gated by the permission that most directly

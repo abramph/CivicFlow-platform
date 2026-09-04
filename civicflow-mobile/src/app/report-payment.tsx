@@ -72,8 +72,13 @@ export default function ReportPaymentScreen() {
   }
 
   async function pickReceipt() {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) return;
+    // launchImageLibraryAsync's own doc comment: "Requires
+    // Permissions.MEDIA_LIBRARY on iOS 10 only" -- on every iOS version
+    // this app supports (and on Android, whose plugin config never
+    // requests a storage/media-library runtime permission either), the
+    // system picker runs out-of-process and hands back only the file the
+    // user chose, with no broad library grant needed. Requesting it first
+    // was unnecessary (build-26 review, Section 6).
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.7 });
     if (result.canceled || !result.assets[0]) return;
     const asset = result.assets[0];

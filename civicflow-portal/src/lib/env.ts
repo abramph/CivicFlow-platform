@@ -111,6 +111,15 @@ const serverEnvSchema = z.object({
   // stay blocked even for an org that otherwise has assessments fully
   // enabled, until that design is built. Preview is never gated by this.
   PTA_VOLUNTEER_ASSESSMENT_POSTING_ENABLED: z.string().optional(),
+  // Platform-wide kill-switch for PTA/PTO academic-year student progression
+  // (the rollover that advances students to a new school year). Mirrors
+  // PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED exactly: checked before any
+  // per-org PtaProfile.studentProgressionEnabled flag. Unset/false means
+  // the feature is fully dark platform-wide, for both preview and commit —
+  // unlike the volunteer-hours program, this one switch covers the whole
+  // feature rather than only its irreversible sub-action, since even a
+  // preview reads and displays real cross-household student data.
+  PTA_STUDENT_PROGRESSION_PLATFORM_ENABLED: z.string().optional(),
   // Base64-encoded 32-byte AES-256-GCM key for encrypting Twilio credentials
   // stored in PlatformSmsSettings (see lib/crypto-secrets.ts). Optional at
   // boot like the other SMS_* vars — only required once a super admin
@@ -187,6 +196,7 @@ export function getServerEnv(): ServerEnv {
     PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED: process.env.PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED,
     PTA_VOLUNTEER_HOURS_ALLOWED_ORG_IDS: process.env.PTA_VOLUNTEER_HOURS_ALLOWED_ORG_IDS,
     PTA_VOLUNTEER_ASSESSMENT_POSTING_ENABLED: process.env.PTA_VOLUNTEER_ASSESSMENT_POSTING_ENABLED,
+    PTA_STUDENT_PROGRESSION_PLATFORM_ENABLED: process.env.PTA_STUDENT_PROGRESSION_PLATFORM_ENABLED,
   };
 
   if (raw.NODE_ENV === "production") {
@@ -259,6 +269,7 @@ export function getServerEnv(): ServerEnv {
     PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED: parsed.PTA_VOLUNTEER_HOURS_PLATFORM_ENABLED,
     PTA_VOLUNTEER_HOURS_ALLOWED_ORG_IDS: parsed.PTA_VOLUNTEER_HOURS_ALLOWED_ORG_IDS,
     PTA_VOLUNTEER_ASSESSMENT_POSTING_ENABLED: parsed.PTA_VOLUNTEER_ASSESSMENT_POSTING_ENABLED,
+    PTA_STUDENT_PROGRESSION_PLATFORM_ENABLED: parsed.PTA_STUDENT_PROGRESSION_PLATFORM_ENABLED,
   };
 
   return cached;
@@ -298,6 +309,21 @@ export function isPtaVolunteerAssessmentPostingEnabled() {
   return (
     env.PTA_VOLUNTEER_ASSESSMENT_POSTING_ENABLED === "1" ||
     env.PTA_VOLUNTEER_ASSESSMENT_POSTING_ENABLED === "true"
+  );
+}
+
+/**
+ * Platform-wide kill-switch for PTA/PTO academic-year student progression.
+ * Every guard checks this FIRST, before any per-org
+ * PtaProfile.studentProgressionEnabled flag — unset/false means the
+ * feature (preview AND commit) is fully dark platform-wide regardless of
+ * how an individual org is configured.
+ */
+export function isPtaStudentProgressionPlatformEnabled() {
+  const env = getServerEnv();
+  return (
+    env.PTA_STUDENT_PROGRESSION_PLATFORM_ENABLED === "1" ||
+    env.PTA_STUDENT_PROGRESSION_PLATFORM_ENABLED === "true"
   );
 }
 

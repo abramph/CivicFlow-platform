@@ -466,6 +466,11 @@ export default function DashboardScreen() {
             <ThemedText style={styles.actionButtonSecondaryText}>Documents</ThemedText>
           </Pressable>
         ) : null}
+        {hasPtaIdentity ? (
+          <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/pta-my-family' as never)} accessibilityRole="button" accessibilityLabel="My family">
+            <ThemedText style={styles.actionButtonSecondaryText}>My Family</ThemedText>
+          </Pressable>
+        ) : null}
       </ThemedView>
 
       <ThemedView style={styles.sectionHeaderRow}>
