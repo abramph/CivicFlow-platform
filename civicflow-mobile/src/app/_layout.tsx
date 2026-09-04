@@ -4,6 +4,7 @@ import * as Notifications from 'expo-notifications';
 import { useColorScheme } from 'react-native';
 
 import { AuthProvider } from '@/lib/auth-context';
+import { StagingBadge } from '@/components/StagingBadge';
 import { Colors } from '@/constants/theme';
 import { useNotificationDeepLinks } from '@/lib/use-notification-deep-links';
 
@@ -32,6 +33,7 @@ export default function RootLayout() {
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <AuthProvider>
         <NotificationDeepLinks />
+        <StagingBadge />
         <Stack
           screenOptions={{
             headerShown: true,

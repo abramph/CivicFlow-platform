@@ -213,7 +213,36 @@ export function getServerEnv(): ServerEnv {
     // key is the more secure choice and works identically with the Stripe
     // SDK. STRIPE_TEST_SECRET_KEY is a separate, intentionally test-mode
     // key for connected-account onboarding and is untouched by this check.
-    if (!/^(sk|rk)_live_/.test(parsed.data.STRIPE_SECRET_KEY)) {
+    // ─────────────────────────────────────────────────────────────────────
+    // STAGING-ONLY ESCAPE HATCH — exists ONLY on test/build26-staging-preview.
+    // NEVER merge this to main.
+    //
+    // An isolated staging environment must run with NODE_ENV=production so it
+    // exercises the real production code paths, yet it must not hold a live
+    // payment credential. Without this hatch those two requirements are
+    // mutually exclusive and no Stripe-free staging environment can exist.
+    //
+    // Deliberately hard to trip by accident: it needs an explicit opt-in AND
+    // a non-production NEXTAUTH_URL. It is also bidirectional — a staging
+    // deployment is forbidden from using a LIVE key, so this cannot become a
+    // route to pointing staging at real money.
+    const PRODUCTION_HOSTS =
+      /(app\.getunestra\.com|civicflow-portal-iule6\.ondigitalocean\.app)/i;
+    const stagingOptIn = process.env.STAGING_ALLOW_TEST_STRIPE === "1";
+    const hostLooksProduction = PRODUCTION_HOSTS.test(parsed.data.NEXTAUTH_URL);
+    const stagingTestStripeAllowed = stagingOptIn && !hostLooksProduction;
+
+    if (stagingOptIn && hostLooksProduction) {
+      throw new Error(
+        "Invalid server environment: STAGING_ALLOW_TEST_STRIPE must never be set on a production host."
+      );
+    }
+    if (stagingTestStripeAllowed && /^(sk|rk)_live_/.test(parsed.data.STRIPE_SECRET_KEY)) {
+      throw new Error(
+        "Invalid server environment: a staging deployment must not use a live-mode Stripe key."
+      );
+    }
+    if (!stagingTestStripeAllowed && !/^(sk|rk)_live_/.test(parsed.data.STRIPE_SECRET_KEY)) {
       throw new Error(
         "Invalid server environment: STRIPE_SECRET_KEY must be a live-mode secret key (sk_live_... or rk_live_...) in production."
       );
