@@ -1,7 +1,7 @@
 import { withApiErrorHandling } from "@/lib/api-route";
 import { requireMobilePtaHouseholdAccess } from "@/lib/mobile-auth";
-import { uploadHouseholdPhoto, deleteHouseholdPhoto, getHouseholdPhotoAttachment } from "@/lib/labs/pta/household-photo";
-import { getSignedObjectUrl } from "@/lib/storage";
+import { uploadHouseholdPhoto, deleteHouseholdPhoto, getHouseholdPhotoBytes } from "@/lib/labs/pta/household-photo";
+import { familyPhotoBytesResponse, noFamilyPhotoResponse } from "@/lib/labs/pta/household-photo-response";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { ValidationError } from "@/lib/validation";
 
@@ -15,20 +15,30 @@ function organizationIdFromQuery(request: Request): string {
 
 /**
  * GET /api/mobile/pta/household/photo?organizationId=...
- * Mobile bridge over household-photo.ts, mirroring the web parent
- * self-service route (my-household/photo) but bearer-authenticated. Unlike
- * the web GET route, this returns JSON with a signed URL rather than a
- * redirect: apiFetch() (src/lib/api-client.ts on the mobile side) expects a
- * {ok, data} JSON envelope and would try to parse the redirected image
- * bytes as JSON if this issued a raw Response.redirect().
+ *
+ * Returns the family photo's BYTES to an authorized caller.
+ *
+ * This used to return `{ url }` carrying a 5-minute signed object-storage
+ * URL. That handed the client a bearer credential for a children's/household
+ * image: anyone who obtained the URL could fetch it from any client, with no
+ * authorization and no way to revoke it before expiry, and the image was then
+ * served by a domain that has no idea who the caller is. The bytes now come
+ * from this endpoint, which authorizes first.
+ *
+ * The household is resolved SERVER-SIDE from the bearer token's own
+ * PtaHouseholdAdult linkage by requireMobilePtaHouseholdAccess. No household,
+ * attachment, object or student identifier is accepted from the client, so
+ * there is nothing for a caller to forge — only organizationId is read from
+ * the query, and it is validated as one the caller actually belongs to.
  */
 export async function GET(request: Request) {
   return withApiErrorHandling(async () => {
+    // Authorization happens before any storage access, and before the
+    // household id even exists in this scope.
     const { organizationId, adult } = await requireMobilePtaHouseholdAccess(request, organizationIdFromQuery(request));
-    const attachment = await getHouseholdPhotoAttachment(organizationId, adult.householdId);
-    if (!attachment) return Response.json({ ok: true, data: null });
-    const url = await getSignedObjectUrl(attachment.objectKey, 300);
-    return Response.json({ ok: true, data: { url, byteSize: attachment.byteSize } });
+    const photo = await getHouseholdPhotoBytes(organizationId, adult.householdId);
+    if (!photo) return noFamilyPhotoResponse();
+    return familyPhotoBytesResponse(photo);
   });
 }
 

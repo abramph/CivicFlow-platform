@@ -7,9 +7,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * file only proves the bridge-specific concerns: organizationId resolved
  * from the query string (not the body) so auth can run before the request
  * body is ever read, the household id always comes from the caller's own
- * PtaHouseholdAdult linkage, and the GET shape is JSON (not a redirect) --
- * required because apiFetch() on the mobile client parses a {ok,data} JSON
- * envelope and would choke on a raw redirect to binary image bytes.
+ * PtaHouseholdAdult linkage, and -- since the Build 26 privacy correction --
+ * that GET returns the image BYTES rather than a signed object-storage URL.
+ * A signed URL is a bearer credential for a children's/household image:
+ * shareable, unrevocable until it expires, and served by a host that cannot
+ * tell who is asking. These tests exist to keep one from coming back.
  */
 
 const requireMobilePtaHouseholdAccess = vi.fn();
@@ -20,15 +22,16 @@ vi.mock("@/lib/mobile-auth", async (importOriginal) => {
 
 const uploadHouseholdPhoto = vi.fn();
 const deleteHouseholdPhoto = vi.fn();
-const getHouseholdPhotoAttachment = vi.fn();
+const getHouseholdPhotoBytes = vi.fn();
 vi.mock("@/lib/labs/pta/household-photo", () => ({
   uploadHouseholdPhoto: (...a: unknown[]) => uploadHouseholdPhoto(...a),
   deleteHouseholdPhoto: (...a: unknown[]) => deleteHouseholdPhoto(...a),
-  getHouseholdPhotoAttachment: (...a: unknown[]) => getHouseholdPhotoAttachment(...a),
+  getHouseholdPhotoBytes: (...a: unknown[]) => getHouseholdPhotoBytes(...a),
 }));
 
-const getSignedObjectUrl = vi.fn();
-vi.mock("@/lib/storage", () => ({ getSignedObjectUrl: (...a: unknown[]) => getSignedObjectUrl(...a) }));
+// Deliberately NOT mocked away: if the route ever imports a signing helper
+// again, that is the regression these tests are here to catch.
+const JPEG_BYTES = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]);
 
 const requireRateLimit = vi.fn();
 vi.mock("@/lib/rate-limit", () => ({ requireRateLimit: (...a: unknown[]) => requireRateLimit(...a) }));
@@ -59,8 +62,7 @@ beforeEach(() => {
   requireRateLimit.mockResolvedValue(null);
   uploadHouseholdPhoto.mockResolvedValue({ photoUrl: `/api/labs/pta/households/${HOUSEHOLD_ID}/photo`, byteSize: 100, width: 10, height: 10 });
   deleteHouseholdPhoto.mockResolvedValue(undefined);
-  getHouseholdPhotoAttachment.mockResolvedValue({ id: "attachment-1", objectKey: "attachments/org-1/pta_household/household-1/photo.jpg", byteSize: 100 });
-  getSignedObjectUrl.mockResolvedValue("https://spaces.example/signed-url");
+  getHouseholdPhotoBytes.mockResolvedValue({ buffer: JPEG_BYTES, contentType: "image/jpeg", byteSize: JPEG_BYTES.byteLength });
 });
 
 describe("GET /api/mobile/pta/household/photo", () => {
@@ -71,22 +73,53 @@ describe("GET /api/mobile/pta/household/photo", () => {
     expect(requireMobilePtaHouseholdAccess).not.toHaveBeenCalled();
   });
 
-  it("returns JSON with a short-lived signed URL, not a redirect", async () => {
+  it("returns the image BYTES, never a signed URL, key, or redirect", async () => {
     const { GET } = await import("../route");
     const res = await GET(new Request(url("/api/mobile/pta/household/photo")));
+
     expect(res.status).toBe(200);
-    const payload = await res.json();
-    expect(payload).toEqual({ ok: true, data: { url: "https://spaces.example/signed-url", byteSize: 100 } });
-    expect(getSignedObjectUrl).toHaveBeenCalledWith("attachments/org-1/pta_household/household-1/photo.jpg", 300);
+    expect(res.headers.get("content-type")).toBe("image/jpeg");
+    const body = Buffer.from(await res.arrayBuffer());
+    expect(body.subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]));
+
+    // Not a redirect to storage.
+    expect(res.status).toBeLessThan(300);
+    expect(res.headers.get("location")).toBeNull();
+    // Nothing in the response names storage.
+    const asText = body.toString("latin1") + JSON.stringify([...res.headers.entries()]);
+    expect(asText).not.toContain("X-Amz-Signature");
+    expect(asText).not.toContain("digitaloceanspaces");
+    expect(asText).not.toContain("attachments/org-1");
   });
 
-  it("returns null data (not an error) when the household has no photo", async () => {
-    getHouseholdPhotoAttachment.mockResolvedValueOnce(null);
+  it("sets privacy-safe caching and sniffing headers", async () => {
     const { GET } = await import("../route");
     const res = await GET(new Request(url("/api/mobile/pta/household/photo")));
-    const payload = await res.json();
-    expect(res.status).toBe(200);
-    expect(payload).toEqual({ ok: true, data: null });
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
+  it("resolves the household from the token, never from anything the client sends", async () => {
+    const { GET } = await import("../route");
+    // A forged household id in the query string must change nothing.
+    await GET(new Request(`${url("/api/mobile/pta/household/photo")}&householdId=someone-elses-household`));
+    expect(getHouseholdPhotoBytes).toHaveBeenCalledWith(ORG_ID, HOUSEHOLD_ID);
+  });
+
+  it("returns 404 when the household has no photo", async () => {
+    getHouseholdPhotoBytes.mockResolvedValueOnce(null);
+    const { GET } = await import("../route");
+    const res = await GET(new Request(url("/api/mobile/pta/household/photo")));
+    expect(res.status).toBe(404);
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
+  });
+
+  it("returns 404 once the photo has been removed, rather than serving stale bytes", async () => {
+    const { GET, DELETE } = await import("../route");
+    await DELETE(new Request(url("/api/mobile/pta/household/photo")));
+    getHouseholdPhotoBytes.mockResolvedValueOnce(null);
+    const res = await GET(new Request(url("/api/mobile/pta/household/photo")));
+    expect(res.status).toBe(404);
   });
 
   it("propagates a bearer-auth failure without querying the attachment", async () => {
@@ -94,7 +127,7 @@ describe("GET /api/mobile/pta/household/photo", () => {
     const { GET } = await import("../route");
     const res = await GET(new Request(url("/api/mobile/pta/household/photo")));
     expect(res.status).toBe(401);
-    expect(getHouseholdPhotoAttachment).not.toHaveBeenCalled();
+    expect(getHouseholdPhotoBytes).not.toHaveBeenCalled();
   });
 });
 

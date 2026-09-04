@@ -24,11 +24,11 @@ vi.mock("@/lib/labs/pta/guard", () => ({
 
 const uploadHouseholdPhoto = vi.fn();
 const deleteHouseholdPhoto = vi.fn();
-const getHouseholdPhotoAttachment = vi.fn();
+const getHouseholdPhotoBytes = vi.fn();
 vi.mock("@/lib/labs/pta/household-photo", () => ({
   uploadHouseholdPhoto: (...a: unknown[]) => uploadHouseholdPhoto(...a),
   deleteHouseholdPhoto: (...a: unknown[]) => deleteHouseholdPhoto(...a),
-  getHouseholdPhotoAttachment: (...a: unknown[]) => getHouseholdPhotoAttachment(...a),
+  getHouseholdPhotoBytes: (...a: unknown[]) => getHouseholdPhotoBytes(...a),
 }));
 
 const findFirstHouseholdAdult = vi.fn();
@@ -36,8 +36,9 @@ vi.mock("@/lib/prisma", () => ({
   prisma: { ptaHouseholdAdult: { findFirst: (...a: unknown[]) => findFirstHouseholdAdult(...a) } },
 }));
 
-const getSignedObjectUrl = vi.fn();
-vi.mock("@/lib/storage", () => ({ getSignedObjectUrl: (...a: unknown[]) => getSignedObjectUrl(...a) }));
+// Storage is deliberately NOT mocked here: this route must not reach for a
+// signing helper at all any more, and an unmocked import would surface that.
+const JPEG_BYTES = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]);
 
 import { PtaError } from "@/lib/labs/pta/errors";
 
@@ -65,8 +66,7 @@ beforeEach(() => {
   requirePtaVertical.mockResolvedValue({ primaryVertical: "PTA", status: "active" });
   uploadHouseholdPhoto.mockResolvedValue({ photoUrl: `/api/labs/pta/households/${HOUSEHOLD_ID}/photo`, byteSize: 100, width: 10, height: 10 });
   deleteHouseholdPhoto.mockResolvedValue(undefined);
-  getHouseholdPhotoAttachment.mockResolvedValue({ id: "attachment-1", objectKey: "attachments/org-1/pta_household/household-1/photo.jpg" });
-  getSignedObjectUrl.mockResolvedValue("https://spaces.example/signed-url");
+  getHouseholdPhotoBytes.mockResolvedValue({ buffer: JPEG_BYTES, contentType: "image/jpeg", byteSize: JPEG_BYTES.byteLength });
   findFirstHouseholdAdult.mockResolvedValue(null);
 });
 
@@ -110,13 +110,26 @@ describe("DELETE /api/labs/pta/households/[householdId]/photo", () => {
 });
 
 describe("GET /api/labs/pta/households/[householdId]/photo -- dual-audience authorization", () => {
-  it("allows an officer holding pta:directory:read and redirects to a short-lived signed URL", async () => {
+  it("allows an officer holding pta:directory:read and serves the BYTES, never a redirect to storage", async () => {
     const { GET } = await import("../route");
     const res = await GET(new Request("https://portal.test/x"), params());
-    expect(res.status).toBe(302);
-    expect(res.headers.get("location")).toBe("https://spaces.example/signed-url");
-    expect(getSignedObjectUrl).toHaveBeenCalledWith("attachments/org-1/pta_household/household-1/photo.jpg", 300);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+    expect(res.headers.get("content-type")).toBe("image/jpeg");
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    const body = Buffer.from(await res.arrayBuffer());
+    expect(body.subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]));
     expect(findFirstHouseholdAdult).not.toHaveBeenCalled(); // officer path short-circuits before the linkage lookup
+  });
+
+  it("never puts a storage host or object key anywhere in the response", async () => {
+    const { GET } = await import("../route");
+    const res = await GET(new Request("https://portal.test/x"), params());
+    const headers = JSON.stringify([...res.headers.entries()]);
+    expect(headers).not.toContain("digitaloceanspaces");
+    expect(headers).not.toContain("X-Amz-Signature");
+    expect(headers).not.toContain("attachments/org-1");
   });
 
   it("allows a parent linked to THIS household even though they hold no permission at all", async () => {
@@ -128,7 +141,7 @@ describe("GET /api/labs/pta/households/[householdId]/photo -- dual-audience auth
     findFirstHouseholdAdult.mockResolvedValueOnce({ id: "adult-1" });
     const { GET } = await import("../route");
     const res = await GET(new Request("https://portal.test/x"), params());
-    expect(res.status).toBe(302);
+    expect(res.status).toBe(200);
     expect(findFirstHouseholdAdult).toHaveBeenCalledWith({
       where: { organizationId: ORG_ID, userId: "parent-1", householdId: HOUSEHOLD_ID },
       select: { id: true },
@@ -145,7 +158,7 @@ describe("GET /api/labs/pta/households/[householdId]/photo -- dual-audience auth
     const { GET } = await import("../route");
     const res = await GET(new Request("https://portal.test/x"), params());
     expect(res.status).toBe(404);
-    expect(getSignedObjectUrl).not.toHaveBeenCalled();
+    expect(getHouseholdPhotoBytes).not.toHaveBeenCalled();
   });
 
   it("denies a caller with neither directory-read permission nor household linkage", async () => {
@@ -157,10 +170,10 @@ describe("GET /api/labs/pta/households/[householdId]/photo -- dual-audience auth
   });
 
   it("returns 404 when authorized but no photo is on file", async () => {
-    getHouseholdPhotoAttachment.mockResolvedValueOnce(null);
+    getHouseholdPhotoBytes.mockResolvedValueOnce(null);
     const { GET } = await import("../route");
     const res = await GET(new Request("https://portal.test/x"), params());
     expect(res.status).toBe(404);
-    expect(getSignedObjectUrl).not.toHaveBeenCalled();
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
   });
 });

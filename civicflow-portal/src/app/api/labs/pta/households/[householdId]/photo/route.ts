@@ -1,10 +1,10 @@
 import { withApiErrorHandling } from "@/lib/api-route";
 import { requireOrganization } from "@/lib/auth-guards";
 import { requirePtaAccess, requirePtaVertical } from "@/lib/labs/pta/guard";
-import { uploadHouseholdPhoto, deleteHouseholdPhoto, getHouseholdPhotoAttachment } from "@/lib/labs/pta/household-photo";
+import { uploadHouseholdPhoto, deleteHouseholdPhoto, getHouseholdPhotoBytes } from "@/lib/labs/pta/household-photo";
+import { familyPhotoBytesResponse, noFamilyPhotoResponse } from "@/lib/labs/pta/household-photo-response";
 import { PtaError } from "@/lib/labs/pta/errors";
 import { prisma } from "@/lib/prisma";
-import { getSignedObjectUrl } from "@/lib/storage";
 
 const MAX_BYTES = 15 * 1024 * 1024;
 
@@ -38,12 +38,15 @@ export async function GET(_request: Request, { params }: { params: Promise<{ hou
       throw new PtaError("PTA_HOUSEHOLD_NOT_FOUND", "Household not found in this organization.");
     }
 
-    const attachment = await getHouseholdPhotoAttachment(organizationId, householdId);
-    if (!attachment) {
-      return Response.json({ ok: false, error: "No family photo on file." }, { status: 404 });
-    }
-    const url = await getSignedObjectUrl(attachment.objectKey, 300);
-    return Response.redirect(url);
+    // Serves the BYTES, never a redirect to object storage. This route used
+    // to end in Response.redirect(getSignedObjectUrl(...)), which handed the
+    // browser a 5-minute bearer credential for a children's/household image —
+    // shareable, unrevocable, and fetched from a domain that cannot tell who
+    // the caller is. Shares one delivery path with the mobile route so the two
+    // cannot drift apart.
+    const photo = await getHouseholdPhotoBytes(organizationId, householdId);
+    if (!photo) return noFamilyPhotoResponse();
+    return familyPhotoBytesResponse(photo);
   });
 }
 

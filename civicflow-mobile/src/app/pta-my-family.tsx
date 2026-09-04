@@ -34,7 +34,13 @@ export default function PtaMyFamilyScreen() {
     selectedOrganization?.organizationName?.trim().charAt(0).toUpperCase() ||
     '';
 
-  const [photo, setPhoto] = useState<PtaHouseholdPhoto | null>(null);
+  // The organization the loaded photo belongs to is tracked alongside it. A
+  // family photo is household data, so it must never be visible for even one
+  // frame after the user switches organization -- and the fetch for the new
+  // organization is asynchronous, so without this the previous family's photo
+  // would stay on screen for the whole of that request.
+  const [photo, setPhoto] = useState<{ organizationId: string; data: PtaHouseholdPhoto } | null>(null);
+  const visiblePhoto = photo && photo.organizationId === selectedOrganizationId ? photo.data : null;
   const [progressionAvailable, setProgressionAvailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -43,7 +49,8 @@ export default function PtaMyFamilyScreen() {
   const load = useCallback(async () => {
     if (!selectedOrganizationId || !hasPtaIdentity) return;
     try {
-      setPhoto(await getPtaHouseholdPhoto(selectedOrganizationId));
+      const loaded = await getPtaHouseholdPhoto(selectedOrganizationId);
+      setPhoto(loaded ? { organizationId: selectedOrganizationId, data: loaded } : null);
       setLoadError(null);
     } catch {
       setLoadError('Unable to load your family photo. Check your connection and try again.');
@@ -129,9 +136,9 @@ export default function PtaMyFamilyScreen() {
           </ThemedView>
         ) : (
           <>
-            {photo ? (
+            {visiblePhoto ? (
               <Image
-                source={{ uri: photo.url }}
+                source={{ uri: visiblePhoto.uri }}
                 style={styles.photo}
                 accessible
                 accessibilityRole="image"
@@ -155,8 +162,8 @@ export default function PtaMyFamilyScreen() {
                 app is plain text, and a screen reader reads the glyph aloud
                 ("camera Add Family Photo") when no accessibilityLabel wins. */}
             <PrimaryActionButton
-              label={photo ? 'Edit Family Photo' : 'Add Family Photo'}
-              accessibilityLabel={photo ? 'Edit family photo' : 'Add family photo'}
+              label={visiblePhoto ? 'Edit Family Photo' : 'Add Family Photo'}
+              accessibilityLabel={visiblePhoto ? 'Edit family photo' : 'Add family photo'}
               accessibilityHint="Opens family photo management, where you can take or choose a photo, replace it, or remove it."
               onPress={() => router.push('/pta-family-photo' as never)}
             />

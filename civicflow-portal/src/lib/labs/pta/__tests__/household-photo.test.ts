@@ -14,6 +14,7 @@ const findFirstHousehold = vi.fn();
 const findFirstAttachment = vi.fn();
 const createAttachment = vi.fn();
 const updateAttachment = vi.fn();
+const findManyAttachment = vi.fn();
 const updateHousehold = vi.fn();
 const transaction = vi.fn();
 
@@ -27,6 +28,7 @@ vi.mock("@/lib/prisma", () => ({
       findFirst: (...a: unknown[]) => findFirstAttachment(...a),
       create: (...a: unknown[]) => createAttachment(...a),
       update: (...a: unknown[]) => updateAttachment(...a),
+      findMany: (...a: unknown[]) => findManyAttachment(...a),
     },
     $transaction: (...a: unknown[]) => transaction(...a),
   },
@@ -37,12 +39,14 @@ vi.mock("@/lib/audit", () => ({ createAuditEvent: (...a: unknown[]) => createAud
 
 const uploadBufferToSpaces = vi.fn();
 const deleteObjectFromSpaces = vi.fn();
+const getObjectBuffer = vi.fn();
 vi.mock("@/lib/storage", async () => {
   const actual = await vi.importActual<typeof import("@/lib/storage")>("@/lib/storage");
   return {
     ...actual,
     uploadBufferToSpaces: (...a: unknown[]) => uploadBufferToSpaces(...a),
     deleteObjectFromSpaces: (...a: unknown[]) => deleteObjectFromSpaces(...a),
+    getObjectBuffer: (...a: unknown[]) => getObjectBuffer(...a),
   };
 });
 
@@ -74,6 +78,7 @@ beforeEach(() => {
   updateAttachment.mockResolvedValue({});
   uploadBufferToSpaces.mockResolvedValue(undefined);
   deleteObjectFromSpaces.mockResolvedValue(undefined);
+  findManyAttachment.mockResolvedValue([]);
   transaction.mockImplementation(async (ops: unknown[]) => Promise.all(ops as Promise<unknown>[]));
   createAuditEvent.mockResolvedValue({});
 });
@@ -296,5 +301,261 @@ describe("getHouseholdPhotoAttachment", () => {
     expect(findFirstAttachment).toHaveBeenCalledWith({
       where: { organizationId: ORG_ID, entityType: "PTA_HOUSEHOLD", entityId: HOUSEHOLD_ID, purpose: "FAMILY_PHOTO", deletedAt: null },
     });
+  });
+});
+
+/**
+ * Build 26 privacy correction (D9). "Remove" has to mean the bytes are gone.
+ * Previously the object delete was fire-and-forget
+ * (deleteObjectFromSpaces(...).catch(() => {})), so a storage outage reported
+ * a successful removal while the family's photo stayed in the bucket.
+ */
+describe("deleteHouseholdPhoto — physical deletion guarantees", () => {
+  const ATTACHMENT = { id: "attachment-1", objectKey: "attachments/org-1/pta_household/household-1/family-photo.jpg" };
+
+  it("deletes the exact storage object, and only that one", async () => {
+    findFirstAttachment.mockResolvedValueOnce(ATTACHMENT);
+    const { deleteHouseholdPhoto } = await import("../household-photo");
+    await deleteHouseholdPhoto(ACTOR);
+
+    expect(deleteObjectFromSpaces).toHaveBeenCalledTimes(1);
+    expect(deleteObjectFromSpaces).toHaveBeenCalledWith(ATTACHMENT.objectKey);
+  });
+
+  it("deletes the object BEFORE tombstoning, so a storage failure cannot leave a hidden-but-present image", async () => {
+    findFirstAttachment.mockResolvedValueOnce(ATTACHMENT);
+    const order: string[] = [];
+    deleteObjectFromSpaces.mockImplementationOnce(async () => {
+      order.push("storage");
+    });
+    transaction.mockImplementationOnce(async (ops: unknown) => {
+      order.push("database");
+      return ops;
+    });
+
+    const { deleteHouseholdPhoto } = await import("../household-photo");
+    await deleteHouseholdPhoto(ACTOR);
+
+    expect(order).toEqual(["storage", "database"]);
+  });
+
+  it("reports a retryable failure and changes NOTHING when storage deletion fails", async () => {
+    findFirstAttachment.mockResolvedValueOnce(ATTACHMENT);
+    deleteObjectFromSpaces.mockRejectedValueOnce(new Error("bucket unreachable"));
+
+    const { deleteHouseholdPhoto } = await import("../household-photo");
+    await expect(deleteHouseholdPhoto(ACTOR)).rejects.toMatchObject({ code: "PTA_HOUSEHOLD_PHOTO_DELETE_FAILED" });
+
+    // No false success: the row is untouched, so the photo is still coherently
+    // present rather than hidden-but-stored.
+    expect(transaction).not.toHaveBeenCalled();
+    expect(updateAttachment).not.toHaveBeenCalled();
+    expect(createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("never leaks the bucket or object key in the error a caller sees", async () => {
+    findFirstAttachment.mockResolvedValueOnce(ATTACHMENT);
+    deleteObjectFromSpaces.mockRejectedValueOnce(
+      new Error("AccessDenied on " + ATTACHMENT.objectKey + " in bucket build26-staging")
+    );
+
+    const { deleteHouseholdPhoto } = await import("../household-photo");
+    const error = await deleteHouseholdPhoto(ACTOR).catch((e: Error) => e);
+
+    expect((error as Error).message).not.toContain(ATTACHMENT.objectKey);
+    expect((error as Error).message).not.toContain("bucket");
+  });
+
+  it("records the actor and a timestamp, and carries no image bytes in the audit record", async () => {
+    findFirstAttachment.mockResolvedValueOnce(ATTACHMENT);
+    const { deleteHouseholdPhoto } = await import("../household-photo");
+    await deleteHouseholdPhoto(ACTOR);
+
+    expect(updateAttachment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: ATTACHMENT.id },
+        data: expect.objectContaining({ deletedByUserId: "user-1", deletedAt: expect.any(Date) }),
+      })
+    );
+    const audit = createAuditEvent.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(audit.action).toBe("pta.household.photo_deleted");
+    expect(audit.actorUserId).toBe("user-1");
+    const serialized = JSON.stringify(audit);
+    expect(serialized).not.toContain("base64");
+    expect(serialized).not.toContain(ATTACHMENT.objectKey);
+    expect(serialized).not.toMatch(/\/9j\//); // a JPEG payload's base64 prefix
+  });
+
+  it("is idempotent: a second removal is safe and does not error", async () => {
+    findFirstAttachment.mockResolvedValueOnce(ATTACHMENT);
+    const { deleteHouseholdPhoto } = await import("../household-photo");
+    await deleteHouseholdPhoto(ACTOR);
+
+    findFirstAttachment.mockResolvedValueOnce(null); // already removed
+    await expect(deleteHouseholdPhoto(ACTOR)).resolves.toBeUndefined();
+  });
+
+  it("a repeat removal still sweeps an object an earlier partial failure left behind", async () => {
+    findFirstAttachment.mockResolvedValueOnce(null); // nothing active
+    findManyAttachment.mockResolvedValueOnce([
+      { id: "old-1", objectKey: "attachments/org-1/pta_household/household-1/orphan.jpg" },
+    ]);
+
+    const { deleteHouseholdPhoto } = await import("../household-photo");
+    await deleteHouseholdPhoto(ACTOR);
+
+    expect(deleteObjectFromSpaces).toHaveBeenCalledWith("attachments/org-1/pta_household/household-1/orphan.jpg");
+  });
+
+  it("scopes the lookup to the caller's own organization and household, so no other household's object can be reached", async () => {
+    findFirstAttachment.mockResolvedValueOnce(ATTACHMENT);
+    const { deleteHouseholdPhoto } = await import("../household-photo");
+    await deleteHouseholdPhoto(ACTOR);
+
+    expect(findFirstAttachment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          organizationId: ORG_ID,
+          entityType: "PTA_HOUSEHOLD",
+          entityId: HOUSEHOLD_ID,
+          purpose: "FAMILY_PHOTO",
+          deletedAt: null,
+        }),
+      })
+    );
+  });
+
+  it("refuses when the household belongs to another organization, before touching storage", async () => {
+    findFirstHousehold.mockResolvedValueOnce(null);
+    const { deleteHouseholdPhoto } = await import("../household-photo");
+    await expect(deleteHouseholdPhoto(ACTOR)).rejects.toMatchObject({ code: "PTA_HOUSEHOLD_NOT_FOUND" });
+    expect(deleteObjectFromSpaces).not.toHaveBeenCalled();
+  });
+});
+
+describe("uploadHouseholdPhoto — replacement cleanup", () => {
+  const PREVIOUS = { id: "attachment-old", objectKey: "attachments/org-1/pta_household/household-1/old.jpg" };
+
+  it("activates the new photo and deletes the superseded object", async () => {
+    findFirstAttachment.mockResolvedValueOnce(PREVIOUS);
+    const { uploadHouseholdPhoto } = await import("../household-photo");
+    await uploadHouseholdPhoto({ ...ACTOR, buffer: await makeJpeg(300, 300), declaredContentType: "image/jpeg" });
+
+    expect(createAttachment).toHaveBeenCalled();
+    expect(updateAttachment).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: PREVIOUS.id }, data: expect.objectContaining({ deletedAt: expect.any(Date) }) })
+    );
+    expect(deleteObjectFromSpaces).toHaveBeenCalledWith(PREVIOUS.objectKey);
+  });
+
+  it("leaves the existing photo completely intact when the new upload fails validation", async () => {
+    findFirstAttachment.mockResolvedValue(PREVIOUS);
+    const { uploadHouseholdPhoto } = await import("../household-photo");
+    await expect(
+      uploadHouseholdPhoto({ ...ACTOR, buffer: Buffer.from("not an image at all"), declaredContentType: "image/jpeg" })
+    ).rejects.toMatchObject({ code: "PTA_VALIDATION_ERROR" });
+
+    expect(uploadBufferToSpaces).not.toHaveBeenCalled();
+    expect(updateAttachment).not.toHaveBeenCalled();
+    expect(deleteObjectFromSpaces).not.toHaveBeenCalled();
+  });
+
+  it("makes a failed cleanup observable and retryable instead of silently orphaning the old image", async () => {
+    findFirstAttachment.mockResolvedValueOnce(PREVIOUS);
+    deleteObjectFromSpaces.mockRejectedValueOnce(new Error("bucket unreachable"));
+
+    const { uploadHouseholdPhoto } = await import("../household-photo");
+    // The new photo is already live and correct, so the request still succeeds.
+    await expect(
+      uploadHouseholdPhoto({ ...ACTOR, buffer: await makeJpeg(300, 300), declaredContentType: "image/jpeg" })
+    ).resolves.toMatchObject({ byteSize: expect.any(Number) });
+
+    const marker = createAuditEvent.mock.calls
+      .map((c) => c[0] as { action: string; metadata?: Record<string, unknown> })
+      .find((c) => c.action === "pta.household.photo_object_cleanup_failed");
+    expect(marker).toBeDefined();
+    expect(marker?.metadata).toMatchObject({ attachmentId: PREVIOUS.id, retryable: true });
+    // The marker names the attachment, never the raw storage key.
+    expect(JSON.stringify(marker)).not.toContain(PREVIOUS.objectKey);
+  });
+
+  it("purge re-attempts every tombstoned object, so rapid replacements cannot orphan indefinitely", async () => {
+    findManyAttachment.mockResolvedValueOnce([
+      { id: "a", objectKey: "attachments/org-1/pta_household/household-1/a.jpg" },
+      { id: "b", objectKey: "attachments/org-1/pta_household/household-1/b.jpg" },
+    ]);
+    const { purgeOrphanedHouseholdPhotoObjects } = await import("../household-photo");
+    const result = await purgeOrphanedHouseholdPhotoObjects(ORG_ID);
+
+    expect(result).toEqual({ attempted: 2, purged: 2 });
+    expect(deleteObjectFromSpaces).toHaveBeenCalledWith("attachments/org-1/pta_household/household-1/a.jpg");
+    expect(deleteObjectFromSpaces).toHaveBeenCalledWith("attachments/org-1/pta_household/household-1/b.jpg");
+  });
+
+  it("one unreachable object does not block cleanup of the rest", async () => {
+    findManyAttachment.mockResolvedValueOnce([
+      { id: "a", objectKey: "key-a" },
+      { id: "b", objectKey: "key-b" },
+    ]);
+    deleteObjectFromSpaces.mockRejectedValueOnce(new Error("gone wrong")).mockResolvedValueOnce(undefined);
+    const { purgeOrphanedHouseholdPhotoObjects } = await import("../household-photo");
+    const result = await purgeOrphanedHouseholdPhotoObjects(ORG_ID);
+
+    expect(result).toEqual({ attempted: 2, purged: 1 });
+  });
+});
+
+describe("getHouseholdPhotoBytes — never hands out a storage reference", () => {
+  const ATTACHMENT = {
+    id: "attachment-1",
+    objectKey: "attachments/org-1/pta_household/household-1/family-photo.jpg",
+    contentType: "image/jpeg",
+    byteSize: 1234,
+  };
+
+  it("returns the bytes and the server's own normalized content type", async () => {
+    const jpeg = await makeJpeg(120, 120);
+    findFirstAttachment.mockResolvedValueOnce(ATTACHMENT);
+    getObjectBuffer.mockResolvedValueOnce(jpeg);
+
+    const { getHouseholdPhotoBytes } = await import("../household-photo");
+    const result = await getHouseholdPhotoBytes(ORG_ID, HOUSEHOLD_ID);
+
+    expect(result?.contentType).toBe("image/jpeg");
+    expect(result?.buffer.subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]));
+    const serialized = JSON.stringify({ contentType: result?.contentType, byteSize: result?.byteSize });
+    expect(serialized).not.toContain(ATTACHMENT.objectKey);
+    expect(serialized).not.toContain("X-Amz-Signature");
+  });
+
+  it("reports a missing object as no-photo rather than a server error, and leaks no storage detail", async () => {
+    findFirstAttachment.mockResolvedValueOnce(ATTACHMENT);
+    getObjectBuffer.mockRejectedValueOnce(new Error("NoSuchKey: " + ATTACHMENT.objectKey + " in bucket build26-staging"));
+
+    const { getHouseholdPhotoBytes } = await import("../household-photo");
+    await expect(getHouseholdPhotoBytes(ORG_ID, HOUSEHOLD_ID)).resolves.toBeNull();
+  });
+
+  it("returns null when the household has no photo, without touching storage", async () => {
+    findFirstAttachment.mockResolvedValueOnce(null);
+    const { getHouseholdPhotoBytes } = await import("../household-photo");
+    await expect(getHouseholdPhotoBytes(ORG_ID, HOUSEHOLD_ID)).resolves.toBeNull();
+    expect(getObjectBuffer).not.toHaveBeenCalled();
+  });
+
+  it("scopes its lookup to the given organization and household", async () => {
+    findFirstAttachment.mockResolvedValueOnce(null);
+    const { getHouseholdPhotoBytes } = await import("../household-photo");
+    await getHouseholdPhotoBytes(ORG_ID, HOUSEHOLD_ID);
+    expect(findFirstAttachment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          organizationId: ORG_ID,
+          entityId: HOUSEHOLD_ID,
+          purpose: "FAMILY_PHOTO",
+          deletedAt: null,
+        }),
+      })
+    );
   });
 });

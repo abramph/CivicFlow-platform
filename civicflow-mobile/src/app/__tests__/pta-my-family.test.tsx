@@ -144,7 +144,7 @@ describe('PtaMyFamilyScreen -- entry point display states', () => {
 
   it('shows the current photo and "Edit Family Photo" when a photo exists', async () => {
     mockUseAuth.mockReturnValue(authWith());
-    mockGetPtaHouseholdPhoto.mockResolvedValue({ url: 'https://spaces.example/signed', byteSize: 1000 });
+    mockGetPtaHouseholdPhoto.mockResolvedValue({ uri: 'data:image/jpeg;base64,signed', byteSize: 1000 });
     await openScreen();
     expect(screen.getByLabelText('Edit family photo')).toBeTruthy();
     expect(screen.getByLabelText("Your family's current photo")).toBeTruthy();
@@ -170,7 +170,7 @@ describe('PtaMyFamilyScreen -- navigation to the existing management screen', ()
 
   it('Edit Family Photo also navigates to /pta-family-photo (the same screen, not a second implementation)', async () => {
     mockUseAuth.mockReturnValue(authWith());
-    mockGetPtaHouseholdPhoto.mockResolvedValue({ url: 'https://spaces.example/signed', byteSize: 1000 });
+    mockGetPtaHouseholdPhoto.mockResolvedValue({ uri: 'data:image/jpeg;base64,signed', byteSize: 1000 });
     await openScreen();
     await fireEvent.press(screen.getByLabelText('Edit family photo'));
     expect(mockPush).toHaveBeenCalledWith('/pta-family-photo');
@@ -184,28 +184,28 @@ describe('PtaMyFamilyScreen -- refresh on regaining focus (covers upload/replace
     await openScreen();
     expect(screen.getByLabelText('Add family photo')).toBeTruthy();
 
-    mockGetPtaHouseholdPhoto.mockResolvedValueOnce({ url: 'https://spaces.example/new-photo', byteSize: 500 });
+    mockGetPtaHouseholdPhoto.mockResolvedValueOnce({ uri: 'data:image/jpeg;base64,newphoto', byteSize: 500 });
     await triggerFocus();
 
     expect(screen.getByLabelText('Edit family photo')).toBeTruthy();
     expect(mockGetPtaHouseholdPhoto).toHaveBeenCalledTimes(2);
   });
 
-  it('shows the replaced photo (a different URL) after returning from photo management', async () => {
+  it('shows the replaced photo (different bytes) after returning from photo management', async () => {
     mockUseAuth.mockReturnValue(authWith());
-    mockGetPtaHouseholdPhoto.mockResolvedValueOnce({ url: 'https://spaces.example/old-photo', byteSize: 500 });
+    mockGetPtaHouseholdPhoto.mockResolvedValueOnce({ uri: 'data:image/jpeg;base64,oldphoto', byteSize: 500 });
     await openScreen();
-    expect(screen.getByLabelText("Your family's current photo").props.source.uri).toBe('https://spaces.example/old-photo');
+    expect(screen.getByLabelText("Your family's current photo").props.source.uri).toBe('data:image/jpeg;base64,oldphoto');
 
-    mockGetPtaHouseholdPhoto.mockResolvedValueOnce({ url: 'https://spaces.example/replaced-photo', byteSize: 600 });
+    mockGetPtaHouseholdPhoto.mockResolvedValueOnce({ uri: 'data:image/jpeg;base64,replacedphoto', byteSize: 600 });
     await triggerFocus();
 
-    expect(screen.getByLabelText("Your family's current photo").props.source.uri).toBe('https://spaces.example/replaced-photo');
+    expect(screen.getByLabelText("Your family's current photo").props.source.uri).toBe('data:image/jpeg;base64,replacedphoto');
   });
 
   it('restores the default placeholder after the photo is removed', async () => {
     mockUseAuth.mockReturnValue(authWith());
-    mockGetPtaHouseholdPhoto.mockResolvedValueOnce({ url: 'https://spaces.example/old-photo', byteSize: 500 });
+    mockGetPtaHouseholdPhoto.mockResolvedValueOnce({ uri: 'data:image/jpeg;base64,oldphoto', byteSize: 500 });
     await openScreen();
     expect(screen.getByLabelText('Edit family photo')).toBeTruthy();
 
@@ -218,7 +218,7 @@ describe('PtaMyFamilyScreen -- refresh on regaining focus (covers upload/replace
 
   it('does not retain a stale photo after the active organization changes', async () => {
     mockUseAuth.mockReturnValue(authWith({ organizationId: 'org-a' }));
-    mockGetPtaHouseholdPhoto.mockResolvedValueOnce({ url: 'https://spaces.example/org-a-photo', byteSize: 500 });
+    mockGetPtaHouseholdPhoto.mockResolvedValueOnce({ uri: 'data:image/jpeg;base64,orgaphoto', byteSize: 500 });
     const { rerender } = await render(<PtaMyFamilyScreen />);
     await triggerFocus();
     expect(screen.getByLabelText("Your family's current photo")).toBeTruthy();
@@ -291,7 +291,7 @@ describe('PtaMyFamilyScreen -- authorization', () => {
 describe('PtaMyFamilyScreen -- organization switching (PTA -> Community/Nonprofit)', () => {
   it('clears the displayed family photo and name, redirects away, and never fetches using the new organization id', async () => {
     mockUseAuth.mockReturnValue(authWith({ organizationId: 'org-pta', householdName: 'The Alvarez Family' }));
-    mockGetPtaHouseholdPhoto.mockResolvedValueOnce({ url: 'https://spaces.example/alvarez-photo', byteSize: 500 });
+    mockGetPtaHouseholdPhoto.mockResolvedValueOnce({ uri: 'data:image/jpeg;base64,alvarezphoto', byteSize: 500 });
     const { rerender } = await render(<PtaMyFamilyScreen />);
     await triggerFocus();
     expect(screen.getByText('The Alvarez Family')).toBeTruthy();
@@ -428,5 +428,30 @@ describe('PtaMyFamilyScreen - Build 26 accessibility remediation', () => {
 
     expect(screen.getByRole('header', { name: 'My Family' })).toBeTruthy();
     expect(screen.getByRole('header', { name: 'Family Photo' })).toBeTruthy();
+  });
+});
+
+describe('PtaMyFamilyScreen - organization switching clears family data', () => {
+  it("never shows the previous organization's photo while the new organization loads", async () => {
+    // Organization A has a photo.
+    mockUseAuth.mockReturnValue(authWith({ organizationId: 'org-a' }));
+    mockGetPtaHouseholdPhoto.mockResolvedValue({ uri: 'data:image/jpeg;base64,AAAA', byteSize: 10 });
+    await openScreen();
+    expect(screen.getByLabelText("Your family's current photo")).toBeTruthy();
+
+    // Switch to organization B, whose fetch has not resolved yet. The photo in
+    // state still belongs to A, so it must not be rendered for even one frame.
+    mockUseAuth.mockReturnValue(authWith({ organizationId: 'org-b' }));
+    mockGetPtaHouseholdPhoto.mockImplementation(() => new Promise(() => {}));
+    await triggerFocus();
+
+    expect(screen.queryByLabelText("Your family's current photo")).toBeNull();
+  });
+
+  it('requests the photo for the organization currently selected', async () => {
+    mockUseAuth.mockReturnValue(authWith({ organizationId: 'org-b' }));
+    mockGetPtaHouseholdPhoto.mockResolvedValue(null);
+    await openScreen();
+    expect(mockGetPtaHouseholdPhoto).toHaveBeenCalledWith('org-b');
   });
 });

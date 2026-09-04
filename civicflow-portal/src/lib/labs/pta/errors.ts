@@ -13,6 +13,7 @@ export const PTA_ERROR_CODES = [
   "PTA_ORGANIZATION_INACTIVE",
   "PTA_PROFILE_NOT_FOUND",
   "PTA_HOUSEHOLD_NOT_FOUND",
+  "PTA_HOUSEHOLD_PHOTO_DELETE_FAILED",
   "PTA_STUDENT_NOT_FOUND",
   "PTA_GRADE_NOT_FOUND",
   "PTA_CLASSROOM_NOT_FOUND",
@@ -246,6 +247,10 @@ const STATUS_FOR_CODE: Record<PtaErrorCode, number> = {
   PTA_ORGANIZATION_INACTIVE: 403,
   PTA_PROFILE_NOT_FOUND: 404,
   PTA_HOUSEHOLD_NOT_FOUND: 404,
+  // Retryable on purpose: the storage object could not be deleted, so
+  // nothing was changed and the caller should try again rather than be
+  // told the photo was removed when it was not.
+  PTA_HOUSEHOLD_PHOTO_DELETE_FAILED: 503,
   PTA_STUDENT_NOT_FOUND: 404,
   PTA_GRADE_NOT_FOUND: 404,
   PTA_CLASSROOM_NOT_FOUND: 404,
