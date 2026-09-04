@@ -1,4 +1,4 @@
-import { apiFetch } from '@/lib/api-client';
+import { apiFetch, apiFetchImageDataUri } from '@/lib/api-client';
 
 export interface DuesCharge {
   id: string;
@@ -784,12 +784,30 @@ export function getPtaDocuments(organizationId: string) {
 // the caller's own PtaHouseholdAdult linkage on every call.
 
 export interface PtaHouseholdPhoto {
-  url: string;
+  /** A local `data:` URI holding the bytes this device fetched with its own
+   * bearer token — never a storage URL. The API stopped returning signed
+   * object-storage URLs for family photos: they are a shareable, unrevocable
+   * bearer credential for children's/household data. */
+  uri: string;
   byteSize: number;
 }
 
-export function getPtaHouseholdPhoto(organizationId: string) {
-  return apiFetch<PtaHouseholdPhoto | null>(`/api/mobile/pta/household/photo?organizationId=${encodeURIComponent(organizationId)}`);
+/**
+ * Returns the family photo for the CALLER'S OWN household. No household,
+ * attachment or student id is sent: the server resolves the household from
+ * the bearer token's linkage, so there is nothing here for a client to forge.
+ *
+ * Resolves to null when there is no photo (HTTP 404), which is a normal state.
+ */
+export async function getPtaHouseholdPhoto(organizationId: string): Promise<PtaHouseholdPhoto | null> {
+  const uri = await apiFetchImageDataUri(
+    `/api/mobile/pta/household/photo?organizationId=${encodeURIComponent(organizationId)}`
+  );
+  if (!uri) return null;
+  // Approximate decoded size from the base64 payload; used only for display
+  // and diagnostics, never for any security decision.
+  const base64 = uri.slice(uri.indexOf(',') + 1);
+  return { uri, byteSize: Math.floor((base64.length * 3) / 4) };
 }
 
 export interface UploadPtaHouseholdPhotoAsset {

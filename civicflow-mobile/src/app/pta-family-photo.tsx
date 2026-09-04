@@ -55,7 +55,11 @@ type Stage =
 
 export default function PtaFamilyPhotoScreen() {
   const { status, selectedOrganizationId } = useAuth();
-  const [photo, setPhoto] = useState<PtaHouseholdPhoto | null>(null);
+  // Tracked with its organization: a family photo is household data and must
+  // not linger on screen for even one frame after an organization switch,
+  // while the new organization's fetch is still in flight.
+  const [photo, setPhoto] = useState<{ organizationId: string; data: PtaHouseholdPhoto } | null>(null);
+  const visiblePhoto = photo && photo.organizationId === selectedOrganizationId ? photo.data : null;
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -65,7 +69,8 @@ export default function PtaFamilyPhotoScreen() {
   const load = useCallback(async () => {
     if (!selectedOrganizationId) return;
     try {
-      setPhoto(await getPtaHouseholdPhoto(selectedOrganizationId));
+      const loaded = await getPtaHouseholdPhoto(selectedOrganizationId);
+      setPhoto(loaded ? { organizationId: selectedOrganizationId, data: loaded } : null);
       setLoadError(null);
     } catch {
       setLoadError('Unable to load your family photo. Check your connection and try again.');
@@ -211,9 +216,9 @@ export default function PtaFamilyPhotoScreen() {
               visually distinct -- current photo, then preview+confirm. */}
           {stage.kind !== 'previewing' ? (
             <ThemedView type="backgroundElement" style={styles.photoCard}>
-              {photo ? (
+              {visiblePhoto ? (
                 <Image
-                  source={{ uri: photo.url }}
+                  source={{ uri: visiblePhoto.uri }}
                   style={styles.photo}
                   accessible
                   accessibilityRole="image"
@@ -235,8 +240,8 @@ export default function PtaFamilyPhotoScreen() {
 
           {stage.kind === 'idle' ? (
             <>
-              <PrimaryActionButton label={photo ? 'Replace Photo' : 'Add Photo'} onPress={() => setStage({ kind: 'choosingSource' })} accessibilityLabel={photo ? 'Replace photo' : 'Add photo'} />
-              {photo ? <SecondaryLinkButton label="Remove Photo" danger onPress={confirmRemove} accessibilityLabel="Remove photo" /> : null}
+              <PrimaryActionButton label={visiblePhoto ? 'Replace Photo' : 'Add Photo'} onPress={() => setStage({ kind: 'choosingSource' })} accessibilityLabel={visiblePhoto ? 'Replace photo' : 'Add photo'} />
+              {visiblePhoto ? <SecondaryLinkButton label="Remove Photo" danger onPress={confirmRemove} accessibilityLabel="Remove photo" /> : null}
             </>
           ) : null}
 
