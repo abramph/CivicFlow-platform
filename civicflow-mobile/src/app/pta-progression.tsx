@@ -126,7 +126,9 @@ export default function PtaProgressionScreen() {
 
   return (
     <ScrollView contentContainerStyle={[styles.container, topPadding]}>
-      <ThemedText type="title">Student Progression</ThemedText>
+      <ThemedText type="title" accessibilityRole="header">
+        Student Progression
+      </ThemedText>
       {summary?.nextSchoolYear && students.some((s) => s.publicationStatus === 'PUBLISHED') ? (
         <ThemedText type="small" themeColor="textSecondary">
           Looking ahead to {summary.nextSchoolYear}
@@ -137,18 +139,26 @@ export default function PtaProgressionScreen() {
         </ThemedText>
       ) : null}
 
-      <LoadErrorBanner message={loadError} onRetry={load} />
+      <LoadErrorBanner message={loadError} onRetry={load} retryTarget="student progression" />
 
       {loading ? (
-        <ThemedView style={styles.centered} accessible accessibilityLabel="Loading student progression">
+        <ThemedView
+          style={styles.centered}
+          accessible
+          accessibilityLabel="Loading student progression"
+          accessibilityRole="progressbar"
+          accessibilityState={{ busy: true }}
+        >
           <ActivityIndicator />
         </ThemedView>
       ) : unavailable ? (
-        <ThemedView type="backgroundElement" style={styles.card}>
+        // Announced as a status rather than read as loose body text, so a
+        // screen-reader user learns why the list is empty.
+        <ThemedView type="backgroundElement" style={styles.card} accessible accessibilityRole="text">
           <ThemedText type="small">Student progression is not available for this organization.</ThemedText>
         </ThemedView>
       ) : loadError ? null : students.length === 0 ? (
-        <ThemedView type="backgroundElement" style={styles.card}>
+        <ThemedView type="backgroundElement" style={styles.card} accessible accessibilityRole="text">
           <ThemedText type="small">No students are on file for your family yet.</ThemedText>
         </ThemedView>
       ) : (

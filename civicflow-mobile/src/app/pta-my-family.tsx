@@ -27,6 +27,12 @@ export default function PtaMyFamilyScreen() {
   const { status, selectedOrganization, selectedOrganizationId } = useAuth();
   const hasPtaIdentity = Boolean(selectedOrganization?.pta?.householdAdultId);
   const householdName = selectedOrganization?.pta?.householdName ?? null;
+  // Falls back to the organization's initial so the avatar still reads as a
+  // deliberate placeholder rather than an empty circle.
+  const initial =
+    householdName?.trim().charAt(0).toUpperCase() ||
+    selectedOrganization?.organizationName?.trim().charAt(0).toUpperCase() ||
+    '';
 
   const [photo, setPhoto] = useState<PtaHouseholdPhoto | null>(null);
   const [progressionAvailable, setProgressionAvailable] = useState(false);
@@ -97,34 +103,59 @@ export default function PtaMyFamilyScreen() {
 
   return (
     <ScrollView contentContainerStyle={[styles.container, topPadding]}>
-      <ThemedText type="title">My Family</ThemedText>
+      <ThemedText type="title" accessibilityRole="header">
+        My Family
+      </ThemedText>
       {householdName ? (
         <ThemedText type="small" themeColor="textSecondary">{householdName}</ThemedText>
       ) : null}
 
-      <LoadErrorBanner message={loadError} onRetry={load} />
+      <LoadErrorBanner message={loadError} onRetry={load} retryTarget="your family photo" />
 
       <ThemedView type="backgroundElement" style={styles.card} accessible={false}>
-        <ThemedText type="smallBold" style={styles.cardLabel}>Family Photo</ThemedText>
+        <ThemedText type="smallBold" style={styles.cardLabel} accessibilityRole="header">
+          Family Photo
+        </ThemedText>
 
         {loading ? (
-          <ThemedView style={styles.centered}>
+          <ThemedView
+            style={styles.centered}
+            accessible
+            accessibilityLabel="Loading your family photo"
+            accessibilityRole="progressbar"
+            accessibilityState={{ busy: true }}
+          >
             <ActivityIndicator />
           </ThemedView>
         ) : (
           <>
             {photo ? (
-              <Image source={{ uri: photo.url }} style={styles.photo} accessibilityLabel="Your family's current photo" />
+              <Image
+                source={{ uri: photo.url }}
+                style={styles.photo}
+                accessible
+                accessibilityRole="image"
+                accessibilityLabel="Your family's current photo"
+              />
             ) : (
-              <ThemedView style={styles.placeholder} accessible accessibilityLabel="No family photo set">
-                <ThemedText type="title" style={styles.placeholderGlyph}>
-                  {householdName ? householdName.trim().charAt(0).toUpperCase() : '👪'}
-                </ThemedText>
+              // An initial-based avatar, not an emoji: the emoji fallback read
+              // aloud as "family" and looked off-system next to the rest of
+              // the app's typography. When there is no name to initial, the
+              // circle stays empty and the label carries the meaning.
+              <ThemedView style={styles.placeholder} accessible accessibilityRole="image" accessibilityLabel="No family photo set">
+                {initial ? (
+                  <ThemedText type="title" style={styles.placeholderGlyph}>
+                    {initial}
+                  </ThemedText>
+                ) : null}
               </ThemedView>
             )}
 
+            {/* No emoji in the label: every other PrimaryActionButton in the
+                app is plain text, and a screen reader reads the glyph aloud
+                ("camera Add Family Photo") when no accessibilityLabel wins. */}
             <PrimaryActionButton
-              label={photo ? '📷 Edit Family Photo' : '📷 Add Family Photo'}
+              label={photo ? 'Edit Family Photo' : 'Add Family Photo'}
               accessibilityLabel={photo ? 'Edit family photo' : 'Add family photo'}
               accessibilityHint="Opens family photo management, where you can take or choose a photo, replace it, or remove it."
               onPress={() => router.push('/pta-family-photo' as never)}
@@ -137,7 +168,9 @@ export default function PtaMyFamilyScreen() {
           for this organization (both feature flags on) -- see load(). */}
       {!loading && progressionAvailable ? (
         <ThemedView type="backgroundElement" style={styles.card} accessible={false}>
-          <ThemedText type="smallBold" style={styles.cardLabel}>Progression</ThemedText>
+          <ThemedText type="smallBold" style={styles.cardLabel} accessibilityRole="header">
+            Progression
+          </ThemedText>
           <ThemedText type="small" themeColor="textSecondary" style={styles.cardLabel}>
             See each child&apos;s current placement and any confirmed next-year placement.
           </ThemedText>

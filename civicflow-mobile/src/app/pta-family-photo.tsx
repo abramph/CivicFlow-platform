@@ -184,28 +184,48 @@ export default function PtaFamilyPhotoScreen() {
 
   return (
     <ScrollView contentContainerStyle={[styles.container, topPadding]}>
-      <ThemedText type="title">Family Photo</ThemedText>
+      <ThemedText type="title" accessibilityRole="header">
+        Family Photo
+      </ThemedText>
       <ThemedText type="small" themeColor="textSecondary">
         Optional. Add a photo for your family — it&apos;s never required and only visible within your PTA.
       </ThemedText>
 
-      <LoadErrorBanner message={loadError} onRetry={load} />
+      <LoadErrorBanner message={loadError} onRetry={load} retryTarget="your family photo" />
 
       {loading ? (
-        <ThemedView style={styles.centered}>
+        <ThemedView
+          style={styles.centered}
+          accessible
+          accessibilityLabel="Loading your family photo"
+          accessibilityRole="progressbar"
+          accessibilityState={{ busy: true }}
+        >
           <ActivityIndicator />
         </ThemedView>
       ) : (
         <>
-          <ThemedView type="backgroundElement" style={styles.photoCard}>
-            {photo ? (
-              <Image source={{ uri: photo.url }} style={styles.photo} accessibilityLabel="Your current family photo" />
-            ) : (
-              <ThemedView style={styles.emptyPhoto} accessible accessibilityLabel="No family photo on file">
-                <ThemedText type="small" themeColor="textSecondary">No photo yet</ThemedText>
-              </ThemedView>
-            )}
-          </ThemedView>
+          {/* Hidden while a picked photo is awaiting confirmation: showing the
+              "No photo yet" placeholder directly above the image the family
+              just chose made the screen contradict itself. The stages stay
+              visually distinct -- current photo, then preview+confirm. */}
+          {stage.kind !== 'previewing' ? (
+            <ThemedView type="backgroundElement" style={styles.photoCard}>
+              {photo ? (
+                <Image
+                  source={{ uri: photo.url }}
+                  style={styles.photo}
+                  accessible
+                  accessibilityRole="image"
+                  accessibilityLabel="Your current family photo"
+                />
+              ) : (
+                <ThemedView style={styles.emptyPhoto} accessible accessibilityRole="image" accessibilityLabel="No family photo on file">
+                  <ThemedText type="small" themeColor="textSecondary">No photo yet</ThemedText>
+                </ThemedView>
+              )}
+            </ThemedView>
+          ) : null}
 
           {actionError ? (
             <ThemedText type="small" style={styles.errorText} accessibilityRole="alert">
@@ -230,7 +250,7 @@ export default function PtaFamilyPhotoScreen() {
 
           {stage.kind === 'primingPermission' ? (
             <ThemedView type="backgroundElement" style={styles.actionCard}>
-              <ThemedText type="smallBold">{CAMERA_PRIMING_COPY.title}</ThemedText>
+              <ThemedText type="smallBold" accessibilityRole="header">{CAMERA_PRIMING_COPY.title}</ThemedText>
               <ThemedText type="small" themeColor="textSecondary">{CAMERA_PRIMING_COPY.body}</ThemedText>
               <PrimaryActionButton label="Continue" onPress={() => confirmPriming()} />
               <SecondaryLinkButton label="Not Now" onPress={() => setStage({ kind: 'idle' })} accessibilityLabel="Not now" />
@@ -239,7 +259,7 @@ export default function PtaFamilyPhotoScreen() {
 
           {stage.kind === 'permissionBlocked' ? (
             <ThemedView type="backgroundElement" style={styles.actionCard}>
-              <ThemedText type="smallBold">{CAMERA_BLOCKED_COPY.title}</ThemedText>
+              <ThemedText type="smallBold" accessibilityRole="header">{CAMERA_BLOCKED_COPY.title}</ThemedText>
               <ThemedText type="small" themeColor="textSecondary">{CAMERA_BLOCKED_COPY.body}</ThemedText>
               <PrimaryActionButton label="Open Settings" onPress={() => Linking.openSettings()} />
               <SecondaryLinkButton label="Not Now" onPress={() => setStage({ kind: 'idle' })} accessibilityLabel="Not now" />
@@ -248,14 +268,32 @@ export default function PtaFamilyPhotoScreen() {
 
           {stage.kind === 'previewing' ? (
             <ThemedView type="backgroundElement" style={styles.actionCard}>
-              <Image source={{ uri: stage.asset.uri }} style={styles.photo} accessibilityLabel="Preview of the photo you picked" />
+              {/* actionCard stretches its children so the buttons fill the
+                  card; the fixed-width image needs to opt out or it hangs off
+                  the left edge while everything around it is centred. */}
+              <Image
+                source={{ uri: stage.asset.uri }}
+                style={[styles.photo, styles.previewPhoto]}
+                accessible
+                accessibilityRole="image"
+                accessibilityLabel="Preview of the photo you picked"
+              />
               <PrimaryActionButton label="Use This Photo" onPress={() => confirmUpload(stage.asset)} accessibilityLabel="Use this photo" />
               <SecondaryLinkButton label="Choose a Different Photo" onPress={() => setStage({ kind: 'choosingSource' })} />
             </ThemedView>
           ) : null}
 
           {stage.kind === 'uploading' || stage.kind === 'removing' ? (
-            <ThemedView style={styles.centered}>
+            // Announced, not just spun: without a live region a screen-reader
+            // user gets no signal that the upload or removal is under way.
+            <ThemedView
+              style={styles.centered}
+              accessible
+              accessibilityRole="progressbar"
+              accessibilityState={{ busy: true }}
+              accessibilityLabel={stage.kind === 'uploading' ? 'Uploading your family photo' : 'Removing your family photo'}
+              accessibilityLiveRegion="polite"
+            >
               <ActivityIndicator />
               <ThemedText type="small" themeColor="textSecondary">{stage.kind === 'uploading' ? 'Uploading…' : 'Removing…'}</ThemedText>
             </ThemedView>
@@ -286,6 +324,9 @@ const styles = StyleSheet.create({
     width: 200,
     height: 200,
     borderRadius: 12,
+  },
+  previewPhoto: {
+    alignSelf: 'center',
   },
   emptyPhoto: {
     width: 200,

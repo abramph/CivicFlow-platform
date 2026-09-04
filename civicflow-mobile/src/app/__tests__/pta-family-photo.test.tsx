@@ -251,3 +251,84 @@ describe('PtaFamilyPhotoScreen', () => {
     await waitFor(() => expect(screen.getByLabelText('Add photo')).toBeTruthy());
   });
 });
+
+/**
+ * Build 26 remediation: accessibility semantics and the two presentation
+ * defects found during device verification.
+ */
+describe('PtaFamilyPhotoScreen — accessibility and presentation', () => {
+  beforeEach(() => {
+    mockGetPtaHouseholdPhoto.mockResolvedValue(null);
+    mockGetCameraPermissionsAsync.mockResolvedValue(granted());
+    mockLaunchCameraAsync.mockResolvedValue({
+      canceled: false,
+      assets: [{ uri: 'file:///tmp/photo.jpg', width: 10, height: 10, fileName: 'photo.jpg', mimeType: 'image/jpeg' }],
+    });
+  });
+
+  it('titles the screen as a header so screen-reader users can navigate to it', async () => {
+    render(<PtaFamilyPhotoScreen />);
+    await waitFor(() => expect(screen.getByText('No photo yet')).toBeTruthy());
+    expect(screen.getByRole('header', { name: 'Family Photo' })).toBeTruthy();
+  });
+
+  it('hides the "No photo yet" empty state while a picked photo awaits confirmation', async () => {
+    render(<PtaFamilyPhotoScreen />);
+    await waitFor(() => expect(screen.getByText('No photo yet')).toBeTruthy());
+
+    await openTakePhoto();
+
+    // The screen previously showed the empty-state card AND the chosen image
+    // at the same time, so it claimed there was no photo while displaying one.
+    expect(screen.queryByText('No photo yet')).toBeNull();
+    expect(screen.getByLabelText('Preview of the photo you picked')).toBeTruthy();
+    expect(screen.getByLabelText('Use this photo')).toBeTruthy();
+  });
+
+  it('centres the preview image inside the stretch-aligned action card', async () => {
+    render(<PtaFamilyPhotoScreen />);
+    await openTakePhoto();
+
+    const preview = screen.getByLabelText('Preview of the photo you picked');
+    const style = Array.isArray(preview.props.style) ? Object.assign({}, ...preview.props.style.flat()) : preview.props.style;
+    expect(style.alignSelf).toBe('center');
+  });
+
+  it('restores the empty state exactly when the picked photo is abandoned', async () => {
+    render(<PtaFamilyPhotoScreen />);
+    await openTakePhoto();
+    expect(screen.queryByText('No photo yet')).toBeNull();
+
+    await press('Choose a Different Photo');
+
+    // back to source selection, and the confirm-stage preview is gone
+    expect(screen.queryByLabelText('Preview of the photo you picked')).toBeNull();
+    expect(screen.getByLabelText('Take photo')).toBeTruthy();
+  });
+
+  it('announces the upload as busy rather than only spinning', async () => {
+    let resolveUpload: (v: unknown) => void = () => {};
+    mockUploadPtaHouseholdPhoto.mockImplementation(() => new Promise((r) => { resolveUpload = r; }));
+
+    render(<PtaFamilyPhotoScreen />);
+    await openTakePhoto();
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText('Use this photo'));
+    });
+
+    const busy = screen.getByLabelText('Uploading your family photo');
+    expect(busy.props.accessibilityRole).toBe('progressbar');
+    expect(busy.props.accessibilityState).toMatchObject({ busy: true });
+
+    await act(async () => {
+      resolveUpload({ photoUrl: '/x', byteSize: 1, width: 1, height: 1 });
+    });
+  });
+
+  it('labels the current photo and the empty placeholder as images, never bare decoration', async () => {
+    mockGetPtaHouseholdPhoto.mockResolvedValue({ url: 'https://spaces.example/signed', byteSize: 10 });
+    render(<PtaFamilyPhotoScreen />);
+    await waitFor(() => expect(screen.getByLabelText('Your current family photo')).toBeTruthy());
+    expect(screen.getByLabelText('Your current family photo').props.accessibilityRole).toBe('image');
+  });
+});

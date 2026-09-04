@@ -365,7 +365,7 @@ describe('PtaMyFamilyScreen -- progression entry point (server-gated by both fea
     mockGetPtaHouseholdPhoto.mockResolvedValue(null);
     mockGetPtaProgression.mockRejectedValue(new Error('network down'));
     await openScreen();
-    expect(screen.queryByLabelText('Retry loading')).toBeNull();
+    expect(screen.queryByLabelText('Retry loading your family photo')).toBeNull();
     expect(screen.queryByLabelText('View student progression')).toBeNull();
   });
 
@@ -405,6 +405,28 @@ describe('PtaMyFamilyScreen -- accessibility', () => {
     expect(screen.getByLabelText('No family photo set')).toBeTruthy();
     // The action label itself is always visible text ("Add Family Photo" /
     // "Edit Family Photo"), never an icon rendered alone.
-    expect(screen.getByText('📷 Add Family Photo')).toBeTruthy();
+    expect(screen.getByText('Add Family Photo')).toBeTruthy();
+  });
+});
+
+describe('PtaMyFamilyScreen - Build 26 accessibility remediation', () => {
+  it('uses a plain-text primary action, with no emoji for a screen reader to read aloud', async () => {
+    mockUseAuth.mockReturnValue(authWith());
+    mockGetPtaHouseholdPhoto.mockResolvedValue(null);
+    await openScreen();
+
+    expect(screen.getByLabelText('Add family photo')).toBeTruthy();
+    // getByText is an exact match, so this passes only if the visible label is
+    // precisely the plain text -- an emoji prefix would fail it.
+    expect(screen.getByText('Add Family Photo')).toBeTruthy();
+  });
+
+  it('marks the screen and card titles as headers', async () => {
+    mockUseAuth.mockReturnValue(authWith());
+    mockGetPtaHouseholdPhoto.mockResolvedValue(null);
+    await openScreen();
+
+    expect(screen.getByRole('header', { name: 'My Family' })).toBeTruthy();
+    expect(screen.getByRole('header', { name: 'Family Photo' })).toBeTruthy();
   });
 });
