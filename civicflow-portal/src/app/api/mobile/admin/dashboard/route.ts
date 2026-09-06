@@ -1,9 +1,12 @@
 import { withApiErrorHandling } from "@/lib/api-route";
 import { requireMobileAuth, MobileForbiddenError } from "@/lib/mobile-auth";
 import { requireMobileAdminAccess, type AdminCapabilityFlag } from "@/lib/mobile-admin";
+import { countPendingFamilyChangeRequests } from "@/lib/labs/pta/family-change-requests";
 import { listPendingPtaVolunteerHourEntries } from "@/lib/labs/pta/volunteers";
 import { getMemberPaymentsFinancialSummary } from "@/lib/financial-summary";
+import { getEffectivePermissions } from "@/lib/role-permissions";
 import { prisma } from "@/lib/prisma";
+import { PERMISSIONS, type Role } from "@/lib/rbac";
 import { ValidationError } from "@/lib/validation";
 
 function centsToCurrency(cents: number) {
@@ -25,6 +28,26 @@ interface NeedsAttentionItem {
   id: string;
   label: string;
   href: string;
+}
+
+/** Build 27 — capability-gated shortcuts into the workflows an admin most
+ * often OPENS the app to do, as opposed to metrics they read. Old app builds
+ * that don't know this field exists simply ignore it. */
+interface AdminQuickAction {
+  key: string;
+  label: string;
+  href: string;
+}
+
+/** Build 27 — a recent-administrative-activity feed (manageOrganization
+ * only). Action slugs and timestamps only: audit metadata can carry entity
+ * detail that individual capability gates protect, so none of it is
+ * forwarded here. */
+interface AdminActivityItem {
+  id: string;
+  action: string;
+  actorEmail: string | null;
+  createdAt: string;
 }
 
 /**
@@ -53,6 +76,18 @@ export async function GET(request: Request) {
 
     const metrics: AdminMetric[] = [];
     const needsAttention: NeedsAttentionItem[] = [];
+    const quickActions: AdminQuickAction[] = [];
+    let recentActivity: AdminActivityItem[] = [];
+
+    // Build 27 — hour-approval visibility follows the EXACT permission that
+    // gates the approval endpoints (pta:volunteer-hours:approve), not the
+    // managePtaVolunteers umbrella: the two are independently
+    // org-customizable, and an approvals-only officer previously saw no
+    // pending-work signal here at all.
+    const organization = await prisma.organization.findUnique({ where: { id: organizationId }, select: { primaryVertical: true } });
+    const effectivePermissions =
+      organization?.primaryVertical === "PTA" && admin.role ? await getEffectivePermissions(organizationId, admin.role as Role) : [];
+    const canApproveHours = effectivePermissions.includes(PERMISSIONS.PTA_VOLUNTEER_HOURS_APPROVE);
 
     if (has("manageMembers")) {
       const breakdown = await prisma.orgMember.groupBy({
@@ -71,7 +106,7 @@ export async function GET(request: Request) {
       );
     }
 
-    if (has("managePtaVolunteers")) {
+    if (has("managePtaVolunteers") || canApproveHours) {
       const pendingHourEntries = await listPendingPtaVolunteerHourEntries(organizationId);
       metrics.push({ key: "ptaPendingHourApprovals", label: "Volunteer Hours Awaiting Approval", value: pendingHourEntries.length, href: "/volunteer-hour-approvals" });
       if (pendingHourEntries.length > 0) {
@@ -106,6 +141,7 @@ export async function GET(request: Request) {
 
       const campaignCount = await prisma.communicationCampaign.count({ where: { organizationId } });
       metrics.push({ key: "campaigns", label: "Campaigns", value: campaignCount, href: "/admin-campaigns" });
+      quickActions.push({ key: "createAnnouncement", label: "New Announcement", href: "/admin-campaigns/new" });
     }
 
     if (has("manageEvents")) {
@@ -156,8 +192,19 @@ export async function GET(request: Request) {
     }
 
     if (has("managePtaHouseholds")) {
-      const activeHouseholdCount = await prisma.ptaHousehold.count({ where: { organizationId, status: "ACTIVE" } });
+      const [activeHouseholdCount, pendingChangeRequestCount] = await Promise.all([
+        prisma.ptaHousehold.count({ where: { organizationId, status: "ACTIVE" } }),
+        countPendingFamilyChangeRequests(organizationId),
+      ]);
       metrics.push({ key: "ptaHouseholds", label: "Active Households", value: activeHouseholdCount, href: "/admin-pta-households" });
+      metrics.push({ key: "ptaPendingChangeRequests", label: "Family Changes Awaiting Review", value: pendingChangeRequestCount, href: "/admin-pta-change-requests" });
+      if (pendingChangeRequestCount > 0) {
+        needsAttention.push({
+          id: "pta-pending-change-requests",
+          label: `${pendingChangeRequestCount} family change request${pendingChangeRequestCount === 1 ? "" : "s"} awaiting review`,
+          href: "/admin-pta-change-requests",
+        });
+      }
     }
 
     if (has("manageHoaProperties")) {
@@ -203,9 +250,24 @@ export async function GET(request: Request) {
       }
     }
 
+    if (has("manageOrganization")) {
+      const events = await prisma.auditEvent.findMany({
+        where: { organizationId },
+        orderBy: { createdAt: "desc" },
+        take: 8,
+        select: { id: true, action: true, actorEmail: true, createdAt: true },
+      });
+      recentActivity = events.map((event) => ({
+        id: event.id,
+        action: event.action,
+        actorEmail: event.actorEmail,
+        createdAt: event.createdAt.toISOString(),
+      }));
+    }
+
     return Response.json({
       ok: true,
-      data: { metrics, needsAttention, generatedAt: new Date().toISOString() },
+      data: { metrics, needsAttention, quickActions, recentActivity, generatedAt: new Date().toISOString() },
     });
   });
 }

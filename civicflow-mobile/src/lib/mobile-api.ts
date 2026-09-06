@@ -590,6 +590,15 @@ export function approvePtaHourEntry(organizationId: string, entryId: string, adj
   });
 }
 
+/** Build 27 — approve's sibling. A reason is required server-side; it lands
+ * in the entry's notes and the audit event, so families always see why. */
+export function rejectPtaHourEntry(organizationId: string, entryId: string, reason: string) {
+  return apiFetch(`/api/mobile/pta/volunteers/hour-entries/${encodeURIComponent(entryId)}/reject`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId, reason }),
+  });
+}
+
 // ── PTA parent parity (dues, events/RSVP, announcements, minutes, documents) ─
 // Backed by /api/mobile/pta/*, bridging a household-authorized parent (no
 // conventional OrgMember) onto the same web PTA parent library functions —
@@ -981,7 +990,7 @@ export function deletePtaStudentPhoto(organizationId: string, studentId: string)
 export interface AdminMetric {
   key: string;
   label: string;
-  value: number;
+  value: number | string;
   href?: string;
 }
 
@@ -991,9 +1000,27 @@ export interface AdminNeedsAttentionItem {
   href: string;
 }
 
+/** Build 27 — capability-gated shortcuts the server includes only when the
+ * caller holds the capability behind them. Optional so the app tolerates a
+ * portal that predates them. */
+export interface AdminQuickAction {
+  key: string;
+  label: string;
+  href: string;
+}
+
+export interface AdminActivityItem {
+  id: string;
+  action: string;
+  actorEmail: string | null;
+  createdAt: string;
+}
+
 export interface AdminDashboard {
   metrics: AdminMetric[];
   needsAttention: AdminNeedsAttentionItem[];
+  quickActions?: AdminQuickAction[];
+  recentActivity?: AdminActivityItem[];
   generatedAt: string;
 }
 
