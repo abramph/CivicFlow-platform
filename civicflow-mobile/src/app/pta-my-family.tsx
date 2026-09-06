@@ -9,19 +9,15 @@ import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { useScreenTopPadding } from '@/hooks/use-screen-top-padding';
 import { useAuth } from '@/lib/auth-context';
-import { getPtaHouseholdPhoto, getPtaProgression, type PtaHouseholdPhoto } from '@/lib/mobile-api';
+import { getMyPtaHousehold, getPtaHouseholdPhoto, getPtaProgression, type MyPtaHousehold, type PtaHouseholdPhoto } from '@/lib/mobile-api';
 
 /**
- * "My Family" -- the parent-facing home for household-level PTA content.
- * Deliberately minimal today: a family profile card (photo or placeholder,
- * plus the Add/Edit Family Photo entry point) is the only content, since
- * that's the only household-level capability that exists yet. This is the
- * discoverable home the family-photo feature was missing -- previously
- * only reachable via a flat dashboard shortcut with no "family profile"
- * framing at all (see build-26-final-report.md's discoverability-gap
- * finding). Reuses pta-family-photo.tsx entirely for the actual
- * take/choose/crop/upload/replace/remove flow; this screen never touches
- * the photo pipeline directly.
+ * "My Family" -- the parent-facing home for household-level PTA content:
+ * the family photo card, the family roster (adults and students with their
+ * placements and photo entry points), and the Build 27 Edit Family flow for
+ * updating contact info and requesting roster changes. Reuses
+ * pta-family-photo.tsx / pta-student-photo.tsx entirely for photo
+ * management; this screen never touches the photo pipeline directly.
  */
 export default function PtaMyFamilyScreen() {
   const { status, selectedOrganization, selectedOrganizationId } = useAuth();
@@ -41,6 +37,8 @@ export default function PtaMyFamilyScreen() {
   // would stay on screen for the whole of that request.
   const [photo, setPhoto] = useState<{ organizationId: string; data: PtaHouseholdPhoto } | null>(null);
   const visiblePhoto = photo && photo.organizationId === selectedOrganizationId ? photo.data : null;
+  const [household, setHousehold] = useState<{ organizationId: string; data: MyPtaHousehold } | null>(null);
+  const visibleHousehold = household && household.organizationId === selectedOrganizationId ? household.data : null;
   const [progressionAvailable, setProgressionAvailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -49,8 +47,12 @@ export default function PtaMyFamilyScreen() {
   const load = useCallback(async () => {
     if (!selectedOrganizationId || !hasPtaIdentity) return;
     try {
-      const loaded = await getPtaHouseholdPhoto(selectedOrganizationId);
+      const [loaded, householdData] = await Promise.all([
+        getPtaHouseholdPhoto(selectedOrganizationId),
+        getMyPtaHousehold(selectedOrganizationId),
+      ]);
       setPhoto(loaded ? { organizationId: selectedOrganizationId, data: loaded } : null);
+      setHousehold({ organizationId: selectedOrganizationId, data: householdData });
       setLoadError(null);
     } catch {
       setLoadError('Unable to load your family photo. Check your connection and try again.');
@@ -171,6 +173,58 @@ export default function PtaMyFamilyScreen() {
         )}
       </ThemedView>
 
+      {!loading && visibleHousehold ? (
+        <>
+          <ThemedView type="backgroundElement" style={styles.card} accessible={false}>
+            <ThemedText type="smallBold" style={styles.cardLabel} accessibilityRole="header">
+              Family Members
+            </ThemedText>
+            {visibleHousehold.adults.map((adult) => (
+              <ThemedView key={adult.id} style={styles.rosterRow} accessible accessibilityLabel={`${adult.name}${adult.relationshipLabel ? `, ${adult.relationshipLabel}` : ''}${adult.isSelf ? ', you' : ''}`}>
+                <ThemedText type="default">
+                  {adult.name}
+                  {adult.isSelf ? ' (you)' : ''}
+                </ThemedText>
+                {adult.relationshipLabel ? (
+                  <ThemedText type="small" themeColor="textSecondary">{adult.relationshipLabel}</ThemedText>
+                ) : null}
+              </ThemedView>
+            ))}
+            {visibleHousehold.students.length > 0 ? (
+              <>
+                <ThemedText type="smallBold" style={styles.cardLabel} accessibilityRole="header">
+                  Students
+                </ThemedText>
+                {visibleHousehold.students.map((student) => (
+                  <ThemedView key={student.id} style={styles.rosterRow} accessible={false}>
+                    <ThemedText type="default">{student.displayName}</ThemedText>
+                    {student.placementLabel ? (
+                      <ThemedText type="small" themeColor="textSecondary">{student.placementLabel}</ThemedText>
+                    ) : null}
+                    <ThemedText
+                      type="link"
+                      onPress={() =>
+                        router.push({ pathname: '/pta-student-photo' as never, params: { studentId: student.id, name: student.displayName } as never })
+                      }
+                      accessibilityRole="button"
+                      accessibilityLabel={`${student.hasPhoto ? 'Edit' : 'Add'} photo for ${student.displayName}`}
+                    >
+                      {student.hasPhoto ? 'Edit Photo' : 'Add Photo'}
+                    </ThemedText>
+                  </ThemedView>
+                ))}
+              </>
+            ) : null}
+            <PrimaryActionButton
+              label="Edit Family"
+              accessibilityLabel="Edit family"
+              accessibilityHint="Update your contact information, volunteer interests, and request changes to your family's records."
+              onPress={() => router.push('/pta-edit-family' as never)}
+            />
+          </ThemedView>
+        </>
+      ) : null}
+
       {/* Rendered only when the server confirmed progression is available
           for this organization (both feature flags on) -- see load(). */}
       {!loading && progressionAvailable ? (
@@ -211,6 +265,11 @@ const styles = StyleSheet.create({
   },
   cardLabel: {
     alignSelf: 'flex-start',
+  },
+  rosterRow: {
+    alignSelf: 'stretch',
+    gap: 2,
+    backgroundColor: 'transparent',
   },
   photo: {
     width: 200,

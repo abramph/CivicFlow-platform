@@ -22,6 +22,7 @@ export const attachmentEntityTypes = [
   "HOA_ARCHITECTURAL_REQUEST",
   "UNION_CASE",
   "PTA_HOUSEHOLD",
+  "PTA_STUDENT",
   "OTHER",
 ] as const satisfies readonly AttachmentEntityType[];
 
@@ -69,6 +70,10 @@ const readPermissions: Record<AttachmentEntityType, Permission> = {
   // gated route (requirePtaHouseholdSelfAccess), matching this codebase's
   // "parent self-service never uses Permission" rule.
   PTA_HOUSEHOLD: "pta:households:manage",
+  // Build 27 student photo — same staff/officer-path-only shape as
+  // PTA_HOUSEHOLD: a parent's read access to their own student's photo
+  // never goes through this; it uses the dedicated linkage-gated routes.
+  PTA_STUDENT: "pta:students:manage",
   OTHER: "org_settings:read",
 };
 
@@ -92,6 +97,7 @@ const writePermissions: Record<AttachmentEntityType, Permission> = {
   HOA_ARCHITECTURAL_REQUEST: "hoa:architectural-requests:write",
   UNION_CASE: "union:cases:manage",
   PTA_HOUSEHOLD: "pta:households:manage",
+  PTA_STUDENT: "pta:students:manage",
   OTHER: "org_settings:write",
 };
 
@@ -147,6 +153,7 @@ const ALLOWED_CONTENT_TYPES: Partial<Record<AttachmentEntityType, readonly strin
   // decoded signature, not just declared content-type) in the dedicated
   // upload route -- see the family-photo upload security review.
   PTA_HOUSEHOLD: ["image/jpeg", "image/png", "image/heic", "image/heif", "image/webp"],
+  PTA_STUDENT: ["image/jpeg", "image/png", "image/heic", "image/heif", "image/webp"],
 };
 
 export function isAllowedAttachmentContentType(entityType: AttachmentEntityType, contentType: string): boolean {
@@ -195,6 +202,8 @@ export async function verifyAttachmentEntity(organizationId: string, entityType:
       return Boolean(await prisma.unionCase.findFirst({ where: { id: entityId, organizationId }, select: { id: true } }));
     case "PTA_HOUSEHOLD":
       return Boolean(await prisma.ptaHousehold.findFirst({ where: { id: entityId, organizationId }, select: { id: true } }));
+    case "PTA_STUDENT":
+      return Boolean(await prisma.ptaStudent.findFirst({ where: { id: entityId, organizationId }, select: { id: true } }));
     case "OTHER":
       return true;
     default:

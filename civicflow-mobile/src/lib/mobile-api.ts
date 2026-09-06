@@ -845,6 +845,131 @@ export function deletePtaHouseholdPhoto(organizationId: string) {
   return apiFetch<void>(`/api/mobile/pta/household/photo?organizationId=${encodeURIComponent(organizationId)}`, { method: 'DELETE' });
 }
 
+// ── Build 27: My Family self-service ────────────────────────────────────────
+// The parent's own household roster, contact self-edits, student photos, and
+// the change-request queue for organization-controlled fields. Everything is
+// resolved server-side from the caller's own PtaHouseholdAdult linkage —
+// the only entity id a client ever sends is a studentId, and the server
+// requires that student to belong to the caller's own household.
+
+export interface MyPtaAdult {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  relationshipLabel: string | null;
+  hasLogin: boolean;
+  isSelf: boolean;
+}
+
+export interface MyPtaStudent {
+  id: string;
+  displayName: string;
+  status: PtaStudentStatus;
+  hasPhoto: boolean;
+  placementLabel: string | null;
+}
+
+export interface MyPtaHousehold {
+  householdId: string;
+  displayName: string;
+  schoolYear: string;
+  currentSchoolYear: string | null;
+  volunteerInterests: string[];
+  adults: MyPtaAdult[];
+  students: MyPtaStudent[];
+}
+
+export function getMyPtaHousehold(organizationId: string) {
+  return apiFetch<MyPtaHousehold>(`/api/mobile/pta/my/household?organizationId=${encodeURIComponent(organizationId)}`);
+}
+
+export interface UpdateMyPtaAdultInput {
+  name?: string;
+  email?: string | null;
+  phone?: string | null;
+  relationshipLabel?: string | null;
+}
+
+export function updateMyPtaAdult(organizationId: string, input: UpdateMyPtaAdultInput) {
+  return apiFetch<Pick<MyPtaAdult, 'id' | 'name' | 'email' | 'phone' | 'relationshipLabel'>>(
+    `/api/mobile/pta/my/adult?organizationId=${encodeURIComponent(organizationId)}`,
+    { method: 'PATCH', body: JSON.stringify(input) }
+  );
+}
+
+export function updateMyPtaHouseholdInterests(organizationId: string, volunteerInterests: string[]) {
+  return apiFetch<{ volunteerInterests: string[] }>(
+    `/api/mobile/pta/my/household?organizationId=${encodeURIComponent(organizationId)}`,
+    { method: 'PATCH', body: JSON.stringify({ volunteerInterests }) }
+  );
+}
+
+export interface MyPtaClassroom {
+  id: string;
+  name: string;
+  gradeName: string;
+}
+
+export function getMyPtaClassrooms(organizationId: string) {
+  return apiFetch<{ currentSchoolYear: string | null; classrooms: MyPtaClassroom[] }>(
+    `/api/mobile/pta/my/classrooms?organizationId=${encodeURIComponent(organizationId)}`
+  );
+}
+
+export type PtaChangeRequestType = 'HOUSEHOLD_DISPLAY_NAME' | 'ADD_STUDENT' | 'RENAME_STUDENT' | 'STUDENT_PLACEMENT' | 'REMOVE_STUDENT';
+export type PtaChangeRequestStatus = 'SUBMITTED' | 'APPROVED' | 'APPLIED' | 'REJECTED';
+
+export interface PtaChangeRequest {
+  id: string;
+  type: PtaChangeRequestType;
+  payload: Record<string, unknown>;
+  status: PtaChangeRequestStatus;
+  decisionNotes: string | null;
+  createdAt: string;
+  reviewedAt: string | null;
+  appliedAt: string | null;
+}
+
+export function getMyPtaChangeRequests(organizationId: string) {
+  return apiFetch<PtaChangeRequest[]>(`/api/mobile/pta/my/change-requests?organizationId=${encodeURIComponent(organizationId)}`);
+}
+
+export function submitPtaChangeRequest(organizationId: string, type: PtaChangeRequestType, payload: Record<string, unknown>) {
+  return apiFetch<Pick<PtaChangeRequest, 'id' | 'type' | 'status' | 'createdAt'>>(
+    `/api/mobile/pta/my/change-requests?organizationId=${encodeURIComponent(organizationId)}`,
+    { method: 'POST', body: JSON.stringify({ type, payload }) }
+  );
+}
+
+/** Same data-URI delivery contract as the family photo — a student photo is
+ * a child's image, never fetched via a storage URL (see
+ * docs/pta-family-photo-privacy.md in the portal). Null means "no photo". */
+export async function getPtaStudentPhoto(organizationId: string, studentId: string): Promise<PtaHouseholdPhoto | null> {
+  const uri = await apiFetchImageDataUri(
+    `/api/mobile/pta/students/${encodeURIComponent(studentId)}/photo?organizationId=${encodeURIComponent(organizationId)}`
+  );
+  if (!uri) return null;
+  const base64 = uri.slice(uri.indexOf(',') + 1);
+  return { uri, byteSize: Math.floor((base64.length * 3) / 4) };
+}
+
+export function uploadPtaStudentPhoto(organizationId: string, studentId: string, asset: UploadPtaHouseholdPhotoAsset) {
+  const form = new FormData();
+  form.append('file', { uri: asset.uri, name: asset.fileName, type: asset.mimeType } as unknown as Blob);
+  return apiFetch<PtaHouseholdPhotoUploadResult>(
+    `/api/mobile/pta/students/${encodeURIComponent(studentId)}/photo?organizationId=${encodeURIComponent(organizationId)}`,
+    { method: 'POST', body: form }
+  );
+}
+
+export function deletePtaStudentPhoto(organizationId: string, studentId: string) {
+  return apiFetch<void>(
+    `/api/mobile/pta/students/${encodeURIComponent(studentId)}/photo?organizationId=${encodeURIComponent(organizationId)}`,
+    { method: 'DELETE' }
+  );
+}
+
 // ── Admin ─────────────────────────────────────────────────────────────────
 // Mobile Admin program (PR A). Gated server-side on resolveMobileAdminCapabilities()
 // (see civicflow-portal's GET /api/mobile/admin/dashboard) -- a 403 here means
@@ -1686,6 +1811,33 @@ export function deactivateAdminPtaStudent(householdId: string, studentId: string
   return apiFetch<AdminPtaStudent>(
     `/api/mobile/admin/pta/households/${encodeURIComponent(householdId)}/students/${encodeURIComponent(studentId)}?organizationId=${encodeURIComponent(organizationId)}`,
     { method: 'DELETE' }
+  );
+}
+
+// ── Build 27: Admin review of parent-submitted family change requests ────────
+
+export interface AdminPtaChangeRequest extends PtaChangeRequest {
+  householdId: string;
+  householdName: string;
+}
+
+export function getAdminPtaChangeRequests(organizationId: string, status?: PtaChangeRequestStatus) {
+  const params = new URLSearchParams({ organizationId });
+  if (status) params.set('status', status);
+  return apiFetch<AdminPtaChangeRequest[]>(`/api/mobile/admin/pta/change-requests?${params.toString()}`);
+}
+
+export function approveAdminPtaChangeRequest(requestId: string, organizationId: string, decisionNotes?: string | null) {
+  return apiFetch<{ id: string; status: PtaChangeRequestStatus; appliedAt: string | null }>(
+    `/api/mobile/admin/pta/change-requests/${encodeURIComponent(requestId)}/approve`,
+    { method: 'POST', body: JSON.stringify({ organizationId, decisionNotes: decisionNotes ?? null }) }
+  );
+}
+
+export function rejectAdminPtaChangeRequest(requestId: string, organizationId: string, decisionNotes?: string | null) {
+  return apiFetch<{ id: string; status: PtaChangeRequestStatus }>(
+    `/api/mobile/admin/pta/change-requests/${encodeURIComponent(requestId)}/reject`,
+    { method: 'POST', body: JSON.stringify({ organizationId, decisionNotes: decisionNotes ?? null }) }
   );
 }
 

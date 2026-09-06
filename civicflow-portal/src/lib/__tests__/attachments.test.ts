@@ -76,8 +76,18 @@ describe("isAllowedAttachmentContentType", () => {
 
   it("every other entity type keeps its unrestricted contract (no entry = no restriction)", async () => {
     const { isAllowedAttachmentContentType, attachmentEntityTypes } = await import("../attachments");
-    for (const entityType of attachmentEntityTypes.filter((type) => type !== "REIMBURSEMENT" && type !== "PTA_HOUSEHOLD")) {
+    for (const entityType of attachmentEntityTypes.filter((type) => type !== "REIMBURSEMENT" && type !== "PTA_HOUSEHOLD" && type !== "PTA_STUDENT")) {
       expect(isAllowedAttachmentContentType(entityType, "application/x-msdownload")).toBe(true);
+    }
+  });
+
+  it("PTA_STUDENT (student photo, Build 27) carries the same image-only allowlist as the family photo", async () => {
+    const { isAllowedAttachmentContentType } = await import("../attachments");
+    for (const type of ["image/jpeg", "image/png", "image/heic", "image/heif", "image/webp"]) {
+      expect(isAllowedAttachmentContentType("PTA_STUDENT", type)).toBe(true);
+    }
+    for (const type of ["application/x-msdownload", "text/html", "application/pdf", "application/octet-stream"]) {
+      expect(isAllowedAttachmentContentType("PTA_STUDENT", type)).toBe(false);
     }
   });
 

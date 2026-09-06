@@ -46,9 +46,11 @@ jest.mock('@/lib/auth-context', () => ({
 
 const mockGetPtaHouseholdPhoto = jest.fn();
 const mockGetPtaProgression = jest.fn();
+const mockGetMyPtaHousehold = jest.fn();
 jest.mock('@/lib/mobile-api', () => ({
   getPtaHouseholdPhoto: (...args: unknown[]) => mockGetPtaHouseholdPhoto(...args),
   getPtaProgression: (...args: unknown[]) => mockGetPtaProgression(...args),
+  getMyPtaHousehold: (...args: unknown[]) => mockGetMyPtaHousehold(...args),
 }));
 
 function authWith(overrides: { householdAdultId?: string | null; householdName?: string | null; organizationId?: string } = {}) {
@@ -126,6 +128,15 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockGetPtaHouseholdPhoto.mockReset();
   mockGetPtaProgression.mockReset();
+  mockGetMyPtaHousehold.mockReset().mockResolvedValue({
+    householdId: 'hh-1',
+    displayName: 'Kim Family',
+    schoolYear: '2026-2027',
+    currentSchoolYear: '2026-2027',
+    volunteerInterests: [],
+    adults: [],
+    students: [],
+  });
   // Default: progression unavailable (both feature flags default OFF), so
   // existing expectations describe an org without progression enabled.
   mockGetPtaProgression.mockRejectedValue(new Error('progression unavailable'));
