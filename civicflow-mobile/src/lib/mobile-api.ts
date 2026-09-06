@@ -1400,6 +1400,27 @@ export interface CreateAdminCampaignInput {
   subject: string;
   body: string;
   sendNow?: boolean;
+  /** Build 27 — the same recipientFilter shape the web form sends (base
+   * selectors, or {selector:'pta_target', ptaRule} for PTA orgs). Omitted =
+   * the server's active_with_email default, exactly as before. */
+  recipientFilter?: Record<string, unknown>;
+}
+
+/** Build 27 — read-only recipient-count preview via the same resolver the
+ * real create uses; never persists anything. */
+export function previewAdminCampaignRecipients(organizationId: string, recipientFilter: Record<string, unknown>, channel: CampaignChannel) {
+  return apiFetch<{ count: number }>('/api/mobile/admin/campaigns/preview-recipients', {
+    method: 'POST',
+    body: JSON.stringify({ organizationId, recipientFilter, channel }),
+  });
+}
+
+/** Build 27 — the facts the composer needs to offer backend-supported
+ * audiences (PTA targeting + the unpaid rule's school year). */
+export function getAdminCampaignTargetingOptions(organizationId: string) {
+  return apiFetch<{ isPta: boolean; currentSchoolYear: string | null }>(
+    `/api/mobile/admin/campaigns/targeting-options?organizationId=${encodeURIComponent(organizationId)}`
+  );
 }
 
 export function createAdminCampaign(input: CreateAdminCampaignInput) {
