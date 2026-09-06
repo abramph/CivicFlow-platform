@@ -102,6 +102,27 @@ describe("GET /api/mobile/admin/campaigns", () => {
 });
 
 describe("POST /api/mobile/admin/campaigns", () => {
+  it("answers an identical create within the duplicate window with 409 and never creates a second campaign (Build 27)", async () => {
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "STAFF", adminCapabilities: ["manageCommunications"] });
+    findFirstCampaign.mockResolvedValueOnce({ id: "camp-existing" });
+
+    const response = await POST(
+      createRequest({ organizationId: "org-a", title: "Newsletter", communicationType: "GENERAL", channel: "INTERNAL_LOG_ONLY", subject: "Hi", body: "Body text" })
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.code).toBe("DUPLICATE_CAMPAIGN");
+    expect(createCampaignPrisma).not.toHaveBeenCalled();
+    // The duplicate check is scoped to this org, this creator, and this
+    // exact content — never a blanket lock.
+    expect(findFirstCampaign).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ organizationId: "org-a", createdByUserId: "user-1", title: "Newsletter", subject: "Hi", body: "Body text" }),
+      })
+    );
+  });
+
   it("rejects a crafted organizationId with no real capability, resolved fresh per request", async () => {
     resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: false, role: null, adminCapabilities: [] });
 
