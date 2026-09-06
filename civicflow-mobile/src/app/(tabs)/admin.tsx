@@ -9,25 +9,28 @@ import { Spacing } from '@/constants/theme';
 import { useScreenTopPadding } from '@/hooks/use-screen-top-padding';
 import { useAuth } from '@/lib/auth-context';
 import { getAdminDashboard, type AdminDashboard } from '@/lib/mobile-api';
+import { deriveOrgCapabilities } from '@/lib/org-capabilities';
 
 /**
- * Mobile Admin program (PR A) — the Admin tab's landing dashboard. Double-gated
- * like volunteer-checkin.tsx/volunteer-hour-approvals.tsx: the tab itself is
+ * The Admin workspace's landing dashboard. Double-gated like
+ * volunteer-checkin.tsx/volunteer-hour-approvals.tsx: the tab itself is
  * already hidden for a caller with no admin capability (see
  * (tabs)/_layout.tsx), and this screen independently re-checks the same
  * server-resolved adminCapabilities array before rendering anything, so a
  * direct/deep-link navigation can't bypass the gate.
  *
- * Quick Actions is deliberately not rendered in PR A — no member/event/
- * payment/report admin screens exist on mobile yet (PR B-E), and showing
- * buttons that go nowhere would be worse than showing nothing. Metrics and
- * Needs Attention only ever include what GET /api/mobile/admin/dashboard
- * actually returns, which itself only includes what the caller's real
- * permissions and this org's vertical support today.
+ * Build 27 made this operational rather than a metric grid: pending work
+ * leads (Needs Attention), capability-gated Quick Actions follow (the
+ * server includes an action only when the caller holds the capability
+ * behind it), and manageOrganization holders get a recent-administrative-
+ * activity feed. Everything rendered comes from GET
+ * /api/mobile/admin/dashboard — the client never derives admin content
+ * from role or permission strings.
  */
 export default function AdminDashboardScreen() {
   const { selectedOrganization, selectedOrganizationId } = useAuth();
-  const hasAdminAccess = Boolean(selectedOrganization?.capability?.adminCapabilities?.length);
+  const caps = deriveOrgCapabilities(selectedOrganization);
+  const hasAdminAccess = caps.hasAdminAccess;
 
   const [dashboard, setDashboard] = useState<AdminDashboard | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -76,6 +79,12 @@ export default function AdminDashboardScreen() {
       <ThemedText type="subtitle" themeColor="textSecondary">
         {selectedOrganization?.organizationName ?? 'Unestra'}
       </ThemedText>
+      {caps.hasParentIdentity || caps.hasMemberIdentity ? (
+        <ThemedText type="small" themeColor="textSecondary">
+          You&apos;re in the admin workspace — your own {caps.hasParentIdentity ? 'family and ' : ''}member screens stay in
+          the other tabs.
+        </ThemedText>
+      ) : null}
 
       <LoadErrorBanner message={loadError} onRetry={load} />
 
@@ -95,6 +104,25 @@ export default function AdminDashboardScreen() {
               </ThemedView>
             </Pressable>
           ))}
+        </ThemedView>
+      ) : null}
+
+      {dashboard && (dashboard.quickActions?.length ?? 0) > 0 ? (
+        <ThemedView style={styles.section}>
+          <ThemedText type="subtitle">Quick Actions</ThemedText>
+          <ThemedView style={styles.quickActionsRow}>
+            {dashboard.quickActions!.map((action) => (
+              <Pressable
+                key={action.key}
+                style={styles.quickActionButton}
+                onPress={() => router.push(action.href as never)}
+                accessibilityRole="button"
+                accessibilityLabel={action.label}
+              >
+                <ThemedText style={styles.quickActionText}>{action.label}</ThemedText>
+              </Pressable>
+            ))}
+          </ThemedView>
         </ThemedView>
       ) : null}
 
@@ -129,6 +157,27 @@ export default function AdminDashboardScreen() {
               );
             })}
           </ThemedView>
+        </ThemedView>
+      ) : null}
+
+      {dashboard && (dashboard.recentActivity?.length ?? 0) > 0 ? (
+        <ThemedView style={styles.section}>
+          <ThemedText type="subtitle">Recent Activity</ThemedText>
+          {dashboard.recentActivity!.map((item) => (
+            <ThemedView
+              key={item.id}
+              type="backgroundElement"
+              style={styles.card}
+              accessible
+              accessibilityLabel={`${item.action.replace(/[._]/g, ' ')}, ${new Date(item.createdAt).toLocaleString()}`}
+            >
+              <ThemedText type="small">{item.action.replace(/[._]/g, ' ')}</ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">
+                {item.actorEmail ? `${item.actorEmail} · ` : ''}
+                {new Date(item.createdAt).toLocaleString()}
+              </ThemedText>
+            </ThemedView>
+          ))}
         </ThemedView>
       ) : null}
 
@@ -170,5 +219,23 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: Spacing.three,
     gap: 4,
+  },
+  quickActionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.two,
+  },
+  quickActionButton: {
+    backgroundColor: '#047857',
+    borderRadius: 10,
+    paddingVertical: Spacing.three,
+    paddingHorizontal: Spacing.three,
+    alignItems: 'center',
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  quickActionText: {
+    color: '#fff',
+    fontWeight: '600',
   },
 });
