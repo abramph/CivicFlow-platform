@@ -14,7 +14,17 @@ export const PTA_ERROR_CODES = [
   "PTA_PROFILE_NOT_FOUND",
   "PTA_HOUSEHOLD_NOT_FOUND",
   "PTA_HOUSEHOLD_PHOTO_DELETE_FAILED",
+  /** Build 27 student photo — same retryable delete-failed contract as the
+   * household photo (storage object could not be deleted; nothing changed). */
+  "PTA_STUDENT_PHOTO_DELETE_FAILED",
   "PTA_STUDENT_NOT_FOUND",
+  // Build 27 parent-submitted family change requests.
+  "PTA_CHANGE_REQUEST_NOT_FOUND",
+  /** CAS claim lost — the request was already approved/rejected by another
+   * reviewer between this caller's read and write. */
+  "PTA_CHANGE_REQUEST_ALREADY_DECIDED",
+  /** Per-household open-request cap reached — review the queue first. */
+  "PTA_CHANGE_REQUEST_LIMIT_REACHED",
   "PTA_GRADE_NOT_FOUND",
   "PTA_CLASSROOM_NOT_FOUND",
   "PTA_TEACHER_NOT_FOUND",
@@ -251,7 +261,11 @@ const STATUS_FOR_CODE: Record<PtaErrorCode, number> = {
   // nothing was changed and the caller should try again rather than be
   // told the photo was removed when it was not.
   PTA_HOUSEHOLD_PHOTO_DELETE_FAILED: 503,
+  PTA_STUDENT_PHOTO_DELETE_FAILED: 503,
   PTA_STUDENT_NOT_FOUND: 404,
+  PTA_CHANGE_REQUEST_NOT_FOUND: 404,
+  PTA_CHANGE_REQUEST_ALREADY_DECIDED: 409,
+  PTA_CHANGE_REQUEST_LIMIT_REACHED: 409,
   PTA_GRADE_NOT_FOUND: 404,
   PTA_CLASSROOM_NOT_FOUND: 404,
   PTA_TEACHER_NOT_FOUND: 404,

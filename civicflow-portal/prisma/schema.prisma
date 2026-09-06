@@ -534,6 +534,11 @@ enum AttachmentEntityType {
   /// (see PtaHousehold's own doc comment and docs/pta-vertical-2.md) — so
   /// this entity type is served by a dedicated route, not the shared one.
   PTA_HOUSEHOLD
+  /// Build 27 student photo: entityId is the PtaStudentId; purpose is always
+  /// "STUDENT_PHOTO". Same dedicated-route/authenticated-bytes contract as
+  /// PTA_HOUSEHOLD above — a child's photo is never served via the generic
+  /// RBAC-gated attachments route, never via a signed URL.
+  PTA_STUDENT
   OTHER
 }
 
@@ -774,6 +779,7 @@ model Organization {
   ptaCommitteeMembers                PtaCommitteeMember[]
   ptaEventRsvps                      PtaEventRsvp[]
   ptaHouseholdAdults                 PtaHouseholdAdult[]
+  ptaFamilyChangeRequests            PtaFamilyChangeRequest[]
   ptaSchoolYears                     PtaSchoolYear[]
   ptaBoardPositions                  PtaBoardPosition[]
   ptaOfficerAssignments              PtaOfficerAssignment[]
@@ -4835,6 +4841,7 @@ model PtaHousehold {
   volunteerReviewFlags            PtaVolunteerReviewFlag[]
   volunteerNotificationLogs       PtaVolunteerNotificationLog[]
   volunteerAgreementAcceptances   PtaVolunteerAgreementAcceptance[]
+  familyChangeRequests            PtaFamilyChangeRequest[]
 
   @@unique([organizationId, displayName, schoolYear])
   @@index([organizationId])
@@ -4893,6 +4900,7 @@ model PtaHouseholdAdult {
   electionVoterRows             PtaElectionVoter[]
   volunteerLedgerEntries        PtaVolunteerLedgerEntry[]
   volunteerAgreementAcceptances PtaVolunteerAgreementAcceptance[]
+  familyChangeRequests          PtaFamilyChangeRequest[]
 
   @@unique([organizationId, userId])
   @@index([organizationId])
@@ -4944,6 +4952,11 @@ model PtaStudent {
   householdId    String
   displayName    String
   status         PtaStudentStatus @default(ACTIVE)
+  /// Build 27: authenticated download route path
+  /// (/api/labs/pta/students/{id}/photo) — never a raw storage URL or object
+  /// key, exactly like PtaHousehold.photoUrl. The object key lives on the
+  /// Attachment row (entityType PTA_STUDENT, purpose STUDENT_PHOTO).
+  photoUrl       String?
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 
@@ -4953,6 +4966,55 @@ model PtaStudent {
   progressionRecords PtaStudentProgressionRecord[]
 
   @@index([organizationId])
+  @@index([householdId])
+}
+
+enum PtaFamilyChangeRequestStatus {
+  SUBMITTED
+  APPROVED
+  APPLIED
+  REJECTED
+}
+
+enum PtaFamilyChangeRequestType {
+  HOUSEHOLD_DISPLAY_NAME
+  ADD_STUDENT
+  RENAME_STUDENT
+  STUDENT_PLACEMENT
+  REMOVE_STUDENT
+}
+
+/// Build 27 parent-submitted family change request — the review-queue
+/// pattern from Member Intake (typed payload, CAS-guarded status
+/// transitions, one apply engine writing through the existing household
+/// services), rebuilt on PTA tables because that program's FKs are
+/// OrgMember-bound and a parent is a PtaHouseholdAdult. A request is never
+/// applied silently: SUBMITTED → APPROVED (reviewer claim) → APPLIED (the
+/// engine wrote the real household/student/enrollment records), or
+/// SUBMITTED → REJECTED. The payload is typed input, not inert storage —
+/// approval always lands on authoritative rows.
+model PtaFamilyChangeRequest {
+  id                 String                       @id @default(cuid())
+  organizationId     String
+  householdId        String
+  /// SetNull, not Cascade: a request survives its submitter being removed
+  /// from the household — the review trail must not vanish with them.
+  submittedByAdultId String?
+  type               PtaFamilyChangeRequestType
+  payload            Json
+  status             PtaFamilyChangeRequestStatus @default(SUBMITTED)
+  decisionNotes      String?
+  reviewedByUserId   String?
+  reviewedAt         DateTime?
+  appliedAt          DateTime?
+  createdAt          DateTime                     @default(now())
+  updatedAt          DateTime                     @updatedAt
+
+  organization     Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  household        PtaHousehold       @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  submittedByAdult PtaHouseholdAdult? @relation(fields: [submittedByAdultId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, status, createdAt])
   @@index([householdId])
 }
 
