@@ -24,7 +24,7 @@ describe('Admin HOA violation create screen', () => {
     mockReplace.mockReset();
     mockCreateAdminHoaViolation.mockReset();
     mockGetAdminHoaProperties.mockReset();
-    mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a' });
+    mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a', selectedOrganization: { capability: { adminCapabilities: ['manageHoaViolations'] } } });
   });
 
   it('requires a property, type, and description', async () => {

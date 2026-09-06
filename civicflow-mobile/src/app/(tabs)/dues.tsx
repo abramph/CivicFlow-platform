@@ -11,6 +11,7 @@ import { useScreenTopPadding } from '@/hooks/use-screen-top-padding';
 import { API_BASE_URL } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { getDues, getPtaDues, type DuesSummary, type PtaDuesStatus, type PtaDuesSummary } from '@/lib/mobile-api';
+import { deriveOrgCapabilities } from '@/lib/org-capabilities';
 
 function formatCurrency(value: number) {
   return value.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
@@ -42,8 +43,11 @@ const STATUS_STYLES: Record<PtaDuesStatus, 'good' | 'warning' | 'due' | 'neutral
 
 export default function DuesScreen() {
   const { selectedOrganization, selectedOrganizationId } = useAuth();
-  const hasMemberIdentity = Boolean(selectedOrganization?.memberId);
-  const hasPtaIdentity = Boolean(selectedOrganization?.pta?.householdAdultId);
+  // Build 27 additive identities: a dual member+parent has BOTH a personal
+  // balance and a household charge, and they are different balances against
+  // different records — load and show both instead of letting the member
+  // identity suppress the household one.
+  const { hasMemberIdentity, hasParentIdentity } = deriveOrgCapabilities(selectedOrganization);
   const [summary, setSummary] = useState<DuesSummary | null>(null);
   const [ptaSummary, setPtaSummary] = useState<PtaDuesSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -53,16 +57,15 @@ export default function DuesScreen() {
   const load = useCallback(async () => {
     if (!selectedOrganizationId) return;
     try {
-      if (hasMemberIdentity) {
-        setSummary(await getDues(selectedOrganizationId));
-      } else if (hasPtaIdentity) {
-        setPtaSummary(await getPtaDues(selectedOrganizationId));
-      }
+      await Promise.all([
+        hasMemberIdentity ? getDues(selectedOrganizationId).then(setSummary) : Promise.resolve(),
+        hasParentIdentity ? getPtaDues(selectedOrganizationId).then(setPtaSummary) : Promise.resolve(),
+      ]);
       setLoadError(null);
     } catch {
       setLoadError('Unable to load dues status. Check your connection and try again.');
     }
-  }, [selectedOrganizationId, hasMemberIdentity, hasPtaIdentity]);
+  }, [selectedOrganizationId, hasMemberIdentity, hasParentIdentity]);
 
   useEffect(() => {
     (async () => {
@@ -83,7 +86,7 @@ export default function DuesScreen() {
 
   const topPadding = useScreenTopPadding();
 
-  if (hasPtaIdentity && !hasMemberIdentity) {
+  if (hasParentIdentity && !hasMemberIdentity) {
     const charge = ptaSummary?.currentCharge ?? null;
     const statusStyle = charge ? STATUS_STYLES[charge.status] : 'neutral';
 
@@ -193,7 +196,7 @@ export default function DuesScreen() {
   // account has no personal dues, and every action below is scoped by an
   // identity it doesn't have, so each would 403 server-side. Show the state
   // plainly instead of falling through to the member UI with doomed buttons.
-  if (!hasMemberIdentity && !hasPtaIdentity) {
+  if (!hasMemberIdentity && !hasParentIdentity) {
     return (
       <ThemedView style={[styles.container, topPadding]}>
         <ThemedText type="title">Dues Status</ThemedText>
@@ -237,6 +240,45 @@ export default function DuesScreen() {
       <Pressable style={styles.linkButton} onPress={() => router.push('/payment-history')} accessibilityRole="link" accessibilityLabel="View payment history">
         <ThemedText type="link">View Payment History</ThemedText>
       </Pressable>
+
+      {hasParentIdentity && ptaSummary?.currentCharge ? (
+        <>
+          <ThemedText type="smallBold" style={styles.sectionLabel}>Household dues</ThemedText>
+          <ThemedView
+            type="backgroundElement"
+            style={styles.summaryCard}
+            accessible
+            accessibilityLabel={`Household ${ptaSummary.currentSchoolYear ?? 'current'} membership, ${formatCentsCurrency(ptaSummary.currentCharge.remainingBalanceCents)} remaining, ${STATUS_LABELS[ptaSummary.currentCharge.status]}`}
+          >
+            <ThemedText type="small" themeColor="textSecondary">
+              {ptaSummary.currentSchoolYear ?? 'Current'} membership · your household
+            </ThemedText>
+            <ThemedText type="subtitle">{formatCentsCurrency(ptaSummary.currentCharge.remainingBalanceCents)} remaining</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">{STATUS_LABELS[ptaSummary.currentCharge.status]}</ThemedText>
+          </ThemedView>
+          {ptaSummary.onlinePaymentLinkSlug ? (
+            <Pressable
+              style={styles.reportButton}
+              onPress={() => WebBrowser.openBrowserAsync(`${API_BASE_URL}/pay/${ptaSummary.onlinePaymentLinkSlug}`)}
+              accessibilityRole="button"
+              accessibilityLabel="Open household payment options"
+              accessibilityHint="Opens payment options in your browser"
+            >
+              <ThemedText style={styles.reportButtonText}>Household Payment Options</ThemedText>
+            </Pressable>
+          ) : null}
+          {ptaSummary.currentCharge.status !== 'PAID' && ptaSummary.currentCharge.status !== 'WAIVED' && ptaSummary.currentCharge.status !== 'VOIDED' ? (
+            <Pressable
+              style={styles.reportButton}
+              onPress={() => router.push('/pta-report-payment')}
+              accessibilityRole="button"
+              accessibilityLabel="Report a household payment"
+            >
+              <ThemedText style={styles.reportButtonText}>Report a Household Payment</ThemedText>
+            </Pressable>
+          ) : null}
+        </>
+      ) : null}
 
       <ThemedText type="smallBold" style={styles.sectionLabel}>Charges</ThemedText>
       <FlatList

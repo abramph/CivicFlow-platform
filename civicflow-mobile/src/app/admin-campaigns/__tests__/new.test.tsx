@@ -21,7 +21,7 @@ describe('Admin campaign create screen', () => {
   beforeEach(() => {
     mockReplace.mockReset();
     mockCreateAdminCampaign.mockReset();
-    mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a' });
+    mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a', selectedOrganization: { capability: { adminCapabilities: ['manageCommunications'] } } });
   });
 
   it('rejects submission without required fields', async () => {

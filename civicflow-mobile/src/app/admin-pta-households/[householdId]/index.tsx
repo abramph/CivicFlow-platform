@@ -15,6 +15,7 @@ import {
   deactivateAdminPtaStudent,
   getAdminPtaHousehold,
   removeAdminPtaHouseholdAdult,
+  sendAdminPtaHouseholdAdultInvite,
   type AdminPtaHouseholdDetail,
 } from '@/lib/mobile-api';
 
@@ -23,9 +24,9 @@ import {
  * (householdId, organizationId) on every mount, matching every other detail
  * screen in this program. Adults have no update route anywhere in this
  * codebase (web or mobile) — only add/remove — so this screen doesn't
- * invent an edit form for them either. Adding an adult never accepts a
- * "link to user account" control since no such officer workflow exists
- * anywhere yet (see mobile-api.ts's doc comment).
+ * invent an edit form for them either. Linking an adult to a login goes
+ * through the emailed single-use invite (Build 27, mirroring the web
+ * officer-invite route) — never a direct "link to user account" control.
  */
 export default function AdminPtaHouseholdDetailScreen() {
   const { selectedOrganization, selectedOrganizationId } = useAuth();
@@ -127,6 +128,19 @@ export default function AdminPtaHouseholdDetailScreen() {
       await load();
     } catch (error) {
       Alert.alert('Unable to remove adult', error instanceof ApiError ? error.message : 'Please try again.');
+    } finally {
+      setActionPending(false);
+    }
+  }
+
+  async function handleInviteAdult(adultId: string, name: string) {
+    if (!selectedOrganizationId || !householdId || actionPending) return;
+    setActionPending(true);
+    try {
+      await sendAdminPtaHouseholdAdultInvite(householdId, adultId, selectedOrganizationId);
+      Alert.alert('Invite sent', `${name} will receive an email with a link to set up app access. The link expires in 7 days.`);
+    } catch (error) {
+      Alert.alert('Unable to send invite', error instanceof ApiError ? error.message : 'Please try again.');
     } finally {
       setActionPending(false);
     }
@@ -254,6 +268,17 @@ export default function AdminPtaHouseholdDetailScreen() {
                 </ThemedText>
                 {adult.email ? <ThemedText type="small" themeColor="textSecondary">{adult.email}</ThemedText> : null}
                 {adult.userId ? <ThemedText type="small" style={styles.badge}>Has portal access</ThemedText> : null}
+                {!adult.userId && adult.email ? (
+                  <Pressable
+                    onPress={() => handleInviteAdult(adult.id, adult.name)}
+                    disabled={actionPending}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Send app invite to ${adult.name}`}
+                    accessibilityState={{ disabled: actionPending }}
+                  >
+                    <ThemedText type="link">Invite to app</ThemedText>
+                  </Pressable>
+                ) : null}
               </ThemedView>
               <Pressable onPress={() => confirmRemoveAdult(adult.id, adult.name)} accessibilityRole="button" accessibilityLabel={`Remove ${adult.name}`}>
                 <ThemedText type="link" style={styles.dangerText}>Remove</ThemedText>

@@ -25,7 +25,7 @@ describe('Admin member add-adjustment screen', () => {
     mockBack.mockReset();
     mockGetAdminMemberDues.mockReset();
     mockCreateAdminDuesAdjustment.mockReset();
-    mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a' });
+    mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a', selectedOrganization: { capability: { adminCapabilities: ['managePayments'] } } });
   });
 
   it('shows an empty state when the member has no charges to adjust', async () => {

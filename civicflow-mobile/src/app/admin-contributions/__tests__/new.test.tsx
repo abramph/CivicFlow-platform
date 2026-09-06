@@ -24,7 +24,7 @@ describe('Admin contribution create screen', () => {
     mockReplace.mockReset();
     mockCreateAdminContribution.mockReset();
     mockGetAdminMembers.mockReset();
-    mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a' });
+    mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a', selectedOrganization: { capability: { adminCapabilities: ['managePayments'] } } });
   });
 
   it('requires an amount and a member or contributor name', async () => {

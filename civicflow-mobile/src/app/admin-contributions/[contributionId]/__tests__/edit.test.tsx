@@ -43,7 +43,7 @@ describe('Admin contribution edit screen', () => {
     mockReplace.mockReset();
     mockGetAdminContribution.mockReset();
     mockUpdateAdminContribution.mockReset();
-    mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a' });
+    mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a', selectedOrganization: { capability: { adminCapabilities: ['managePayments'] } } });
   });
 
   it('shows a not-found state for a deleted/foreign-org contribution', async () => {

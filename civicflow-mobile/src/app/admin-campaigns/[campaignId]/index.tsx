@@ -9,6 +9,7 @@ import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { getAdminCampaign, sendAdminCampaign, type AdminCampaignDetail, type CampaignStatus } from '@/lib/mobile-api';
+import { requireAdminCapability } from '@/components/require-admin-capability';
 
 const STATUS_LABELS: Record<CampaignStatus, string> = {
   DRAFT: 'Draft',
@@ -27,7 +28,7 @@ const SENDABLE_STATUSES: CampaignStatus[] = ['DRAFT', 'READY', 'FAILED'];
  * idempotent/resumable sendCommunicationCampaign() the web "Send Campaign"
  * button uses -- safe to tap again if a prior send partially completed.
  */
-export default function AdminCampaignDetailScreen() {
+function AdminCampaignDetailScreen() {
   const { selectedOrganizationId } = useAuth();
   const { campaignId } = useLocalSearchParams<{ campaignId: string }>();
 
@@ -158,3 +159,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+export default requireAdminCapability('manageCommunications', 'communications administration', AdminCampaignDetailScreen);

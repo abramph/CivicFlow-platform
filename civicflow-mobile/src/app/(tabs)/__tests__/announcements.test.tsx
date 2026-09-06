@@ -11,19 +11,19 @@ jest.mock('@/lib/auth-context', () => ({
   useAuth: () => mockUseAuth(),
 }));
 
-const mockGetAnnouncementsForIdentity = jest.fn();
+const mockGetAnnouncementsForIdentities = jest.fn();
 jest.mock('@/lib/mobile-api', () => ({
-  getAnnouncementsForIdentity: (...args: unknown[]) => mockGetAnnouncementsForIdentity(...args),
+  getAnnouncementsForIdentities: (...args: unknown[]) => mockGetAnnouncementsForIdentities(...args),
 }));
 
 describe('Announcements list accessibility', () => {
   beforeEach(() => {
-    mockGetAnnouncementsForIdentity.mockReset();
+    mockGetAnnouncementsForIdentities.mockReset();
     mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a', selectedOrganization: { memberId: 'member-1', pta: null } });
   });
 
   it('exposes each announcement as a single accessible button labeled with its read state, subject, and date', async () => {
-    mockGetAnnouncementsForIdentity.mockResolvedValue([
+    mockGetAnnouncementsForIdentities.mockResolvedValue([
       {
         id: 'ann-1',
         subject: 'Welcome to Pine Grove PTA!',
@@ -42,7 +42,7 @@ describe('Announcements list accessibility', () => {
   });
 
   it('does not prefix a read announcement with "Unread"', async () => {
-    mockGetAnnouncementsForIdentity.mockResolvedValue([
+    mockGetAnnouncementsForIdentities.mockResolvedValue([
       {
         id: 'ann-2',
         subject: 'September minutes approved',
@@ -61,7 +61,7 @@ describe('Announcements list accessibility', () => {
   });
 
   it('shows a retryable error banner instead of a silently empty list when the load fails', async () => {
-    mockGetAnnouncementsForIdentity.mockRejectedValueOnce(new Error('Network request failed'));
+    mockGetAnnouncementsForIdentities.mockRejectedValueOnce(new Error('Network request failed'));
 
     await render(<AnnouncementsScreen />);
 
@@ -69,7 +69,7 @@ describe('Announcements list accessibility', () => {
       expect(screen.getByText('Unable to load announcements. Check your connection and try again.')).toBeTruthy()
     );
 
-    mockGetAnnouncementsForIdentity.mockResolvedValueOnce([
+    mockGetAnnouncementsForIdentities.mockResolvedValueOnce([
       { id: 'ann-1', subject: 'Welcome!', title: 'Welcome!', body: 'Hi there.', isRead: false, sentAt: '2026-09-01T12:00:00.000Z' },
     ]);
     fireEvent.press(screen.getByLabelText('Retry loading'));

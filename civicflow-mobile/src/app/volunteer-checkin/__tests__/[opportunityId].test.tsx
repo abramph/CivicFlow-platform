@@ -65,7 +65,10 @@ describe('Volunteer check-in roster', () => {
     mockCheckInPtaVolunteer.mockReset();
     mockCheckOutPtaVolunteer.mockReset();
     mockSetPtaVolunteerAttendance.mockReset();
-    mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-pta' });
+    mockUseAuth.mockReturnValue({
+      selectedOrganizationId: 'org-pta',
+      selectedOrganization: { pta: { householdAdultId: null, isOfficer: true, canCheckIn: true, canApproveHours: false } },
+    });
   });
 
   it('shows a check-in button for a volunteer who has not checked in yet', async () => {

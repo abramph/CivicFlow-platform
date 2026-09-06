@@ -13,6 +13,7 @@ import {
   type AdminMemberListRow,
   type DuesPaymentMethodValue,
 } from '@/lib/mobile-api';
+import { requireAdminCapability } from '@/components/require-admin-capability';
 
 const PAYMENT_METHODS: DuesPaymentMethodValue[] = ['CASH', 'CHECK', 'CREDIT_CARD', 'ACH', 'ZELLE', 'CASH_APP', 'VENMO', 'PAYPAL', 'OTHER'];
 
@@ -28,7 +29,7 @@ function todayIsoDate() {
  * flow. Member attribution is optional (matches the web form) — a contribution
  * can be recorded against a contributor name with no OrgMember record.
  */
-export default function AdminContributionCreateScreen() {
+function AdminContributionCreateScreen() {
   const { selectedOrganizationId } = useAuth();
 
   const [memberSearch, setMemberSearch] = useState('');
@@ -304,3 +305,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+export default requireAdminCapability('managePayments', 'payment administration', AdminContributionCreateScreen);

@@ -38,7 +38,7 @@ describe('Admin PTA household edit screen', () => {
     mockReplace.mockReset();
     mockGetAdminPtaHousehold.mockReset();
     mockUpdateAdminPtaHousehold.mockReset();
-    mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a' });
+    mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a', selectedOrganization: { capability: { adminCapabilities: ['managePtaHouseholds'] } } });
   });
 
   it('pre-fills the form from the loaded household', async () => {

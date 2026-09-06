@@ -45,7 +45,7 @@ describe('Admin campaign detail screen', () => {
     mockGetAdminCampaign.mockReset();
     mockSendAdminCampaign.mockReset();
     alertSpy.mockClear();
-    mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a' });
+    mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a', selectedOrganization: { capability: { adminCapabilities: ['manageCommunications'] } } });
   });
 
   it('re-fetches by campaignId + organization', async () => {

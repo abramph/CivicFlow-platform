@@ -1664,6 +1664,17 @@ export function removeAdminPtaHouseholdAdult(householdId: string, adultId: strin
   );
 }
 
+/** Build 27: emails a single-use app invite to an adult with no login yet —
+ * the same PR #85 accept flow that is the ONLY path ever setting
+ * PtaHouseholdAdult.userId. This is what lets an administrator who is also
+ * a parent get their own household linked without leaving the app. */
+export function sendAdminPtaHouseholdAdultInvite(householdId: string, adultId: string, organizationId: string) {
+  return apiFetch<void>(
+    `/api/mobile/admin/pta/households/${encodeURIComponent(householdId)}/adults/${encodeURIComponent(adultId)}/invite`,
+    { method: 'POST', body: JSON.stringify({ organizationId }) }
+  );
+}
+
 export function addAdminPtaStudent(householdId: string, organizationId: string, displayName: string) {
   return apiFetch<AdminPtaStudent>(`/api/mobile/admin/pta/households/${encodeURIComponent(householdId)}/students`, {
     method: 'POST',
@@ -1933,20 +1944,76 @@ export function addAdminHoaArchitecturalRequestComment(requestId: string, organi
 }
 
 // ── Identity routing ─────────────────────────────────────────────────────────
-// A caller can have a conventional OrgMember, a PTA household link, both (an
-// officer who is also a parent), or neither. `hasMemberIdentity` always wins
-// when both are present, matching how dashboard.tsx already treats it as the
-// organization's "primary" identity for the officer/dual-identity case.
-// Screens branch through these instead of re-deriving the choice themselves.
+// Build 27: a caller can have a conventional OrgMember, a PTA household link,
+// both (an officer or admin who is also a parent), or neither — and the old
+// two-way `hasMemberIdentity ? conventional : PTA` switch flattened the dual
+// case onto one identity (preview finding #10). Announcements are now read as
+// the UNION of both identities' inboxes: a campaign can target the caller's
+// personal OrgMember, their household's billing member, or both, so the two
+// lists are fetched together, merged, and de-duplicated by campaign id. Each
+// row remembers which source(s) it came from so mark-read stamps the right
+// recipient row(s).
 
-export function getAnnouncementsForIdentity(organizationId: string, hasMemberIdentity: boolean) {
-  return hasMemberIdentity ? getAnnouncements(organizationId) : getPtaAnnouncements(organizationId);
+export type AnnouncementSource = 'member' | 'pta';
+
+export interface AnnouncementWithSources extends Announcement {
+  sources: AnnouncementSource[];
 }
 
-export function markAnnouncementReadForIdentity(organizationId: string, campaignId: string, hasMemberIdentity: boolean) {
-  return hasMemberIdentity
-    ? markAnnouncementRead(organizationId, campaignId)
-    : markPtaAnnouncementRead(organizationId, campaignId);
+export interface AnnouncementIdentity {
+  hasMemberIdentity: boolean;
+  hasParentIdentity: boolean;
+}
+
+export async function getAnnouncementsForIdentities(
+  organizationId: string,
+  identity: AnnouncementIdentity
+): Promise<AnnouncementWithSources[]> {
+  const [memberList, ptaList] = await Promise.all([
+    identity.hasMemberIdentity ? getAnnouncements(organizationId) : Promise.resolve([]),
+    identity.hasParentIdentity ? getPtaAnnouncements(organizationId) : Promise.resolve([]),
+  ]);
+
+  const merged = new Map<string, AnnouncementWithSources>();
+  for (const item of memberList) {
+    merged.set(item.id, { ...item, sources: ['member'] });
+  }
+  for (const item of ptaList) {
+    const existing = merged.get(item.id);
+    if (existing) {
+      existing.sources.push('pta');
+      // A campaign read through either recipient row is read — never show an
+      // announcement as unread again because its second row hasn't been
+      // stamped yet.
+      existing.isRead = existing.isRead || item.isRead;
+    } else {
+      merged.set(item.id, { ...item, sources: ['pta'] });
+    }
+  }
+
+  return Array.from(merged.values()).sort((a, b) => {
+    const aTime = a.sentAt ? new Date(a.sentAt).getTime() : 0;
+    const bTime = b.sentAt ? new Date(b.sentAt).getTime() : 0;
+    return bTime - aTime;
+  });
+}
+
+/** Stamps the caller's own recipient row(s) for every source the merged
+ * announcement carried. Both stamps are attempted even if one fails —
+ * mark-read is best-effort everywhere in this app. */
+export async function markAnnouncementReadForSources(
+  organizationId: string,
+  campaignId: string,
+  sources: AnnouncementSource[]
+): Promise<void> {
+  await Promise.all(
+    sources.map((source) =>
+      (source === 'member'
+        ? markAnnouncementRead(organizationId, campaignId)
+        : markPtaAnnouncementRead(organizationId, campaignId)
+      ).catch(() => null)
+    )
+  );
 }
 
 /**

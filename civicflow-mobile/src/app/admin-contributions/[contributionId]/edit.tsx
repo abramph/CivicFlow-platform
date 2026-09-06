@@ -14,6 +14,7 @@ import {
   type AdminContributionDetail,
   type DuesPaymentMethodValue,
 } from '@/lib/mobile-api';
+import { requireAdminCapability } from '@/components/require-admin-capability';
 
 const PAYMENT_METHODS: DuesPaymentMethodValue[] = ['CASH', 'CHECK', 'CREDIT_CARD', 'ACH', 'ZELLE', 'CASH_APP', 'VENMO', 'PAYPAL', 'OTHER'];
 
@@ -23,7 +24,7 @@ const PAYMENT_METHODS: DuesPaymentMethodValue[] = ['CASH', 'CHECK', 'CREDIT_CARD
  * reason, matching the web form's audit convention for corrections to
  * already-recorded financial records.
  */
-export default function AdminContributionEditScreen() {
+function AdminContributionEditScreen() {
   const { selectedOrganizationId } = useAuth();
   const { contributionId } = useLocalSearchParams<{ contributionId: string }>();
 
@@ -235,3 +236,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+export default requireAdminCapability('managePayments', 'payment administration', AdminContributionEditScreen);

@@ -67,7 +67,7 @@ export default function ReportPaymentScreen() {
   // record). Entry points already hide the action, but deep links, saved
   // routes and notification taps bypass those — degrade to the Payments tab's
   // non-member state rather than letting the server's raw 403 text surface.
-  if (status === 'signedIn' && selectedOrg && !selectedOrg.memberId) {
+  if (status === 'signedIn' && selectedOrg && !(selectedOrg.constituentMemberId ?? selectedOrg.memberId)) {
     return <Redirect href="/dues" />;
   }
 
