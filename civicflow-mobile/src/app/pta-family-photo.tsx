@@ -54,7 +54,11 @@ type Stage =
   | { kind: 'removing' };
 
 export default function PtaFamilyPhotoScreen() {
-  const { status, selectedOrganizationId } = useAuth();
+  const { status, selectedOrganization, selectedOrganizationId } = useAuth();
+  // Direct-navigation defense mirroring pta-my-family's: the whole screen is
+  // household self-service, so a login with no household link here gets the
+  // dashboard, not an interactive uploader whose only stop is the server 403.
+  const hasParentIdentity = Boolean(selectedOrganization?.pta?.householdAdultId);
   // Tracked with its organization: a family photo is household data and must
   // not linger on screen for even one frame after an organization switch,
   // while the new organization's fetch is still in flight.
@@ -185,6 +189,9 @@ export default function PtaFamilyPhotoScreen() {
 
   if (status === 'signedOut') {
     return <Redirect href={{ pathname: '/login', params: { redirectTo: '/pta-family-photo' } }} />;
+  }
+  if (status === 'signedIn' && selectedOrganization && !hasParentIdentity) {
+    return <Redirect href="/dashboard" />;
   }
 
   return (

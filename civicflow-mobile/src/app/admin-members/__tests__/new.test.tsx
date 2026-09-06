@@ -21,7 +21,7 @@ describe('Admin member create screen', () => {
   beforeEach(() => {
     mockReplace.mockReset();
     mockCreateAdminMember.mockReset();
-    mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a' });
+    mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a', selectedOrganization: { capability: { adminCapabilities: ['manageMembers'] } } });
   });
 
   it('rejects submission without first/last name', async () => {

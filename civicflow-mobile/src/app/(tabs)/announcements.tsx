@@ -8,25 +8,26 @@ import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { useScreenTopPadding } from '@/hooks/use-screen-top-padding';
 import { useAuth } from '@/lib/auth-context';
-import { getAnnouncementsForIdentity, type Announcement } from '@/lib/mobile-api';
+import { getAnnouncementsForIdentities, type AnnouncementWithSources } from '@/lib/mobile-api';
+import { deriveOrgCapabilities } from '@/lib/org-capabilities';
 
 export default function AnnouncementsScreen() {
   const { selectedOrganization, selectedOrganizationId } = useAuth();
-  const hasMemberIdentity = Boolean(selectedOrganization?.memberId);
-  const hasPtaIdentity = Boolean(selectedOrganization?.pta?.householdAdultId);
-  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const { hasMemberIdentity, hasParentIdentity } = deriveOrgCapabilities(selectedOrganization);
+  const hasRecipientIdentity = hasMemberIdentity || hasParentIdentity;
+  const [announcements, setAnnouncements] = useState<AnnouncementWithSources[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!selectedOrganizationId || (!hasMemberIdentity && !hasPtaIdentity)) return;
+    if (!selectedOrganizationId || !hasRecipientIdentity) return;
     try {
-      setAnnouncements(await getAnnouncementsForIdentity(selectedOrganizationId, hasMemberIdentity));
+      setAnnouncements(await getAnnouncementsForIdentities(selectedOrganizationId, { hasMemberIdentity, hasParentIdentity }));
       setLoadError(null);
     } catch {
       setLoadError('Unable to load announcements. Check your connection and try again.');
     }
-  }, [selectedOrganizationId, hasMemberIdentity, hasPtaIdentity]);
+  }, [selectedOrganizationId, hasRecipientIdentity, hasMemberIdentity, hasParentIdentity]);
 
   useEffect(() => {
     (async () => {
@@ -71,7 +72,9 @@ export default function AnnouncementsScreen() {
         )}
         ListEmptyComponent={
           <ThemedText type="small" themeColor="textSecondary" style={styles.empty}>
-            No announcements yet.
+            {hasRecipientIdentity
+              ? 'No announcements yet.'
+              : 'Announcements are sent to members and families. Your login has no member or family record in this organization, so there is nothing to show here.'}
           </ThemedText>
         }
       />

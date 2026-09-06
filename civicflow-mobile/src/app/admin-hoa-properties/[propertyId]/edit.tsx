@@ -9,6 +9,7 @@ import { Spacing } from '@/constants/theme';
 import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { getAdminHoaProperty, updateAdminHoaProperty, type HoaPropertyType } from '@/lib/mobile-api';
+import { requireAdminCapability } from '@/components/require-admin-capability';
 
 const PROPERTY_TYPES: { value: HoaPropertyType; label: string }[] = [
   { value: 'SINGLE_FAMILY', label: 'Single Family' },
@@ -20,7 +21,7 @@ const PROPERTY_TYPES: { value: HoaPropertyType; label: string }[] = [
 ];
 
 /** Mobile Admin program (PR E) — edit an HOA property. Blocked server-side on an archived property (reactivate first), matching the web behavior. */
-export default function AdminHoaPropertyEditScreen() {
+function AdminHoaPropertyEditScreen() {
   const { selectedOrganizationId } = useAuth();
   const { propertyId } = useLocalSearchParams<{ propertyId: string }>();
 
@@ -244,3 +245,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+export default requireAdminCapability('manageHoaProperties', 'property administration', AdminHoaPropertyEditScreen);

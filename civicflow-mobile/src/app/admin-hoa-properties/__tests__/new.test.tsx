@@ -21,7 +21,7 @@ describe('Admin HOA property create screen', () => {
   beforeEach(() => {
     mockReplace.mockReset();
     mockCreateAdminHoaProperty.mockReset();
-    mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a' });
+    mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a', selectedOrganization: { capability: { adminCapabilities: ['manageHoaProperties'] } } });
   });
 
   it('requires a street address', async () => {

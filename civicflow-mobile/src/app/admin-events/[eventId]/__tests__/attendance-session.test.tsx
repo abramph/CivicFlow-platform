@@ -42,7 +42,7 @@ beforeEach(() => {
   mockGetQr.mockReset();
   mockGetSummary.mockReset();
   alertSpy.mockClear();
-  mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a' });
+  mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a', selectedOrganization: { capability: { adminCapabilities: ['manageAttendance'] } } });
 });
 
 describe('Admin attendance session screen', () => {

@@ -8,6 +8,7 @@ import { Spacing } from '@/constants/theme';
 import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { createAdminCampaign, type CampaignChannel, type CampaignCommunicationType } from '@/lib/mobile-api';
+import { requireAdminCapability } from '@/components/require-admin-capability';
 
 const TYPE_OPTIONS: { value: CampaignCommunicationType; label: string }[] = [
   { value: 'ANNOUNCEMENT', label: 'Announcement' },
@@ -32,7 +33,7 @@ const CHANNEL_OPTIONS: { value: CampaignChannel; label: string }[] = [
  * the default "active members with email/phone" audience covers the
  * common officer use case.
  */
-export default function AdminCampaignCreateScreen() {
+function AdminCampaignCreateScreen() {
   const { selectedOrganizationId } = useAuth();
 
   const [title, setTitle] = useState('');
@@ -222,3 +223,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+export default requireAdminCapability('manageCommunications', 'communications administration', AdminCampaignCreateScreen);

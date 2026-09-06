@@ -15,6 +15,16 @@ interface OrgRow {
   organizationName: string;
   organizationLogoUrl: string | null;
   memberId: string | null;
+  /** Build 27 additive dual-role field: the caller's role-agnostic linked
+   * OrgMember id, populated for EVERY row where one exists — including
+   * household-adult rows, whose legacy `memberId` stays withheld (branch 4)
+   * so fielded Build 25/26 clients keep their two-way identity switch
+   * intact. One deliberate exception: when the linked OrgMember IS the
+   * caller's household billing identity (PtaHousehold.orgMemberId), it is
+   * NOT surfaced here — that identity is already represented by the
+   * household context, and surfacing it again would make the app show the
+   * same household dues twice under two names. */
+  constituentMemberId: string | null;
   firstName: string | null;
   lastName: string | null;
   membershipStatus: string | null;
@@ -161,6 +171,7 @@ export async function GET(request: Request) {
         organizationName: membership.organization.name,
         organizationLogoUrl: membership.organization.logoUrl,
         memberId: member.id,
+        constituentMemberId: member.id,
         firstName: member.firstName,
         lastName: member.lastName,
         membershipStatus: member.membershipStatus,
@@ -172,8 +183,15 @@ export async function GET(request: Request) {
     // ── 2. PTA household adults ──────────────────────────────────────────
     const householdAdults = await prisma.ptaHouseholdAdult.findMany({
       where: { userId, organization: { status: "active" }, household: { status: "ACTIVE" } },
-      include: { organization: { select: { id: true, name: true, logoUrl: true, primaryVertical: true } } },
+      include: {
+        organization: { select: { id: true, name: true, logoUrl: true, primaryVertical: true } },
+        household: { select: { displayName: true, orgMemberId: true } },
+      },
     });
+    // The household's shared billing OrgMember per org — used by the
+    // constituent-resolution pass below to avoid re-surfacing the billing
+    // identity as a personal member identity.
+    const householdBillingMemberIdByOrgId = new Map<string, string>();
     for (const adult of householdAdults) {
       // PTA/PTO is a first-class vertical (PR #40) — included whenever the
       // organization's own primaryVertical is PTA, never a separate Labs
@@ -182,21 +200,23 @@ export async function GET(request: Request) {
 
       rawVerticalByOrgId.set(adult.organizationId, "PTA");
       confirmedPtaOrgIds.add(adult.organizationId);
+      if (adult.household.orgMemberId) householdBillingMemberIdByOrgId.set(adult.organizationId, adult.household.orgMemberId);
       const existing = rows.get(adult.organizationId);
       const [firstName, ...lastParts] = adult.name.split(" ");
       if (existing) {
-        existing.pta = { householdAdultId: adult.id, householdName: null, isOfficer: existing.pta?.isOfficer ?? false, canCheckIn: existing.pta?.canCheckIn ?? false, canApproveHours: existing.pta?.canApproveHours ?? false };
+        existing.pta = { householdAdultId: adult.id, householdName: adult.household.displayName, isOfficer: existing.pta?.isOfficer ?? false, canCheckIn: existing.pta?.canCheckIn ?? false, canApproveHours: existing.pta?.canApproveHours ?? false };
       } else {
         rows.set(adult.organizationId, {
           organizationId: adult.organizationId,
           organizationName: adult.organization.name,
           organizationLogoUrl: adult.organization.logoUrl,
           memberId: null,
+          constituentMemberId: null,
           firstName: firstName ?? adult.name,
           lastName: lastParts.join(" ") || null,
           membershipStatus: null,
           isDelinquent: false,
-          pta: { householdAdultId: adult.id, householdName: null, isOfficer: false, canCheckIn: false, canApproveHours: false },
+          pta: { householdAdultId: adult.id, householdName: adult.household.displayName, isOfficer: false, canCheckIn: false, canApproveHours: false },
         });
       }
     }
@@ -250,6 +270,7 @@ export async function GET(request: Request) {
           organizationName: membership.organization.name,
           organizationLogoUrl: membership.organization.logoUrl,
           memberId: null,
+          constituentMemberId: null,
           firstName: null,
           lastName: null,
           membershipStatus: null,
@@ -285,7 +306,7 @@ export async function GET(request: Request) {
     // untouched in the database; this only withholds it from mobile identity
     // routing, where the household link is the authoritative identity.
     const unresolved = Array.from(rows.values()).filter(
-      (row) => row.memberId === null && !row.pta?.householdAdultId
+      (row) => row.constituentMemberId === null
     );
     if (unresolved.length > 0) {
       const linkedMembers = await prisma.orgMember.findMany({
@@ -295,6 +316,19 @@ export async function GET(request: Request) {
       for (const member of linkedMembers) {
         const row = rows.get(member.organizationId);
         if (!row) continue;
+        // Build 27: the household's shared billing OrgMember is a billing
+        // identity, not a personal one — never surface it as the caller's
+        // constituent identity (the household context already represents it,
+        // and doing so would show the same household dues twice).
+        if (householdBillingMemberIdByOrgId.get(member.organizationId) === member.id) continue;
+        row.constituentMemberId = member.id;
+        // Legacy `memberId` and the name/status merge keep their exact
+        // pre-Build-27 semantics: both are withheld from any row carrying a
+        // PTA household identity, because fielded Build 25/26 clients still
+        // route reads through the two-way `hasMemberIdentity ? conventional
+        // : PTA` switch (see the branch comment above) and must see
+        // byte-identical rows. New clients read `constituentMemberId`.
+        if (row.pta?.householdAdultId) continue;
         row.memberId = member.id;
         // A PTA household adult row already carries the adult's own name;
         // don't clobber it with the constituent record's.

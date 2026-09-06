@@ -10,6 +10,7 @@ import { useScreenTopPadding } from '@/hooks/use-screen-top-padding';
 import { useAuth } from '@/lib/auth-context';
 import { API_BASE_URL } from '@/lib/api-client';
 import { getDues, getProfile, updateProfile, type DuesSummary, type MobileProfile } from '@/lib/mobile-api';
+import { deriveOrgCapabilities } from '@/lib/org-capabilities';
 
 function formatCurrency(value: number) {
   return value.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
@@ -17,7 +18,12 @@ function formatCurrency(value: number) {
 
 export default function ProfileScreen() {
   const { user, selectedOrganization, selectedOrganizationId, logout } = useAuth();
-  const hasMemberIdentity = Boolean(selectedOrganization?.memberId);
+  // Build 27: constituent identity is role-agnostic (see org-capabilities.ts)
+  // — a parent or admin with a linked OrgMember gets the member sections
+  // (profile edit, attendance history, notification preferences) their
+  // record actually supports, instead of the old memberId-only gate hiding
+  // them for every household adult.
+  const { hasMemberIdentity } = deriveOrgCapabilities(selectedOrganization);
   // Union foregrounds Cases in primary nav, so Payments isn't a bottom tab
   // for these orgs (see (tabs)/_layout.tsx) — dues/payment status and
   // actions relocate here instead of disappearing. Never deletes the

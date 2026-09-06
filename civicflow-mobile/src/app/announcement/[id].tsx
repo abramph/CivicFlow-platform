@@ -6,24 +6,25 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/lib/auth-context';
-import { getAnnouncementsForIdentity, markAnnouncementReadForIdentity, type Announcement } from '@/lib/mobile-api';
+import { getAnnouncementsForIdentities, markAnnouncementReadForSources, type AnnouncementWithSources } from '@/lib/mobile-api';
+import { deriveOrgCapabilities } from '@/lib/org-capabilities';
 
 export default function AnnouncementDetailScreen() {
   const { selectedOrganization, selectedOrganizationId } = useAuth();
-  const hasMemberIdentity = Boolean(selectedOrganization?.memberId);
+  const { hasMemberIdentity, hasParentIdentity } = deriveOrgCapabilities(selectedOrganization);
   const { id } = useLocalSearchParams<{ id: string }>();
-  const [announcement, setAnnouncement] = useState<Announcement | null>(null);
+  const [announcement, setAnnouncement] = useState<AnnouncementWithSources | null>(null);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     if (!selectedOrganizationId || !id) return;
-    const all = await getAnnouncementsForIdentity(selectedOrganizationId, hasMemberIdentity);
+    const all = await getAnnouncementsForIdentities(selectedOrganizationId, { hasMemberIdentity, hasParentIdentity });
     const match = all.find((item) => item.id === id) ?? null;
     setAnnouncement(match);
     if (match && !match.isRead) {
-      await markAnnouncementReadForIdentity(selectedOrganizationId, id, hasMemberIdentity).catch(() => null);
+      await markAnnouncementReadForSources(selectedOrganizationId, id, match.sources);
     }
-  }, [selectedOrganizationId, id, hasMemberIdentity]);
+  }, [selectedOrganizationId, id, hasMemberIdentity, hasParentIdentity]);
 
   useEffect(() => {
     (async () => {

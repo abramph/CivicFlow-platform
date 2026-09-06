@@ -8,6 +8,7 @@ import { Spacing } from '@/constants/theme';
 import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { getAdminMember, updateAdminMember } from '@/lib/mobile-api';
+import { requireAdminCapability } from '@/components/require-admin-capability';
 
 /**
  * Mobile Admin program (PR B) — edit member. Always prepopulates from a
@@ -16,7 +17,7 @@ import { getAdminMember, updateAdminMember } from '@/lib/mobile-api';
  * made in between. Status is not editable here -- terminate/reinstate on
  * the detail screen are the only status actions PR B exposes on mobile.
  */
-export default function AdminMemberEditScreen() {
+function AdminMemberEditScreen() {
   const { selectedOrganizationId } = useAuth();
   const { memberId } = useLocalSearchParams<{ memberId: string }>();
 
@@ -251,3 +252,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+export default requireAdminCapability('manageMembers', 'member administration', AdminMemberEditScreen);

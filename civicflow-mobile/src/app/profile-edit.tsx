@@ -83,7 +83,7 @@ export default function ProfileEditScreen() {
     return <Redirect href="/org-switcher" />;
   }
   const selectedOrg = organizations.find((org) => org.organizationId === selectedOrganizationId);
-  if (status === 'signedIn' && selectedOrg && !selectedOrg.memberId) {
+  if (status === 'signedIn' && selectedOrg && !(selectedOrg.constituentMemberId ?? selectedOrg.memberId)) {
     return <Redirect href="/profile" />;
   }
 

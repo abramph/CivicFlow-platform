@@ -89,7 +89,7 @@ export default function PaymentHistoryScreen() {
   // Direct-route defense: history is scoped by an OrgMember identity a
   // staff/owner login may not hold. Reachable by deep link even though every
   // in-app entry point gates on it.
-  if (status === 'signedIn' && selectedOrganization && !selectedOrganization.memberId) {
+  if (status === 'signedIn' && selectedOrganization && !(selectedOrganization.constituentMemberId ?? selectedOrganization.memberId)) {
     return <Redirect href="/dues" />;
   }
 

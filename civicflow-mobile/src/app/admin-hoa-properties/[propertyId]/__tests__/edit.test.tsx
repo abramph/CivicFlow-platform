@@ -45,7 +45,7 @@ describe('Admin HOA property edit screen', () => {
     mockReplace.mockReset();
     mockGetAdminHoaProperty.mockReset();
     mockUpdateAdminHoaProperty.mockReset();
-    mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a' });
+    mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a', selectedOrganization: { capability: { adminCapabilities: ['manageHoaProperties'] } } });
   });
 
   it('pre-fills the form from the loaded property', async () => {

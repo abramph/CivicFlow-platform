@@ -11,7 +11,7 @@ import { useScreenTopPadding } from '@/hooks/use-screen-top-padding';
 import { API_BASE_URL } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import {
-  getAnnouncementsForIdentity,
+  getAnnouncementsForIdentities,
   getDues,
   getEventsForOrganization,
   getPaymentHistory,
@@ -19,7 +19,7 @@ import {
   getPtaVolunteerCommitments,
   getPtaVolunteerHours,
   getUnionCases,
-  type Announcement,
+  type AnnouncementWithSources,
   type DuesSummary,
   type MobileEvent,
   type PtaDuesSummary,
@@ -30,6 +30,7 @@ import {
   getGiving,
   type GivingSummary,
 } from '@/lib/mobile-api';
+import { deriveOrgCapabilities } from '@/lib/org-capabilities';
 import { useUnreadConversationCount } from '@/lib/unread-count';
 
 const UNION_OPEN_CASE_STATUSES = ['NEW', 'TRIAGE', 'ASSIGNED', 'ACTIVE', 'PENDING'];
@@ -48,11 +49,11 @@ function formatHours(minutes: number): string {
 }
 
 export default function DashboardScreen() {
-  const { selectedOrganization, selectedOrganizationId } = useAuth();
+  const { selectedOrganization, selectedOrganizationId, user } = useAuth();
   const [dues, setDues] = useState<DuesSummary | null>(null);
   const [ptaDues, setPtaDues] = useState<PtaDuesSummary | null>(null);
   const [unionCases, setUnionCases] = useState<UnionCaseSummary[]>([]);
-  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [announcements, setAnnouncements] = useState<AnnouncementWithSources[]>([]);
   const [events, setEvents] = useState<(MobileEvent | PtaEvent)[]>([]);
   const [pendingReportCount, setPendingReportCount] = useState(0);
   const [ptaHours, setPtaHours] = useState<PtaVolunteerHours | null>(null);
@@ -62,7 +63,14 @@ export default function DashboardScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const unreadCount = useUnreadConversationCount(selectedOrganizationId);
-  const hasMemberIdentity = Boolean(selectedOrganization?.memberId);
+  // Build 27 additive dual-role model: every identity axis is independent —
+  // a caller can be a member, a parent, an officer, an admin, or any
+  // combination, and each section below keys off exactly the capability it
+  // needs (see lib/org-capabilities.ts). This replaces the old "primary
+  // identity" flattening that hid My Family from admin-parents and left
+  // admin-only users a blank dashboard.
+  const caps = deriveOrgCapabilities(selectedOrganization);
+  const { hasMemberIdentity, hasParentIdentity, hasAdminAccess } = caps;
   // Most unions collect dues via employer payroll checkoff rather than
   // member-initiated payment, so the payment-first layout the other
   // verticals use (Balance tile, Make a Payment) doesn't fit -- Union
@@ -73,21 +81,22 @@ export default function DashboardScreen() {
   // (see docs on the Give tab). Same live-read-every-render reasoning as
   // isUnion above.
   const isChurch = selectedOrganization?.capability?.primaryVertical === 'CHURCH';
-  const pta = selectedOrganization?.pta ?? null;
-  const hasPtaIdentity = Boolean(pta?.householdAdultId);
   // A pure PTA parent (household link, no OrgMember) reads announcements,
   // events, and messages through the org-access / household-authorized
   // bridge routes instead of the conventional member routes — see
   // requireMobileOrgAccess / requireMobilePtaHouseholdAccess in
   // civicflow-portal's mobile-auth.ts, and docs/mobile-pta-parent-parity.md.
-  const hasAnyIdentity = hasMemberIdentity || hasPtaIdentity;
+  const hasAnyIdentity = hasMemberIdentity || hasParentIdentity;
 
   const load = useCallback(async () => {
-    if (!selectedOrganizationId || !hasAnyIdentity) return;
+    if (!selectedOrganizationId) return;
 
     try {
+      // Events are readable with any active org tie (requireMobileOrgAccess),
+      // so an admin-only login still sees the calendar; announcements fetch
+      // per held identity and resolve to an empty list when there is none.
       const [announcementsData, eventsData] = await Promise.all([
-        getAnnouncementsForIdentity(selectedOrganizationId, hasMemberIdentity),
+        getAnnouncementsForIdentities(selectedOrganizationId, { hasMemberIdentity, hasParentIdentity }),
         getEventsForOrganization(selectedOrganizationId, selectedOrganization?.capability?.rsvp, hasMemberIdentity),
       ]);
       setAnnouncements(announcementsData.slice(0, 3));
@@ -117,13 +126,13 @@ export default function DashboardScreen() {
         setGivingSummary(givingData);
         setDues(duesData);
         setPendingReportCount(historyData.reports.filter((r) => r.status === 'pending').length);
-      } else if (hasPtaIdentity) {
+      } else if (hasParentIdentity) {
         const duesData = await getPtaDues(selectedOrganizationId);
         setPtaDues(duesData);
         setPendingReportCount(duesData.currentCharge?.pendingReportCount ?? 0);
       }
 
-      if (pta?.householdAdultId) {
+      if (hasParentIdentity) {
         const [hoursData, commitments] = await Promise.all([
           getPtaVolunteerHours(selectedOrganizationId),
           getPtaVolunteerCommitments(selectedOrganizationId),
@@ -135,7 +144,7 @@ export default function DashboardScreen() {
     } catch {
       setLoadError('Unable to load your dashboard. Check your connection and try again.');
     }
-  }, [selectedOrganizationId, hasAnyIdentity, hasMemberIdentity, hasPtaIdentity, isUnion, isChurch, pta?.householdAdultId, selectedOrganization?.capability?.rsvp]);
+  }, [selectedOrganizationId, hasMemberIdentity, hasParentIdentity, isUnion, isChurch, selectedOrganization?.capability?.rsvp]);
 
   useEffect(() => {
     (async () => {
@@ -182,10 +191,55 @@ export default function DashboardScreen() {
         {selectedOrganization?.organizationName ?? 'Unestra'}
       </ThemedText>
       <ThemedText type="subtitle" themeColor="textSecondary">
-        Welcome back, {selectedOrganization?.firstName ?? 'member'}
+        Welcome back, {selectedOrganization?.firstName ?? user?.displayName ?? 'member'}
       </ThemedText>
 
       <LoadErrorBanner message={loadError} onRetry={load} />
+
+      {hasAdminAccess ? (
+        <Pressable
+          style={styles.adminCard}
+          onPress={() => router.push('/admin' as never)}
+          accessibilityRole="button"
+          accessibilityLabel="Open the admin dashboard"
+        >
+          <ThemedText style={styles.adminCardTitle}>Admin workspace</ThemedText>
+          <ThemedText style={styles.adminCardSubtitle}>
+            Approvals, members, events, and communications for {selectedOrganization?.organizationName ?? 'this organization'}.
+          </ThemedText>
+        </Pressable>
+      ) : null}
+
+      {caps.canCheckInVolunteers || caps.canApproveHours ? (
+        <ThemedView style={styles.summaryRow}>
+          {caps.canCheckInVolunteers ? (
+            <Pressable
+              style={styles.summaryTile}
+              onPress={() => router.push('/volunteer-checkin')}
+              accessibilityRole="button"
+              accessibilityLabel="Volunteer check-in"
+            >
+              <ThemedView type="backgroundElement" style={styles.card}>
+                <ThemedText type="small" themeColor="textSecondary">Volunteers</ThemedText>
+                <ThemedText type="smallBold">Check-in</ThemedText>
+              </ThemedView>
+            </Pressable>
+          ) : null}
+          {caps.canApproveHours ? (
+            <Pressable
+              style={styles.summaryTile}
+              onPress={() => router.push('/volunteer-hour-approvals')}
+              accessibilityRole="button"
+              accessibilityLabel="Volunteer hour approvals"
+            >
+              <ThemedView type="backgroundElement" style={styles.card}>
+                <ThemedText type="small" themeColor="textSecondary">Volunteer hours</ThemedText>
+                <ThemedText type="smallBold">Approvals</ThemedText>
+              </ThemedView>
+            </Pressable>
+          ) : null}
+        </ThemedView>
+      ) : null}
 
       {hasMemberIdentity && !isUnion && !isChurch ? (
         <ThemedView style={styles.summaryRow}>
@@ -316,7 +370,7 @@ export default function DashboardScreen() {
         </>
       ) : null}
 
-      {hasPtaIdentity && !hasMemberIdentity ? (
+      {hasParentIdentity && !hasMemberIdentity ? (
         <ThemedView style={styles.summaryRow}>
           <Pressable
             style={styles.summaryTile}
@@ -351,7 +405,7 @@ export default function DashboardScreen() {
         </ThemedView>
       ) : null}
 
-      {pta?.householdAdultId ? (
+      {hasParentIdentity ? (
         <Pressable
           onPress={() => router.push('/volunteers')}
           accessibilityRole="button"
@@ -421,7 +475,7 @@ export default function DashboardScreen() {
             <ThemedText style={styles.actionButtonText}>Giving</ThemedText>
           </Pressable>
         ) : null}
-        {hasPtaIdentity && !hasMemberIdentity && ptaDues?.onlinePaymentLinkSlug ? (
+        {hasParentIdentity && !hasMemberIdentity && ptaDues?.onlinePaymentLinkSlug ? (
           <Pressable
             style={styles.actionButton}
             onPress={() => WebBrowser.openBrowserAsync(`${API_BASE_URL}/pay/${ptaDues.onlinePaymentLinkSlug}`)}
@@ -439,7 +493,7 @@ export default function DashboardScreen() {
         {hasAnyIdentity && !isChurch ? (
           <Pressable
             style={styles.actionButtonSecondary}
-            onPress={() => router.push(hasPtaIdentity && !hasMemberIdentity ? '/pta-report-payment' : '/report-payment')}
+            onPress={() => router.push(hasParentIdentity && !hasMemberIdentity ? '/pta-report-payment' : '/report-payment')}
             accessibilityRole="button"
             accessibilityLabel="Report a payment"
           >
@@ -461,12 +515,12 @@ export default function DashboardScreen() {
         <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/minutes')} accessibilityRole="button" accessibilityLabel="Meeting minutes">
           <ThemedText style={styles.actionButtonSecondaryText}>Meeting Minutes</ThemedText>
         </Pressable>
-        {hasPtaIdentity ? (
+        {hasParentIdentity ? (
           <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/pta-documents')} accessibilityRole="button" accessibilityLabel="Documents">
             <ThemedText style={styles.actionButtonSecondaryText}>Documents</ThemedText>
           </Pressable>
         ) : null}
-        {hasPtaIdentity ? (
+        {hasParentIdentity ? (
           <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/pta-my-family' as never)} accessibilityRole="button" accessibilityLabel="My family">
             <ThemedText style={styles.actionButtonSecondaryText}>My Family</ThemedText>
           </Pressable>
@@ -530,6 +584,21 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     padding: Spacing.four,
     gap: 4,
+  },
+  adminCard: {
+    backgroundColor: '#1D2939',
+    borderRadius: 14,
+    padding: Spacing.four,
+    gap: 4,
+  },
+  adminCardTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  adminCardSubtitle: {
+    color: '#D0D5DD',
+    fontSize: 13,
   },
   getHelpCardTitle: {
     color: '#fff',

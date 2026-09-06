@@ -8,6 +8,7 @@ import { Spacing } from '@/constants/theme';
 import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { createAdminHoaProperty, type HoaPropertyType } from '@/lib/mobile-api';
+import { requireAdminCapability } from '@/components/require-admin-capability';
 
 const PROPERTY_TYPES: { value: HoaPropertyType; label: string }[] = [
   { value: 'SINGLE_FAMILY', label: 'Single Family' },
@@ -19,7 +20,7 @@ const PROPERTY_TYPES: { value: HoaPropertyType; label: string }[] = [
 ];
 
 /** Mobile Admin program (PR E) — create an HOA property. Uses the exact same createProperty() service the web /hoa/properties/new form uses. */
-export default function AdminHoaPropertyCreateScreen() {
+function AdminHoaPropertyCreateScreen() {
   const { selectedOrganizationId } = useAuth();
 
   const [addressLine1, setAddressLine1] = useState('');
@@ -180,3 +181,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+export default requireAdminCapability('manageHoaProperties', 'property administration', AdminHoaPropertyCreateScreen);

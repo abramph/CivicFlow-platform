@@ -49,7 +49,7 @@ export default function MakePaymentScreen() {
 
   // Direct-route defense: campaigns and events here are member-scoped, so a
   // staff/owner login with no linked member record would 403 on mount.
-  if (status === 'signedIn' && selectedOrganization && !selectedOrganization.memberId) {
+  if (status === 'signedIn' && selectedOrganization && !(selectedOrganization.constituentMemberId ?? selectedOrganization.memberId)) {
     return <Redirect href="/dues" />;
   }
 

@@ -64,6 +64,13 @@ export interface MobileOrganization {
   organizationLogoUrl: string | null;
   /** Null for a pure PTA parent — the household's shared OrgMember is a billing identity, never a per-adult one. */
   memberId: string | null;
+  /** Build 27 additive dual-role field: the caller's role-agnostic linked
+   * OrgMember id, populated even on household-adult rows (whose legacy
+   * `memberId` stays withheld for old builds' two-way identity switch).
+   * Never the household's shared billing OrgMember. Optional so the app
+   * tolerates a portal that predates Build 27. Read identities through
+   * deriveOrgCapabilities() (lib/org-capabilities.ts), not raw fields. */
+  constituentMemberId?: string | null;
   firstName: string | null;
   lastName: string | null;
   membershipStatus: string | null;
