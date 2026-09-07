@@ -90,6 +90,8 @@ describe('AdminEventDetailScreen -- RSVP section (household mode)', () => {
     expect(screen.getByLabelText('Declined')).toBeTruthy();
     // A declined household's stale guest count is never displayed.
     expect(screen.queryByText('1 person')).toBeNull();
+    // Every response row shows its last-update time.
+    expect(screen.getAllByText(/^Updated /)).toHaveLength(3);
   });
 
   it('shows the empty state when nobody has responded yet', async () => {

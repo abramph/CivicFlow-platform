@@ -24,8 +24,8 @@ Build 27 Round-1 expansion audit (2026-09-07, at `fb2c54c`). Scope: every model 
 | Guests / invitations / capacity / waitlist | none / not tracked / **`Event` has no capacity field** / none |
 | Canonical services | `setEventRsvp`, `listEventRsvps`, `getEventRsvpSummary`, admin: `getAdminEventRsvpView` (155c9ca) |
 | API | member self-RSVP via mobile events routes (`rsvp` block); admin: mobile `GET /api/mobile/admin/events/[eventId]` |
-| Web admin | `/events/[id]` (`events:read`): RSVP **count** StatCard — **no respondent list** ⇒ GAP (fixed this round) |
-| Mobile admin | detail: full view (155c9ca); **list: no counts** ⇒ GAP; **dashboard: no planning info** ⇒ GAP (all fixed this round) |
+| Web admin | `/events/[id]` (`events:read`): RSVP count StatCard **and a full Member RSVPs table** (direct `prisma.eventRsvp` query — a service-level grep missed it; corrected on page read). No gap. |
+| Mobile admin | detail: full view (155c9ca); **list: no counts** ⇒ GAP; **dashboard: no planning info** ⇒ GAP (both fixed this round) |
 | Member/parent | own `rsvp` block only — never the org-wide list |
 
 ### 2. Events (PTA)
@@ -35,7 +35,7 @@ Build 27 Round-1 expansion audit (2026-09-07, at `fb2c54c`). Scope: every model 
 | Model / semantics | `PtaEventRsvp` — household, per `PtaHousehold`, `attendeeCount` = whole household incl. guests |
 | Guests / invitations / capacity / waitlist | **yes (`attendeeCount`)** / not tracked / none / none |
 | Canonical services | `setPtaEventRsvp`, `listPtaEventRsvps`, `getPtaEventAttendanceSummary`, admin: `getAdminEventRsvpView` |
-| Web admin | `/labs/pta/events/[eventId]` officer page: full household list + summary — satisfied |
+| Web admin | `/labs/pta/events/[eventId]` officer page: full household list + summary — satisfied. **Real web gap:** the CORE `/events/[id]` page showed a PTA admin no RSVP information at all and never linked the labs view ⇒ fixed this round (inline Expected Attendees StatCard + Household RSVPs table in the meetings page's exact pattern, plus a link to the officer view). |
 | Mobile admin | same gaps/fixes as core events (shared screens) |
 | Parent | own household RSVP only |
 
@@ -46,13 +46,13 @@ Build 27 Round-1 expansion audit (2026-09-07, at `fb2c54c`). Scope: every model 
 | Model / semantics | `MeetingRsvp` — individual, parallel to `EventRsvp` |
 | Canonical services | `setMeetingRsvp`, `listMeetingRsvps`, `getMeetingRsvpSummary` (`src/lib/meeting-rsvp.ts`) — admin view added this round (`getAdminMeetingRsvpView`) |
 | API | member self-RSVP: `/api/mobile/meetings/[id]/rsvp`; list carries normalized `rsvp` block |
-| Web admin | `/meetings/[id]` (`meetings:read`): expected-attendance StatCard (both modes) — **no respondent list** ⇒ GAP (fixed this round) |
+| Web admin | `/meetings/[id]` (`meetings:read`): expected-attendance StatCard **and full respondent tables for BOTH modes** (Member RSVPs / Household RSVPs incl. attendee counts and updated times) — already satisfied; corrected on page read, no change needed. |
 | Mobile admin | **no admin meeting surfaces exist on mobile at all** (no `/api/mobile/admin/meetings`, no screens). Meetings administration is web-first. This round: meetings join the mobile admin dashboard planning indicator (counts only, behind a new `manageMeetings` capability); the respondent list lives on the web meeting detail. Remaining limitation, documented. |
 | Member | own `rsvp` block only |
 
 ### 4. Meetings (PTA)
 
-Same as (3) with `PtaMeetingRsvp` (household, `attendeeCount`), services in `labs/pta/meetings.ts` (`listPtaMeetingRsvps`, `getPtaMeetingAttendanceSummary`). Parent RSVPs via `/api/mobile/pta/meetings/[id]/rsvp`. Web meeting detail shows household counts; list added this round.
+Same as (3) with `PtaMeetingRsvp` (household, `attendeeCount`), services in `labs/pta/meetings.ts` (`listPtaMeetingRsvps`, `getPtaMeetingAttendanceSummary`). Parent RSVPs via `/api/mobile/pta/meetings/[id]/rsvp`. Web meeting detail already shows household counts AND the household respondent table — satisfied.
 
 ### 5. Volunteer opportunities / shifts (PTA)
 
@@ -91,7 +91,7 @@ RSVP mode `none` everywhere by design. No planning surfaces owed; admin views re
 
 - **Server**: `getAdminMeetingRsvpView` (meeting twin of `getAdminEventRsvpView`); batched `getAdminEventRsvpCounts` / `getAdminMeetingRsvpCounts` (groupBy — no N+1) for lists and the dashboard; new mobile admin capability flag `manageMeetings` (`meetings:write`, all verticals); admin events list rows gain a compact `rsvp` summary; admin dashboard gains `rsvpPlanning` (upcoming events for `manageEvents` holders + upcoming meetings for `manageMeetings` holders).
 - **Mobile**: admin event list cards show "N going · M expected" / "No responses yet"; admin dashboard "Upcoming Attendance" section; detail rows show last-update time; focus-driven refresh + org-tagged state on admin event list/detail.
-- **Web**: respondent lists added to `/events/[id]` (individual mode; household mode continues to defer to the PTA officer page) and `/meetings/[id]` (both modes).
+- **Web**: `/events/[id]` gains the household-mode Expected Attendees StatCard + Household RSVPs table + officer-view link (the one real web gap). The individual-mode event table and both meeting tables already existed — no other web change.
 - **Desktop/Electron**: the desktop product does not embed these portal surfaces; web parity covers every browser-delivered admin surface. No desktop work required.
 
 ## Authorization contract (all server-side)
