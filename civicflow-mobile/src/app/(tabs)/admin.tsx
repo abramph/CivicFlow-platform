@@ -5,6 +5,7 @@ import { Pressable, RefreshControl, ScrollView, StyleSheet } from 'react-native'
 import { LoadErrorBanner } from '@/components/load-error-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { Card, EmptyState, IconBadge, SectionHeader, StatTile, WorkspaceHero } from '@/components/ui';
 import { Elevation, Radii, Spacing, WorkspaceColors } from '@/constants/theme';
 import { useScreenTopPadding } from '@/hooks/use-screen-top-padding';
 import { useAuth } from '@/lib/auth-context';
@@ -75,22 +76,24 @@ export default function AdminDashboardScreen() {
       contentContainerStyle={[styles.container, topPadding]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
     >
-      <ThemedText type="title">Admin</ThemedText>
-      <ThemedText type="subtitle" themeColor="textSecondary">
-        {selectedOrganization?.organizationName ?? 'Unestra'}
-      </ThemedText>
-      {caps.hasParentIdentity || caps.hasMemberIdentity ? (
-        <ThemedText type="small" themeColor="textSecondary">
-          You&apos;re in the admin workspace — your own {caps.hasParentIdentity ? 'family and ' : ''}member screens stay in
-          the other tabs.
-        </ThemedText>
-      ) : null}
+      {/* The slate hero is the admin workspace's identity — same product,
+          visibly different room from the parent-green surfaces. */}
+      <WorkspaceHero
+        workspace="admin"
+        title="Admin"
+        subtitle={selectedOrganization?.organizationName ?? 'Unestra'}
+        note={
+          caps.hasParentIdentity || caps.hasMemberIdentity
+            ? `You're in the admin workspace — your own ${caps.hasParentIdentity ? 'family and ' : ''}member screens stay in the other tabs.`
+            : null
+        }
+      />
 
       <LoadErrorBanner message={loadError} onRetry={load} />
 
       {dashboard && dashboard.needsAttention.length > 0 ? (
         <ThemedView style={styles.section}>
-          <ThemedText type="subtitle">Needs Attention</ThemedText>
+          <SectionHeader title="Needs Attention" />
           {dashboard.needsAttention.map((item) => (
             <Pressable
               key={item.id}
@@ -99,17 +102,35 @@ export default function AdminDashboardScreen() {
               accessibilityRole="button"
               accessibilityLabel={item.label}
             >
-              <ThemedView type="backgroundElement" style={styles.card}>
-                <ThemedText type="default">{item.label}</ThemedText>
-              </ThemedView>
+              <Card style={styles.attentionCard}>
+                <IconBadge glyph="!" tone="pending" />
+                <ThemedText type="default" style={styles.attentionLabel}>
+                  {item.label}
+                </ThemedText>
+              </Card>
             </Pressable>
           ))}
         </ThemedView>
       ) : null}
 
+      {/* F-05: an empty queue is a state worth saying out loud, not a
+          silently missing section — zero pending items reads as "caught
+          up", never as "this dashboard has nothing". Suppressed for a
+          truly empty dashboard, which keeps its own message below. */}
+      {dashboard &&
+      dashboard.needsAttention.length === 0 &&
+      (dashboard.metrics.length > 0 || (dashboard.quickActions?.length ?? 0) > 0) ? (
+        <Card>
+          <EmptyState
+            title="You're all caught up"
+            body="Nothing needs your attention right now. Pending volunteer hours and family change requests will appear here."
+          />
+        </Card>
+      ) : null}
+
       {dashboard && (dashboard.quickActions?.length ?? 0) > 0 ? (
         <ThemedView style={styles.section}>
-          <ThemedText type="subtitle">Quick Actions</ThemedText>
+          <SectionHeader title="Quick Actions" />
           <ThemedView style={styles.quickActionsRow}>
             {dashboard.quickActions!.map((action) => (
               <Pressable
@@ -128,19 +149,13 @@ export default function AdminDashboardScreen() {
 
       {dashboard && dashboard.metrics.length > 0 ? (
         <ThemedView style={styles.section}>
-          <ThemedText type="subtitle">Organization Snapshot</ThemedText>
+          <SectionHeader title="Organization Snapshot" />
           <ThemedView style={styles.metricsGrid}>
             {dashboard.metrics.map((metric) => {
-              const card = (
-                <ThemedView type="backgroundElement" style={styles.metricCard}>
-                  <ThemedText type="small" themeColor="textSecondary">{metric.label}</ThemedText>
-                  <ThemedText type="subtitle">{metric.value}</ThemedText>
-                </ThemedView>
-              );
               if (!metric.href) {
                 return (
                   <ThemedView key={metric.key} style={styles.metricTile}>
-                    {card}
+                    <StatTile label={metric.label} value={metric.value} />
                   </ThemedView>
                 );
               }
@@ -152,7 +167,7 @@ export default function AdminDashboardScreen() {
                   accessibilityRole="button"
                   accessibilityLabel={`${metric.label}, ${metric.value}`}
                 >
-                  {card}
+                  <StatTile label={metric.label} value={metric.value} />
                 </Pressable>
               );
             })}
@@ -162,12 +177,11 @@ export default function AdminDashboardScreen() {
 
       {dashboard && (dashboard.recentActivity?.length ?? 0) > 0 ? (
         <ThemedView style={styles.section}>
-          <ThemedText type="subtitle">Recent Activity</ThemedText>
+          <SectionHeader title="Recent Activity" />
           {dashboard.recentActivity!.map((item) => (
-            <ThemedView
+            <Card
               key={item.id}
-              type="backgroundElement"
-              style={styles.card}
+              style={styles.activityCard}
               accessible
               accessibilityLabel={`${item.action.replace(/[._]/g, ' ')}, ${new Date(item.createdAt).toLocaleString()}`}
             >
@@ -176,7 +190,7 @@ export default function AdminDashboardScreen() {
                 {item.actorEmail ? `${item.actorEmail} · ` : ''}
                 {new Date(item.createdAt).toLocaleString()}
               </ThemedText>
-            </ThemedView>
+            </Card>
           ))}
         </ThemedView>
       ) : null}
@@ -198,14 +212,19 @@ const styles = StyleSheet.create({
   section: {
     gap: Spacing.two,
   },
-  card: {
-    borderRadius: Radii.md,
-    padding: Spacing.three,
-    gap: 4,
-    ...(Elevation.card as object),
-  },
   attentionRow: {
     minHeight: 44,
+  },
+  attentionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two + Spacing.one,
+  },
+  attentionLabel: {
+    flex: 1,
+  },
+  activityCard: {
+    gap: 4,
   },
   metricsGrid: {
     flexDirection: 'row',
@@ -215,12 +234,6 @@ const styles = StyleSheet.create({
   metricTile: {
     flexBasis: '47%',
     minHeight: 44,
-  },
-  metricCard: {
-    borderRadius: Radii.md,
-    padding: Spacing.three,
-    gap: 4,
-    ...(Elevation.card as object),
   },
   quickActionsRow: {
     flexDirection: 'row',
@@ -238,6 +251,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     minHeight: 44,
     justifyContent: 'center',
+    ...(Elevation.card as object),
   },
   quickActionText: {
     color: WorkspaceColors.adminHeaderText,

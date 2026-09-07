@@ -3,7 +3,8 @@ import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, TextInput } f
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { ActionColors, Spacing } from '@/constants/theme';
+import { EmptyState, StatusChip } from '@/components/ui';
+import { ActionColors, Elevation, Spacing } from '@/constants/theme';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { approvePtaHourEntry, getPendingPtaHourEntries, rejectPtaHourEntry, type PendingPtaHourEntry } from '@/lib/mobile-api';
@@ -94,14 +95,17 @@ export default function VolunteerHourApprovalsScreen() {
     >
       <ThemedText type="title">Hour Approvals</ThemedText>
       {entries.length === 0 ? (
-        <ThemedText type="small" themeColor="textSecondary">Nothing pending.</ThemedText>
+        <EmptyState title="Nothing pending." body="New volunteer hour submissions will appear here for review." />
       ) : (
         entries.map((entry) => {
           const isPending = pendingId === entry.id;
           const isDeclining = decliningId === entry.id;
           return (
             <ThemedView key={entry.id} type="backgroundElement" style={styles.card}>
-              <ThemedText type="smallBold">{entry.volunteerName}</ThemedText>
+              <ThemedView style={styles.cardHeader}>
+                <ThemedText type="smallBold">{entry.volunteerName}</ThemedText>
+                <StatusChip tone="pending" label="Pending" />
+              </ThemedView>
               <ThemedText type="small" themeColor="textSecondary">{entry.opportunityTitle}</ThemedText>
               <ThemedText type="default">{(entry.creditedMinutes / 60).toFixed(1)} hours proposed</ThemedText>
 
@@ -182,6 +186,14 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: Spacing.three,
     gap: 4,
+    ...(Elevation.card as object),
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+    backgroundColor: 'transparent',
   },
   button: {
     marginTop: Spacing.two,

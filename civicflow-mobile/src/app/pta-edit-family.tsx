@@ -8,7 +8,7 @@ import { StudentAvatar, useStudentPhotos } from '@/components/student-avatar';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { StatusChip } from '@/components/ui';
-import { ActionColors, Radii, Spacing, type StatusTone } from '@/constants/theme';
+import { ActionColors, Elevation, Radii, Spacing, type StatusTone } from '@/constants/theme';
 import { useScreenTopPadding } from '@/hooks/use-screen-top-padding';
 import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
@@ -437,6 +437,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: Spacing.three,
     gap: Spacing.two,
+    ...(Elevation.card as object),
   },
   input: {
     borderWidth: 1,

@@ -4,7 +4,7 @@ import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, Sc
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { MinTouchTarget, Spacing, WorkspaceColors } from '@/constants/theme';
 import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import {
@@ -192,10 +192,10 @@ function AdminCampaignCreateScreen() {
       <ScrollView contentContainerStyle={styles.container}>
         <ThemedText type="title">New Announcement</ThemedText>
 
-        <ThemedText type="small" themeColor="textSecondary">Title</ThemedText>
+        <ThemedText type="smallBold">Title</ThemedText>
         <TextInput style={styles.input} value={title} onChangeText={setTitle} accessibilityLabel="Title" />
 
-        <ThemedText type="small" themeColor="textSecondary">Type</ThemedText>
+        <ThemedText type="smallBold">Type</ThemedText>
         <ThemedView style={styles.chipRow} accessibilityRole="radiogroup" accessibilityLabel="Campaign type">
           {TYPE_OPTIONS.map((option) => (
             <Pressable
@@ -213,7 +213,7 @@ function AdminCampaignCreateScreen() {
           ))}
         </ThemedView>
 
-        <ThemedText type="small" themeColor="textSecondary">Channel</ThemedText>
+        <ThemedText type="smallBold">Channel</ThemedText>
         <ThemedView style={styles.chipRow} accessibilityRole="radiogroup" accessibilityLabel="Channel">
           {CHANNEL_OPTIONS.map((option) => (
             <Pressable
@@ -231,7 +231,7 @@ function AdminCampaignCreateScreen() {
           ))}
         </ThemedView>
 
-        <ThemedText type="small" themeColor="textSecondary">Audience</ThemedText>
+        <ThemedText type="smallBold">Audience</ThemedText>
         <ThemedView style={styles.chipRow} accessibilityRole="radiogroup" accessibilityLabel="Audience">
           {audienceOptions.map((option) => (
             <Pressable
@@ -270,10 +270,10 @@ function AdminCampaignCreateScreen() {
           </ThemedText>
         ) : null}
 
-        <ThemedText type="small" themeColor="textSecondary">Subject</ThemedText>
+        <ThemedText type="smallBold">Subject</ThemedText>
         <TextInput style={styles.input} value={subject} onChangeText={setSubject} accessibilityLabel="Subject" />
 
-        <ThemedText type="small" themeColor="textSecondary">Message</ThemedText>
+        <ThemedText type="smallBold">Message</ThemedText>
         <TextInput style={[styles.input, styles.multiline]} value={body} onChangeText={setBody} accessibilityLabel="Message body" multiline />
 
         {error ? (
@@ -337,13 +337,16 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.one,
+    minHeight: MinTouchTarget,
+    justifyContent: 'center',
   },
+  // Slate selection, not green: the composer is an admin-workspace surface.
   chipSelected: {
-    backgroundColor: '#047857',
-    borderColor: '#047857',
+    backgroundColor: WorkspaceColors.adminAccent,
+    borderColor: WorkspaceColors.adminAccent,
   },
   chipTextSelected: {
-    color: '#fff',
+    color: WorkspaceColors.adminHeaderText,
   },
   error: {
     color: '#B42318',
@@ -355,7 +358,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.two,
   },
   button: {
-    backgroundColor: '#047857',
+    backgroundColor: WorkspaceColors.adminAccent,
     borderRadius: 10,
     paddingVertical: Spacing.three,
     alignItems: 'center',
