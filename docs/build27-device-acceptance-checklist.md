@@ -33,7 +33,12 @@ Note: ENABLE_EMAIL_SEND=0 on staging — invite/announcement EMAILS will not tra
 - [ ] Family Change Requests screen: approve applies the change to real records (re-check My Family); reject with note; second reviewer racing gets "already reviewed".
 - [ ] Parent-only account gets the unauthorized state on every admin surface and 403s on direct API calls.
 
-## 4. Announcements & messages
+## 3b. RSVP planning (round-1 expansion — build 1.0.0 (3)+)
+- [ ] Admin event list rows show the planning line ("N going · M expected incl. guests" for PTA) or "No responses yet"; counts change after a parent RSVPs.
+- [ ] Admin event detail: RSVP card shows summary, respondent names, per-household people counts, status chips, Updated times; pull-to-refresh updates after an RSVP change/withdrawal.
+- [ ] Admin dashboard "Upcoming Attendance": upcoming events AND meetings with expected counts; event rows open event detail; meeting rows open the Meeting RSVPs screen.
+- [ ] Meeting RSVPs screen: title/date/mode, summary, respondent list, empty state on a response-less meeting, pull-to-refresh; requires the meetings capability (manageEvents-only admin gets the denial state; parent-only login likewise + API 403s).
+- [ ] Org switch: no RSVP counts or respondent names from the previous org appear anywhere, even briefly.
 - [ ] Composer: audience chips (PTA: All families / Unpaid households / All active with email); preview count works; Send Now shows count-confirmation dialog; success lands on detail.
 - [ ] Duplicate protection: immediately recreate the identical announcement → clear conflict message, no second campaign.
 - [ ] Save as Draft → detail shows Draft → Delete Draft (confirm) removes it; audit row exists.
