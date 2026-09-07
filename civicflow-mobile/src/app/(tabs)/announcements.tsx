@@ -25,8 +25,13 @@ import { deriveOrgCapabilities } from '@/lib/org-capabilities';
  */
 export default function AnnouncementsScreen() {
   const { selectedOrganization, selectedOrganizationId } = useAuth();
-  const { hasMemberIdentity, hasParentIdentity } = deriveOrgCapabilities(selectedOrganization);
+  const { hasMemberIdentity, hasParentIdentity, adminCapabilities } = deriveOrgCapabilities(selectedOrganization);
   const hasRecipientIdentity = hasMemberIdentity || hasParentIdentity;
+  // Management is a separate surface (Admin → Campaigns, campaign-query
+  // backed) that never depends on recipient identity — an admin with no
+  // member/family record still fully manages announcements. This tab only
+  // links there; it never renders management state itself.
+  const canManageAnnouncements = adminCapabilities.includes('manageCommunications');
   const [announcements, setAnnouncements] = useState<AnnouncementWithSources[]>([]);
   const [showArchived, setShowArchived] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -79,16 +84,29 @@ export default function AnnouncementsScreen() {
     <ThemedView style={[styles.container, topPadding]}>
       <ThemedView style={styles.headerRow}>
         <ThemedText type="title">{showArchived ? 'Archived' : 'Announcements'}</ThemedText>
-        {hasRecipientIdentity ? (
-          <Pressable
-            onPress={() => setShowArchived((v) => !v)}
-            style={styles.toggle}
-            accessibilityRole="button"
-            accessibilityLabel={showArchived ? 'Show announcements' : 'Show archived announcements'}
-          >
-            <ThemedText type="link">{showArchived ? 'Back to inbox' : 'Archived'}</ThemedText>
-          </Pressable>
-        ) : null}
+        <ThemedView style={styles.headerActions}>
+          {canManageAnnouncements ? (
+            <Pressable
+              onPress={() => router.push('/admin-campaigns' as never)}
+              style={styles.toggle}
+              accessibilityRole="button"
+              accessibilityLabel="Manage announcements"
+              accessibilityHint="Opens announcement management, where administrators compose, send, and withdraw announcements."
+            >
+              <ThemedText type="link">Manage</ThemedText>
+            </Pressable>
+          ) : null}
+          {hasRecipientIdentity ? (
+            <Pressable
+              onPress={() => setShowArchived((v) => !v)}
+              style={styles.toggle}
+              accessibilityRole="button"
+              accessibilityLabel={showArchived ? 'Show announcements' : 'Show archived announcements'}
+            >
+              <ThemedText type="link">{showArchived ? 'Back to inbox' : 'Archived'}</ThemedText>
+            </Pressable>
+          ) : null}
+        </ThemedView>
       </ThemedView>
       <LoadErrorBanner message={loadError} onRetry={load} />
       <FlatList
@@ -126,13 +144,29 @@ export default function AnnouncementsScreen() {
           </Pressable>
         )}
         ListEmptyComponent={
-          <ThemedText type="small" themeColor="textSecondary" style={styles.empty}>
-            {!hasRecipientIdentity
-              ? 'Announcements are sent to members and families. Your login has no member or family record in this organization, so there is nothing to show here.'
-              : showArchived
-                ? 'Nothing archived.'
-                : 'No announcements yet.'}
-          </ThemedText>
+          <ThemedView style={styles.emptyWrap}>
+            <ThemedText type="small" themeColor="textSecondary" style={styles.empty}>
+              {!hasRecipientIdentity
+                ? 'Announcements are sent to members and families. Your login has no member or family record in this organization, so there is nothing to show here.'
+                : showArchived
+                  ? 'Nothing archived.'
+                  : 'No announcements yet.'}
+            </ThemedText>
+            {/* The truthful recipient message above stays exactly as-is; an
+                administrator additionally gets the path to the management
+                surface, which does not depend on recipient identity. */}
+            {!hasRecipientIdentity && canManageAnnouncements ? (
+              <Pressable
+                onPress={() => router.push('/admin-campaigns' as never)}
+                style={styles.emptyManage}
+                accessibilityRole="button"
+                accessibilityLabel="Manage announcements"
+                accessibilityHint="Opens announcement management, where administrators compose, send, and withdraw announcements."
+              >
+                <ThemedText type="link">Manage Announcements</ThemedText>
+              </Pressable>
+            ) : null}
+          </ThemedView>
         }
       />
     </ThemedView>
@@ -151,9 +185,24 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     backgroundColor: 'transparent',
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+    backgroundColor: 'transparent',
+  },
   toggle: {
     minHeight: 44,
     justifyContent: 'center',
+  },
+  emptyWrap: {
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+  },
+  emptyManage: {
+    minHeight: 44,
+    justifyContent: 'center',
+    marginTop: Spacing.three,
   },
   list: {
     gap: Spacing.two,

@@ -128,3 +128,82 @@ describe('Announcement personal lifecycle (Build 27)', () => {
     );
   });
 });
+
+describe('Announcement management discoverability (device-acceptance F-02)', () => {
+  const { router } = jest.requireMock('expo-router');
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockGetAnnouncementsForIdentities.mockReset();
+    mockSetAnnouncementArchivedForSources.mockReset();
+  });
+
+  it('an identity-less administrator with manageCommunications keeps the truthful recipient message AND gets a path to management', async () => {
+    mockUseAuth.mockReturnValue({
+      selectedOrganizationId: 'org-a',
+      selectedOrganization: { pta: null, capability: { adminCapabilities: ['adminDashboard', 'manageCommunications'] } },
+    });
+
+    await render(<AnnouncementsScreen />);
+
+    // The honest empty state is unchanged -- management access must never
+    // pretend the admin has a recipient inbox.
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          'Announcements are sent to members and families. Your login has no member or family record in this organization, so there is nothing to show here.'
+        )
+      ).toBeTruthy()
+    );
+    expect(mockGetAnnouncementsForIdentities).not.toHaveBeenCalled();
+
+    // Both entry points exist: the header action and the empty-state action.
+    const manageActions = screen.getAllByLabelText('Manage announcements');
+    expect(manageActions.length).toBe(2);
+
+    await fireEvent.press(manageActions[manageActions.length - 1]);
+    expect(router.push).toHaveBeenCalledWith('/admin-campaigns');
+  });
+
+  it('management entry does not depend on recipient identity, and inbox behavior is unchanged for a dual-role admin', async () => {
+    mockUseAuth.mockReturnValue({
+      selectedOrganizationId: 'org-a',
+      selectedOrganization: { memberId: 'member-1', pta: null, capability: { adminCapabilities: ['adminDashboard', 'manageCommunications'] } },
+    });
+    mockGetAnnouncementsForIdentities.mockResolvedValue([
+      { id: 'ann-1', subject: 'Book fair', title: 'Book fair', body: 'Next week.', isRead: true, sentAt: '2026-09-01T12:00:00.000Z', sources: ['member'] },
+    ]);
+
+    await render(<AnnouncementsScreen />);
+
+    await waitFor(() => expect(screen.getByText('Book fair')).toBeTruthy());
+    // Header action present alongside the normal inbox.
+    expect(screen.getByLabelText('Manage announcements')).toBeTruthy();
+    expect(screen.getByLabelText('Show archived announcements')).toBeTruthy();
+  });
+
+  it('a parent/member without manageCommunications sees no management entry anywhere -- behavior unchanged', async () => {
+    mockUseAuth.mockReturnValue({
+      selectedOrganizationId: 'org-a',
+      selectedOrganization: { memberId: 'member-1', pta: null, capability: { adminCapabilities: [] } },
+    });
+    mockGetAnnouncementsForIdentities.mockResolvedValue([]);
+
+    await render(<AnnouncementsScreen />);
+
+    await waitFor(() => expect(screen.getByText('No announcements yet.')).toBeTruthy());
+    expect(screen.queryByLabelText('Manage announcements')).toBeNull();
+  });
+
+  it('an admin whose capabilities do not include manageCommunications gets no management entry', async () => {
+    mockUseAuth.mockReturnValue({
+      selectedOrganizationId: 'org-a',
+      selectedOrganization: { pta: null, capability: { adminCapabilities: ['adminDashboard', 'manageEvents'] } },
+    });
+
+    await render(<AnnouncementsScreen />);
+
+    await waitFor(() => expect(screen.getByText(/no member or family record/)).toBeTruthy());
+    expect(screen.queryByLabelText('Manage announcements')).toBeNull();
+  });
+});
