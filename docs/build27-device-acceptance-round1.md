@@ -84,3 +84,14 @@ An adult row was added to the Northwind household via `addPtaHouseholdAdult` (au
 5. Perceptible visual redesign + dashboard zero states (F-06, part of F-05).
 
 No migration, no feature-flag change, no new RSVP data model. All fixes are JavaScript-only, but **expo-updates is not configured**, so validation on device requires a new EAS preview build (`1.0.0 (3)`) — not triggered without authorization.
+
+## Round-1 expansion: platform-wide RSVP planning visibility
+
+After F-01 closed, the acceptance scope was expanded beyond the PTA event-detail correction: every RSVP-enabled activity, every vertical. The full audit is `docs/build27-rsvp-capability-matrix.md`; the implementation (commits after the matrix) adds, all on the existing canonical services with **no migration and no new model**:
+
+- **Server**: `getAdminMeetingRsvpView` + batched `getAdminEventRsvpCounts`/`getAdminMeetingRsvpCounts` (single groupBy, normative attendee math), the new `manageMeetings` mobile capability flag (`meetings:write`), an additive compact `rsvp` summary on admin event list rows, and an additive `rsvpPlanning` dashboard block (upcoming events behind `manageEvents`, meetings behind `manageMeetings`; counts only, never names).
+- **Mobile**: planning lines on admin event cards ("N going · M expected incl. guests" / "No responses yet"), an Upcoming Attendance dashboard section, last-update times on detail respondent rows, focus-driven refresh + org-tagged payloads on the admin event list/detail.
+- **Web**: the one real gap — a PTA administrator on the core `/events/[id]` page saw no RSVP data — closed with the inline household summary/table + officer-view link. The individual-mode event table and both meeting respondent tables already existed.
+- **Honest limits**, unchanged from the matrix: invited-but-not-responded is not representable (no invitation model); capacity/waitlist exist only for volunteer shifts (already fully served on their own surfaces); meetings administration remains web-first, so the meeting respondent list lives on the web meeting detail while mobile shows meeting counts on the dashboard.
+
+Device re-validation of these surfaces belongs to the next walkthrough on build `1.0.0 (3)`.

@@ -431,4 +431,93 @@ describe("GET /api/mobile/admin/dashboard", () => {
 
     expect(typeof body.data.generatedAt).toBe("string");
   });
+
+  describe("rsvpPlanning (Build 27 round-1 expansion)", () => {
+    it("includes upcoming events with counts for manageEvents holders -- counts only, never respondent names", async () => {
+      resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "ORG_ADMIN", adminCapabilities: ["adminDashboard", "manageEvents"] });
+      countEvent.mockResolvedValueOnce(2);
+      findManyEvent.mockResolvedValueOnce([
+        { id: "evt-1", title: "Fall Festival", startAt: new Date("2026-09-20T18:00:00Z") },
+        { id: "evt-2", title: "Cleanup Day", startAt: new Date("2026-09-27T15:00:00Z") },
+      ]);
+      groupByEventRsvp.mockResolvedValueOnce([{ eventId: "evt-1", status: "GOING", _count: { _all: 4 } }]);
+
+      const response = await GET(request());
+      const body = await response.json();
+
+      expect(body.data.rsvpPlanning.mode).toBe("individual");
+      expect(body.data.rsvpPlanning.guestCounts).toBe(false);
+      expect(body.data.rsvpPlanning.items).toEqual([
+        {
+          type: "event",
+          id: "evt-1",
+          title: "Fall Festival",
+          startAt: "2026-09-20T18:00:00.000Z",
+          counts: { totalResponses: 4, going: 4, maybe: 0, notGoing: 0, totalAttendees: 4 },
+          href: "/admin-events/evt-1",
+        },
+        {
+          type: "event",
+          id: "evt-2",
+          title: "Cleanup Day",
+          startAt: "2026-09-27T15:00:00.000Z",
+          counts: { totalResponses: 0, going: 0, maybe: 0, notGoing: 0, totalAttendees: 0 },
+          href: "/admin-events/evt-2",
+        },
+      ]);
+      // Meetings section requires its own flag.
+      expect(findManyMeeting).not.toHaveBeenCalled();
+      expect(JSON.stringify(body.data.rsvpPlanning)).not.toMatch(/firstName|lastName|displayName|email/);
+    });
+
+    it("includes upcoming meetings (informational, no href) only for manageMeetings holders, with household guest math", async () => {
+      resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "ORG_ADMIN", adminCapabilities: ["adminDashboard", "manageMeetings"] });
+      findUniqueOrganization.mockResolvedValue({ primaryVertical: "PTA" });
+      getEffectivePermissions.mockResolvedValue([]);
+      findManyMeeting.mockResolvedValueOnce([{ id: "mtg-1", title: "September General Meeting", meetingDate: new Date("2026-09-15T19:00:00Z") }]);
+      groupByPtaMeetingRsvp.mockResolvedValueOnce([
+        { meetingId: "mtg-1", status: "GOING", _count: { _all: 2 }, _sum: { attendeeCount: 7 } },
+      ]);
+
+      const response = await GET(request());
+      const body = await response.json();
+
+      expect(body.data.rsvpPlanning.guestCounts).toBe(true);
+      expect(body.data.rsvpPlanning.items).toEqual([
+        {
+          type: "meeting",
+          id: "mtg-1",
+          title: "September General Meeting",
+          startAt: "2026-09-15T19:00:00.000Z",
+          counts: { totalResponses: 2, going: 2, maybe: 0, notGoing: 0, totalAttendees: 7 },
+        },
+      ]);
+      expect(findManyEvent).not.toHaveBeenCalled();
+    });
+
+    it("is null when the caller holds neither manageEvents nor manageMeetings", async () => {
+      resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "STAFF", adminCapabilities: ["adminDashboard", "manageCommunications"] });
+      findManyConversationParticipant.mockResolvedValueOnce([]);
+
+      const response = await GET(request());
+      const body = await response.json();
+
+      expect(body.data.rsvpPlanning).toBeNull();
+      expect(findManyEvent).not.toHaveBeenCalled();
+      expect(findManyMeeting).not.toHaveBeenCalled();
+    });
+
+    it("is null for an HOA organization (RSVP mode none) even with both flags", async () => {
+      resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "ORG_ADMIN", adminCapabilities: ["adminDashboard", "manageEvents", "manageMeetings"] });
+      findUniqueOrganization.mockResolvedValue({ primaryVertical: "HOA" });
+      countEvent.mockResolvedValueOnce(0);
+
+      const response = await GET(request());
+      const body = await response.json();
+
+      expect(body.data.rsvpPlanning).toBeNull();
+      expect(findManyEvent).not.toHaveBeenCalled();
+      expect(findManyMeeting).not.toHaveBeenCalled();
+    });
+  });
 });
