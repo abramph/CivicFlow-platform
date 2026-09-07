@@ -1,5 +1,37 @@
 # Mobile design tokens — incremental adoption
 
+## Build 27 update — the semantic system
+
+Build 27 extended the token set (`constants/theme.ts`) and added shared
+primitives (`components/ui.tsx`), then migrated the major parent and admin
+surfaces onto them:
+
+- **`Brand`** — the Unestra green plus tint surfaces for both schemes.
+- **`WorkspaceColors`** — the deliberate Parent (green) vs Admin (slate)
+  accent split: same shapes and type scale, recognizably different
+  temperature, one product.
+- **`StatusColors` + `StatusTone`** — the app-wide chip vocabulary for
+  pending / approved / rejected / needsCorrection / completed / info /
+  neutral, with AA-contrast text-on-tint pairs per scheme. A screen must
+  never invent a hex for a state this vocabulary names.
+- **`Radii`**, **`Elevation.card`**, **`MinTouchTarget`** — the ad-hoc
+  values that already existed everywhere, named once.
+- **`components/ui.tsx`** — `Card`, `SectionHeader`, `StatusChip`,
+  `StatTile`, `EmptyState`.
+- **`components/pta-photo-manager.tsx`** — the shared, review-hardened
+  photo management flow (extracted in Batch 2).
+
+Migrated in the Build 27 pass: dashboard, Admin tab, dues (status chips),
+Edit Family (status chips), announcements, inbox, profile, org-switcher,
+volunteer-hour-approvals, family change-request review, campaign detail.
+Remaining hardcoded occurrences in screens not touched by Build 27 follow
+the same incremental rule as before — adopt when the screen is next
+touched.
+
+---
+
+## Build 26 baseline (historical)
+
 build-26 Phase H. Additive design-token pass, scoped deliberately narrow
 per the directive's own "incremental" instruction — this is not a
 mass-migration and does not touch auth or payment screens' behavior.

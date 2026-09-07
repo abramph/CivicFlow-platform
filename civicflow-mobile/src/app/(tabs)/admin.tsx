@@ -5,7 +5,7 @@ import { Pressable, RefreshControl, ScrollView, StyleSheet } from 'react-native'
 import { LoadErrorBanner } from '@/components/load-error-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { Elevation, Radii, Spacing, WorkspaceColors } from '@/constants/theme';
 import { useScreenTopPadding } from '@/hooks/use-screen-top-padding';
 import { useAuth } from '@/lib/auth-context';
 import { getAdminDashboard, type AdminDashboard } from '@/lib/mobile-api';
@@ -199,9 +199,10 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
   },
   card: {
-    borderRadius: 12,
+    borderRadius: Radii.md,
     padding: Spacing.three,
     gap: 4,
+    ...(Elevation.card as object),
   },
   attentionRow: {
     minHeight: 44,
@@ -216,18 +217,22 @@ const styles = StyleSheet.create({
     minHeight: 44,
   },
   metricCard: {
-    borderRadius: 12,
+    borderRadius: Radii.md,
     padding: Spacing.three,
     gap: 4,
+    ...(Elevation.card as object),
   },
   quickActionsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: Spacing.two,
   },
+  // The admin workspace's own accent — deliberately NOT the parent green,
+  // so the two workspaces read differently at a glance while sharing the
+  // same shapes and type scale.
   quickActionButton: {
-    backgroundColor: '#047857',
-    borderRadius: 10,
+    backgroundColor: WorkspaceColors.adminAccent,
+    borderRadius: Radii.sm,
     paddingVertical: Spacing.three,
     paddingHorizontal: Spacing.three,
     alignItems: 'center',
@@ -235,7 +240,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   quickActionText: {
-    color: '#fff',
+    color: WorkspaceColors.adminHeaderText,
     fontWeight: '600',
   },
 });

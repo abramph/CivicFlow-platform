@@ -6,7 +6,7 @@ import { Pressable, RefreshControl, ScrollView, StyleSheet } from 'react-native'
 import { LoadErrorBanner } from '@/components/load-error-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { ActionColors, Elevation, Radii, Spacing, WorkspaceColors } from '@/constants/theme';
 import { useScreenTopPadding } from '@/hooks/use-screen-top-padding';
 import { API_BASE_URL } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
@@ -583,33 +583,35 @@ const styles = StyleSheet.create({
     gap: Spacing.three,
   },
   getHelpCard: {
-    backgroundColor: '#047857',
-    borderRadius: 14,
+    backgroundColor: WorkspaceColors.parentAccent,
+    borderRadius: Radii.lg,
     padding: Spacing.four,
     gap: 4,
+    ...(Elevation.card as object),
   },
   adminCard: {
-    backgroundColor: '#1D2939',
-    borderRadius: 14,
+    backgroundColor: WorkspaceColors.adminAccent,
+    borderRadius: Radii.lg,
     padding: Spacing.four,
     gap: 4,
+    ...(Elevation.card as object),
   },
   adminCardTitle: {
-    color: '#fff',
+    color: WorkspaceColors.adminHeaderText,
     fontSize: 18,
     fontWeight: '700',
   },
   adminCardSubtitle: {
-    color: '#D0D5DD',
+    color: WorkspaceColors.adminHeaderSubtext,
     fontSize: 13,
   },
   getHelpCardTitle: {
-    color: '#fff',
+    color: WorkspaceColors.parentHeaderText,
     fontSize: 18,
     fontWeight: '700',
   },
   getHelpCardSubtitle: {
-    color: '#D1FAE5',
+    color: WorkspaceColors.parentHeaderSubtext,
     fontSize: 13,
   },
   summaryRow: {
@@ -621,18 +623,19 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   card: {
-    borderRadius: 12,
+    borderRadius: Radii.md,
     padding: Spacing.three,
     gap: 4,
+    ...(Elevation.card as object),
   },
   delinquent: {
-    color: '#B42318',
+    color: ActionColors.danger,
   },
   pending: {
-    color: '#B54708',
+    color: ActionColors.warning,
   },
   rsvpBadge: {
-    color: '#047857',
+    color: ActionColors.primary,
   },
   sectionHeaderRow: {
     flexDirection: 'row',
@@ -641,7 +644,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   unreadBadgeText: {
-    color: '#047857',
+    color: ActionColors.primary,
     fontWeight: '600',
   },
   sectionLabel: {
@@ -654,29 +657,33 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   actionButton: {
-    backgroundColor: '#047857',
-    borderRadius: 10,
+    backgroundColor: ActionColors.primary,
+    borderRadius: Radii.sm,
     paddingVertical: Spacing.three,
     paddingHorizontal: Spacing.three,
     alignItems: 'center',
+    minHeight: 44,
+    justifyContent: 'center',
   },
   actionButtonText: {
-    color: '#fff',
+    color: ActionColors.primaryText,
     fontWeight: '600',
   },
   actionButtonSecondary: {
     borderWidth: 1,
-    borderColor: '#D0D5DD',
-    borderRadius: 10,
+    borderColor: ActionColors.border,
+    borderRadius: Radii.sm,
     paddingVertical: Spacing.three,
     paddingHorizontal: Spacing.three,
     alignItems: 'center',
+    minHeight: 44,
+    justifyContent: 'center',
   },
   actionButtonSecondaryText: {
     fontWeight: '600',
   },
   listCard: {
-    borderRadius: 10,
+    borderRadius: Radii.sm,
     padding: Spacing.three,
     gap: 2,
   },

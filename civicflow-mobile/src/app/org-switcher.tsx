@@ -3,7 +3,7 @@ import { FlatList, Pressable, StyleSheet } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { ActionColors, Brand, Spacing } from '@/constants/theme';
 import { useAuth } from '@/lib/auth-context';
 
 export default function OrgSwitcherScreen() {
@@ -88,7 +88,7 @@ const styles = StyleSheet.create({
   },
   row: {
     borderWidth: 1,
-    borderColor: '#D0D5DD',
+    borderColor: ActionColors.border,
     borderRadius: 12,
     padding: Spacing.three,
     gap: 4,
@@ -102,8 +102,8 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   rowSelected: {
-    borderColor: '#047857',
-    backgroundColor: '#ECFDF5',
+    borderColor: ActionColors.primary,
+    backgroundColor: Brand.primaryTintLight,
   },
   empty: {
     textAlign: 'center',
