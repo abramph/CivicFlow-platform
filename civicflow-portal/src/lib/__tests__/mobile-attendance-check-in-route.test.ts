@@ -15,8 +15,10 @@ vi.mock("@/lib/attendance-checkin", () => ({
 }));
 
 const requireMobileMembership = vi.fn();
+const requireMobilePtaHouseholdAccess = vi.fn();
 vi.mock("@/lib/mobile-auth", () => ({
   requireMobileMembership: (...args: unknown[]) => requireMobileMembership(...args),
+  requireMobilePtaHouseholdAccess: (...args: unknown[]) => requireMobilePtaHouseholdAccess(...args),
   MobileForbiddenError: class MobileForbiddenError extends Error {
     status = 403;
   },
@@ -43,12 +45,15 @@ function request(body: unknown) {
 }
 
 describe("POST /api/mobile/attendance/check-in", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     requireRateLimit.mockClear();
     resolveAttendanceSession.mockReset();
     recordAttendanceCheckIn.mockReset();
     requireMobileMembership.mockReset();
     findFirstOrgMember.mockReset();
+    // Default: no household identity either — individual tests override.
+    const { MobileForbiddenError } = await import("@/lib/mobile-auth");
+    requireMobilePtaHouseholdAccess.mockReset().mockRejectedValue(new MobileForbiddenError("No household in this organization"));
   });
 
   it("rejects a code with an invalid/expired token before ever checking membership", async () => {
@@ -79,7 +84,7 @@ describe("POST /api/mobile/attendance/check-in", () => {
     expect(requireMobileMembership).toHaveBeenCalledWith(expect.anything(), "org-real");
   });
 
-  it("rejects when the member's own org membership doesn't match the meeting's organization (cross-org)", async () => {
+  it("rejects when the caller holds NEITHER a member nor a household identity in the meeting's organization (cross-org)", async () => {
     resolveAttendanceSession.mockResolvedValueOnce({
       ok: true,
       session: { id: "s1", organizationId: "org-real", meetingId: "m1", meetingTitle: "Board", meetingDate: new Date(), lateThresholdMinutes: 10 },
@@ -88,8 +93,72 @@ describe("POST /api/mobile/attendance/check-in", () => {
     requireMobileMembership.mockRejectedValueOnce(new MobileForbiddenError("No active membership for this organization"));
 
     const response = await POST(request({ qrToken: "valid-token" }));
+    const data = await response.json();
 
     expect(response.status).toBe(403);
+    expect(data.code).toBe("not_eligible");
+    expect(recordAttendanceCheckIn).not.toHaveBeenCalled();
+    // Both identity resolutions were attempted against the TOKEN's org.
+    expect(requireMobilePtaHouseholdAccess).toHaveBeenCalledWith(expect.anything(), "org-real");
+  });
+
+  it("Build 27: a PTA parent with no OrgMember checks in their household's billing member", async () => {
+    resolveAttendanceSession.mockResolvedValueOnce({
+      ok: true,
+      session: { id: "s1", organizationId: "org-pta", meetingId: "m1", meetingTitle: "PTA General", meetingDate: new Date(), lateThresholdMinutes: 10 },
+    });
+    const { MobileForbiddenError } = await import("@/lib/mobile-auth");
+    requireMobileMembership.mockRejectedValueOnce(new MobileForbiddenError("No active membership for this organization"));
+    requireMobilePtaHouseholdAccess.mockResolvedValueOnce({
+      organizationId: "org-pta",
+      adult: { id: "adult-1", householdId: "hh-1", billingMemberId: "member-billing" },
+      session: { userId: "user-1", email: "parent@example.org" },
+    });
+    findFirstOrgMember.mockResolvedValueOnce({ membershipStatus: "active" });
+    recordAttendanceCheckIn.mockResolvedValueOnce({ alreadyCheckedIn: false, attendanceRecordId: "att-1" });
+
+    const response = await POST(request({ qrToken: "valid-token" }));
+
+    expect(response.status).toBe(200);
+    expect(recordAttendanceCheckIn).toHaveBeenCalledWith(
+      expect.objectContaining({ memberId: "member-billing", method: "QR_APP" })
+    );
+  });
+
+  it("Build 27: a member identity still wins over the household fallback — the fallback never runs", async () => {
+    resolveAttendanceSession.mockResolvedValueOnce({
+      ok: true,
+      session: { id: "s1", organizationId: "org-pta", meetingId: "m1", meetingTitle: "PTA General", meetingDate: new Date(), lateThresholdMinutes: 10 },
+    });
+    requireMobileMembership.mockResolvedValueOnce({ memberId: "member-personal" });
+    findFirstOrgMember.mockResolvedValueOnce({ membershipStatus: "active" });
+    recordAttendanceCheckIn.mockResolvedValueOnce({ alreadyCheckedIn: false, attendanceRecordId: "att-1" });
+
+    await POST(request({ qrToken: "valid-token" }));
+
+    expect(requireMobilePtaHouseholdAccess).not.toHaveBeenCalled();
+    expect(recordAttendanceCheckIn).toHaveBeenCalledWith(expect.objectContaining({ memberId: "member-personal" }));
+  });
+
+  it("Build 27: a household whose billing member is not active is not eligible", async () => {
+    resolveAttendanceSession.mockResolvedValueOnce({
+      ok: true,
+      session: { id: "s1", organizationId: "org-pta", meetingId: "m1", meetingTitle: "PTA General", meetingDate: new Date(), lateThresholdMinutes: 10 },
+    });
+    const { MobileForbiddenError } = await import("@/lib/mobile-auth");
+    requireMobileMembership.mockRejectedValueOnce(new MobileForbiddenError("No active membership for this organization"));
+    requireMobilePtaHouseholdAccess.mockResolvedValueOnce({
+      organizationId: "org-pta",
+      adult: { id: "adult-1", householdId: "hh-1", billingMemberId: "member-billing" },
+      session: { userId: "user-1", email: "parent@example.org" },
+    });
+    findFirstOrgMember.mockResolvedValueOnce({ membershipStatus: "inactive" });
+
+    const response = await POST(request({ qrToken: "valid-token" }));
+    const data = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(data.code).toBe("not_eligible");
     expect(recordAttendanceCheckIn).not.toHaveBeenCalled();
   });
 
