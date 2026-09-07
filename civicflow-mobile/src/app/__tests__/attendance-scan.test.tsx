@@ -44,6 +44,37 @@ beforeEach(() => {
   mockUseCameraPermissions.mockReturnValue([permission({ canAskAgain: true }), mockRequestPermission]);
 });
 
+describe('AttendanceScanScreen -- identity gate (Build 27)', () => {
+  it('a PTA parent with no OrgMember reaches the scanner — household check-in is a real identity', async () => {
+    mockUseAuth.mockReturnValue({
+      status: 'signedIn',
+      selectedOrganization: { memberId: null, pta: { householdAdultId: 'adult-1', isOfficer: false, canCheckIn: false, canApproveHours: false } },
+    });
+    await render(<AttendanceScanScreen />);
+    // The permission priming renders — i.e. we made it past the gate.
+    expect(screen.getByText('Use Your Camera')).toBeTruthy();
+  });
+
+  it('an admin/officer-only login gets a clear unauthorized state, never a doomed scanner', async () => {
+    mockUseAuth.mockReturnValue({
+      status: 'signedIn',
+      selectedOrganization: {
+        memberId: null,
+        pta: { householdAdultId: null, isOfficer: true, canCheckIn: true, canApproveHours: true },
+        capability: { adminCapabilities: ['adminDashboard'] },
+      },
+    });
+    await render(<AttendanceScanScreen />);
+    expect(screen.queryByText('Use Your Camera')).toBeNull();
+    expect(screen.getByText("Check-in records attendance for a member or family record, and your login doesn't have one in this organization.")).toBeTruthy();
+  });
+
+  it('a constituent member still reaches the scanner exactly as before', async () => {
+    await render(<AttendanceScanScreen />);
+    expect(screen.getByText('Use Your Camera')).toBeTruthy();
+  });
+});
+
 describe('AttendanceScanScreen -- camera permission priming', () => {
   it('shows neutral copy, not a directive command, before permission is granted', async () => {
     await render(<AttendanceScanScreen />);

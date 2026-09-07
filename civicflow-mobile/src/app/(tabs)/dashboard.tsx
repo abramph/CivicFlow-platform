@@ -485,7 +485,10 @@ export default function DashboardScreen() {
             <ThemedText style={styles.actionButtonText}>Make a Payment</ThemedText>
           </Pressable>
         ) : null}
-        {hasMemberIdentity ? (
+        {/* Build 27: parents scan too — check-in resolves a member OR the
+            household's billing identity server-side. Admin/officer status
+            alone never shows this (they run sessions, not self check-in). */}
+        {caps.canScanAttendance ? (
           <Pressable style={styles.actionButtonSecondary} onPress={() => router.push('/attendance-scan')} accessibilityRole="button" accessibilityLabel="Scan attendance code">
             <ThemedText style={styles.actionButtonSecondaryText}>Scan Attendance Code</ThemedText>
           </Pressable>
