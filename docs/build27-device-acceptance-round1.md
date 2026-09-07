@@ -14,6 +14,12 @@
 - **Severity:** High as an acceptance blocker; **not a code defect**.
 - **Root cause — missing staging data / persona mismatch.** The staging administrator (`cmtn58pp90…`, ORG_ADMIN) has **no `PtaHouseholdAdult` link and no `OrgMember`**. The household-linked login is a *different* user (`cmtn58ppq0…`) — the two were seeded milliseconds apart, so their id prefixes collide, which made them look like one account. No dual-role persona existed in staging. The app enforced exactly the Build 27 rule ("admin status never grants parent access"); contract tests prove My Family renders when a real household link exists.
 - **Correction:** provision the dual persona through the legitimate flow (done — see "Dual-role persona provisioning" below); no code change.
+- **✅ PASSED on physical device (2026-09-07).** Abram accepted the invitation with the existing administrator account; My Family, the household, and students now render for that login. Server-side verification (read-only, staging DB, 2026-09-07 ~15:00Z):
+  - The invitation's `PtaHouseholdAdult` row (`cmtqvbby…`, "Parent") is linked to exactly the administrator user (`cmtn58pp90…`) — the adult's email equals that user's email, and exactly one `User` row holds that email (no duplicate account was created).
+  - No duplicate records anywhere: still 1 household (newest 2026-09-04), 2 household adults (newest = the 06:36Z provisioning row — acceptance created none), 3 students (newest 2026-09-04), 2 organization memberships, **0 `OrgMember` rows in the org** (the accept flow deliberately creates neither `OrgMember` nor `OrganizationMembership`), and no `userId` is linked to more than one adult in the org.
+  - Administrative permissions retained: the `ORG_ADMIN` membership is unchanged and `active`; the org still has exactly one ORG_ADMIN.
+  - Capabilities are additive by construction in the data: the admin workspace derives solely from the `ORG_ADMIN` membership, the parent workspace solely from the new `PtaHouseholdAdult.userId` link, and no member identity exists to have been granted as a side effect.
+  - The invitation is consumed: `acceptedAt = 2026-09-07T14:58:23Z`. Reuse is impossible on two independent grounds — the atomic claim (`updateMany … WHERE acceptedAt IS NULL`) can never fire again, and the adult's `userId` being set now trips the already-linked guard. Audit rows exist for both `pta.household_adult.added` (provisioning) and `pta.household_adult.invite_accepted`.
 
 ### F-02 — Announcement area reports no member/family record
 
@@ -66,6 +72,8 @@ F-01 and F-02's *inbox* portion share the identity-linkage cause (staging data).
 ## Dual-role persona provisioning (Option B — done)
 
 An adult row was added to the Northwind household via `addPtaHouseholdAdult` (audited) with the administrator's account email, and a single-use invitation was created via `createPtaHouseholdAdultInvite` (only its hash is stored). The acceptance URL was written to a **root-only file on the staging VPS** (`root:root`, mode `600`, created no-clobber); the token never appeared in chat, logs, git, or command output. Invite expires **2026-09-14T06:36:55Z**. Acceptance is Abram's action: open the URL on the iPhone and enter the administrator account's password — the flow links the existing account (`acceptPtaHouseholdAdultInvite` requires proving the password; it never auto-links).
+
+**Accepted 2026-09-07T14:58:23Z** by Abram with the existing administrator account — see the F-01 pass record above for the full post-acceptance verification. The invitation is spent; the root-only file on the VPS is now inert (its token can never be claimed again) and can be deleted at leisure.
 
 ## Corrections in this branch (stacked on `1620d1b`)
 
