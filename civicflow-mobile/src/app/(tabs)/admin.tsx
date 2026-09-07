@@ -113,6 +113,53 @@ export default function AdminDashboardScreen() {
         </ThemedView>
       ) : null}
 
+      {/* RSVP planning indicator — expected attendance for upcoming
+          RSVP-enabled activities, without opening every record. Counts
+          only; the respondent lists live on the detail surfaces. Absent
+          entirely against an older portal payload or for RSVP mode 'none'.
+          Meeting rows are informational (meetings administration is
+          web-first — no mobile screen exists to open). */}
+      {dashboard?.rsvpPlanning && dashboard.rsvpPlanning.items.length > 0 ? (
+        <ThemedView style={styles.section}>
+          <SectionHeader title="Upcoming Attendance" />
+          {dashboard.rsvpPlanning.items.map((item) => {
+            const summary =
+              item.counts.totalResponses === 0
+                ? 'No responses yet'
+                : `${item.counts.going} going · ${item.counts.totalAttendees} expected${dashboard.rsvpPlanning!.guestCounts ? ' incl. guests' : ''}`;
+            const label = `${item.type === 'meeting' ? 'Meeting: ' : ''}${item.title}${item.startAt ? `, ${new Date(item.startAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ''}, ${summary}`;
+            const body = (
+              <Card style={styles.planningCard}>
+                <ThemedText type="smallBold">
+                  {item.type === 'meeting' ? 'Meeting · ' : ''}
+                  {item.title}
+                </ThemedText>
+                {item.startAt ? (
+                  <ThemedText type="small" themeColor="textSecondary">
+                    {new Date(item.startAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                  </ThemedText>
+                ) : null}
+                <ThemedText type="small" themeColor="textSecondary">{summary}</ThemedText>
+              </Card>
+            );
+            return item.href ? (
+              <Pressable
+                key={`${item.type}-${item.id}`}
+                onPress={() => router.push(item.href as never)}
+                accessibilityRole="button"
+                accessibilityLabel={label}
+              >
+                {body}
+              </Pressable>
+            ) : (
+              <ThemedView key={`${item.type}-${item.id}`} accessible accessibilityLabel={label} style={styles.planningStatic}>
+                {body}
+              </ThemedView>
+            );
+          })}
+        </ThemedView>
+      ) : null}
+
       {/* F-05: an empty queue is a state worth saying out loud, not a
           silently missing section — zero pending items reads as "caught
           up", never as "this dashboard has nothing". Suppressed for a
@@ -225,6 +272,12 @@ const styles = StyleSheet.create({
   },
   activityCard: {
     gap: 4,
+  },
+  planningCard: {
+    gap: 4,
+  },
+  planningStatic: {
+    backgroundColor: 'transparent',
   },
   metricsGrid: {
     flexDirection: 'row',

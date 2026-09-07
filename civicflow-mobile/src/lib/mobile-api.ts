@@ -1042,11 +1042,35 @@ export interface AdminActivityItem {
   createdAt: string;
 }
 
+/** Compact planning counts — the list/dashboard-sized RSVP summary. Same
+ * math as the detail view: totalAttendees includes household guests in
+ * household mode and equals `going` in individual mode. */
+export interface AdminRsvpCompactCounts {
+  totalResponses: number;
+  going: number;
+  maybe: number;
+  notGoing: number;
+  totalAttendees: number;
+}
+
+export interface AdminRsvpPlanningItem {
+  type: 'event' | 'meeting';
+  id: string;
+  title: string;
+  startAt: string | null;
+  counts: AdminRsvpCompactCounts;
+  /** Present only when a mobile screen exists to open (events); meeting
+   * rows are informational — meetings administration is web-first. */
+  href?: string;
+}
+
 export interface AdminDashboard {
   metrics: AdminMetric[];
   needsAttention: AdminNeedsAttentionItem[];
   quickActions?: AdminQuickAction[];
   recentActivity?: AdminActivityItem[];
+  /** Optional so the app tolerates a portal that predates it. */
+  rsvpPlanning?: { mode: string; guestCounts: boolean; items: AdminRsvpPlanningItem[] } | null;
   generatedAt: string;
 }
 
@@ -1224,6 +1248,9 @@ export interface AdminEventListRow {
   startAt: string | null;
   endAt: string | null;
   status: EventStatusValue;
+  /** Compact planning summary. Optional (older portals omit it); null when
+   * the org's RSVP mode is 'none'; explicit zeros mean "no responses yet". */
+  rsvp?: ({ guestCounts: boolean } & AdminRsvpCompactCounts) | null;
 }
 
 export function getAdminEvents(organizationId: string) {
