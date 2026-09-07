@@ -63,8 +63,8 @@ interface RsvpPlanningItem {
   title: string;
   startAt: string | null;
   counts: AdminRsvpCounts;
-  /** Present only when a mobile screen exists to open (events). Meetings
-   * administration is web-first, so meeting rows are informational. */
+  /** Deep link into the matching planning screen: the admin event detail
+   * for events, the read-only meeting RSVP planning screen for meetings. */
   href?: string;
 }
 
@@ -212,6 +212,7 @@ export async function GET(request: Request) {
             title: meeting.title,
             startAt: meeting.meetingDate.toISOString(),
             counts: counts.byId[meeting.id] ?? { totalResponses: 0, going: 0, maybe: 0, notGoing: 0, totalAttendees: 0 },
+            href: `/admin-meetings/${meeting.id}`,
           });
         }
       }

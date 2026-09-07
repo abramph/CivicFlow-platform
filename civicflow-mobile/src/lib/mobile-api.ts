@@ -1302,6 +1302,27 @@ export function getAdminEvent(organizationId: string, eventId: string) {
   return apiFetch<AdminEventDetail>(`/api/mobile/admin/events/${encodeURIComponent(eventId)}?organizationId=${encodeURIComponent(organizationId)}`);
 }
 
+/** Read-only meeting RSVP planning for an authorized administrator
+ * (manageMeetings). Deliberately NOT a meeting-administration payload —
+ * meetings administration stays web-first; this exists so a mobile admin
+ * can see who is coming, not to edit meetings. */
+export interface AdminMeetingRsvpDetail {
+  id: string;
+  title: string;
+  meetingDate: string;
+  location: string | null;
+  status: string;
+  /** Optional so the screen degrades gracefully if a future payload
+   * variant omits it; today's server always includes it. */
+  rsvp?: AdminEventRsvpView;
+}
+
+export function getAdminMeetingRsvp(organizationId: string, meetingId: string) {
+  return apiFetch<AdminMeetingRsvpDetail>(
+    `/api/mobile/admin/meetings/${encodeURIComponent(meetingId)}?organizationId=${encodeURIComponent(organizationId)}`
+  );
+}
+
 export interface CreateAdminEventInput {
   organizationId: string;
   title: string;
