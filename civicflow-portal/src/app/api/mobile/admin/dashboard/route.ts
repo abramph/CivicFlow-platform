@@ -8,6 +8,8 @@ import { getEffectivePermissions } from "@/lib/role-permissions";
 import { prisma } from "@/lib/prisma";
 import { PERMISSIONS, type Role } from "@/lib/rbac";
 import { ValidationError } from "@/lib/validation";
+import { getAdminEventRsvpCounts, getRsvpMode, type AdminRsvpCounts } from "@/lib/event-rsvp";
+import { getAdminMeetingRsvpCounts } from "@/lib/meeting-rsvp";
 
 function centsToCurrency(cents: number) {
   return `$${(cents / 100).toFixed(2)}`;
@@ -48,6 +50,22 @@ interface AdminActivityItem {
   action: string;
   actorEmail: string | null;
   createdAt: string;
+}
+
+/** Build 27 round-1 expansion — one upcoming RSVP-enabled activity with its
+ * planning counts, so an admin sees expected attendance without opening
+ * every record. Events require manageEvents; meetings require the new
+ * manageMeetings flag (each section is independently gated below). No
+ * respondent names here — the list belongs on the detail surfaces. */
+interface RsvpPlanningItem {
+  type: "event" | "meeting";
+  id: string;
+  title: string;
+  startAt: string | null;
+  counts: AdminRsvpCounts;
+  /** Present only when a mobile screen exists to open (events). Meetings
+   * administration is web-first, so meeting rows are informational. */
+  href?: string;
 }
 
 /**
@@ -149,6 +167,57 @@ export async function GET(request: Request) {
         where: { organizationId, startAt: { gte: new Date() } },
       });
       metrics.push({ key: "eventsUpcoming", label: "Upcoming Events", value: upcomingEventsCount, href: "/admin-events" });
+    }
+
+    // RSVP planning indicator — upcoming RSVP-enabled activities with their
+    // expected attendance. Only for orgs whose RSVP mode isn't "none", and
+    // each activity family only behind its own capability flag.
+    let rsvpPlanning: { mode: string; guestCounts: boolean; items: RsvpPlanningItem[] } | null = null;
+    const rsvpMode = organization ? getRsvpMode(organization.primaryVertical) : "none";
+    if (rsvpMode !== "none" && (has("manageEvents") || has("manageMeetings"))) {
+      const items: RsvpPlanningItem[] = [];
+
+      if (has("manageEvents")) {
+        const upcoming = await prisma.event.findMany({
+          where: { organizationId, startAt: { gte: new Date() }, status: { not: "cancelled" } },
+          orderBy: { startAt: "asc" },
+          take: 5,
+          select: { id: true, title: true, startAt: true },
+        });
+        const counts = await getAdminEventRsvpCounts(organizationId, upcoming.map((e) => e.id));
+        for (const event of upcoming) {
+          items.push({
+            type: "event",
+            id: event.id,
+            title: event.title,
+            startAt: event.startAt ? event.startAt.toISOString() : null,
+            counts: counts.byId[event.id] ?? { totalResponses: 0, going: 0, maybe: 0, notGoing: 0, totalAttendees: 0 },
+            href: `/admin-events/${event.id}`,
+          });
+        }
+      }
+
+      if (has("manageMeetings")) {
+        const upcoming = await prisma.meeting.findMany({
+          where: { organizationId, meetingDate: { gte: new Date() }, status: "SCHEDULED" },
+          orderBy: { meetingDate: "asc" },
+          take: 5,
+          select: { id: true, title: true, meetingDate: true },
+        });
+        const counts = await getAdminMeetingRsvpCounts(organizationId, upcoming.map((m) => m.id));
+        for (const meeting of upcoming) {
+          items.push({
+            type: "meeting",
+            id: meeting.id,
+            title: meeting.title,
+            startAt: meeting.meetingDate.toISOString(),
+            counts: counts.byId[meeting.id] ?? { totalResponses: 0, going: 0, maybe: 0, notGoing: 0, totalAttendees: 0 },
+          });
+        }
+      }
+
+      items.sort((a, b) => (a.startAt ?? "").localeCompare(b.startAt ?? ""));
+      rsvpPlanning = { mode: rsvpMode, guestCounts: rsvpMode === "household", items: items.slice(0, 6) };
     }
 
     if (has("managePayments")) {
@@ -267,7 +336,8 @@ export async function GET(request: Request) {
 
     return Response.json({
       ok: true,
-      data: { metrics, needsAttention, quickActions, recentActivity, generatedAt: new Date().toISOString() },
+      // rsvpPlanning is additive — fielded clients that predate it ignore it.
+      data: { metrics, needsAttention, quickActions, recentActivity, rsvpPlanning, generatedAt: new Date().toISOString() },
     });
   });
 }

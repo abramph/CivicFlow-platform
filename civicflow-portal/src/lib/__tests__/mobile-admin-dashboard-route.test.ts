@@ -40,11 +40,22 @@ const countViolation = vi.fn();
 const countArchitecturalRequest = vi.fn();
 const findUniqueOrganization = vi.fn();
 const findManyAuditEvent = vi.fn();
+const findManyEvent = vi.fn();
+const findManyMeeting = vi.fn();
+const groupByEventRsvp = vi.fn();
+const groupByPtaEventRsvp = vi.fn();
+const groupByMeetingRsvp = vi.fn();
+const groupByPtaMeetingRsvp = vi.fn();
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     orgMember: { groupBy: (...args: unknown[]) => groupByOrgMember(...args), count: (...args: unknown[]) => countOrgMember(...args) },
     conversationParticipant: { findMany: (...args: unknown[]) => findManyConversationParticipant(...args) },
-    event: { count: (...args: unknown[]) => countEvent(...args) },
+    event: { count: (...args: unknown[]) => countEvent(...args), findMany: (...args: unknown[]) => findManyEvent(...args) },
+    meeting: { findMany: (...args: unknown[]) => findManyMeeting(...args) },
+    eventRsvp: { groupBy: (...args: unknown[]) => groupByEventRsvp(...args) },
+    ptaEventRsvp: { groupBy: (...args: unknown[]) => groupByPtaEventRsvp(...args) },
+    meetingRsvp: { groupBy: (...args: unknown[]) => groupByMeetingRsvp(...args) },
+    ptaMeetingRsvp: { groupBy: (...args: unknown[]) => groupByPtaMeetingRsvp(...args) },
     communicationCampaign: { count: (...args: unknown[]) => countCommunicationCampaign(...args) },
     meetingAttendanceSession: { count: (...args: unknown[]) => countMeetingAttendanceSession(...args) },
     paymentReport: { count: (...args: unknown[]) => countPaymentReport(...args) },
@@ -100,6 +111,12 @@ beforeEach(() => {
   countArchitecturalRequest.mockReset().mockResolvedValue(0);
   findUniqueOrganization.mockReset().mockResolvedValue({ primaryVertical: "COMMUNITY" });
   findManyAuditEvent.mockReset().mockResolvedValue([]);
+  findManyEvent.mockReset().mockResolvedValue([]);
+  findManyMeeting.mockReset().mockResolvedValue([]);
+  groupByEventRsvp.mockReset().mockResolvedValue([]);
+  groupByPtaEventRsvp.mockReset().mockResolvedValue([]);
+  groupByMeetingRsvp.mockReset().mockResolvedValue([]);
+  groupByPtaMeetingRsvp.mockReset().mockResolvedValue([]);
   countPendingFamilyChangeRequests.mockReset().mockResolvedValue(0);
   getEffectivePermissions.mockReset().mockResolvedValue([]);
   getMemberPaymentsFinancialSummary.mockReset().mockResolvedValue({
