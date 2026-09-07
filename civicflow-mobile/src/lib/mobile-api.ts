@@ -1042,11 +1042,35 @@ export interface AdminActivityItem {
   createdAt: string;
 }
 
+/** Compact planning counts — the list/dashboard-sized RSVP summary. Same
+ * math as the detail view: totalAttendees includes household guests in
+ * household mode and equals `going` in individual mode. */
+export interface AdminRsvpCompactCounts {
+  totalResponses: number;
+  going: number;
+  maybe: number;
+  notGoing: number;
+  totalAttendees: number;
+}
+
+export interface AdminRsvpPlanningItem {
+  type: 'event' | 'meeting';
+  id: string;
+  title: string;
+  startAt: string | null;
+  counts: AdminRsvpCompactCounts;
+  /** Present only when a mobile screen exists to open (events); meeting
+   * rows are informational — meetings administration is web-first. */
+  href?: string;
+}
+
 export interface AdminDashboard {
   metrics: AdminMetric[];
   needsAttention: AdminNeedsAttentionItem[];
   quickActions?: AdminQuickAction[];
   recentActivity?: AdminActivityItem[];
+  /** Optional so the app tolerates a portal that predates it. */
+  rsvpPlanning?: { mode: string; guestCounts: boolean; items: AdminRsvpPlanningItem[] } | null;
   generatedAt: string;
 }
 
@@ -1224,10 +1248,39 @@ export interface AdminEventListRow {
   startAt: string | null;
   endAt: string | null;
   status: EventStatusValue;
+  /** Compact planning summary. Optional (older portals omit it); null when
+   * the org's RSVP mode is 'none'; explicit zeros mean "no responses yet". */
+  rsvp?: ({ guestCounts: boolean } & AdminRsvpCompactCounts) | null;
 }
 
 export function getAdminEvents(organizationId: string) {
   return apiFetch<AdminEventListRow[]>(`/api/mobile/admin/events?organizationId=${encodeURIComponent(organizationId)}`);
+}
+
+export type AdminRsvpMode = 'household' | 'individual' | 'none';
+export type AdminRsvpStatus = 'GOING' | 'MAYBE' | 'NOT_GOING';
+
+export interface AdminEventRsvpResponseRow {
+  id: string;
+  /** Responding household's display name (household mode) or member's name
+   * (individual mode) — only ever served behind the manageEvents gate. */
+  name: string;
+  status: AdminRsvpStatus;
+  /** Household mode only (guests included); null in individual mode. */
+  attendeeCount: number | null;
+  respondedAt: string;
+}
+
+/** Aggregated RSVP view on the ADMIN event detail. The server decides the
+ * mode from the organization's RSVP capability (portal event-rsvp.ts) —
+ * the client never infers it. summary is null when mode is 'none' (HOA).
+ * There is no capacity/remaining figure anywhere: Event has no capacity
+ * field, so none is representable. */
+export interface AdminEventRsvpView {
+  mode: AdminRsvpMode;
+  guestCounts: boolean;
+  summary: { totalResponses: number; going: number; maybe: number; notGoing: number; totalAttendees: number } | null;
+  responses: AdminEventRsvpResponseRow[];
 }
 
 export interface AdminEventDetail {
@@ -1240,10 +1293,34 @@ export interface AdminEventDetail {
   endAt: string | null;
   status: EventStatusValue;
   notes: string | null;
+  /** Optional so a client built from this branch degrades gracefully (no
+   * RSVP section) against a server that predates the block. */
+  rsvp?: AdminEventRsvpView;
 }
 
 export function getAdminEvent(organizationId: string, eventId: string) {
   return apiFetch<AdminEventDetail>(`/api/mobile/admin/events/${encodeURIComponent(eventId)}?organizationId=${encodeURIComponent(organizationId)}`);
+}
+
+/** Read-only meeting RSVP planning for an authorized administrator
+ * (manageMeetings). Deliberately NOT a meeting-administration payload —
+ * meetings administration stays web-first; this exists so a mobile admin
+ * can see who is coming, not to edit meetings. */
+export interface AdminMeetingRsvpDetail {
+  id: string;
+  title: string;
+  meetingDate: string;
+  location: string | null;
+  status: string;
+  /** Optional so the screen degrades gracefully if a future payload
+   * variant omits it; today's server always includes it. */
+  rsvp?: AdminEventRsvpView;
+}
+
+export function getAdminMeetingRsvp(organizationId: string, meetingId: string) {
+  return apiFetch<AdminMeetingRsvpDetail>(
+    `/api/mobile/admin/meetings/${encodeURIComponent(meetingId)}?organizationId=${encodeURIComponent(organizationId)}`
+  );
 }
 
 export interface CreateAdminEventInput {

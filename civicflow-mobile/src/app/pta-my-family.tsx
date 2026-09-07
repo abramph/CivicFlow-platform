@@ -4,9 +4,11 @@ import { ActivityIndicator, Image, ScrollView, StyleSheet } from 'react-native';
 
 import { PrimaryActionButton } from '@/components/action-buttons';
 import { LoadErrorBanner } from '@/components/load-error-banner';
+import { StudentAvatar, useStudentPhotos } from '@/components/student-avatar';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { Brand, Elevation, Spacing, WorkspaceColors } from '@/constants/theme';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useScreenTopPadding } from '@/hooks/use-screen-top-padding';
 import { useAuth } from '@/lib/auth-context';
 import { getMyPtaHousehold, getPtaHouseholdPhoto, getPtaProgression, type MyPtaHousehold, type PtaHouseholdPhoto } from '@/lib/mobile-api';
@@ -39,10 +41,21 @@ export default function PtaMyFamilyScreen() {
   const visiblePhoto = photo && photo.organizationId === selectedOrganizationId ? photo.data : null;
   const [household, setHousehold] = useState<{ organizationId: string; data: MyPtaHousehold } | null>(null);
   const visibleHousehold = household && household.organizationId === selectedOrganizationId ? household.data : null;
+  // Student photos follow the same org-tagged staleness contract as the
+  // family photo above (the hook tags and gates on organizationId), and
+  // refresh whenever the focus-driven reload above produces a new roster.
+  const studentPhotos = useStudentPhotos(selectedOrganizationId, visibleHousehold?.students ?? null);
   const [progressionAvailable, setProgressionAvailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const topPadding = useScreenTopPadding();
+  const scheme = useColorScheme() ?? 'light';
+  // Parent-workspace tint on the photo placeholder — the same documented-AA
+  // pairs the student avatars use, so the whole family card reads green.
+  const placeholderPalette =
+    scheme === 'dark'
+      ? { background: Brand.primaryTintDark, text: WorkspaceColors.parentHeaderSubtext }
+      : { background: Brand.primaryTintLight, text: Brand.primaryDark };
 
   const load = useCallback(async () => {
     if (!selectedOrganizationId || !hasPtaIdentity) return;
@@ -151,9 +164,14 @@ export default function PtaMyFamilyScreen() {
               // aloud as "family" and looked off-system next to the rest of
               // the app's typography. When there is no name to initial, the
               // circle stays empty and the label carries the meaning.
-              <ThemedView style={styles.placeholder} accessible accessibilityRole="image" accessibilityLabel="No family photo set">
+              <ThemedView
+                style={[styles.placeholder, { backgroundColor: placeholderPalette.background }]}
+                accessible
+                accessibilityRole="image"
+                accessibilityLabel="No family photo set"
+              >
                 {initial ? (
-                  <ThemedText type="title" style={styles.placeholderGlyph}>
+                  <ThemedText type="title" style={[styles.placeholderGlyph, { color: placeholderPalette.text }]}>
                     {initial}
                   </ThemedText>
                 ) : null}
@@ -196,21 +214,24 @@ export default function PtaMyFamilyScreen() {
                   Students
                 </ThemedText>
                 {visibleHousehold.students.map((student) => (
-                  <ThemedView key={student.id} style={styles.rosterRow} accessible={false}>
-                    <ThemedText type="default">{student.displayName}</ThemedText>
-                    {student.placementLabel ? (
-                      <ThemedText type="small" themeColor="textSecondary">{student.placementLabel}</ThemedText>
-                    ) : null}
-                    <ThemedText
-                      type="link"
-                      onPress={() =>
-                        router.push({ pathname: '/pta-student-photo' as never, params: { studentId: student.id, name: student.displayName } as never })
-                      }
-                      accessibilityRole="button"
-                      accessibilityLabel={`${student.hasPhoto ? 'Edit' : 'Add'} photo for ${student.displayName}`}
-                    >
-                      {student.hasPhoto ? 'Edit Photo' : 'Add Photo'}
-                    </ThemedText>
+                  <ThemedView key={student.id} style={styles.studentRow} accessible={false}>
+                    <StudentAvatar name={student.displayName} uri={studentPhotos[student.id] ?? null} />
+                    <ThemedView style={styles.studentInfo}>
+                      <ThemedText type="default">{student.displayName}</ThemedText>
+                      {student.placementLabel ? (
+                        <ThemedText type="small" themeColor="textSecondary">{student.placementLabel}</ThemedText>
+                      ) : null}
+                      <ThemedText
+                        type="link"
+                        onPress={() =>
+                          router.push({ pathname: '/pta-student-photo' as never, params: { studentId: student.id, name: student.displayName } as never })
+                        }
+                        accessibilityRole="button"
+                        accessibilityLabel={`${student.hasPhoto ? 'Edit' : 'Add'} photo for ${student.displayName}`}
+                      >
+                        {student.hasPhoto ? 'Edit Photo' : 'Add Photo'}
+                      </ThemedText>
+                    </ThemedView>
                   </ThemedView>
                 ))}
               </>
@@ -262,12 +283,25 @@ const styles = StyleSheet.create({
     padding: Spacing.four,
     gap: Spacing.three,
     alignItems: 'center',
+    ...(Elevation.card as object),
   },
   cardLabel: {
     alignSelf: 'flex-start',
   },
   rosterRow: {
     alignSelf: 'stretch',
+    gap: 2,
+    backgroundColor: 'transparent',
+  },
+  studentRow: {
+    alignSelf: 'stretch',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two + Spacing.one,
+    backgroundColor: 'transparent',
+  },
+  studentInfo: {
+    flex: 1,
     gap: 2,
     backgroundColor: 'transparent',
   },

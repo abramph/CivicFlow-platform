@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 
 import PtaMyFamilyScreen from '../pta-my-family';
 
@@ -47,10 +47,12 @@ jest.mock('@/lib/auth-context', () => ({
 const mockGetPtaHouseholdPhoto = jest.fn();
 const mockGetPtaProgression = jest.fn();
 const mockGetMyPtaHousehold = jest.fn();
+const mockGetPtaStudentPhoto = jest.fn();
 jest.mock('@/lib/mobile-api', () => ({
   getPtaHouseholdPhoto: (...args: unknown[]) => mockGetPtaHouseholdPhoto(...args),
   getPtaProgression: (...args: unknown[]) => mockGetPtaProgression(...args),
   getMyPtaHousehold: (...args: unknown[]) => mockGetMyPtaHousehold(...args),
+  getPtaStudentPhoto: (...args: unknown[]) => mockGetPtaStudentPhoto(...args),
 }));
 
 function authWith(overrides: { householdAdultId?: string | null; householdName?: string | null; organizationId?: string } = {}) {
@@ -140,8 +142,21 @@ beforeEach(() => {
   // Default: progression unavailable (both feature flags default OFF), so
   // existing expectations describe an org without progression enabled.
   mockGetPtaProgression.mockRejectedValue(new Error('progression unavailable'));
+  mockGetPtaStudentPhoto.mockReset().mockResolvedValue(null);
   latestFocusCallback = null;
 });
+
+function householdWithStudents(students: { id: string; displayName: string; hasPhoto: boolean; placementLabel?: string | null }[]) {
+  return {
+    householdId: 'hh-1',
+    displayName: 'Kim Family',
+    schoolYear: '2026-2027',
+    currentSchoolYear: '2026-2027',
+    volunteerInterests: [],
+    adults: [],
+    students: students.map((s) => ({ status: 'ACTIVE', placementLabel: null, ...s })),
+  };
+}
 
 describe('PtaMyFamilyScreen -- entry point display states', () => {
   it('shows a placeholder and "Add Family Photo" when no photo exists', async () => {
@@ -245,6 +260,86 @@ describe('PtaMyFamilyScreen -- refresh on regaining focus (covers upload/replace
     expect(screen.getByLabelText('No family photo set')).toBeTruthy();
     expect(screen.queryByLabelText("Your family's current photo")).toBeNull();
     expect(mockGetPtaHouseholdPhoto).toHaveBeenLastCalledWith('org-b');
+  });
+});
+
+describe('PtaMyFamilyScreen -- student photos on the roster', () => {
+  it('renders the photo for a student who has one and initials for a student who does not', async () => {
+    mockUseAuth.mockReturnValue(authWith());
+    mockGetPtaHouseholdPhoto.mockResolvedValue(null);
+    mockGetMyPtaHousehold.mockResolvedValue(
+      householdWithStudents([
+        { id: 'stu-1', displayName: 'Mina Kim', hasPhoto: true, placementLabel: '2nd Grade · Room 4' },
+        { id: 'stu-2', displayName: 'Theo Kim', hasPhoto: false },
+      ])
+    );
+    mockGetPtaStudentPhoto.mockResolvedValue({ uri: 'data:image/jpeg;base64,mina', byteSize: 100 });
+
+    await openScreen();
+
+    await waitFor(() => expect(screen.getByLabelText('Photo of Mina Kim')).toBeTruthy());
+    expect(screen.getByLabelText('Photo of Mina Kim').props.source.uri).toBe('data:image/jpeg;base64,mina');
+    expect(screen.getByLabelText('No photo set for Theo Kim')).toBeTruthy();
+    // Photos are fetched only for students the server flagged as having
+    // one, and only through the secured per-student endpoint.
+    expect(mockGetPtaStudentPhoto).toHaveBeenCalledTimes(1);
+    expect(mockGetPtaStudentPhoto).toHaveBeenCalledWith('org-1', 'stu-1');
+  });
+
+  it('shows the replaced photo bytes after returning from photo management', async () => {
+    mockUseAuth.mockReturnValue(authWith());
+    mockGetPtaHouseholdPhoto.mockResolvedValue(null);
+    // A fresh response object per request, like a real API -- the refresh
+    // contract keys off the reload producing a new roster array.
+    mockGetMyPtaHousehold.mockImplementation(async () => householdWithStudents([{ id: 'stu-1', displayName: 'Mina Kim', hasPhoto: true }]));
+    mockGetPtaStudentPhoto.mockResolvedValueOnce({ uri: 'data:image/jpeg;base64,old', byteSize: 100 });
+
+    await openScreen();
+    await waitFor(() => expect(screen.getByLabelText('Photo of Mina Kim').props.source.uri).toBe('data:image/jpeg;base64,old'));
+
+    mockGetPtaStudentPhoto.mockResolvedValueOnce({ uri: 'data:image/jpeg;base64,replaced', byteSize: 120 });
+    await triggerFocus();
+
+    await waitFor(() => expect(screen.getByLabelText('Photo of Mina Kim').props.source.uri).toBe('data:image/jpeg;base64,replaced'));
+  });
+
+  it('falls back to initials as soon as a removal lands (next focus reports hasPhoto false)', async () => {
+    mockUseAuth.mockReturnValue(authWith());
+    mockGetPtaHouseholdPhoto.mockResolvedValue(null);
+    mockGetMyPtaHousehold.mockResolvedValueOnce(householdWithStudents([{ id: 'stu-1', displayName: 'Mina Kim', hasPhoto: true }]));
+    mockGetPtaStudentPhoto.mockResolvedValueOnce({ uri: 'data:image/jpeg;base64,mina', byteSize: 100 });
+
+    await openScreen();
+    await waitFor(() => expect(screen.getByLabelText('Photo of Mina Kim')).toBeTruthy());
+
+    mockGetMyPtaHousehold.mockResolvedValueOnce(householdWithStudents([{ id: 'stu-1', displayName: 'Mina Kim', hasPhoto: false }]));
+    await triggerFocus();
+
+    await waitFor(() => expect(screen.getByLabelText('No photo set for Mina Kim')).toBeTruthy());
+    expect(screen.queryByLabelText('Photo of Mina Kim')).toBeNull();
+    // Removal means no fetch either -- the rebuilt map simply has no entry.
+    expect(mockGetPtaStudentPhoto).toHaveBeenCalledTimes(1);
+  });
+
+  it("never shows the previous organization's student photo after an org switch, even while the new fetch is pending", async () => {
+    mockUseAuth.mockReturnValue(authWith({ organizationId: 'org-a' }));
+    mockGetPtaHouseholdPhoto.mockResolvedValue(null);
+    mockGetMyPtaHousehold.mockResolvedValue(householdWithStudents([{ id: 'stu-1', displayName: 'Mina Kim', hasPhoto: true }]));
+    mockGetPtaStudentPhoto.mockResolvedValueOnce({ uri: 'data:image/jpeg;base64,orga', byteSize: 100 });
+    const { rerender } = await render(<PtaMyFamilyScreen />);
+    await triggerFocus();
+    await waitFor(() => expect(screen.getByLabelText('Photo of Mina Kim')).toBeTruthy());
+
+    // Organization B has a student with the same display name whose photo
+    // fetch never resolves: the org-A bytes must not bridge the gap.
+    mockUseAuth.mockReturnValue(authWith({ organizationId: 'org-b' }));
+    mockGetMyPtaHousehold.mockResolvedValue(householdWithStudents([{ id: 'stu-9', displayName: 'Mina Kim', hasPhoto: true }]));
+    mockGetPtaStudentPhoto.mockImplementation(() => new Promise(() => {}));
+    await rerender(<PtaMyFamilyScreen />);
+    await triggerFocus();
+
+    await waitFor(() => expect(screen.getByLabelText('No photo set for Mina Kim')).toBeTruthy());
+    expect(screen.queryByLabelText('Photo of Mina Kim')).toBeNull();
   });
 });
 

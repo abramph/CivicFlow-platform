@@ -100,6 +100,106 @@ describe('Admin dashboard screen — capability gating', () => {
     await waitFor(() => expect(screen.getByText('Nothing to show here yet for your role in this organization.')).toBeTruthy());
   });
 
+  it('renders the Upcoming Attendance planning section: event rows AND meeting rows navigate to their planning screens', async () => {
+    mockUseAuth.mockReturnValue({
+      selectedOrganizationId: 'org-a',
+      selectedOrganization: { organizationName: 'Sample Org', capability: { adminCapabilities: ['adminDashboard', 'manageEvents', 'manageMeetings'] } },
+    });
+    mockGetAdminDashboard.mockResolvedValueOnce({
+      metrics: [],
+      needsAttention: [],
+      rsvpPlanning: {
+        mode: 'household',
+        guestCounts: true,
+        items: [
+          {
+            type: 'event',
+            id: 'evt-1',
+            title: 'Fall Festival',
+            startAt: '2026-09-20T18:00:00.000Z',
+            counts: { totalResponses: 3, going: 2, maybe: 1, notGoing: 0, totalAttendees: 7 },
+            href: '/admin-events/evt-1',
+          },
+          {
+            type: 'meeting',
+            id: 'mtg-1',
+            title: 'September General Meeting',
+            startAt: '2026-09-15T19:00:00.000Z',
+            counts: { totalResponses: 0, going: 0, maybe: 0, notGoing: 0, totalAttendees: 0 },
+            href: '/admin-meetings/mtg-1',
+          },
+        ],
+      },
+      generatedAt: '2026-09-07T00:00:00.000Z',
+    });
+
+    await render(<AdminDashboardScreen />);
+
+    await waitFor(() => expect(screen.getByText('Upcoming Attendance')).toBeTruthy());
+    // Household math surfaces as expected attendees including guests --
+    // never the raw row count.
+    expect(screen.getByText('2 going · 7 expected incl. guests')).toBeTruthy();
+    // A zero-response upcoming activity is an explicit state.
+    expect(screen.getByText('No responses yet')).toBeTruthy();
+    expect(screen.getByText('Meeting · September General Meeting')).toBeTruthy();
+
+    await fireEvent.press(screen.getByLabelText(/^Fall Festival/));
+    expect(mockPush).toHaveBeenCalledWith('/admin-events/evt-1');
+    // Meeting summaries are actionable: they open the read-only meeting
+    // RSVP planning screen.
+    await fireEvent.press(screen.getByLabelText(/^Meeting: September General Meeting/));
+    expect(mockPush).toHaveBeenCalledWith('/admin-meetings/mtg-1');
+  });
+
+  it('renders a meeting row from an OLDER server payload (no href) as informational, without crashing', async () => {
+    mockUseAuth.mockReturnValue({
+      selectedOrganizationId: 'org-a',
+      selectedOrganization: { organizationName: 'Sample Org', capability: { adminCapabilities: ['adminDashboard', 'manageMeetings'] } },
+    });
+    mockGetAdminDashboard.mockResolvedValueOnce({
+      metrics: [],
+      needsAttention: [],
+      rsvpPlanning: {
+        mode: 'individual',
+        guestCounts: false,
+        items: [
+          {
+            type: 'meeting',
+            id: 'mtg-9',
+            title: 'Budget Review',
+            startAt: '2026-09-18T19:00:00.000Z',
+            counts: { totalResponses: 4, going: 4, maybe: 0, notGoing: 0, totalAttendees: 4 },
+          },
+        ],
+      },
+      generatedAt: '2026-09-07T00:00:00.000Z',
+    });
+
+    await render(<AdminDashboardScreen />);
+
+    await waitFor(() => expect(screen.getByText('Meeting · Budget Review')).toBeTruthy());
+    expect(screen.getByText('4 going · 4 expected')).toBeTruthy();
+    expect(screen.getByLabelText(/^Meeting: Budget Review/).props.accessibilityRole).not.toBe('button');
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('renders no planning section against an older portal payload without rsvpPlanning', async () => {
+    mockUseAuth.mockReturnValue({
+      selectedOrganizationId: 'org-a',
+      selectedOrganization: { organizationName: 'Sample Org', capability: { adminCapabilities: ['adminDashboard', 'manageEvents'] } },
+    });
+    mockGetAdminDashboard.mockResolvedValueOnce({
+      metrics: [{ key: 'eventsUpcoming', label: 'Upcoming Events', value: 2, href: '/admin-events' }],
+      needsAttention: [],
+      generatedAt: '2026-09-07T00:00:00.000Z',
+    });
+
+    await render(<AdminDashboardScreen />);
+
+    await waitFor(() => expect(screen.getByText('Upcoming Events')).toBeTruthy());
+    expect(screen.queryByText('Upcoming Attendance')).toBeNull();
+  });
+
   it('shows a retry banner when the fetch fails, without crashing', async () => {
     mockUseAuth.mockReturnValue({
       selectedOrganizationId: 'org-a',

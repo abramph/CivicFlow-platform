@@ -6,6 +6,7 @@ import { Pressable, RefreshControl, ScrollView, StyleSheet } from 'react-native'
 import { LoadErrorBanner } from '@/components/load-error-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { StatusChip, WorkspaceHero } from '@/components/ui';
 import { ActionColors, Elevation, Radii, Spacing, WorkspaceColors } from '@/constants/theme';
 import { useScreenTopPadding } from '@/hooks/use-screen-top-padding';
 import { API_BASE_URL } from '@/lib/api-client';
@@ -187,12 +188,13 @@ export default function DashboardScreen() {
       contentContainerStyle={[styles.container, topPadding]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
     >
-      <ThemedText type="title">
-        {selectedOrganization?.organizationName ?? 'Unestra'}
-      </ThemedText>
-      <ThemedText type="subtitle" themeColor="textSecondary">
-        Welcome back, {selectedOrganization?.firstName ?? user?.displayName ?? 'member'}
-      </ThemedText>
+      {/* Parent/member home leads with the warm green workspace identity —
+          the counterpart of the Admin tab's slate hero. */}
+      <WorkspaceHero
+        workspace="parent"
+        title={selectedOrganization?.organizationName ?? 'Unestra'}
+        subtitle={`Welcome back, ${selectedOrganization?.firstName ?? user?.displayName ?? 'member'}`}
+      />
 
       <LoadErrorBanner message={loadError} onRetry={load} />
 
@@ -252,7 +254,7 @@ export default function DashboardScreen() {
             <ThemedView type="backgroundElement" style={styles.card}>
               <ThemedText type="small" themeColor="textSecondary">Balance</ThemedText>
               <ThemedText type="subtitle">{dues ? formatCurrency(dues.outstandingBalance) : '—'}</ThemedText>
-              {dues?.isDelinquent ? <ThemedText type="small" style={styles.delinquent}>Past due</ThemedText> : null}
+              {dues?.isDelinquent ? <StatusChip tone="rejected" label="Past due" /> : null}
             </ThemedView>
           </Pressable>
           <Pressable
@@ -384,7 +386,7 @@ export default function DashboardScreen() {
                 {ptaDues?.currentCharge ? formatCentsCurrency(ptaDues.currentCharge.remainingBalanceCents) : '—'}
               </ThemedText>
               {ptaDues?.currentCharge?.status === 'PENDING_REVIEW' ? (
-                <ThemedText type="small" style={styles.pending}>Payment pending review</ThemedText>
+                <StatusChip tone="pending" label="Payment pending review" />
               ) : null}
               {ptaDues?.hasBillingIdentity === false ? (
                 <ThemedText type="small" themeColor="textSecondary">No billing record</ThemedText>
@@ -455,7 +457,10 @@ export default function DashboardScreen() {
               <ThemedText type="small" themeColor="textSecondary">{new Date(nextEvent.startAt).toLocaleString()}</ThemedText>
             ) : null}
             {nextEvent.rsvp?.response ? (
-              <ThemedText type="small" style={styles.rsvpBadge}>You&apos;re {nextEvent.rsvp.response.status.replace('_', ' ').toLowerCase()}</ThemedText>
+              <StatusChip
+                tone={nextEvent.rsvp.response.status === 'GOING' ? 'approved' : nextEvent.rsvp.response.status === 'MAYBE' ? 'pending' : 'neutral'}
+                label={`You're ${nextEvent.rsvp.response.status.replace('_', ' ').toLowerCase()}`}
+              />
             ) : null}
           </ThemedView>
         </Pressable>
@@ -546,7 +551,7 @@ export default function DashboardScreen() {
             accessibilityRole="button"
             accessibilityLabel={`${item.isRead ? '' : 'Unread, '}${item.subject || item.title}`}
           >
-            <ThemedView type="backgroundElement" style={styles.listCard}>
+            <ThemedView type="backgroundElement" style={[styles.listCard, !item.isRead ? styles.listCardUnread : null]}>
               <ThemedText type={item.isRead ? 'small' : 'smallBold'}>{item.subject || item.title}</ThemedText>
             </ThemedView>
           </Pressable>
@@ -628,15 +633,6 @@ const styles = StyleSheet.create({
     gap: 4,
     ...(Elevation.card as object),
   },
-  delinquent: {
-    color: ActionColors.danger,
-  },
-  pending: {
-    color: ActionColors.warning,
-  },
-  rsvpBadge: {
-    color: ActionColors.primary,
-  },
   sectionHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -686,5 +682,12 @@ const styles = StyleSheet.create({
     borderRadius: Radii.sm,
     padding: Spacing.three,
     gap: 2,
+    ...(Elevation.card as object),
+  },
+  // Unread rows carry the parent accent as a left rail — a color signal on
+  // top of (never instead of) the bold-text and "N new" treatments.
+  listCardUnread: {
+    borderLeftWidth: 3,
+    borderLeftColor: ActionColors.primary,
   },
 });

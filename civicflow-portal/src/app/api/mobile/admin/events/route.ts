@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { ValidationError, parseJsonBody, z } from "@/lib/validation";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { createEvent, createEventSchema } from "@/lib/event-mutations";
+import { getAdminEventRsvpCounts } from "@/lib/event-rsvp";
 
 const createMobileEventSchema = createEventSchema.extend({ organizationId: z.string().min(1) });
 
@@ -38,7 +39,23 @@ export async function GET(request: Request) {
       select: { id: true, title: true, location: true, startAt: true, endAt: true, status: true },
     });
 
-    return Response.json({ ok: true, data: rows });
+    // Compact per-row planning summary (one batched groupBy, no N+1) —
+    // additive field, so fielded clients that predate it are unaffected.
+    // null means the org's RSVP mode is "none" (HOA); a present object with
+    // zero totalResponses means "no responses yet".
+    const counts = await getAdminEventRsvpCounts(organizationId, rows.map((row) => row.id));
+    const data = rows.map((row) => ({
+      ...row,
+      rsvp:
+        counts.mode === "none"
+          ? null
+          : {
+              guestCounts: counts.guestCounts,
+              ...(counts.byId[row.id] ?? { totalResponses: 0, going: 0, maybe: 0, notGoing: 0, totalAttendees: 0 }),
+            },
+    }));
+
+    return Response.json({ ok: true, data });
   });
 }
 

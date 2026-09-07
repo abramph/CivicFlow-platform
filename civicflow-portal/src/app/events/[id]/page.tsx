@@ -57,10 +57,11 @@ export default async function EventDetailPage({
     prisma.organization.findUnique({ where: { id: organizationId }, select: { primaryVertical: true } }),
   ]);
 
-  // Individual (per-member) RSVPs — Community/Union only. PTA events keep
-  // their household-level RSVP view on /labs/pta/events/[eventId] (a
-  // household row there can represent several attendees, so its counts are
-  // NOT comparable to these row-per-member counts); HOA is RSVP mode "none".
+  // Individual (per-member) RSVPs — Community/Union/Church. HOA is RSVP
+  // mode "none". PTA (household mode) is rendered inline below exactly like
+  // the meetings page renders PtaMeetingRsvp — one household row can
+  // represent several attendees, so its headline sums attendeeCount and is
+  // deliberately never mixed with the row-per-member counts.
   const rsvpMode = organization ? getRsvpMode(organization.primaryVertical) : "none";
   const eventRsvps =
     rsvpMode === "individual"
@@ -71,6 +72,17 @@ export default async function EventDetailPage({
         })
       : [];
   const rsvpGoingCount = eventRsvps.filter((r) => r.status === "GOING").length;
+  const householdRsvps =
+    rsvpMode === "household"
+      ? await prisma.ptaEventRsvp.findMany({
+          where: { organizationId, eventId: id },
+          include: { household: { select: { id: true, displayName: true } } },
+          orderBy: { updatedAt: "desc" },
+        })
+      : [];
+  const householdExpectedAttendees = householdRsvps
+    .filter((r) => r.status === "GOING")
+    .reduce((sum, r) => sum + r.attendeeCount, 0);
 
   if (!event) {
     return (
@@ -126,6 +138,13 @@ export default async function EventDetailPage({
           // RSVPs instead sum attendeeCount — see labs/pta/events.ts).
           <StatCard label="RSVPs" value={rsvpGoingCount} helper={`${rsvpGoingCount} expected attendee${rsvpGoingCount === 1 ? "" : "s"} · ${eventRsvps.length} response${eventRsvps.length === 1 ? "" : "s"}`} />
         ) : null}
+        {rsvpMode === "household" ? (
+          <StatCard
+            label="Expected Attendees"
+            value={householdExpectedAttendees}
+            helper={`${householdRsvps.filter((r) => r.status === "GOING").length} household(s) going · ${householdRsvps.length} response(s)`}
+          />
+        ) : null}
       </div>
 
       <SectionCard title="Event Overview" description="Operational details for this event.">
@@ -163,6 +182,38 @@ export default async function EventDetailPage({
               );
             })}
           </ul>
+        </SectionCard>
+      ) : null}
+
+      {rsvpMode === "household" ? (
+        <SectionCard
+          title="Household RSVPs"
+          description="Household RSVP responses for this event. One household response can represent several attendees — the Expected Attendees figure sums household counts, not rows. The PTA officer event page offers the full RSVP management view."
+        >
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead className="bg-slate-50 text-left text-slate-700">
+                <tr><th className="px-4 py-3">Household</th><th className="px-4 py-3">Attendees</th><th className="px-4 py-3">Response</th><th className="px-4 py-3">Updated</th></tr>
+              </thead>
+              <tbody>
+                {householdRsvps.length === 0 ? (
+                  <tr><td colSpan={4} className="px-4 py-6 text-center text-slate-600">No households have responded to this event yet.</td></tr>
+                ) : householdRsvps.map((rsvp) => (
+                  <tr key={rsvp.id} className="border-t border-slate-100">
+                    <td className="px-4 py-3 text-slate-900">{rsvp.household.displayName}</td>
+                    <td className="px-4 py-3 text-slate-900">{rsvp.attendeeCount}</td>
+                    <td className="px-4 py-3 text-slate-900">{formatEnumLabel(rsvp.status)}</td>
+                    <td className="px-4 py-3 text-slate-900">{formatDateTime(rsvp.updatedAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 text-sm">
+            <Link href={`/labs/pta/events/${event.id}`} className="text-emerald-700 hover:underline">
+              Open the PTA officer view for this event
+            </Link>
+          </p>
         </SectionCard>
       ) : null}
 

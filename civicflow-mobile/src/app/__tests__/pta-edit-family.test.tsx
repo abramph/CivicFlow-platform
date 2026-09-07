@@ -22,6 +22,7 @@ const mockGetMyPtaClassrooms = jest.fn();
 const mockUpdateMyPtaAdult = jest.fn();
 const mockUpdateMyPtaHouseholdInterests = jest.fn();
 const mockSubmitPtaChangeRequest = jest.fn();
+const mockGetPtaStudentPhoto = jest.fn();
 jest.mock('@/lib/mobile-api', () => ({
   getMyPtaHousehold: (...args: unknown[]) => mockGetMyPtaHousehold(...args),
   getMyPtaChangeRequests: (...args: unknown[]) => mockGetMyPtaChangeRequests(...args),
@@ -29,6 +30,7 @@ jest.mock('@/lib/mobile-api', () => ({
   updateMyPtaAdult: (...args: unknown[]) => mockUpdateMyPtaAdult(...args),
   updateMyPtaHouseholdInterests: (...args: unknown[]) => mockUpdateMyPtaHouseholdInterests(...args),
   submitPtaChangeRequest: (...args: unknown[]) => mockSubmitPtaChangeRequest(...args),
+  getPtaStudentPhoto: (...args: unknown[]) => mockGetPtaStudentPhoto(...args),
 }));
 
 jest.spyOn(Alert, 'alert').mockImplementation((_title, _message, buttons) => {
@@ -75,6 +77,26 @@ describe('Edit Family — Build 27 parent-managed information', () => {
     });
     mockUpdateMyPtaAdult.mockResolvedValue({});
     mockSubmitPtaChangeRequest.mockResolvedValue({ id: 'req-1', type: 'RENAME_STUDENT', status: 'SUBMITTED', createdAt: '2026-09-06T00:00:00.000Z' });
+    mockGetPtaStudentPhoto.mockResolvedValue(null);
+  });
+
+  it('shows an initials avatar for a photo-less student without ever fetching a photo', async () => {
+    await render(<PtaEditFamilyScreen />);
+    await waitFor(() => expect(screen.getByLabelText('No photo set for Riley Kim')).toBeTruthy());
+    // hasPhoto is false for the fixture student, so no photo request is made.
+    expect(mockGetPtaStudentPhoto).not.toHaveBeenCalled();
+  });
+
+  it("renders the student's photo on their card when one exists", async () => {
+    const withPhoto = household();
+    withPhoto.students[0] = { ...withPhoto.students[0], hasPhoto: true };
+    mockGetMyPtaHousehold.mockResolvedValue(withPhoto);
+    mockGetPtaStudentPhoto.mockResolvedValue({ uri: 'data:image/jpeg;base64,riley', byteSize: 100 });
+
+    await render(<PtaEditFamilyScreen />);
+    await waitFor(() => expect(screen.getByLabelText('Photo of Riley Kim')).toBeTruthy());
+    expect(screen.getByLabelText('Photo of Riley Kim').props.source.uri).toBe('data:image/jpeg;base64,riley');
+    expect(mockGetPtaStudentPhoto).toHaveBeenCalledWith('org-pta', 'stu-1');
   });
 
   it("prefills the caller's OWN contact row and saves it directly — no review queue for personal contact data", async () => {
