@@ -12,8 +12,10 @@ jest.mock('@/lib/auth-context', () => ({
 }));
 
 const mockGetAnnouncementsForIdentities = jest.fn();
+const mockSetAnnouncementArchivedForSources = jest.fn();
 jest.mock('@/lib/mobile-api', () => ({
   getAnnouncementsForIdentities: (...args: unknown[]) => mockGetAnnouncementsForIdentities(...args),
+  setAnnouncementArchivedForSources: (...args: unknown[]) => mockSetAnnouncementArchivedForSources(...args),
 }));
 
 describe('Announcements list accessibility', () => {
@@ -78,5 +80,51 @@ describe('Announcements list accessibility', () => {
     expect(
       screen.queryByText('Unable to load announcements. Check your connection and try again.')
     ).toBeNull();
+  });
+});
+
+describe('Announcement personal lifecycle (Build 27)', () => {
+  beforeEach(() => {
+    mockGetAnnouncementsForIdentities.mockReset();
+    mockSetAnnouncementArchivedForSources.mockReset().mockResolvedValue(undefined);
+    mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a', selectedOrganization: { memberId: 'member-1', pta: null } });
+  });
+
+  it('archives the caller’s own copy through every source row, then reloads', async () => {
+    mockGetAnnouncementsForIdentities.mockResolvedValue([
+      { id: 'ann-1', subject: 'Book fair', title: 'Book fair', body: 'Next week.', isRead: true, sentAt: '2026-09-01T12:00:00.000Z', sources: ['member'] },
+    ]);
+
+    await render(<AnnouncementsScreen />);
+    await waitFor(() => expect(screen.getByText('Book fair')).toBeTruthy());
+
+    await fireEvent.press(screen.getByLabelText('Archive Book fair'));
+
+    await waitFor(() =>
+      expect(mockSetAnnouncementArchivedForSources).toHaveBeenCalledWith('org-a', 'ann-1', ['member'], true)
+    );
+  });
+
+  it('the Archived view fetches archived items and offers Restore instead', async () => {
+    mockGetAnnouncementsForIdentities.mockResolvedValue([
+      { id: 'ann-2', subject: 'Old news', title: 'Old news', body: 'Done.', isRead: true, sentAt: '2026-08-01T12:00:00.000Z', sources: ['member'], isArchived: true },
+    ]);
+
+    await render(<AnnouncementsScreen />);
+    await fireEvent.press(screen.getByLabelText('Show archived announcements'));
+
+    await waitFor(() =>
+      expect(mockGetAnnouncementsForIdentities).toHaveBeenCalledWith(
+        'org-a',
+        { hasMemberIdentity: true, hasParentIdentity: false },
+        { archived: true }
+      )
+    );
+    await waitFor(() => expect(screen.getByLabelText('Restore Old news')).toBeTruthy());
+
+    await fireEvent.press(screen.getByLabelText('Restore Old news'));
+    await waitFor(() =>
+      expect(mockSetAnnouncementArchivedForSources).toHaveBeenCalledWith('org-a', 'ann-2', ['member'], false)
+    );
   });
 });

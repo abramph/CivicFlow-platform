@@ -269,7 +269,7 @@ describe("GET /api/mobile/pta/announcements", () => {
     const response = await announcementsGET(new Request("https://portal.test/api/mobile/pta/announcements?organizationId=org-a"));
 
     expect(response.status).toBe(200);
-    expect(listAnnouncementsForMember).toHaveBeenCalledWith("org-a", "member-1");
+    expect(listAnnouncementsForMember).toHaveBeenCalledWith("org-a", "member-1", { archived: false });
   });
 
   it("returns an empty list (not an error) for a household with no billing identity yet", async () => {
