@@ -4,6 +4,7 @@ import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, TextInput 
 
 import { PrimaryActionButton, SecondaryLinkButton } from '@/components/action-buttons';
 import { LoadErrorBanner } from '@/components/load-error-banner';
+import { StudentAvatar, useStudentPhotos } from '@/components/student-avatar';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { StatusChip } from '@/components/ui';
@@ -76,6 +77,9 @@ export default function PtaEditFamilyScreen() {
   const topPadding = useScreenTopPadding();
 
   const [household, setHousehold] = useState<MyPtaHousehold | null>(null);
+  // Org-tagged inside the hook, so a stale roster from a previous
+  // organization can never surface its photos here.
+  const studentPhotos = useStudentPhotos(selectedOrganizationId, household?.students ?? null);
   const [requests, setRequests] = useState<PtaChangeRequest[]>([]);
   const [classrooms, setClassrooms] = useState<MyPtaClassroom[]>([]);
   const [loading, setLoading] = useState(true);
@@ -282,12 +286,17 @@ export default function PtaEditFamilyScreen() {
           <ThemedText type="smallBold" accessibilityRole="header">Students</ThemedText>
           {household.students.map((student) => (
             <ThemedView key={student.id} type="backgroundElement" style={styles.card}>
-              <ThemedText type="smallBold">{student.displayName}</ThemedText>
-              {student.placementLabel ? (
-                <ThemedText type="small" themeColor="textSecondary">{student.placementLabel}</ThemedText>
-              ) : (
-                <ThemedText type="small" themeColor="textSecondary">No class placement on file for this school year.</ThemedText>
-              )}
+              <ThemedView style={styles.studentHeader}>
+                <StudentAvatar name={student.displayName} uri={studentPhotos[student.id] ?? null} size={40} />
+                <ThemedView style={styles.studentHeaderText}>
+                  <ThemedText type="smallBold">{student.displayName}</ThemedText>
+                  {student.placementLabel ? (
+                    <ThemedText type="small" themeColor="textSecondary">{student.placementLabel}</ThemedText>
+                  ) : (
+                    <ThemedText type="small" themeColor="textSecondary">No class placement on file for this school year.</ThemedText>
+                  )}
+                </ThemedView>
+              </ThemedView>
 
               {requestForm.kind === 'renameStudent' && requestForm.studentId === student.id ? (
                 <>
@@ -441,6 +450,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: Spacing.three,
+    backgroundColor: 'transparent',
+  },
+  studentHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two + Spacing.one,
+    backgroundColor: 'transparent',
+  },
+  studentHeaderText: {
+    flex: 1,
+    gap: 2,
     backgroundColor: 'transparent',
   },
   classroomRow: {
