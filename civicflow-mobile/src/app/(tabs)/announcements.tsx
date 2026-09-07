@@ -1,32 +1,49 @@
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { FlatList, Pressable, RefreshControl, StyleSheet } from 'react-native';
+import { Alert, FlatList, Pressable, RefreshControl, StyleSheet } from 'react-native';
 
 import { LoadErrorBanner } from '@/components/load-error-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { ActionColors, Spacing } from '@/constants/theme';
 import { useScreenTopPadding } from '@/hooks/use-screen-top-padding';
+import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
-import { getAnnouncementsForIdentity, type Announcement } from '@/lib/mobile-api';
+import {
+  getAnnouncementsForIdentities,
+  setAnnouncementArchivedForSources,
+  type AnnouncementWithSources,
+} from '@/lib/mobile-api';
+import { deriveOrgCapabilities } from '@/lib/org-capabilities';
 
+/**
+ * The announcements list, with the Build 27 personal lifecycle: each row can
+ * be archived out of the caller's own view (and restored from the Archived
+ * view) — a personal inbox action that never deletes the announcement and
+ * never affects any other recipient. Withdrawn announcements never appear
+ * in either view (enforced server-side).
+ */
 export default function AnnouncementsScreen() {
   const { selectedOrganization, selectedOrganizationId } = useAuth();
-  const hasMemberIdentity = Boolean(selectedOrganization?.memberId);
-  const hasPtaIdentity = Boolean(selectedOrganization?.pta?.householdAdultId);
-  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const { hasMemberIdentity, hasParentIdentity } = deriveOrgCapabilities(selectedOrganization);
+  const hasRecipientIdentity = hasMemberIdentity || hasParentIdentity;
+  const [announcements, setAnnouncements] = useState<AnnouncementWithSources[]>([]);
+  const [showArchived, setShowArchived] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [pendingId, setPendingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!selectedOrganizationId || (!hasMemberIdentity && !hasPtaIdentity)) return;
+    if (!selectedOrganizationId || !hasRecipientIdentity) return;
     try {
-      setAnnouncements(await getAnnouncementsForIdentity(selectedOrganizationId, hasMemberIdentity));
+      setAnnouncements(
+        await getAnnouncementsForIdentities(selectedOrganizationId, { hasMemberIdentity, hasParentIdentity }, { archived: showArchived })
+      );
       setLoadError(null);
     } catch {
       setLoadError('Unable to load announcements. Check your connection and try again.');
     }
-  }, [selectedOrganizationId, hasMemberIdentity, hasPtaIdentity]);
+  }, [selectedOrganizationId, hasRecipientIdentity, hasMemberIdentity, hasParentIdentity, showArchived]);
 
   useEffect(() => {
     (async () => {
@@ -40,11 +57,39 @@ export default function AnnouncementsScreen() {
     setRefreshing(false);
   }
 
+  async function handleArchiveToggle(item: AnnouncementWithSources) {
+    if (!selectedOrganizationId || pendingId) return;
+    setPendingId(item.id);
+    try {
+      await setAnnouncementArchivedForSources(selectedOrganizationId, item.id, item.sources, !showArchived);
+      await load();
+    } catch (error) {
+      Alert.alert(
+        showArchived ? 'Unable to restore' : 'Unable to archive',
+        error instanceof ApiError ? error.message : 'Please try again.'
+      );
+    } finally {
+      setPendingId(null);
+    }
+  }
+
   const topPadding = useScreenTopPadding();
 
   return (
     <ThemedView style={[styles.container, topPadding]}>
-      <ThemedText type="title">Announcements</ThemedText>
+      <ThemedView style={styles.headerRow}>
+        <ThemedText type="title">{showArchived ? 'Archived' : 'Announcements'}</ThemedText>
+        {hasRecipientIdentity ? (
+          <Pressable
+            onPress={() => setShowArchived((v) => !v)}
+            style={styles.toggle}
+            accessibilityRole="button"
+            accessibilityLabel={showArchived ? 'Show announcements' : 'Show archived announcements'}
+          >
+            <ThemedText type="link">{showArchived ? 'Back to inbox' : 'Archived'}</ThemedText>
+          </Pressable>
+        ) : null}
+      </ThemedView>
       <LoadErrorBanner message={loadError} onRetry={load} />
       <FlatList
         data={announcements}
@@ -66,12 +111,27 @@ export default function AnnouncementsScreen() {
                 <ThemedText type="small" themeColor="textSecondary">{new Date(item.sentAt).toLocaleDateString()}</ThemedText>
               ) : null}
               <ThemedText type="default" numberOfLines={2} style={styles.body}>{item.body}</ThemedText>
+              <Pressable
+                onPress={() => handleArchiveToggle(item)}
+                disabled={pendingId === item.id}
+                style={styles.archiveAction}
+                accessibilityRole="button"
+                accessibilityLabel={`${showArchived ? 'Restore' : 'Archive'} ${item.subject || item.title}`}
+                accessibilityHint={showArchived ? 'Moves this announcement back to your inbox.' : 'Hides this announcement from your view only. You can restore it from Archived.'}
+                accessibilityState={{ disabled: pendingId === item.id }}
+              >
+                <ThemedText type="link">{pendingId === item.id ? 'Working…' : showArchived ? 'Restore' : 'Archive'}</ThemedText>
+              </Pressable>
             </ThemedView>
           </Pressable>
         )}
         ListEmptyComponent={
           <ThemedText type="small" themeColor="textSecondary" style={styles.empty}>
-            No announcements yet.
+            {!hasRecipientIdentity
+              ? 'Announcements are sent to members and families. Your login has no member or family record in this organization, so there is nothing to show here.'
+              : showArchived
+                ? 'Nothing archived.'
+                : 'No announcements yet.'}
           </ThemedText>
         }
       />
@@ -84,6 +144,16 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: Spacing.four,
     gap: Spacing.three,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'transparent',
+  },
+  toggle: {
+    minHeight: 44,
+    justifyContent: 'center',
   },
   list: {
     gap: Spacing.two,
@@ -103,10 +173,15 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#047857',
+    backgroundColor: ActionColors.primary,
   },
   body: {
     marginTop: 4,
+  },
+  archiveAction: {
+    minHeight: 44,
+    justifyContent: 'center',
+    alignSelf: 'flex-start',
   },
   empty: {
     textAlign: 'center',

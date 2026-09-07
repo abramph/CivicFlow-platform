@@ -13,6 +13,7 @@ import {
   type AdminDuesCharge,
   type DuesAdjustmentType,
 } from '@/lib/mobile-api';
+import { requireAdminCapability } from '@/components/require-admin-capability';
 
 const ADJUSTMENT_TYPES: { value: DuesAdjustmentType; label: string }[] = [
   { value: 'WAIVER', label: 'Waiver' },
@@ -28,7 +29,7 @@ const ADJUSTMENT_TYPES: { value: DuesAdjustmentType; label: string }[] = [
  * form uses. A charge selection is required, matching the web form (an
  * adjustment always applies against a specific charge).
  */
-export default function AdminMemberAddAdjustmentScreen() {
+function AdminMemberAddAdjustmentScreen() {
   const { selectedOrganizationId } = useAuth();
   const { memberId } = useLocalSearchParams<{ memberId: string }>();
 
@@ -224,3 +225,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+export default requireAdminCapability('managePayments', 'payment administration', AdminMemberAddAdjustmentScreen);

@@ -8,7 +8,7 @@
  *   2. a storage URL reappearing in what the client renders.
  */
 import { apiFetchImageDataUri, setAccessToken, API_BASE_URL } from '@/lib/api-client';
-import { getPtaHouseholdPhoto } from '@/lib/mobile-api';
+import { getPtaHouseholdPhoto, getPtaStudentPhoto } from '@/lib/mobile-api';
 
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]);
 
@@ -88,5 +88,50 @@ describe('family photo delivery — mobile client', () => {
     // No household, attachment or student id is ever sent: the server resolves
     // the household from the token, so there is nothing here to forge.
     expect(url).not.toMatch(/householdId|attachmentId|studentId/);
+  });
+});
+
+/**
+ * Build 27 — the student photo shares the family photo's delivery contract
+ * (a student photo is a child's image outright). Same two mistakes pinned:
+ * the token never leaves the Unestra API host, and no storage URL ever
+ * reaches what the client renders.
+ */
+describe('student photo delivery — mobile client (Build 27)', () => {
+  const fetchMock = jest.fn();
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    global.fetch = fetchMock as unknown as typeof fetch;
+    setAccessToken('test-access-token');
+  });
+
+  afterEach(() => setAccessToken(null));
+
+  it('fetches through the authenticated API endpoint only, as a local data URI', async () => {
+    fetchMock.mockResolvedValueOnce(imageResponse());
+    const photo = await getPtaStudentPhoto('org-1', 'student-1');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url.startsWith(API_BASE_URL)).toBe(true);
+    expect(url).toContain('/api/mobile/pta/students/student-1/photo');
+    expect(url).toContain('organizationId=org-1');
+    expect((init.headers as Headers).get('Authorization')).toBe('Bearer test-access-token');
+    expect(photo?.uri.startsWith('data:image/jpeg;base64,')).toBe(true);
+    expect(JSON.stringify(photo)).not.toMatch(/https?:\/\//);
+  });
+
+  it('never contacts an object-storage host', async () => {
+    fetchMock.mockResolvedValueOnce(imageResponse());
+    await getPtaStudentPhoto('org-1', 'student-1');
+    for (const [url] of fetchMock.mock.calls as [string][]) {
+      expect(url).not.toMatch(/digitaloceanspaces|amazonaws|X-Amz-Signature/i);
+    }
+  });
+
+  it('treats 404 — including another family\'s studentId — as "no photo"', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 404, headers: new Headers() } as unknown as Response);
+    await expect(getPtaStudentPhoto('org-1', 'someone-elses-student')).resolves.toBeNull();
   });
 });

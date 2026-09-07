@@ -92,16 +92,31 @@ export interface Announcement {
   deepLink: string | null;
   sentAt: string | null;
   isRead: boolean;
+  /** Build 27 — the caller's own archive state. Optional so the app
+   * tolerates a portal that predates the lifecycle work. */
+  isArchived?: boolean;
 }
 
-export function getAnnouncements(organizationId: string) {
-  return apiFetch<Announcement[]>(`/api/mobile/announcements?organizationId=${encodeURIComponent(organizationId)}`);
+export function getAnnouncements(organizationId: string, options: { archived?: boolean } = {}) {
+  const params = new URLSearchParams({ organizationId });
+  if (options.archived) params.set('archived', '1');
+  return apiFetch<Announcement[]>(`/api/mobile/announcements?${params.toString()}`);
 }
 
 export function markAnnouncementRead(organizationId: string, campaignId: string) {
   return apiFetch<void>(`/api/mobile/announcements/${encodeURIComponent(campaignId)}/read`, {
     method: 'POST',
     body: JSON.stringify({ organizationId }),
+  });
+}
+
+/** Build 27 — archives (archived:true) or restores (archived:false) the
+ * caller's OWN copy of an announcement. Personal inbox state only: never
+ * deletes anything, never affects any other recipient. */
+export function setAnnouncementArchived(organizationId: string, campaignId: string, archived: boolean) {
+  return apiFetch<void>(`/api/mobile/announcements/${encodeURIComponent(campaignId)}/archive`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId, archived }),
   });
 }
 
@@ -590,6 +605,15 @@ export function approvePtaHourEntry(organizationId: string, entryId: string, adj
   });
 }
 
+/** Build 27 — approve's sibling. A reason is required server-side; it lands
+ * in the entry's notes and the audit event, so families always see why. */
+export function rejectPtaHourEntry(organizationId: string, entryId: string, reason: string) {
+  return apiFetch(`/api/mobile/pta/volunteers/hour-entries/${encodeURIComponent(entryId)}/reject`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId, reason }),
+  });
+}
+
 // ── PTA parent parity (dues, events/RSVP, announcements, minutes, documents) ─
 // Backed by /api/mobile/pta/*, bridging a household-authorized parent (no
 // conventional OrgMember) onto the same web PTA parent library functions —
@@ -597,14 +621,25 @@ export function approvePtaHourEntry(organizationId: string, entryId: string, adj
 // either PTA Labs isn't enrolled for this org, or the caller's account has no
 // linked household in it — both normal, not errors to surface as failures.
 
-export function getPtaAnnouncements(organizationId: string) {
-  return apiFetch<Announcement[]>(`/api/mobile/pta/announcements?organizationId=${encodeURIComponent(organizationId)}`);
+export function getPtaAnnouncements(organizationId: string, options: { archived?: boolean } = {}) {
+  const params = new URLSearchParams({ organizationId });
+  if (options.archived) params.set('archived', '1');
+  return apiFetch<Announcement[]>(`/api/mobile/pta/announcements?${params.toString()}`);
 }
 
 export function markPtaAnnouncementRead(organizationId: string, campaignId: string) {
   return apiFetch<void>(`/api/mobile/pta/announcements/${encodeURIComponent(campaignId)}/read`, {
     method: 'POST',
     body: JSON.stringify({ organizationId }),
+  });
+}
+
+/** Build 27 — household twin of setAnnouncementArchived; archive state is
+ * shared between the household's adults exactly like read state. */
+export function setPtaAnnouncementArchived(organizationId: string, campaignId: string, archived: boolean) {
+  return apiFetch<void>(`/api/mobile/pta/announcements/${encodeURIComponent(campaignId)}/archive`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId, archived }),
   });
 }
 
@@ -845,6 +880,131 @@ export function deletePtaHouseholdPhoto(organizationId: string) {
   return apiFetch<void>(`/api/mobile/pta/household/photo?organizationId=${encodeURIComponent(organizationId)}`, { method: 'DELETE' });
 }
 
+// ── Build 27: My Family self-service ────────────────────────────────────────
+// The parent's own household roster, contact self-edits, student photos, and
+// the change-request queue for organization-controlled fields. Everything is
+// resolved server-side from the caller's own PtaHouseholdAdult linkage —
+// the only entity id a client ever sends is a studentId, and the server
+// requires that student to belong to the caller's own household.
+
+export interface MyPtaAdult {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  relationshipLabel: string | null;
+  hasLogin: boolean;
+  isSelf: boolean;
+}
+
+export interface MyPtaStudent {
+  id: string;
+  displayName: string;
+  status: PtaStudentStatus;
+  hasPhoto: boolean;
+  placementLabel: string | null;
+}
+
+export interface MyPtaHousehold {
+  householdId: string;
+  displayName: string;
+  schoolYear: string;
+  currentSchoolYear: string | null;
+  volunteerInterests: string[];
+  adults: MyPtaAdult[];
+  students: MyPtaStudent[];
+}
+
+export function getMyPtaHousehold(organizationId: string) {
+  return apiFetch<MyPtaHousehold>(`/api/mobile/pta/my/household?organizationId=${encodeURIComponent(organizationId)}`);
+}
+
+export interface UpdateMyPtaAdultInput {
+  name?: string;
+  email?: string | null;
+  phone?: string | null;
+  relationshipLabel?: string | null;
+}
+
+export function updateMyPtaAdult(organizationId: string, input: UpdateMyPtaAdultInput) {
+  return apiFetch<Pick<MyPtaAdult, 'id' | 'name' | 'email' | 'phone' | 'relationshipLabel'>>(
+    `/api/mobile/pta/my/adult?organizationId=${encodeURIComponent(organizationId)}`,
+    { method: 'PATCH', body: JSON.stringify(input) }
+  );
+}
+
+export function updateMyPtaHouseholdInterests(organizationId: string, volunteerInterests: string[]) {
+  return apiFetch<{ volunteerInterests: string[] }>(
+    `/api/mobile/pta/my/household?organizationId=${encodeURIComponent(organizationId)}`,
+    { method: 'PATCH', body: JSON.stringify({ volunteerInterests }) }
+  );
+}
+
+export interface MyPtaClassroom {
+  id: string;
+  name: string;
+  gradeName: string;
+}
+
+export function getMyPtaClassrooms(organizationId: string) {
+  return apiFetch<{ currentSchoolYear: string | null; classrooms: MyPtaClassroom[] }>(
+    `/api/mobile/pta/my/classrooms?organizationId=${encodeURIComponent(organizationId)}`
+  );
+}
+
+export type PtaChangeRequestType = 'HOUSEHOLD_DISPLAY_NAME' | 'ADD_STUDENT' | 'RENAME_STUDENT' | 'STUDENT_PLACEMENT' | 'REMOVE_STUDENT';
+export type PtaChangeRequestStatus = 'SUBMITTED' | 'APPROVED' | 'APPLIED' | 'REJECTED';
+
+export interface PtaChangeRequest {
+  id: string;
+  type: PtaChangeRequestType;
+  payload: Record<string, unknown>;
+  status: PtaChangeRequestStatus;
+  decisionNotes: string | null;
+  createdAt: string;
+  reviewedAt: string | null;
+  appliedAt: string | null;
+}
+
+export function getMyPtaChangeRequests(organizationId: string) {
+  return apiFetch<PtaChangeRequest[]>(`/api/mobile/pta/my/change-requests?organizationId=${encodeURIComponent(organizationId)}`);
+}
+
+export function submitPtaChangeRequest(organizationId: string, type: PtaChangeRequestType, payload: Record<string, unknown>) {
+  return apiFetch<Pick<PtaChangeRequest, 'id' | 'type' | 'status' | 'createdAt'>>(
+    `/api/mobile/pta/my/change-requests?organizationId=${encodeURIComponent(organizationId)}`,
+    { method: 'POST', body: JSON.stringify({ type, payload }) }
+  );
+}
+
+/** Same data-URI delivery contract as the family photo — a student photo is
+ * a child's image, never fetched via a storage URL (see
+ * docs/pta-family-photo-privacy.md in the portal). Null means "no photo". */
+export async function getPtaStudentPhoto(organizationId: string, studentId: string): Promise<PtaHouseholdPhoto | null> {
+  const uri = await apiFetchImageDataUri(
+    `/api/mobile/pta/students/${encodeURIComponent(studentId)}/photo?organizationId=${encodeURIComponent(organizationId)}`
+  );
+  if (!uri) return null;
+  const base64 = uri.slice(uri.indexOf(',') + 1);
+  return { uri, byteSize: Math.floor((base64.length * 3) / 4) };
+}
+
+export function uploadPtaStudentPhoto(organizationId: string, studentId: string, asset: UploadPtaHouseholdPhotoAsset) {
+  const form = new FormData();
+  form.append('file', { uri: asset.uri, name: asset.fileName, type: asset.mimeType } as unknown as Blob);
+  return apiFetch<PtaHouseholdPhotoUploadResult>(
+    `/api/mobile/pta/students/${encodeURIComponent(studentId)}/photo?organizationId=${encodeURIComponent(organizationId)}`,
+    { method: 'POST', body: form }
+  );
+}
+
+export function deletePtaStudentPhoto(organizationId: string, studentId: string) {
+  return apiFetch<void>(
+    `/api/mobile/pta/students/${encodeURIComponent(studentId)}/photo?organizationId=${encodeURIComponent(organizationId)}`,
+    { method: 'DELETE' }
+  );
+}
+
 // ── Admin ─────────────────────────────────────────────────────────────────
 // Mobile Admin program (PR A). Gated server-side on resolveMobileAdminCapabilities()
 // (see civicflow-portal's GET /api/mobile/admin/dashboard) -- a 403 here means
@@ -856,7 +1016,7 @@ export function deletePtaHouseholdPhoto(organizationId: string) {
 export interface AdminMetric {
   key: string;
   label: string;
-  value: number;
+  value: number | string;
   href?: string;
 }
 
@@ -866,9 +1026,27 @@ export interface AdminNeedsAttentionItem {
   href: string;
 }
 
+/** Build 27 — capability-gated shortcuts the server includes only when the
+ * caller holds the capability behind them. Optional so the app tolerates a
+ * portal that predates them. */
+export interface AdminQuickAction {
+  key: string;
+  label: string;
+  href: string;
+}
+
+export interface AdminActivityItem {
+  id: string;
+  action: string;
+  actorEmail: string | null;
+  createdAt: string;
+}
+
 export interface AdminDashboard {
   metrics: AdminMetric[];
   needsAttention: AdminNeedsAttentionItem[];
+  quickActions?: AdminQuickAction[];
+  recentActivity?: AdminActivityItem[];
   generatedAt: string;
 }
 
@@ -1230,6 +1408,9 @@ export interface AdminCampaignDetail {
   status: CampaignStatus;
   scheduledFor: string | null;
   sentAt: string | null;
+  /** Build 27 — set when an admin withdrew this sent announcement.
+   * Optional so the app tolerates a portal that predates it. */
+  withdrawnAt?: string | null;
   createdAt: string;
   _count: { recipients: number };
 }
@@ -1248,10 +1429,50 @@ export interface CreateAdminCampaignInput {
   subject: string;
   body: string;
   sendNow?: boolean;
+  /** Build 27 — the same recipientFilter shape the web form sends (base
+   * selectors, or {selector:'pta_target', ptaRule} for PTA orgs). Omitted =
+   * the server's active_with_email default, exactly as before. */
+  recipientFilter?: Record<string, unknown>;
+}
+
+/** Build 27 — read-only recipient-count preview via the same resolver the
+ * real create uses; never persists anything. */
+export function previewAdminCampaignRecipients(organizationId: string, recipientFilter: Record<string, unknown>, channel: CampaignChannel) {
+  return apiFetch<{ count: number }>('/api/mobile/admin/campaigns/preview-recipients', {
+    method: 'POST',
+    body: JSON.stringify({ organizationId, recipientFilter, channel }),
+  });
+}
+
+/** Build 27 — the facts the composer needs to offer backend-supported
+ * audiences (PTA targeting + the unpaid rule's school year). */
+export function getAdminCampaignTargetingOptions(organizationId: string) {
+  return apiFetch<{ isPta: boolean; currentSchoolYear: string | null }>(
+    `/api/mobile/admin/campaigns/targeting-options?organizationId=${encodeURIComponent(organizationId)}`
+  );
 }
 
 export function createAdminCampaign(input: CreateAdminCampaignInput) {
   return apiFetch<AdminCampaignDetail>('/api/mobile/admin/campaigns', { method: 'POST', body: JSON.stringify(input) });
+}
+
+/** Build 27 — administrative recall of a SENT announcement: hides it from
+ * every member-facing list while preserving the campaign, recipients, and
+ * audit history. Only SENT campaigns qualify; drafts are deleted instead. */
+export function withdrawAdminCampaign(organizationId: string, campaignId: string, reason?: string | null) {
+  return apiFetch<void>(`/api/mobile/admin/campaigns/${encodeURIComponent(campaignId)}/withdraw`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId, reason: reason ?? null }),
+  });
+}
+
+/** Build 27 — deletes an UNSENT DRAFT only (audited server-side); anything
+ * that entered the send pipeline is preserved forever. */
+export function deleteAdminCampaignDraft(organizationId: string, campaignId: string) {
+  return apiFetch<void>(
+    `/api/mobile/admin/campaigns/${encodeURIComponent(campaignId)}?organizationId=${encodeURIComponent(organizationId)}`,
+    { method: 'DELETE' }
+  );
 }
 
 export function sendAdminCampaign(organizationId: string, campaignId: string) {
@@ -1664,6 +1885,17 @@ export function removeAdminPtaHouseholdAdult(householdId: string, adultId: strin
   );
 }
 
+/** Build 27: emails a single-use app invite to an adult with no login yet —
+ * the same PR #85 accept flow that is the ONLY path ever setting
+ * PtaHouseholdAdult.userId. This is what lets an administrator who is also
+ * a parent get their own household linked without leaving the app. */
+export function sendAdminPtaHouseholdAdultInvite(householdId: string, adultId: string, organizationId: string) {
+  return apiFetch<void>(
+    `/api/mobile/admin/pta/households/${encodeURIComponent(householdId)}/adults/${encodeURIComponent(adultId)}/invite`,
+    { method: 'POST', body: JSON.stringify({ organizationId }) }
+  );
+}
+
 export function addAdminPtaStudent(householdId: string, organizationId: string, displayName: string) {
   return apiFetch<AdminPtaStudent>(`/api/mobile/admin/pta/households/${encodeURIComponent(householdId)}/students`, {
     method: 'POST',
@@ -1675,6 +1907,33 @@ export function deactivateAdminPtaStudent(householdId: string, studentId: string
   return apiFetch<AdminPtaStudent>(
     `/api/mobile/admin/pta/households/${encodeURIComponent(householdId)}/students/${encodeURIComponent(studentId)}?organizationId=${encodeURIComponent(organizationId)}`,
     { method: 'DELETE' }
+  );
+}
+
+// ── Build 27: Admin review of parent-submitted family change requests ────────
+
+export interface AdminPtaChangeRequest extends PtaChangeRequest {
+  householdId: string;
+  householdName: string;
+}
+
+export function getAdminPtaChangeRequests(organizationId: string, status?: PtaChangeRequestStatus) {
+  const params = new URLSearchParams({ organizationId });
+  if (status) params.set('status', status);
+  return apiFetch<AdminPtaChangeRequest[]>(`/api/mobile/admin/pta/change-requests?${params.toString()}`);
+}
+
+export function approveAdminPtaChangeRequest(requestId: string, organizationId: string, decisionNotes?: string | null) {
+  return apiFetch<{ id: string; status: PtaChangeRequestStatus; appliedAt: string | null }>(
+    `/api/mobile/admin/pta/change-requests/${encodeURIComponent(requestId)}/approve`,
+    { method: 'POST', body: JSON.stringify({ organizationId, decisionNotes: decisionNotes ?? null }) }
+  );
+}
+
+export function rejectAdminPtaChangeRequest(requestId: string, organizationId: string, decisionNotes?: string | null) {
+  return apiFetch<{ id: string; status: PtaChangeRequestStatus }>(
+    `/api/mobile/admin/pta/change-requests/${encodeURIComponent(requestId)}/reject`,
+    { method: 'POST', body: JSON.stringify({ organizationId, decisionNotes: decisionNotes ?? null }) }
   );
 }
 
@@ -1933,20 +2192,96 @@ export function addAdminHoaArchitecturalRequestComment(requestId: string, organi
 }
 
 // ── Identity routing ─────────────────────────────────────────────────────────
-// A caller can have a conventional OrgMember, a PTA household link, both (an
-// officer who is also a parent), or neither. `hasMemberIdentity` always wins
-// when both are present, matching how dashboard.tsx already treats it as the
-// organization's "primary" identity for the officer/dual-identity case.
-// Screens branch through these instead of re-deriving the choice themselves.
+// Build 27: a caller can have a conventional OrgMember, a PTA household link,
+// both (an officer or admin who is also a parent), or neither — and the old
+// two-way `hasMemberIdentity ? conventional : PTA` switch flattened the dual
+// case onto one identity (preview finding #10). Announcements are now read as
+// the UNION of both identities' inboxes: a campaign can target the caller's
+// personal OrgMember, their household's billing member, or both, so the two
+// lists are fetched together, merged, and de-duplicated by campaign id. Each
+// row remembers which source(s) it came from so mark-read stamps the right
+// recipient row(s).
 
-export function getAnnouncementsForIdentity(organizationId: string, hasMemberIdentity: boolean) {
-  return hasMemberIdentity ? getAnnouncements(organizationId) : getPtaAnnouncements(organizationId);
+export type AnnouncementSource = 'member' | 'pta';
+
+export interface AnnouncementWithSources extends Announcement {
+  sources: AnnouncementSource[];
 }
 
-export function markAnnouncementReadForIdentity(organizationId: string, campaignId: string, hasMemberIdentity: boolean) {
-  return hasMemberIdentity
-    ? markAnnouncementRead(organizationId, campaignId)
-    : markPtaAnnouncementRead(organizationId, campaignId);
+export interface AnnouncementIdentity {
+  hasMemberIdentity: boolean;
+  hasParentIdentity: boolean;
+}
+
+export async function getAnnouncementsForIdentities(
+  organizationId: string,
+  identity: AnnouncementIdentity,
+  options: { archived?: boolean } = {}
+): Promise<AnnouncementWithSources[]> {
+  const [memberList, ptaList] = await Promise.all([
+    identity.hasMemberIdentity ? getAnnouncements(organizationId, options) : Promise.resolve([]),
+    identity.hasParentIdentity ? getPtaAnnouncements(organizationId, options) : Promise.resolve([]),
+  ]);
+
+  const merged = new Map<string, AnnouncementWithSources>();
+  for (const item of memberList) {
+    merged.set(item.id, { ...item, sources: ['member'] });
+  }
+  for (const item of ptaList) {
+    const existing = merged.get(item.id);
+    if (existing) {
+      existing.sources.push('pta');
+      // A campaign read through either recipient row is read — never show an
+      // announcement as unread again because its second row hasn't been
+      // stamped yet.
+      existing.isRead = existing.isRead || item.isRead;
+    } else {
+      merged.set(item.id, { ...item, sources: ['pta'] });
+    }
+  }
+
+  return Array.from(merged.values()).sort((a, b) => {
+    const aTime = a.sentAt ? new Date(a.sentAt).getTime() : 0;
+    const bTime = b.sentAt ? new Date(b.sentAt).getTime() : 0;
+    return bTime - aTime;
+  });
+}
+
+/** Stamps the caller's own recipient row(s) for every source the merged
+ * announcement carried. Both stamps are attempted even if one fails —
+ * mark-read is best-effort everywhere in this app. */
+export async function markAnnouncementReadForSources(
+  organizationId: string,
+  campaignId: string,
+  sources: AnnouncementSource[]
+): Promise<void> {
+  await Promise.all(
+    sources.map((source) =>
+      (source === 'member'
+        ? markAnnouncementRead(organizationId, campaignId)
+        : markPtaAnnouncementRead(organizationId, campaignId)
+      ).catch(() => null)
+    )
+  );
+}
+
+/** Build 27 — archive/restore across every source row the merged
+ * announcement carried, so a dual-identity user's action covers both their
+ * personal and household copies. NOT best-effort: the caller needs to know
+ * the action stuck, so a failure propagates. */
+export async function setAnnouncementArchivedForSources(
+  organizationId: string,
+  campaignId: string,
+  sources: AnnouncementSource[],
+  archived: boolean
+): Promise<void> {
+  await Promise.all(
+    sources.map((source) =>
+      source === 'member'
+        ? setAnnouncementArchived(organizationId, campaignId, archived)
+        : setPtaAnnouncementArchived(organizationId, campaignId, archived)
+    )
+  );
 }
 
 /**

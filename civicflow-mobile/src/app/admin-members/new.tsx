@@ -7,6 +7,7 @@ import { Spacing } from '@/constants/theme';
 import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { createAdminMember } from '@/lib/mobile-api';
+import { requireAdminCapability } from '@/components/require-admin-capability';
 
 /**
  * Mobile Admin program (PR B) — create member. Uses the exact same
@@ -16,7 +17,7 @@ import { createAdminMember } from '@/lib/mobile-api';
  * this screen only validates for usability. Only first/last name are
  * required, matching the web form and the underlying schema.
  */
-export default function AdminMemberCreateScreen() {
+function AdminMemberCreateScreen() {
   const { selectedOrganizationId } = useAuth();
 
   const [firstName, setFirstName] = useState('');
@@ -164,3 +165,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+export default requireAdminCapability('manageMembers', 'member administration', AdminMemberCreateScreen);

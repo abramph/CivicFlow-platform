@@ -480,6 +480,132 @@ export async function addPtaStudent(input: AddStudentInput) {
   return student;
 }
 
+export interface RenameStudentInput {
+  organizationId: string;
+  householdId: string;
+  studentId: string;
+  displayName: string;
+  actorUserId: string;
+  actorEmail?: string | null;
+}
+
+/**
+ * Build 27 — the first (and only) PtaStudent field update. Exists solely for
+ * the approved-change-request apply engine and officer corrections; the
+ * audit event records ids only, never the old or new displayName, matching
+ * addPtaStudent's data-minimization rule.
+ */
+export async function renamePtaStudent(input: RenameStudentInput) {
+  const student = await prisma.ptaStudent.findFirst({ where: { id: input.studentId, householdId: input.householdId, organizationId: input.organizationId } });
+  if (!student) throw new PtaError("PTA_STUDENT_NOT_FOUND", "Student not found in this organization.");
+  if (!input.displayName.trim()) throw new PtaError("PTA_VALIDATION_ERROR", "Student display name is required.");
+
+  const updated = await prisma.ptaStudent.update({ where: { id: student.id }, data: { displayName: input.displayName.trim() } });
+
+  await createAuditEvent({
+    organizationId: input.organizationId,
+    actorUserId: input.actorUserId,
+    actorEmail: input.actorEmail ?? null,
+    action: "pta.student.renamed",
+    entityType: "pta_student",
+    entityId: student.id,
+    metadata: {},
+  });
+
+  return updated;
+}
+
+export interface UpdateOwnAdultInput {
+  organizationId: string;
+  adultId: string;
+  name?: string;
+  email?: string | null;
+  phone?: string | null;
+  relationshipLabel?: string | null;
+  actorUserId: string;
+  actorEmail?: string | null;
+}
+
+/**
+ * Build 27 parent self-service — an adult updating their OWN contact row.
+ * The route layer must have already resolved adultId from the caller's own
+ * linkage (requireMobilePtaHouseholdAccess / requirePtaHouseholdSelfAccess);
+ * this function re-scopes by organizationId but deliberately takes no
+ * "target adult" concept beyond that — it is never an officer edit surface.
+ * If the adult is the household's primary contact, the billing OrgMember's
+ * empty contact fields are filled via the same fill-once sync rule adding a
+ * primary contact uses (never overwriting a real value).
+ */
+export async function updateOwnPtaHouseholdAdult(input: UpdateOwnAdultInput) {
+  const adult = await prisma.ptaHouseholdAdult.findFirst({
+    where: { id: input.adultId, organizationId: input.organizationId },
+    include: { household: { select: { id: true, primaryContactAdultId: true, orgMemberId: true } } },
+  });
+  if (!adult) throw new PtaError("PTA_NOT_A_HOUSEHOLD_MEMBER", "Household adult not found in this organization.");
+  if (input.name !== undefined && !input.name.trim()) {
+    throw new PtaError("PTA_VALIDATION_ERROR", "Name is required.");
+  }
+
+  const updated = await prisma.ptaHouseholdAdult.update({
+    where: { id: adult.id },
+    data: {
+      ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+      ...(input.email !== undefined ? { email: input.email } : {}),
+      ...(input.phone !== undefined ? { phone: input.phone } : {}),
+      ...(input.relationshipLabel !== undefined ? { relationshipLabel: input.relationshipLabel } : {}),
+    },
+  });
+
+  if (adult.household.primaryContactAdultId === adult.id && adult.household.orgMemberId) {
+    await syncHouseholdBillingContact(adult.household.orgMemberId, updated.email, updated.phone);
+  }
+
+  // Field KEYS only — the values are personal contact data and the audit
+  // trail doesn't need them to answer "who changed what kind of thing when".
+  await createAuditEvent({
+    organizationId: input.organizationId,
+    actorUserId: input.actorUserId,
+    actorEmail: input.actorEmail ?? null,
+    action: "pta.household_adult.self_updated",
+    entityType: "pta_household_adult",
+    entityId: adult.id,
+    metadata: { fields: Object.keys(input).filter((k) => !["organizationId", "adultId", "actorUserId", "actorEmail"].includes(k)) },
+  });
+
+  return updated;
+}
+
+/**
+ * Build 27 parent self-service — volunteer interests are preference data the
+ * household already owns (parents pick them at signup on the web), so this
+ * is a direct edit, not a change request. Nothing else on the household is
+ * editable through this function.
+ */
+export async function updateOwnPtaHouseholdVolunteerInterests(
+  organizationId: string,
+  householdId: string,
+  volunteerInterests: string[],
+  actorUserId: string,
+  actorEmail?: string | null
+) {
+  const household = await prisma.ptaHousehold.findFirst({ where: { id: householdId, organizationId } });
+  if (!household) throw new PtaError("PTA_HOUSEHOLD_NOT_FOUND", "Household not found in this organization.");
+
+  const updated = await prisma.ptaHousehold.update({ where: { id: household.id }, data: { volunteerInterests } });
+
+  await createAuditEvent({
+    organizationId,
+    actorUserId,
+    actorEmail: actorEmail ?? null,
+    action: "pta.household.volunteer_interests_updated",
+    entityType: "pta_household",
+    entityId: household.id,
+    metadata: { count: volunteerInterests.length },
+  });
+
+  return updated;
+}
+
 export async function deactivatePtaStudent(organizationId: string, householdId: string, studentId: string, actorUserId: string, actorEmail?: string | null) {
   const student = await prisma.ptaStudent.findFirst({ where: { id: studentId, householdId, organizationId } });
   if (!student) throw new PtaError("PTA_STUDENT_NOT_FOUND", "Student not found in this organization.");

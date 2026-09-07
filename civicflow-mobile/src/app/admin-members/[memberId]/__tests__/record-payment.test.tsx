@@ -25,7 +25,7 @@ describe('Admin member record-payment screen', () => {
     mockBack.mockReset();
     mockGetAdminMemberDues.mockReset();
     mockRecordAdminDuesPayment.mockReset();
-    mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a' });
+    mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a', selectedOrganization: { capability: { adminCapabilities: ['managePayments'] } } });
   });
 
   it('loads open charges to offer as optional allocation targets', async () => {

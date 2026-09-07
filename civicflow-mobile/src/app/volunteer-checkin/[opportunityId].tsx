@@ -4,6 +4,7 @@ import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet } from 'rea
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { UnauthorizedNotice } from '@/components/unauthorized-notice';
 import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
@@ -25,16 +26,21 @@ import {
  * timestamp.
  */
 export default function VolunteerCheckinRosterScreen() {
-  const { selectedOrganizationId } = useAuth();
+  const { selectedOrganization, selectedOrganizationId } = useAuth();
+  // Same gate as the parent /volunteer-checkin screen — this is the screen
+  // performing the actual check-in/out writes, and it shipped with no
+  // client-side check at all (deep-linkable straight to live action
+  // buttons whose only stop was the server's 403).
+  const canCheckIn = Boolean(selectedOrganization?.pta?.canCheckIn);
   const { opportunityId } = useLocalSearchParams<{ opportunityId: string }>();
   const [roster, setRoster] = useState<PtaVolunteerRoster | null>(null);
   const [loading, setLoading] = useState(true);
   const [pendingSignupId, setPendingSignupId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!selectedOrganizationId || !opportunityId) return;
+    if (!selectedOrganizationId || !opportunityId || !canCheckIn) return;
     setRoster(await getPtaVolunteerRoster(selectedOrganizationId, opportunityId));
-  }, [selectedOrganizationId, opportunityId]);
+  }, [selectedOrganizationId, opportunityId, canCheckIn]);
 
   useEffect(() => {
     (async () => {
@@ -58,6 +64,10 @@ export default function VolunteerCheckinRosterScreen() {
     } finally {
       setPendingSignupId(null);
     }
+  }
+
+  if (!canCheckIn) {
+    return <UnauthorizedNotice message="You don't have volunteer check-in access for this organization." />;
   }
 
   if (loading) {

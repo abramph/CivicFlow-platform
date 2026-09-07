@@ -69,7 +69,7 @@ describe('Admin member edit screen', () => {
     mockUpdateAdminMember.mockReset();
     alertSpy.mockClear();
     alertButtons = undefined;
-    mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a' });
+    mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a', selectedOrganization: { capability: { adminCapabilities: ['manageMembers'] } } });
   });
 
   it('prepopulates the form from a fresh server fetch', async () => {

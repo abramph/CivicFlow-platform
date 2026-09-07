@@ -6,10 +6,12 @@ import { ActivityIndicator, Linking, Pressable, StyleSheet } from 'react-native'
 import { PrimaryActionButton, SecondaryLinkButton } from '@/components/action-buttons';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { UnauthorizedNotice } from '@/components/unauthorized-notice';
 import { ActionColors, Spacing } from '@/constants/theme';
 import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { checkInWithQrToken, type AttendanceCheckInResult } from '@/lib/mobile-api';
+import { deriveOrgCapabilities } from '@/lib/org-capabilities';
 
 /** The scanned QR encodes the full web check-in URL — only the token query
  * param is meaningful to us; everything else about the URL is ignored. */
@@ -63,12 +65,17 @@ export default function AttendanceScanScreen() {
   if (status === 'signedOut') {
     return <Redirect href={{ pathname: '/login', params: { redirectTo: '/attendance-scan' } }} />;
   }
-  // Direct-route defense: check-in is recorded against an OrgMember identity a
-  // staff/owner login may not hold. The organization is derived server-side
-  // from the scanned QR, not from the client, so this only avoids a doomed
-  // scan — it does not weaken that guard.
-  if (status === 'signedIn' && selectedOrganization && !selectedOrganization.memberId) {
-    return <Redirect href="/dues" />;
+  // Direct-route defense (Build 27): scanning records attendance for a
+  // constituent identity — a personal OrgMember, or (for a PTA parent) the
+  // household's shared billing member, both resolved server-side. The old
+  // gate keyed on `memberId` alone, which hid the scanner from every PTA
+  // parent (their memberId is withheld — see org-capabilities.ts). Admin or
+  // officer status alone still doesn't qualify: they mint and control
+  // sessions instead of scanning themselves in. The organization is derived
+  // server-side from the scanned QR, not from the client, so this only
+  // avoids a doomed scan — it does not weaken that guard.
+  if (status === 'signedIn' && selectedOrganization && !deriveOrgCapabilities(selectedOrganization).canScanAttendance) {
+    return <UnauthorizedNotice title="Scan Attendance Code" message="Check-in records attendance for a member or family record, and your login doesn't have one in this organization." />;
   }
 
   if (!permission) {

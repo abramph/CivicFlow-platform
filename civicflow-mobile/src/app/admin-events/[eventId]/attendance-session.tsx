@@ -19,6 +19,7 @@ import {
   type AdminAttendanceSession,
   type AdminAttendanceSummary,
 } from '@/lib/mobile-api';
+import { requireAdminCapability } from '@/components/require-admin-capability';
 
 const SUMMARY_POLL_MS = 5000;
 
@@ -30,7 +31,7 @@ const SUMMARY_POLL_MS = 5000;
  * specifically, a materially higher bar than manageAttendance alone, and
  * this officer-facing screen isn't the right place to add that rank check.
  */
-export default function AdminEventAttendanceSessionScreen() {
+function AdminEventAttendanceSessionScreen() {
   const { selectedOrganizationId } = useAuth();
   const { eventId } = useLocalSearchParams<{ eventId: string }>();
 
@@ -317,3 +318,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+export default requireAdminCapability('manageAttendance', 'attendance administration', AdminEventAttendanceSessionScreen);

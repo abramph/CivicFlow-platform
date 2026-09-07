@@ -21,7 +21,7 @@ describe('Admin PTA household create screen', () => {
   beforeEach(() => {
     mockReplace.mockReset();
     mockCreateAdminPtaHousehold.mockReset();
-    mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a' });
+    mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a', selectedOrganization: { capability: { adminCapabilities: ['managePtaHouseholds'] } } });
   });
 
   it('requires a household name', async () => {

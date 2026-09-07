@@ -7,6 +7,7 @@ import { Spacing } from '@/constants/theme';
 import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { createAdminPtaHousehold } from '@/lib/mobile-api';
+import { requireAdminCapability } from '@/components/require-admin-capability';
 
 function currentSchoolYear() {
   const now = new Date();
@@ -20,7 +21,7 @@ function currentSchoolYear() {
  * Matches the web form's exact field set (displayName, schoolYear, notes) —
  * status/volunteerInterests aren't exposed on create there either.
  */
-export default function AdminPtaHouseholdCreateScreen() {
+function AdminPtaHouseholdCreateScreen() {
   const { selectedOrganizationId } = useAuth();
 
   const [displayName, setDisplayName] = useState('');
@@ -134,3 +135,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+export default requireAdminCapability('managePtaHouseholds', 'household administration', AdminPtaHouseholdCreateScreen);

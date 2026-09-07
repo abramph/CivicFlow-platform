@@ -1,3 +1,4 @@
+import { Redirect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { FlatList, StyleSheet } from 'react-native';
 
@@ -9,20 +10,24 @@ import { useAuth } from '@/lib/auth-context';
 import { getPtaDocuments, type PtaDocument } from '@/lib/mobile-api';
 
 export default function PtaDocumentsScreen() {
-  const { selectedOrganizationId } = useAuth();
+  const { status, selectedOrganization, selectedOrganizationId } = useAuth();
+  // The server route requires a household link (requireMobilePtaHouseholdAccess),
+  // and the dashboard entry point gates on the same — this mirrors
+  // pta-my-family's direct-navigation defense for deep links.
+  const hasParentIdentity = Boolean(selectedOrganization?.pta?.householdAdultId);
   const [documents, setDocuments] = useState<PtaDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!selectedOrganizationId) return;
+    if (!selectedOrganizationId || !hasParentIdentity) return;
     try {
       setDocuments(await getPtaDocuments(selectedOrganizationId));
       setLoadError(null);
     } catch {
       setLoadError('Unable to load documents. Check your connection and try again.');
     }
-  }, [selectedOrganizationId]);
+  }, [selectedOrganizationId, hasParentIdentity]);
 
   useEffect(() => {
     (async () => {
@@ -34,6 +39,10 @@ export default function PtaDocumentsScreen() {
       }
     })();
   }, [load]);
+
+  if (status === 'signedIn' && selectedOrganization && !hasParentIdentity) {
+    return <Redirect href="/dashboard" />;
+  }
 
   return (
     <ThemedView style={styles.container}>

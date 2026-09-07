@@ -1,29 +1,48 @@
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
+import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
-import { getAnnouncementsForIdentity, markAnnouncementReadForIdentity, type Announcement } from '@/lib/mobile-api';
+import {
+  getAnnouncementsForIdentities,
+  markAnnouncementReadForSources,
+  setAnnouncementArchivedForSources,
+  type AnnouncementWithSources,
+} from '@/lib/mobile-api';
+import { deriveOrgCapabilities } from '@/lib/org-capabilities';
 
 export default function AnnouncementDetailScreen() {
   const { selectedOrganization, selectedOrganizationId } = useAuth();
-  const hasMemberIdentity = Boolean(selectedOrganization?.memberId);
+  const { hasMemberIdentity, hasParentIdentity } = deriveOrgCapabilities(selectedOrganization);
   const { id } = useLocalSearchParams<{ id: string }>();
-  const [announcement, setAnnouncement] = useState<Announcement | null>(null);
+  const [announcement, setAnnouncement] = useState<AnnouncementWithSources | null>(null);
+  const [isArchived, setIsArchived] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [archiving, setArchiving] = useState(false);
 
   const load = useCallback(async () => {
     if (!selectedOrganizationId || !id) return;
-    const all = await getAnnouncementsForIdentity(selectedOrganizationId, hasMemberIdentity);
-    const match = all.find((item) => item.id === id) ?? null;
-    setAnnouncement(match);
-    if (match && !match.isRead) {
-      await markAnnouncementReadForIdentity(selectedOrganizationId, id, hasMemberIdentity).catch(() => null);
+    const identity = { hasMemberIdentity, hasParentIdentity };
+    // The item may live in either view — an archived announcement is still
+    // openable (e.g. from the Archived list or an old notification tap).
+    const inbox = await getAnnouncementsForIdentities(selectedOrganizationId, identity);
+    let match = inbox.find((item) => item.id === id) ?? null;
+    let archived = false;
+    if (!match) {
+      const archivedList = await getAnnouncementsForIdentities(selectedOrganizationId, identity, { archived: true });
+      match = archivedList.find((item) => item.id === id) ?? null;
+      archived = Boolean(match);
     }
-  }, [selectedOrganizationId, id, hasMemberIdentity]);
+    setAnnouncement(match);
+    setIsArchived(archived);
+    if (match && !match.isRead) {
+      await markAnnouncementReadForSources(selectedOrganizationId, id, match.sources);
+    }
+  }, [selectedOrganizationId, id, hasMemberIdentity, hasParentIdentity]);
 
   useEffect(() => {
     (async () => {
@@ -35,6 +54,22 @@ export default function AnnouncementDetailScreen() {
       }
     })();
   }, [load]);
+
+  async function handleArchiveToggle() {
+    if (!selectedOrganizationId || !announcement || archiving) return;
+    setArchiving(true);
+    try {
+      await setAnnouncementArchivedForSources(selectedOrganizationId, announcement.id, announcement.sources, !isArchived);
+      router.back();
+    } catch (error) {
+      Alert.alert(
+        isArchived ? 'Unable to restore' : 'Unable to archive',
+        error instanceof ApiError ? error.message : 'Please try again.'
+      );
+    } finally {
+      setArchiving(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -64,6 +99,22 @@ export default function AnnouncementDetailScreen() {
         </ThemedText>
       ) : null}
       <ThemedText type="default" style={styles.body}>{announcement.body}</ThemedText>
+
+      <Pressable
+        onPress={handleArchiveToggle}
+        disabled={archiving}
+        style={styles.archiveAction}
+        accessibilityRole="button"
+        accessibilityLabel={isArchived ? 'Restore announcement' : 'Archive announcement'}
+        accessibilityHint={
+          isArchived
+            ? 'Moves this announcement back to your inbox.'
+            : 'Hides this announcement from your view only. You can restore it from Archived.'
+        }
+        accessibilityState={{ disabled: archiving }}
+      >
+        <ThemedText type="link">{archiving ? 'Working…' : isArchived ? 'Restore' : 'Archive'}</ThemedText>
+      </Pressable>
     </ScrollView>
   );
 }
@@ -80,5 +131,11 @@ const styles = StyleSheet.create({
   },
   body: {
     marginTop: Spacing.two,
+  },
+  archiveAction: {
+    minHeight: 44,
+    justifyContent: 'center',
+    alignSelf: 'flex-start',
+    marginTop: Spacing.three,
   },
 });

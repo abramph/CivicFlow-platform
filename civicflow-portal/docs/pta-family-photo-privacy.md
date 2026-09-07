@@ -1,8 +1,12 @@
-# PTA family photos — delivery and retention
+# PTA family and student photos — delivery and retention
 
 A family photo is household data and, in a K-12 product, effectively
-children's data. Two properties are load-bearing and easy to lose by accident,
-so they are written down here.
+children's data — and a **student photo is a child's image outright**. Two
+properties are load-bearing and easy to lose by accident, so they are written
+down here. As of Build 27 this contract covers BOTH photo kinds: the student
+photo (`PtaStudent.photoUrl`, `src/lib/labs/pta/student-photo.ts`) shares the
+family photo's validation pipeline (`photo-pipeline.ts`), delivery helper,
+removal semantics, and audit rules — by construction, not by convention.
 
 ## 1. The bytes are served by an endpoint that authorized the caller
 
@@ -13,13 +17,22 @@ it, from any client, with no authorization check, no way to revoke it before it
 expires, and it is served by a host that has no idea who is asking. That is the
 wrong shape for this data even with a five-minute lifetime.
 
-Both routes that serve a family photo go through one helper,
+Every route that serves one of these photos goes through one helper,
 `familyPhotoBytesResponse` in `src/lib/labs/pta/household-photo-response.ts`:
 
 | Route | Audience | Auth |
 |---|---|---|
 | `GET /api/mobile/pta/household/photo` | the household's own parent | bearer token |
 | `GET /api/labs/pta/households/[householdId]/photo` | officer with `pta:directory:read`, or the household's own linked parent | session |
+| `GET /api/mobile/pta/students/[studentId]/photo` | a parent of the student's OWN household (linkage + household-membership check on the student) | bearer token |
+| `GET /api/labs/pta/students/[studentId]/photo` | officer with `pta:directory:read`, or a parent of the student's own household | session |
+
+A `studentId` is never an authorization input: the mobile route re-derives the
+caller's household from their own `PtaHouseholdAdult` linkage and requires the
+student to belong to it; any other family's student answers "not found",
+never confirming existence. Student photo writes are officer-gated by
+`pta:students:manage` (web) or the same own-household linkage (mobile parent
+self-service).
 
 Both:
 

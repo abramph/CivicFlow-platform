@@ -8,6 +8,7 @@ import { Spacing } from '@/constants/theme';
 import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { getAdminEvent, updateAdminEvent } from '@/lib/mobile-api';
+import { requireAdminCapability } from '@/components/require-admin-capability';
 
 /**
  * Mobile Admin program (PR C) — edit event. Always prepopulates from a
@@ -17,7 +18,7 @@ import { getAdminEvent, updateAdminEvent } from '@/lib/mobile-api';
  * step, matching the web CancelEventButton's separation from the generic
  * edit form.
  */
-export default function AdminEventEditScreen() {
+function AdminEventEditScreen() {
   const { selectedOrganizationId } = useAuth();
   const { eventId } = useLocalSearchParams<{ eventId: string }>();
 
@@ -218,3 +219,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+export default requireAdminCapability('manageEvents', 'event administration', AdminEventEditScreen);

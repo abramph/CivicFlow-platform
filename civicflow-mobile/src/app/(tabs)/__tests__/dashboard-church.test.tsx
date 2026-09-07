@@ -21,13 +21,13 @@ jest.mock('@/lib/unread-count', () => ({
   useUnreadConversationCount: () => 0,
 }));
 
-const mockGetAnnouncementsForIdentity = jest.fn();
+const mockGetAnnouncementsForIdentities = jest.fn();
 const mockGetEventsForOrganization = jest.fn();
 const mockGetDues = jest.fn();
 const mockGetPaymentHistory = jest.fn();
 const mockGetGiving = jest.fn();
 jest.mock('@/lib/mobile-api', () => ({
-  getAnnouncementsForIdentity: (...args: unknown[]) => mockGetAnnouncementsForIdentity(...args),
+  getAnnouncementsForIdentities: (...args: unknown[]) => mockGetAnnouncementsForIdentities(...args),
   getEventsForOrganization: (...args: unknown[]) => mockGetEventsForOrganization(...args),
   getDues: (...args: unknown[]) => mockGetDues(...args),
   getPaymentHistory: (...args: unknown[]) => mockGetPaymentHistory(...args),
@@ -60,7 +60,7 @@ describe('Dashboard Church vertical layout', () => {
   beforeEach(() => {
     mockRouterPush.mockReset();
     mockOpenBrowserAsync.mockReset();
-    mockGetAnnouncementsForIdentity.mockReset().mockResolvedValue([]);
+    mockGetAnnouncementsForIdentities.mockReset().mockResolvedValue([]);
     mockGetEventsForOrganization.mockReset().mockResolvedValue([]);
     mockGetDues.mockReset().mockResolvedValue({ outstandingBalance: 0, isDelinquent: false, delinquentSince: null, charges: [] });
     mockGetPaymentHistory.mockReset().mockResolvedValue({ payments: [], reports: [] });

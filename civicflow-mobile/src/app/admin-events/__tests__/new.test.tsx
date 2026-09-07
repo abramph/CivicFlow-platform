@@ -21,7 +21,7 @@ describe('Admin event create screen', () => {
   beforeEach(() => {
     mockReplace.mockReset();
     mockCreateAdminEvent.mockReset();
-    mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a' });
+    mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a', selectedOrganization: { capability: { adminCapabilities: ['manageEvents'] } } });
   });
 
   it('rejects submission without a title', async () => {

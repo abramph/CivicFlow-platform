@@ -66,6 +66,30 @@ export async function POST(request: Request) {
     const { organizationId, ...input } = await parseJsonBody(request, createMobileCampaignSchema);
     const { userId, email } = await requireManageCommunications(request, organizationId);
 
+    // Build 27 duplicate-submission protection: a retried/double-tapped
+    // create of the same content by the same admin within a short window is
+    // answered with a conflict instead of a second campaign (and, when
+    // sendNow was set, a second full send). Deliberately narrow — same
+    // title AND subject AND body — so legitimately re-sending an updated
+    // announcement is never blocked.
+    const recentDuplicate = await prisma.communicationCampaign.findFirst({
+      where: {
+        organizationId,
+        createdByUserId: userId,
+        title: input.title.trim(),
+        subject: input.subject.trim(),
+        body: input.body.trim(),
+        createdAt: { gte: new Date(Date.now() - 2 * 60_000) },
+      },
+      select: { id: true },
+    });
+    if (recentDuplicate) {
+      return Response.json(
+        { ok: false, error: "An identical announcement was just created. Check the campaign list before sending it again.", code: "DUPLICATE_CAMPAIGN" },
+        { status: 409 }
+      );
+    }
+
     const campaign = await createCommunicationCampaign(organizationId, { userId, userEmail: email }, input);
 
     return Response.json({ ok: true, data: campaign }, { status: 201 });

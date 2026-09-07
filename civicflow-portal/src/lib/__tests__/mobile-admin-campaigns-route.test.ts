@@ -20,12 +20,16 @@ vi.mock("@/lib/mobile-admin", () => ({
 const findManyCampaign = vi.fn();
 const createCampaignPrisma = vi.fn();
 const findFirstCampaign = vi.fn();
+const deleteManyCampaign = vi.fn();
+const updateManyCampaign = vi.fn();
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     communicationCampaign: {
       findMany: (...a: unknown[]) => findManyCampaign(...a),
       create: (...a: unknown[]) => createCampaignPrisma(...a),
       findFirst: (...a: unknown[]) => findFirstCampaign(...a),
+      deleteMany: (...a: unknown[]) => deleteManyCampaign(...a),
+      updateMany: (...a: unknown[]) => updateManyCampaign(...a),
     },
   },
 }));
@@ -49,8 +53,9 @@ vi.mock("@/lib/audit", () => ({ createAuditEvent: vi.fn().mockResolvedValue(unde
 vi.mock("@/lib/rate-limit", () => ({ requireRateLimit: vi.fn().mockResolvedValue(null) }));
 
 import { GET, POST } from "@/app/api/mobile/admin/campaigns/route";
-import { GET as detailGet } from "@/app/api/mobile/admin/campaigns/[campaignId]/route";
+import { GET as detailGet, DELETE as detailDelete } from "@/app/api/mobile/admin/campaigns/[campaignId]/route";
 import { POST as sendPost } from "@/app/api/mobile/admin/campaigns/[campaignId]/send/route";
+import { POST as withdrawPost } from "@/app/api/mobile/admin/campaigns/[campaignId]/withdraw/route";
 
 function listRequest(qs = "organizationId=org-a") {
   return new Request(`https://portal.test/api/mobile/admin/campaigns?${qs}`, { headers: { Authorization: "Bearer test-token" } });
@@ -102,6 +107,27 @@ describe("GET /api/mobile/admin/campaigns", () => {
 });
 
 describe("POST /api/mobile/admin/campaigns", () => {
+  it("answers an identical create within the duplicate window with 409 and never creates a second campaign (Build 27)", async () => {
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "STAFF", adminCapabilities: ["manageCommunications"] });
+    findFirstCampaign.mockResolvedValueOnce({ id: "camp-existing" });
+
+    const response = await POST(
+      createRequest({ organizationId: "org-a", title: "Newsletter", communicationType: "GENERAL", channel: "INTERNAL_LOG_ONLY", subject: "Hi", body: "Body text" })
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.code).toBe("DUPLICATE_CAMPAIGN");
+    expect(createCampaignPrisma).not.toHaveBeenCalled();
+    // The duplicate check is scoped to this org, this creator, and this
+    // exact content — never a blanket lock.
+    expect(findFirstCampaign).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ organizationId: "org-a", createdByUserId: "user-1", title: "Newsletter", subject: "Hi", body: "Body text" }),
+      })
+    );
+  });
+
   it("rejects a crafted organizationId with no real capability, resolved fresh per request", async () => {
     resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: false, role: null, adminCapabilities: [] });
 
@@ -211,5 +237,94 @@ describe("POST /api/mobile/admin/campaigns/[campaignId]/send", () => {
     expect(response.status).toBe(200);
     expect(body.data.sent).toBe(5);
     expect(sendCommunicationCampaign).toHaveBeenCalledWith({ organizationId: "org-a", campaignId: "camp-1", actorUserId: "user-1", actorEmail: "officer@example.com" });
+  });
+});
+
+describe("DELETE /api/mobile/admin/campaigns/[campaignId] (Build 27 draft delete)", () => {
+  function deleteRequest() {
+    return new Request("https://portal.test/api/mobile/admin/campaigns/camp-1?organizationId=org-a", {
+      method: "DELETE",
+      headers: { Authorization: "Bearer test-token" },
+    });
+  }
+  const detailParams = () => ({ params: Promise.resolve({ campaignId: "camp-1" }) });
+
+  it("deletes an unsent DRAFT with a conditional status-scoped delete", async () => {
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "STAFF", adminCapabilities: ["manageCommunications"] });
+    findFirstCampaign.mockResolvedValueOnce({ id: "camp-1", status: "DRAFT" });
+    deleteManyCampaign.mockResolvedValueOnce({ count: 1 });
+
+    const response = await detailDelete(deleteRequest(), detailParams());
+    expect(response.status).toBe(200);
+    expect(deleteManyCampaign).toHaveBeenCalledWith({ where: { id: "camp-1", organizationId: "org-a", status: "DRAFT" } });
+  });
+
+  it("refuses to delete anything that entered the send pipeline — sent history is never erased", async () => {
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "STAFF", adminCapabilities: ["manageCommunications"] });
+    findFirstCampaign.mockResolvedValueOnce({ id: "camp-1", status: "SENT" });
+
+    const response = await detailDelete(deleteRequest(), detailParams());
+    expect(response.status).toBe(409);
+    expect(deleteManyCampaign).not.toHaveBeenCalled();
+  });
+
+  it("loses cleanly when the draft was sent between the read and the delete", async () => {
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "STAFF", adminCapabilities: ["manageCommunications"] });
+    findFirstCampaign.mockResolvedValueOnce({ id: "camp-1", status: "DRAFT" });
+    deleteManyCampaign.mockResolvedValueOnce({ count: 0 });
+
+    const response = await detailDelete(deleteRequest(), detailParams());
+    expect(response.status).toBe(409);
+  });
+});
+
+describe("POST /api/mobile/admin/campaigns/[campaignId]/withdraw (Build 27)", () => {
+  function withdrawRequest(body: Record<string, unknown> = { organizationId: "org-a" }) {
+    return new Request("https://portal.test/api/mobile/admin/campaigns/camp-1/withdraw", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer test-token" },
+      body: JSON.stringify(body),
+    });
+  }
+  const detailParams = () => ({ params: Promise.resolve({ campaignId: "camp-1" }) });
+
+  it("withdraws a SENT announcement via a conditional claim — the campaign row is updated, never deleted", async () => {
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "STAFF", adminCapabilities: ["manageCommunications"] });
+    findFirstCampaign.mockResolvedValueOnce({ id: "camp-1", status: "SENT", withdrawnAt: null });
+    updateManyCampaign.mockResolvedValueOnce({ count: 1 });
+
+    const response = await withdrawPost(withdrawRequest(), detailParams());
+    expect(response.status).toBe(200);
+    expect(updateManyCampaign).toHaveBeenCalledWith({
+      where: { id: "camp-1", organizationId: "org-a", status: "SENT", withdrawnAt: null },
+      data: { withdrawnAt: expect.any(Date), withdrawnByUserId: "user-1" },
+    });
+    expect(deleteManyCampaign).not.toHaveBeenCalled();
+  });
+
+  it("conflicts on an already-withdrawn announcement", async () => {
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "STAFF", adminCapabilities: ["manageCommunications"] });
+    findFirstCampaign.mockResolvedValueOnce({ id: "camp-1", status: "SENT", withdrawnAt: new Date() });
+
+    const response = await withdrawPost(withdrawRequest(), detailParams());
+    expect(response.status).toBe(409);
+    expect(updateManyCampaign).not.toHaveBeenCalled();
+  });
+
+  it("refuses to withdraw a draft — drafts are deleted, not withdrawn", async () => {
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "STAFF", adminCapabilities: ["manageCommunications"] });
+    findFirstCampaign.mockResolvedValueOnce({ id: "camp-1", status: "DRAFT", withdrawnAt: null });
+
+    const response = await withdrawPost(withdrawRequest(), detailParams());
+    expect(response.status).toBe(409);
+    expect(updateManyCampaign).not.toHaveBeenCalled();
+  });
+
+  it("403s without manageCommunications", async () => {
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "STAFF", adminCapabilities: ["manageEvents"] });
+
+    const response = await withdrawPost(withdrawRequest(), detailParams());
+    expect(response.status).toBe(403);
+    expect(findFirstCampaign).not.toHaveBeenCalled();
   });
 });

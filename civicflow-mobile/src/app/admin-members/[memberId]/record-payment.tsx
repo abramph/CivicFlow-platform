@@ -13,6 +13,7 @@ import {
   type AdminDuesCharge,
   type DuesPaymentMethodValue,
 } from '@/lib/mobile-api';
+import { requireAdminCapability } from '@/components/require-admin-capability';
 
 const PAYMENT_METHODS: DuesPaymentMethodValue[] = ['CASH', 'CHECK', 'CREDIT_CARD', 'ACH', 'ZELLE', 'CASH_APP', 'VENMO', 'PAYPAL', 'OTHER'];
 
@@ -27,7 +28,7 @@ function todayIsoDate() {
  * compare-and-swap-safe recordDuesPayment underneath). A charge selection is
  * optional, matching the web form's "unallocated payment" support.
  */
-export default function AdminMemberRecordPaymentScreen() {
+function AdminMemberRecordPaymentScreen() {
   const { selectedOrganizationId } = useAuth();
   const { memberId } = useLocalSearchParams<{ memberId: string }>();
 
@@ -227,3 +228,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+export default requireAdminCapability('managePayments', 'payment administration', AdminMemberRecordPaymentScreen);

@@ -78,7 +78,7 @@ describe("GET /api/mobile/organizations", () => {
     findManyMembership.mockResolvedValueOnce([]); // no MEMBER-role memberships
     findManyOrgMember.mockResolvedValueOnce([]);
     findManyHouseholdAdult.mockResolvedValueOnce([
-      { id: "adult-1", organizationId: "org-pta", name: "Casey Kim", organization: { id: "org-pta", name: "Pine Grove School PTA", logoUrl: null, primaryVertical: "PTA" } },
+      { id: "adult-1", organizationId: "org-pta", name: "Casey Kim", organization: { id: "org-pta", name: "Pine Grove School PTA", logoUrl: null, primaryVertical: "PTA" }, household: { displayName: "Kim Family", orgMemberId: null } },
     ]);
     findManyMembership.mockResolvedValueOnce([]); // no staff memberships either
 
@@ -104,7 +104,7 @@ describe("GET /api/mobile/organizations", () => {
     findManyMembership.mockResolvedValueOnce([]);
     findManyOrgMember.mockResolvedValueOnce([]);
     findManyHouseholdAdult.mockResolvedValueOnce([
-      { id: "adult-1", organizationId: "org-pta", name: "Casey Kim", organization: { id: "org-pta", name: "Pine Grove School PTA", logoUrl: null, primaryVertical: "COMMUNITY" } },
+      { id: "adult-1", organizationId: "org-pta", name: "Casey Kim", organization: { id: "org-pta", name: "Pine Grove School PTA", logoUrl: null, primaryVertical: "COMMUNITY" }, household: { displayName: "Kim Family", orgMemberId: null } },
     ]);
     findManyMembership.mockResolvedValueOnce([]);
 
@@ -168,7 +168,7 @@ describe("GET /api/mobile/organizations", () => {
       .mockResolvedValueOnce([{ id: "membership-1", organizationId: "org-pta", role: "ORG_OWNER", organization: { id: "org-pta", name: "Pine Grove School PTA", logoUrl: null, status: "active", primaryVertical: "PTA" } }]);
     findManyOrgMember.mockResolvedValueOnce([]);
     findManyHouseholdAdult.mockResolvedValueOnce([
-      { id: "adult-1", organizationId: "org-pta", name: "Alex Morgan", organization: { id: "org-pta", name: "Pine Grove School PTA", logoUrl: null, primaryVertical: "PTA" } },
+      { id: "adult-1", organizationId: "org-pta", name: "Alex Morgan", organization: { id: "org-pta", name: "Pine Grove School PTA", logoUrl: null, primaryVertical: "PTA" }, household: { displayName: "Morgan Family", orgMemberId: null } },
     ]);
     getEffectivePermissions.mockResolvedValueOnce(["pta:volunteers:checkin", "pta:volunteer-hours:approve"]);
 
@@ -340,7 +340,7 @@ describe("GET /api/mobile/organizations — dual identity (staff/owner who is al
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ id: "membership-1", organizationId: "org-pta", role: "ORG_OWNER", organization: { id: "org-pta", name: "Pine Grove School PTA", logoUrl: null, status: "active", primaryVertical: "PTA" } }]);
     findManyHouseholdAdult.mockResolvedValueOnce([
-      { id: "adult-1", organizationId: "org-pta", name: "Alex Morgan", organization: { id: "org-pta", name: "Pine Grove School PTA", logoUrl: null, primaryVertical: "PTA" } },
+      { id: "adult-1", organizationId: "org-pta", name: "Alex Morgan", organization: { id: "org-pta", name: "Pine Grove School PTA", logoUrl: null, primaryVertical: "PTA" }, household: { displayName: "Morgan Family", orgMemberId: null } },
     ]);
     getEffectivePermissions.mockResolvedValueOnce(["pta:volunteers:checkin", "pta:volunteer-hours:approve"]);
 
@@ -374,6 +374,7 @@ describe("GET /api/mobile/organizations — PTA household routing wins over a li
     organizationId: "org-pta",
     name: "Casey Kim",
     organization: { id: "org-pta", name: "Harris PTA", logoUrl: null, primaryVertical: "PTA" },
+    household: { displayName: "Kim Family", orgMemberId: "member-billing" },
   };
 
   it("keeps memberId null for a PTA household adult who also has a linked OrgMember", async () => {
@@ -440,6 +441,97 @@ describe("GET /api/mobile/organizations — PTA household routing wins over a li
 });
 
 /**
+ * Build 27 additive dual-role contract: `constituentMemberId` carries the
+ * role-agnostic linked OrgMember for EVERY row (so new clients can read both
+ * identities at once), while `memberId` keeps its exact legacy semantics for
+ * fielded Build 25/26 clients. The household's shared billing OrgMember is
+ * never surfaced as a constituent identity.
+ */
+describe("GET /api/mobile/organizations — constituentMemberId (Build 27 dual-role)", () => {
+  const ptaAdult = {
+    id: "adult-1",
+    organizationId: "org-pta",
+    name: "Casey Kim",
+    organization: { id: "org-pta", name: "Harris PTA", logoUrl: null, primaryVertical: "PTA" },
+    household: { displayName: "Kim Family", orgMemberId: "member-billing" },
+  };
+
+  async function fetchRows() {
+    const token = await signAccessToken("user-1", 0);
+    const response = await GET(new Request("https://portal.test/api/mobile/organizations", { headers: { Authorization: `Bearer ${token}` } }));
+    return (await response.json()).data;
+  }
+
+  it("populates constituentMemberId for a household adult with a personal OrgMember while memberId stays withheld", async () => {
+    findManyHouseholdAdult.mockResolvedValueOnce([ptaAdult]);
+    findManyOrgMember.mockResolvedValue([
+      { id: "member-linked", organizationId: "org-pta", firstName: "Casey", lastName: "Kim", membershipStatus: "active", isDelinquent: false },
+    ]);
+
+    const rows = await fetchRows();
+    expect(rows[0]).toEqual(
+      expect.objectContaining({
+        memberId: null,
+        constituentMemberId: "member-linked",
+        pta: expect.objectContaining({ householdAdultId: "adult-1", householdName: "Kim Family" }),
+      })
+    );
+  });
+
+  it("never surfaces the household's shared billing OrgMember as the caller's constituent identity", async () => {
+    findManyHouseholdAdult.mockResolvedValueOnce([ptaAdult]);
+    // The only linked OrgMember IS the household billing identity.
+    findManyOrgMember.mockResolvedValue([
+      { id: "member-billing", organizationId: "org-pta", firstName: "Kim", lastName: "Family", membershipStatus: "active", isDelinquent: false },
+    ]);
+
+    const rows = await fetchRows();
+    expect(rows[0]).toEqual(expect.objectContaining({ memberId: null, constituentMemberId: null }));
+  });
+
+  it("keeps a household row's name and delinquency untouched by the constituent pass (fielded-client byte-compatibility)", async () => {
+    findManyHouseholdAdult.mockResolvedValueOnce([ptaAdult]);
+    findManyOrgMember.mockResolvedValue([
+      { id: "member-linked", organizationId: "org-pta", firstName: "Different", lastName: "Name", membershipStatus: "lapsed", isDelinquent: true },
+    ]);
+
+    const rows = await fetchRows();
+    expect(rows[0]).toEqual(
+      expect.objectContaining({
+        firstName: "Casey",
+        lastName: "Kim",
+        membershipStatus: null,
+        isDelinquent: false,
+        constituentMemberId: "member-linked",
+      })
+    );
+  });
+
+  it("mirrors memberId into constituentMemberId for a regular MEMBER row", async () => {
+    findManyMembership.mockResolvedValueOnce([
+      { organizationId: "org-a", organization: { id: "org-a", name: "Riverdale", logoUrl: null, primaryVertical: "COMMUNITY" }, joinedAt: new Date() },
+    ]);
+    findManyOrgMember.mockResolvedValueOnce([{ id: "member-1", organizationId: "org-a", firstName: "Jamie", lastName: "Lee", membershipStatus: "active", isDelinquent: false }]);
+
+    const rows = await fetchRows();
+    expect(rows[0]).toEqual(expect.objectContaining({ memberId: "member-1", constituentMemberId: "member-1" }));
+  });
+
+  it("sets both memberId and constituentMemberId for a staff/owner with a linked OrgMember and no household", async () => {
+    findManyMembership
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: "membership-1", organizationId: "org-a", role: "ORG_OWNER", organization: { id: "org-a", name: "Riverdale", logoUrl: null, status: "active", primaryVertical: "COMMUNITY" } }]);
+    findManyOrgMember
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: "member-owner", organizationId: "org-a", firstName: "Abram", lastName: "Harris", membershipStatus: "active", isDelinquent: false }]);
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "ORG_OWNER", adminCapabilities: ["adminDashboard"] });
+
+    const rows = await fetchRows();
+    expect(rows[0]).toEqual(expect.objectContaining({ memberId: "member-owner", constituentMemberId: "member-owner" }));
+  });
+});
+
+/**
  * Core Event RSVP — capability.rsvp is the explicit contract the mobile
  * client keys ALL RSVP routing/UI off (mode by vertical, canRsvp by the
  * caller's real identity), replacing the implicit `'myRsvp' in event` /
@@ -474,7 +566,7 @@ describe("GET /api/mobile/organizations — rsvp capability contract", () => {
 
   it("PTA household adult → household mode with guest counts, canRsvp true", async () => {
     findManyHouseholdAdult.mockResolvedValueOnce([
-      { id: "adult-1", organizationId: "org-pta", name: "Casey Kim", organization: { id: "org-pta", name: "Harris PTA", logoUrl: null, primaryVertical: "PTA" } },
+      { id: "adult-1", organizationId: "org-pta", name: "Casey Kim", organization: { id: "org-pta", name: "Harris PTA", logoUrl: null, primaryVertical: "PTA" }, household: { displayName: "Kim Family", orgMemberId: null } },
     ]);
 
     const rows = await fetchRows();
