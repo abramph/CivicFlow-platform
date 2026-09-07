@@ -5,7 +5,7 @@ import { FlatList, Pressable, RefreshControl, StyleSheet } from 'react-native';
 import { LoadErrorBanner } from '@/components/load-error-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { ActionColors, Spacing } from '@/constants/theme';
 import { useScreenTopPadding } from '@/hooks/use-screen-top-padding';
 import { useAuth } from '@/lib/auth-context';
 import { getConversations, type ConversationSummary } from '@/lib/mobile-api';
@@ -120,7 +120,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#047857',
+    backgroundColor: ActionColors.primary,
   },
   empty: {
     textAlign: 'center',

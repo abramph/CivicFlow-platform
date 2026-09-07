@@ -5,7 +5,7 @@ import * as WebBrowser from 'expo-web-browser';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { ActionColors, Spacing } from '@/constants/theme';
 import { useScreenTopPadding } from '@/hooks/use-screen-top-padding';
 import { useAuth } from '@/lib/auth-context';
 import { API_BASE_URL } from '@/lib/api-client';
@@ -227,13 +227,13 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   deleteAccountText: {
-    color: '#B42318',
+    color: ActionColors.danger,
   },
   sectionLabel: {
     marginTop: Spacing.two,
   },
   delinquent: {
-    color: '#B42318',
+    color: ActionColors.danger,
   },
   toggleRow: {
     flexDirection: 'row',
@@ -247,7 +247,7 @@ const styles = StyleSheet.create({
   },
   logoutButton: {
     marginTop: Spacing.three,
-    backgroundColor: '#B42318',
+    backgroundColor: ActionColors.danger,
     borderRadius: 10,
     paddingVertical: Spacing.three,
     alignItems: 'center',

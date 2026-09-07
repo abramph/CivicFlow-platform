@@ -6,7 +6,8 @@ import { PrimaryActionButton, SecondaryLinkButton } from '@/components/action-bu
 import { LoadErrorBanner } from '@/components/load-error-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { ActionColors, Spacing } from '@/constants/theme';
+import { StatusChip } from '@/components/ui';
+import { ActionColors, Radii, Spacing, type StatusTone } from '@/constants/theme';
 import { useScreenTopPadding } from '@/hooks/use-screen-top-padding';
 import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
@@ -45,6 +46,13 @@ const STATUS_LABELS: Record<PtaChangeRequestStatus, string> = {
   APPROVED: 'Approved',
   APPLIED: 'Applied',
   REJECTED: 'Not approved',
+};
+
+const STATUS_TONES: Record<PtaChangeRequestStatus, StatusTone> = {
+  SUBMITTED: 'pending',
+  APPROVED: 'info',
+  APPLIED: 'approved',
+  REJECTED: 'rejected',
 };
 
 const TYPE_LABELS: Record<PtaChangeRequest['type'], string> = {
@@ -379,7 +387,7 @@ export default function PtaEditFamilyScreen() {
                 pendingRequests.map((request) => (
                   <ThemedView key={request.id} type="backgroundElement" style={styles.card}>
                     <ThemedText type="smallBold">{TYPE_LABELS[request.type]}</ThemedText>
-                    <ThemedText type="small" style={styles.pendingText}>{STATUS_LABELS[request.status]}</ThemedText>
+                    <StatusChip tone={STATUS_TONES[request.status]} label={STATUS_LABELS[request.status]} />
                     <ThemedText type="small" themeColor="textSecondary">Submitted {new Date(request.createdAt).toLocaleDateString()}</ThemedText>
                   </ThemedView>
                 ))
@@ -390,9 +398,7 @@ export default function PtaEditFamilyScreen() {
                   {decidedRequests.map((request) => (
                     <ThemedView key={request.id} type="backgroundElement" style={styles.card}>
                       <ThemedText type="smallBold">{TYPE_LABELS[request.type]}</ThemedText>
-                      <ThemedText type="small" style={request.status === 'REJECTED' ? styles.rejectedText : styles.appliedText}>
-                        {STATUS_LABELS[request.status]}
-                      </ThemedText>
+                      <StatusChip tone={STATUS_TONES[request.status]} label={STATUS_LABELS[request.status]} />
                       {request.decisionNotes ? (
                         <ThemedText type="small" themeColor="textSecondary">{request.decisionNotes}</ThemedText>
                       ) : null}
@@ -440,21 +446,9 @@ const styles = StyleSheet.create({
   classroomRow: {
     borderWidth: 1,
     borderColor: ActionColors.border,
-    borderRadius: 10,
+    borderRadius: Radii.sm,
     padding: Spacing.three,
     minHeight: 44,
     justifyContent: 'center',
-  },
-  pendingText: {
-    color: ActionColors.warning,
-    fontWeight: '600',
-  },
-  rejectedText: {
-    color: ActionColors.danger,
-    fontWeight: '600',
-  },
-  appliedText: {
-    color: ActionColors.primary,
-    fontWeight: '600',
   },
 });

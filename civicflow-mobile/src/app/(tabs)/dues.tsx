@@ -6,7 +6,8 @@ import { FlatList, Pressable, RefreshControl, StyleSheet } from 'react-native';
 import { LoadErrorBanner } from '@/components/load-error-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { StatusChip } from '@/components/ui';
+import { ActionColors, Radii, Spacing, type StatusTone } from '@/constants/theme';
 import { useScreenTopPadding } from '@/hooks/use-screen-top-padding';
 import { API_BASE_URL } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
@@ -31,14 +32,16 @@ const STATUS_LABELS: Record<PtaDuesStatus, string> = {
   PENDING_REVIEW: 'Payment pending review',
 };
 
-const STATUS_STYLES: Record<PtaDuesStatus, 'good' | 'warning' | 'due' | 'neutral'> = {
+// Semantic status tones (Build 27 vocabulary) — the chip palette carries
+// AA-contrast pairs for both schemes, so no per-screen status hex exists.
+const STATUS_TONES: Record<PtaDuesStatus, StatusTone> = {
   NO_CHARGE: 'neutral',
-  UNPAID: 'due',
-  PARTIALLY_PAID: 'warning',
-  PAID: 'good',
-  WAIVED: 'good',
+  UNPAID: 'rejected',
+  PARTIALLY_PAID: 'pending',
+  PAID: 'approved',
+  WAIVED: 'approved',
   VOIDED: 'neutral',
-  PENDING_REVIEW: 'warning',
+  PENDING_REVIEW: 'pending',
 };
 
 export default function DuesScreen() {
@@ -88,7 +91,6 @@ export default function DuesScreen() {
 
   if (hasParentIdentity && !hasMemberIdentity) {
     const charge = ptaSummary?.currentCharge ?? null;
-    const statusStyle = charge ? STATUS_STYLES[charge.status] : 'neutral';
 
     return (
       <ThemedView style={[styles.container, topPadding]}>
@@ -112,9 +114,7 @@ export default function DuesScreen() {
               {ptaSummary?.currentSchoolYear ?? 'Current'} membership
             </ThemedText>
             <ThemedText type="subtitle">{formatCentsCurrency(charge.remainingBalanceCents)} remaining</ThemedText>
-            <ThemedText type="small" style={statusStyle === 'due' ? styles.due : statusStyle === 'warning' ? styles.warning : statusStyle === 'good' ? styles.good : undefined}>
-              {STATUS_LABELS[charge.status]}
-            </ThemedText>
+            <StatusChip tone={STATUS_TONES[charge.status]} label={STATUS_LABELS[charge.status]} />
             <ThemedText type="small" themeColor="textSecondary">
               Due {new Date(charge.dueDate).toLocaleDateString()} · {formatCentsCurrency(charge.amountDueCents)} due · {formatCentsCurrency(charge.amountPaidCents)} paid
             </ThemedText>
@@ -254,7 +254,7 @@ export default function DuesScreen() {
               {ptaSummary.currentSchoolYear ?? 'Current'} membership · your household
             </ThemedText>
             <ThemedText type="subtitle">{formatCentsCurrency(ptaSummary.currentCharge.remainingBalanceCents)} remaining</ThemedText>
-            <ThemedText type="small" themeColor="textSecondary">{STATUS_LABELS[ptaSummary.currentCharge.status]}</ThemedText>
+            <StatusChip tone={STATUS_TONES[ptaSummary.currentCharge.status]} label={STATUS_LABELS[ptaSummary.currentCharge.status]} />
           </ThemedView>
           {ptaSummary.onlinePaymentLinkSlug ? (
             <Pressable
@@ -316,38 +316,34 @@ const styles = StyleSheet.create({
     gap: Spacing.three,
   },
   summaryCard: {
-    borderRadius: 12,
+    borderRadius: Radii.md,
     padding: Spacing.three,
     gap: 4,
   },
   due: {
-    color: '#B42318',
-    marginTop: 4,
-  },
-  warning: {
-    color: '#B54708',
-    marginTop: 4,
-  },
-  good: {
-    color: '#047857',
+    color: ActionColors.danger,
     marginTop: 4,
   },
   payButton: {
-    backgroundColor: '#047857',
-    borderRadius: 10,
+    backgroundColor: ActionColors.primary,
+    borderRadius: Radii.sm,
     paddingVertical: Spacing.three,
     alignItems: 'center',
+    minHeight: 44,
+    justifyContent: 'center',
   },
   payButtonText: {
-    color: '#fff',
+    color: ActionColors.primaryText,
     fontWeight: '600',
   },
   reportButton: {
     borderWidth: 1,
-    borderColor: '#D0D5DD',
-    borderRadius: 10,
+    borderColor: ActionColors.border,
+    borderRadius: Radii.sm,
     paddingVertical: Spacing.three,
     alignItems: 'center',
+    minHeight: 44,
+    justifyContent: 'center',
   },
   reportButtonText: {
     fontWeight: '600',
