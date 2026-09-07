@@ -24,7 +24,10 @@ export async function GET(request: Request) {
     const { organizationId: verifiedOrgId, adult } = await requireMobilePtaHouseholdAccess(request, organizationId);
     if (!adult.billingMemberId) return Response.json({ ok: true, data: [] });
 
-    const data = await listAnnouncementsForMember(verifiedOrgId, adult.billingMemberId);
+    // Build 27: archived=1 lists the household's archived items instead of
+    // the default view. Archive state — like read state — lives on the
+    // household's shared recipient row (docs/pta-communication-identity.md).
+    const data = await listAnnouncementsForMember(verifiedOrgId, adult.billingMemberId, { archived: searchParams.get("archived") === "1" });
     return Response.json({ ok: true, data });
   });
 }

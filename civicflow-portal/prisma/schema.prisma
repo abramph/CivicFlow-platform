@@ -3419,6 +3419,13 @@ model CommunicationCampaign {
   whatsappTemplateVariables Json?
   scheduledFor              DateTime?
   sentAt                    DateTime?
+  /// Build 27 — administrative withdrawal of a SENT announcement. Withdrawn
+  /// content disappears from member-facing lists but the campaign row, its
+  /// recipients, delivery logs, and audit trail are all preserved — an
+  /// administrator can never erase communication history without trace.
+  /// Never set for a draft (drafts are hard-deleted instead, also audited).
+  withdrawnAt               DateTime?
+  withdrawnByUserId         String?
   createdAt                 DateTime                     @default(now())
   updatedAt                 DateTime                     @updatedAt
 
@@ -3461,6 +3468,12 @@ model CommunicationRecipient {
   /// distinct from deliveryStatus/sentAt, which are about whether it was
   /// sent, not whether the recipient has seen it.
   readAt                 DateTime?
+  /// Build 27 — the recipient hid this from their OWN inbox view. Same
+  /// per-recipient granularity as readAt (for a PTA household that means
+  /// shared between the household's adults, matching read state — see
+  /// docs/pta-communication-identity.md). Never affects any other
+  /// recipient and never deletes anything.
+  archivedAt             DateTime?
   createdAt              DateTime                     @default(now())
   updatedAt              DateTime                     @updatedAt
 

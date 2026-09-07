@@ -92,16 +92,31 @@ export interface Announcement {
   deepLink: string | null;
   sentAt: string | null;
   isRead: boolean;
+  /** Build 27 — the caller's own archive state. Optional so the app
+   * tolerates a portal that predates the lifecycle work. */
+  isArchived?: boolean;
 }
 
-export function getAnnouncements(organizationId: string) {
-  return apiFetch<Announcement[]>(`/api/mobile/announcements?organizationId=${encodeURIComponent(organizationId)}`);
+export function getAnnouncements(organizationId: string, options: { archived?: boolean } = {}) {
+  const params = new URLSearchParams({ organizationId });
+  if (options.archived) params.set('archived', '1');
+  return apiFetch<Announcement[]>(`/api/mobile/announcements?${params.toString()}`);
 }
 
 export function markAnnouncementRead(organizationId: string, campaignId: string) {
   return apiFetch<void>(`/api/mobile/announcements/${encodeURIComponent(campaignId)}/read`, {
     method: 'POST',
     body: JSON.stringify({ organizationId }),
+  });
+}
+
+/** Build 27 — archives (archived:true) or restores (archived:false) the
+ * caller's OWN copy of an announcement. Personal inbox state only: never
+ * deletes anything, never affects any other recipient. */
+export function setAnnouncementArchived(organizationId: string, campaignId: string, archived: boolean) {
+  return apiFetch<void>(`/api/mobile/announcements/${encodeURIComponent(campaignId)}/archive`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId, archived }),
   });
 }
 
@@ -606,14 +621,25 @@ export function rejectPtaHourEntry(organizationId: string, entryId: string, reas
 // either PTA Labs isn't enrolled for this org, or the caller's account has no
 // linked household in it — both normal, not errors to surface as failures.
 
-export function getPtaAnnouncements(organizationId: string) {
-  return apiFetch<Announcement[]>(`/api/mobile/pta/announcements?organizationId=${encodeURIComponent(organizationId)}`);
+export function getPtaAnnouncements(organizationId: string, options: { archived?: boolean } = {}) {
+  const params = new URLSearchParams({ organizationId });
+  if (options.archived) params.set('archived', '1');
+  return apiFetch<Announcement[]>(`/api/mobile/pta/announcements?${params.toString()}`);
 }
 
 export function markPtaAnnouncementRead(organizationId: string, campaignId: string) {
   return apiFetch<void>(`/api/mobile/pta/announcements/${encodeURIComponent(campaignId)}/read`, {
     method: 'POST',
     body: JSON.stringify({ organizationId }),
+  });
+}
+
+/** Build 27 — household twin of setAnnouncementArchived; archive state is
+ * shared between the household's adults exactly like read state. */
+export function setPtaAnnouncementArchived(organizationId: string, campaignId: string, archived: boolean) {
+  return apiFetch<void>(`/api/mobile/pta/announcements/${encodeURIComponent(campaignId)}/archive`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId, archived }),
   });
 }
 
@@ -1382,6 +1408,9 @@ export interface AdminCampaignDetail {
   status: CampaignStatus;
   scheduledFor: string | null;
   sentAt: string | null;
+  /** Build 27 — set when an admin withdrew this sent announcement.
+   * Optional so the app tolerates a portal that predates it. */
+  withdrawnAt?: string | null;
   createdAt: string;
   _count: { recipients: number };
 }
@@ -1425,6 +1454,25 @@ export function getAdminCampaignTargetingOptions(organizationId: string) {
 
 export function createAdminCampaign(input: CreateAdminCampaignInput) {
   return apiFetch<AdminCampaignDetail>('/api/mobile/admin/campaigns', { method: 'POST', body: JSON.stringify(input) });
+}
+
+/** Build 27 — administrative recall of a SENT announcement: hides it from
+ * every member-facing list while preserving the campaign, recipients, and
+ * audit history. Only SENT campaigns qualify; drafts are deleted instead. */
+export function withdrawAdminCampaign(organizationId: string, campaignId: string, reason?: string | null) {
+  return apiFetch<void>(`/api/mobile/admin/campaigns/${encodeURIComponent(campaignId)}/withdraw`, {
+    method: 'POST',
+    body: JSON.stringify({ organizationId, reason: reason ?? null }),
+  });
+}
+
+/** Build 27 — deletes an UNSENT DRAFT only (audited server-side); anything
+ * that entered the send pipeline is preserved forever. */
+export function deleteAdminCampaignDraft(organizationId: string, campaignId: string) {
+  return apiFetch<void>(
+    `/api/mobile/admin/campaigns/${encodeURIComponent(campaignId)}?organizationId=${encodeURIComponent(organizationId)}`,
+    { method: 'DELETE' }
+  );
 }
 
 export function sendAdminCampaign(organizationId: string, campaignId: string) {
@@ -2167,11 +2215,12 @@ export interface AnnouncementIdentity {
 
 export async function getAnnouncementsForIdentities(
   organizationId: string,
-  identity: AnnouncementIdentity
+  identity: AnnouncementIdentity,
+  options: { archived?: boolean } = {}
 ): Promise<AnnouncementWithSources[]> {
   const [memberList, ptaList] = await Promise.all([
-    identity.hasMemberIdentity ? getAnnouncements(organizationId) : Promise.resolve([]),
-    identity.hasParentIdentity ? getPtaAnnouncements(organizationId) : Promise.resolve([]),
+    identity.hasMemberIdentity ? getAnnouncements(organizationId, options) : Promise.resolve([]),
+    identity.hasParentIdentity ? getPtaAnnouncements(organizationId, options) : Promise.resolve([]),
   ]);
 
   const merged = new Map<string, AnnouncementWithSources>();
@@ -2212,6 +2261,25 @@ export async function markAnnouncementReadForSources(
         ? markAnnouncementRead(organizationId, campaignId)
         : markPtaAnnouncementRead(organizationId, campaignId)
       ).catch(() => null)
+    )
+  );
+}
+
+/** Build 27 — archive/restore across every source row the merged
+ * announcement carried, so a dual-identity user's action covers both their
+ * personal and household copies. NOT best-effort: the caller needs to know
+ * the action stuck, so a failure propagates. */
+export async function setAnnouncementArchivedForSources(
+  organizationId: string,
+  campaignId: string,
+  sources: AnnouncementSource[],
+  archived: boolean
+): Promise<void> {
+  await Promise.all(
+    sources.map((source) =>
+      source === 'member'
+        ? setAnnouncementArchived(organizationId, campaignId, archived)
+        : setPtaAnnouncementArchived(organizationId, campaignId, archived)
     )
   );
 }
