@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { ValidationError, parseJsonBody, z } from "@/lib/validation";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { updateEvent, updateEventSchema } from "@/lib/event-mutations";
+import { getAdminEventRsvpView } from "@/lib/event-rsvp";
 
 const updateMobileEventSchema = updateEventSchema.extend({ organizationId: z.string().min(1) });
 
@@ -37,7 +38,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ even
       return Response.json({ ok: false, error: "Event not found" }, { status: 404 });
     }
 
-    return Response.json({ ok: true, data: event });
+    // Aggregated RSVP visibility for the authorized administrator — the
+    // per-vertical mode/services all live in event-rsvp.ts; this route only
+    // adds the manageEvents gate (above) and the tenancy 404 (also above).
+    const rsvp = await getAdminEventRsvpView(organizationId, eventId);
+    return Response.json({ ok: true, data: { ...event, rsvp } });
   });
 }
 

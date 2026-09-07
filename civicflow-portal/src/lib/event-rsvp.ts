@@ -1,6 +1,7 @@
 import type { EventRsvpStatus, OrganizationVertical } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { createAuditEvent } from "@/lib/audit";
+import { getPtaEventAttendanceSummary, listPtaEventRsvps } from "@/lib/labs/pta/events";
 
 /**
  * Core Event RSVP — capability contract + individual (per-OrgMember) RSVP
@@ -239,4 +240,111 @@ export async function getEventRsvpSummary(organizationId: string, eventId: strin
     /** Equal to membersGoing by definition for individual RSVP. */
     totalAttendees: rsvps.filter((r) => r.status === "GOING").length,
   };
+}
+
+// ── Officer/admin-facing RSVP view ─────────────────────────────────────────
+
+/** One RSVP row as an authorized event administrator sees it. `name` is the
+ * responding household's display name (household mode) or the member's name
+ * (individual mode) — names are only ever exposed behind the manageEvents
+ * capability check the calling route performs. */
+export interface AdminEventRsvpResponseRow {
+  id: string;
+  name: string;
+  status: EventRsvpStatus;
+  /** Household mode only; null for individual mode, where one response is
+   * exactly one attendee and a per-row count would be noise. */
+  attendeeCount: number | null;
+  respondedAt: Date;
+}
+
+export interface AdminEventRsvpView {
+  mode: RsvpMode;
+  guestCounts: boolean;
+  /** Null when mode is "none" (HOA — no RSVP model is offered at all).
+   * There is deliberately no capacity/remaining figure: Event has no
+   * capacity field, so any such number would be invented. `maybe` doubles
+   * as the pending-decision count — with no invitation model there is no
+   * invited-but-silent population to count. */
+  summary: {
+    totalResponses: number;
+    going: number;
+    maybe: number;
+    notGoing: number;
+    /** Expected headcount among GOING responses: sums household
+     * attendeeCounts (guests included) in household mode, equals `going`
+     * in individual mode — same cross-vertical rule as
+     * getEventRsvpSummary()'s doc comment. */
+    totalAttendees: number;
+  } | null;
+  responses: AdminEventRsvpResponseRow[];
+}
+
+/**
+ * The RSVP block for an ADMIN event-detail payload — the same mode
+ * authority (getRsvpMode) and the same existing per-vertical services as
+ * everywhere else, just aggregated for an officer instead of scoped to the
+ * caller's own response. Callers must have already enforced the
+ * manageEvents capability AND verified the event belongs to
+ * organizationId; both underlying list services still re-verify event
+ * tenancy themselves (defense in depth).
+ */
+export async function getAdminEventRsvpView(organizationId: string, eventId: string): Promise<AdminEventRsvpView> {
+  const organization = await prisma.organization.findUnique({
+    where: { id: organizationId },
+    select: { primaryVertical: true },
+  });
+  const mode = organization ? getRsvpMode(organization.primaryVertical) : "none";
+
+  if (mode === "household") {
+    const [summary, rows] = await Promise.all([
+      getPtaEventAttendanceSummary(organizationId, eventId),
+      listPtaEventRsvps(organizationId, eventId),
+    ]);
+    return {
+      mode,
+      guestCounts: true,
+      summary: {
+        totalResponses: rows.length,
+        going: summary.householdsGoing,
+        maybe: summary.householdsMaybe,
+        notGoing: summary.householdsNotGoing,
+        totalAttendees: summary.totalAttendees,
+      },
+      responses: rows.map((row) => ({
+        id: row.id,
+        name: row.household.displayName,
+        status: row.status as EventRsvpStatus,
+        attendeeCount: row.attendeeCount,
+        respondedAt: row.updatedAt,
+      })),
+    };
+  }
+
+  if (mode === "individual") {
+    const [summary, rows] = await Promise.all([
+      getEventRsvpSummary(organizationId, eventId),
+      listEventRsvps(organizationId, eventId),
+    ]);
+    return {
+      mode,
+      guestCounts: false,
+      summary: {
+        totalResponses: rows.length,
+        going: summary.membersGoing,
+        maybe: summary.membersMaybe,
+        notGoing: summary.membersNotGoing,
+        totalAttendees: summary.totalAttendees,
+      },
+      responses: rows.map((row) => ({
+        id: row.id,
+        name: `${row.orgMember.firstName} ${row.orgMember.lastName}`.trim(),
+        status: row.status,
+        attendeeCount: null,
+        respondedAt: row.updatedAt,
+      })),
+    };
+  }
+
+  return { mode: "none", guestCounts: false, summary: null, responses: [] };
 }

@@ -1230,6 +1230,32 @@ export function getAdminEvents(organizationId: string) {
   return apiFetch<AdminEventListRow[]>(`/api/mobile/admin/events?organizationId=${encodeURIComponent(organizationId)}`);
 }
 
+export type AdminRsvpMode = 'household' | 'individual' | 'none';
+export type AdminRsvpStatus = 'GOING' | 'MAYBE' | 'NOT_GOING';
+
+export interface AdminEventRsvpResponseRow {
+  id: string;
+  /** Responding household's display name (household mode) or member's name
+   * (individual mode) — only ever served behind the manageEvents gate. */
+  name: string;
+  status: AdminRsvpStatus;
+  /** Household mode only (guests included); null in individual mode. */
+  attendeeCount: number | null;
+  respondedAt: string;
+}
+
+/** Aggregated RSVP view on the ADMIN event detail. The server decides the
+ * mode from the organization's RSVP capability (portal event-rsvp.ts) —
+ * the client never infers it. summary is null when mode is 'none' (HOA).
+ * There is no capacity/remaining figure anywhere: Event has no capacity
+ * field, so none is representable. */
+export interface AdminEventRsvpView {
+  mode: AdminRsvpMode;
+  guestCounts: boolean;
+  summary: { totalResponses: number; going: number; maybe: number; notGoing: number; totalAttendees: number } | null;
+  responses: AdminEventRsvpResponseRow[];
+}
+
 export interface AdminEventDetail {
   id: string;
   organizationId: string;
@@ -1240,6 +1266,9 @@ export interface AdminEventDetail {
   endAt: string | null;
   status: EventStatusValue;
   notes: string | null;
+  /** Optional so a client built from this branch degrades gracefully (no
+   * RSVP section) against a server that predates the block. */
+  rsvp?: AdminEventRsvpView;
 }
 
 export function getAdminEvent(organizationId: string, eventId: string) {
