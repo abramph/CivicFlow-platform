@@ -100,10 +100,10 @@ describe('Admin dashboard screen — capability gating', () => {
     await waitFor(() => expect(screen.getByText('Nothing to show here yet for your role in this organization.')).toBeTruthy());
   });
 
-  it('renders the Upcoming Attendance planning section: event rows navigate, meeting rows are informational', async () => {
+  it('renders the Upcoming Attendance planning section: event rows AND meeting rows navigate to their planning screens', async () => {
     mockUseAuth.mockReturnValue({
       selectedOrganizationId: 'org-a',
-      selectedOrganization: { organizationName: 'Sample Org', capability: { adminCapabilities: ['adminDashboard', 'manageEvents'] } },
+      selectedOrganization: { organizationName: 'Sample Org', capability: { adminCapabilities: ['adminDashboard', 'manageEvents', 'manageMeetings'] } },
     });
     mockGetAdminDashboard.mockResolvedValueOnce({
       metrics: [],
@@ -126,6 +126,7 @@ describe('Admin dashboard screen — capability gating', () => {
             title: 'September General Meeting',
             startAt: '2026-09-15T19:00:00.000Z',
             counts: { totalResponses: 0, going: 0, maybe: 0, notGoing: 0, totalAttendees: 0 },
+            href: '/admin-meetings/mtg-1',
           },
         ],
       },
@@ -140,12 +141,46 @@ describe('Admin dashboard screen — capability gating', () => {
     expect(screen.getByText('2 going · 7 expected incl. guests')).toBeTruthy();
     // A zero-response upcoming activity is an explicit state.
     expect(screen.getByText('No responses yet')).toBeTruthy();
-    // Meeting rows are visibly labeled and carry no navigation.
     expect(screen.getByText('Meeting · September General Meeting')).toBeTruthy();
 
-    fireEvent.press(screen.getByLabelText(/^Fall Festival/));
+    await fireEvent.press(screen.getByLabelText(/^Fall Festival/));
     expect(mockPush).toHaveBeenCalledWith('/admin-events/evt-1');
-    expect(screen.getByLabelText(/^Meeting: September General Meeting/).props.accessibilityRole).not.toBe('button');
+    // Meeting summaries are actionable: they open the read-only meeting
+    // RSVP planning screen.
+    await fireEvent.press(screen.getByLabelText(/^Meeting: September General Meeting/));
+    expect(mockPush).toHaveBeenCalledWith('/admin-meetings/mtg-1');
+  });
+
+  it('renders a meeting row from an OLDER server payload (no href) as informational, without crashing', async () => {
+    mockUseAuth.mockReturnValue({
+      selectedOrganizationId: 'org-a',
+      selectedOrganization: { organizationName: 'Sample Org', capability: { adminCapabilities: ['adminDashboard', 'manageMeetings'] } },
+    });
+    mockGetAdminDashboard.mockResolvedValueOnce({
+      metrics: [],
+      needsAttention: [],
+      rsvpPlanning: {
+        mode: 'individual',
+        guestCounts: false,
+        items: [
+          {
+            type: 'meeting',
+            id: 'mtg-9',
+            title: 'Budget Review',
+            startAt: '2026-09-18T19:00:00.000Z',
+            counts: { totalResponses: 4, going: 4, maybe: 0, notGoing: 0, totalAttendees: 4 },
+          },
+        ],
+      },
+      generatedAt: '2026-09-07T00:00:00.000Z',
+    });
+
+    await render(<AdminDashboardScreen />);
+
+    await waitFor(() => expect(screen.getByText('Meeting · Budget Review')).toBeTruthy());
+    expect(screen.getByText('4 going · 4 expected')).toBeTruthy();
+    expect(screen.getByLabelText(/^Meeting: Budget Review/).props.accessibilityRole).not.toBe('button');
+    expect(mockPush).not.toHaveBeenCalled();
   });
 
   it('renders no planning section against an older portal payload without rsvpPlanning', async () => {

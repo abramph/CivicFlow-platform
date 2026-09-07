@@ -2,34 +2,20 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet } from 'react-native';
 
+import { AdminRsvpSection } from '@/components/admin-rsvp-section';
 import { LoadErrorBanner } from '@/components/load-error-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { EmptyState, StatusChip } from '@/components/ui';
-import { Spacing, type StatusTone } from '@/constants/theme';
+import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
-import { getAdminEvent, updateAdminEvent, type AdminEventDetail, type AdminRsvpStatus, type EventStatusValue } from '@/lib/mobile-api';
+import { getAdminEvent, updateAdminEvent, type AdminEventDetail, type EventStatusValue } from '@/lib/mobile-api';
 
 const STATUS_LABELS: Record<EventStatusValue, string> = {
   upcoming: 'Upcoming',
   in_progress: 'In Progress',
   completed: 'Completed',
   cancelled: 'Cancelled',
-};
-
-const RSVP_STATUS_LABELS: Record<AdminRsvpStatus, string> = {
-  GOING: 'Attending',
-  MAYBE: 'Maybe',
-  NOT_GOING: 'Declined',
-};
-
-// A decline is a normal answer, not a failure -- neutral, never the red
-// "rejected" tone; MAYBE reads as the undecided/pending tone.
-const RSVP_STATUS_TONES: Record<AdminRsvpStatus, StatusTone> = {
-  GOING: 'approved',
-  MAYBE: 'pending',
-  NOT_GOING: 'neutral',
 };
 
 /**
@@ -164,70 +150,13 @@ export default function AdminEventDetailScreen() {
         ) : null}
       </ThemedView>
 
-      {/* RSVP visibility for the authorized administrator. The server decides
-          the mode from the org's RSVP capability and enforces manageEvents +
-          tenancy; nothing renders for mode 'none' (HOA) or an older server
-          payload without the block. Pull-to-refresh above re-fetches this. */}
-      {rsvp && rsvp.summary ? (
-        <ThemedView type="backgroundElement" style={styles.card}>
-          <ThemedText type="smallBold" accessibilityRole="header">
-            RSVPs
-          </ThemedText>
-          {rsvp.summary.totalResponses === 0 ? (
-            <EmptyState
-              title="No responses yet"
-              body={
-                rsvp.mode === 'household'
-                  ? 'Household RSVPs will appear here as families respond.'
-                  : 'Member RSVPs will appear here as people respond.'
-              }
-            />
-          ) : (
-            <>
-              <ThemedView
-                style={styles.rsvpSummaryRow}
-                accessible
-                accessibilityLabel={`${rsvp.summary.going} attending, ${rsvp.summary.maybe} maybe, ${rsvp.summary.notGoing} declined, ${rsvp.summary.totalResponses} total responses`}
-              >
-                <ThemedText type="default">
-                  {rsvp.summary.going} attending · {rsvp.summary.maybe} maybe · {rsvp.summary.notGoing} declined
-                </ThemedText>
-                <ThemedText type="small" themeColor="textSecondary">
-                  {rsvp.summary.totalResponses} {rsvp.summary.totalResponses === 1 ? 'response' : 'responses'}
-                  {rsvp.guestCounts
-                    ? ` · ${rsvp.summary.totalAttendees} expected ${rsvp.summary.totalAttendees === 1 ? 'attendee' : 'attendees'} including guests`
-                    : ` · ${rsvp.summary.totalAttendees} expected ${rsvp.summary.totalAttendees === 1 ? 'attendee' : 'attendees'}`}
-                </ThemedText>
-              </ThemedView>
-              {rsvp.responses.map((response) => (
-                <ThemedView
-                  key={response.id}
-                  style={styles.rsvpRow}
-                  accessible
-                  accessibilityLabel={`${response.name}, ${RSVP_STATUS_LABELS[response.status]}${
-                    rsvp.guestCounts && response.attendeeCount !== null && response.status !== 'NOT_GOING'
-                      ? `, ${response.attendeeCount} ${response.attendeeCount === 1 ? 'person' : 'people'}`
-                      : ''
-                  }`}
-                >
-                  <ThemedView style={styles.rsvpRowText}>
-                    <ThemedText type="default">{response.name}</ThemedText>
-                    {rsvp.guestCounts && response.attendeeCount !== null && response.status !== 'NOT_GOING' ? (
-                      <ThemedText type="small" themeColor="textSecondary">
-                        {response.attendeeCount} {response.attendeeCount === 1 ? 'person' : 'people'}
-                      </ThemedText>
-                    ) : null}
-                    <ThemedText type="small" themeColor="textSecondary">
-                      Updated {new Date(response.respondedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
-                    </ThemedText>
-                  </ThemedView>
-                  <StatusChip tone={RSVP_STATUS_TONES[response.status]} label={RSVP_STATUS_LABELS[response.status]} />
-                </ThemedView>
-              ))}
-            </>
-          )}
-        </ThemedView>
-      ) : null}
+      {/* RSVP visibility for the authorized administrator — the shared
+          AdminRsvpSection (also used by the admin meeting planning screen).
+          The server decides the mode from the org's RSVP capability and
+          enforces manageEvents + tenancy; nothing renders for mode 'none'
+          (HOA) or an older server payload without the block.
+          Pull-to-refresh above re-fetches this. */}
+      {rsvp ? <AdminRsvpSection rsvp={rsvp} /> : null}
 
       <Pressable
         style={styles.secondaryButton}
@@ -279,23 +208,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: Spacing.three,
     gap: 6,
-  },
-  rsvpSummaryRow: {
-    gap: 2,
-    backgroundColor: 'transparent',
-  },
-  rsvpRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Spacing.two,
-    paddingVertical: Spacing.one,
-    backgroundColor: 'transparent',
-  },
-  rsvpRowText: {
-    flex: 1,
-    gap: 2,
-    backgroundColor: 'transparent',
   },
   button: {
     backgroundColor: '#047857',

@@ -470,7 +470,7 @@ describe("GET /api/mobile/admin/dashboard", () => {
       expect(JSON.stringify(body.data.rsvpPlanning)).not.toMatch(/firstName|lastName|displayName|email/);
     });
 
-    it("includes upcoming meetings (informational, no href) only for manageMeetings holders, with household guest math", async () => {
+    it("includes upcoming meetings (deep-linked to the meeting RSVP planning screen) only for manageMeetings holders, with household guest math", async () => {
       resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "ORG_ADMIN", adminCapabilities: ["adminDashboard", "manageMeetings"] });
       findUniqueOrganization.mockResolvedValue({ primaryVertical: "PTA" });
       getEffectivePermissions.mockResolvedValue([]);
@@ -490,6 +490,7 @@ describe("GET /api/mobile/admin/dashboard", () => {
           title: "September General Meeting",
           startAt: "2026-09-15T19:00:00.000Z",
           counts: { totalResponses: 2, going: 2, maybe: 0, notGoing: 0, totalAttendees: 7 },
+          href: "/admin-meetings/mtg-1",
         },
       ]);
       expect(findManyEvent).not.toHaveBeenCalled();
