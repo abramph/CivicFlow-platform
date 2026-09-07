@@ -1,7 +1,13 @@
-import type { MeetingRsvpStatus } from "@prisma/client";
+import type { EventRsvpStatus, MeetingRsvpStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { createAuditEvent } from "@/lib/audit";
-import { getRsvpMode } from "@/lib/event-rsvp";
+import {
+  getRsvpMode,
+  type AdminEventRsvpView,
+  type AdminRsvpCounts,
+  type AdminRsvpCountsResult,
+} from "@/lib/event-rsvp";
+import { getPtaMeetingAttendanceSummary, listPtaMeetingRsvps } from "@/lib/labs/pta/meetings";
 
 /**
  * Core Meeting RSVP — the Meeting counterpart of the Event RSVP service in
@@ -117,4 +123,131 @@ export async function getMeetingRsvpSummary(organizationId: string, meetingId: s
     membersNotGoing: rsvps.filter((r) => r.status === "NOT_GOING").length,
     totalAttendees: rsvps.filter((r) => r.status === "GOING").length,
   };
+}
+
+// ── Officer/admin-facing RSVP view (Meeting twin of the Event versions) ────
+
+/** Same shape as the admin EVENT view on purpose: one client component can
+ * render either. Reuses this module's own list/summary services and the PTA
+ * meeting services — never a new aggregation path. */
+export type AdminMeetingRsvpView = AdminEventRsvpView;
+
+/**
+ * The RSVP block for an ADMIN meeting payload. Callers must have already
+ * enforced the appropriate administrative gate (meetings:write / the mobile
+ * manageMeetings flag) and verified the meeting belongs to organizationId;
+ * the underlying list services re-verify meeting tenancy themselves.
+ */
+export async function getAdminMeetingRsvpView(organizationId: string, meetingId: string): Promise<AdminMeetingRsvpView> {
+  const organization = await prisma.organization.findUnique({
+    where: { id: organizationId },
+    select: { primaryVertical: true },
+  });
+  const mode = organization ? getRsvpMode(organization.primaryVertical) : "none";
+
+  if (mode === "household") {
+    const [summary, rows] = await Promise.all([
+      getPtaMeetingAttendanceSummary(organizationId, meetingId),
+      listPtaMeetingRsvps(organizationId, meetingId),
+    ]);
+    return {
+      mode,
+      guestCounts: true,
+      summary: {
+        totalResponses: rows.length,
+        going: summary.householdsGoing,
+        maybe: summary.householdsMaybe,
+        notGoing: summary.householdsNotGoing,
+        totalAttendees: summary.totalAttendees,
+      },
+      responses: rows.map((row) => ({
+        id: row.id,
+        name: row.household.displayName,
+        status: row.status as EventRsvpStatus,
+        attendeeCount: row.attendeeCount,
+        respondedAt: row.updatedAt,
+      })),
+    };
+  }
+
+  if (mode === "individual") {
+    const [summary, rows] = await Promise.all([
+      getMeetingRsvpSummary(organizationId, meetingId),
+      listMeetingRsvps(organizationId, meetingId),
+    ]);
+    return {
+      mode,
+      guestCounts: false,
+      summary: {
+        totalResponses: rows.length,
+        going: summary.membersGoing,
+        maybe: summary.membersMaybe,
+        notGoing: summary.membersNotGoing,
+        totalAttendees: summary.totalAttendees,
+      },
+      responses: rows.map((row) => ({
+        id: row.id,
+        name: `${row.orgMember.firstName} ${row.orgMember.lastName}`.trim(),
+        status: row.status,
+        attendeeCount: null,
+        respondedAt: row.updatedAt,
+      })),
+    };
+  }
+
+  return { mode: "none", guestCounts: false, summary: null, responses: [] };
+}
+
+/**
+ * Batched planning counts for MANY meetings — the Meeting twin of
+ * getAdminEventRsvpCounts, same normative math and the same structural
+ * tenancy (organizationId WHERE-scopes every grouped row).
+ */
+export async function getAdminMeetingRsvpCounts(organizationId: string, meetingIds: string[]): Promise<AdminRsvpCountsResult> {
+  const organization = await prisma.organization.findUnique({
+    where: { id: organizationId },
+    select: { primaryVertical: true },
+  });
+  const mode = organization ? getRsvpMode(organization.primaryVertical) : "none";
+  const guestCounts = mode === "household";
+  const byId: Record<string, AdminRsvpCounts> = {};
+  if (mode === "none" || meetingIds.length === 0) return { mode, guestCounts, byId };
+
+  const ensure = (id: string) =>
+    (byId[id] ??= { totalResponses: 0, going: 0, maybe: 0, notGoing: 0, totalAttendees: 0 });
+
+  if (mode === "household") {
+    const groups = await prisma.ptaMeetingRsvp.groupBy({
+      by: ["meetingId", "status"],
+      where: { organizationId, meetingId: { in: meetingIds } },
+      _count: { _all: true },
+      _sum: { attendeeCount: true },
+    });
+    for (const group of groups) {
+      const counts = ensure(group.meetingId);
+      counts.totalResponses += group._count._all;
+      if (group.status === "GOING") {
+        counts.going += group._count._all;
+        counts.totalAttendees += group._sum.attendeeCount ?? 0;
+      } else if (group.status === "MAYBE") counts.maybe += group._count._all;
+      else counts.notGoing += group._count._all;
+    }
+  } else {
+    const groups = await prisma.meetingRsvp.groupBy({
+      by: ["meetingId", "status"],
+      where: { organizationId, meetingId: { in: meetingIds } },
+      _count: { _all: true },
+    });
+    for (const group of groups) {
+      const counts = ensure(group.meetingId);
+      counts.totalResponses += group._count._all;
+      if (group.status === "GOING") {
+        counts.going += group._count._all;
+        counts.totalAttendees += group._count._all;
+      } else if (group.status === "MAYBE") counts.maybe += group._count._all;
+      else counts.notGoing += group._count._all;
+    }
+  }
+
+  return { mode, guestCounts, byId };
 }

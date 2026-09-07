@@ -280,6 +280,85 @@ export interface AdminEventRsvpView {
   responses: AdminEventRsvpResponseRow[];
 }
 
+/** Compact planning counts for one activity — the list/dashboard-sized
+ * subset of the summary above. Same normative math: totalAttendees sums
+ * household attendeeCount over GOING rows in household mode and equals
+ * `going` in individual mode. */
+export interface AdminRsvpCounts {
+  totalResponses: number;
+  going: number;
+  maybe: number;
+  notGoing: number;
+  totalAttendees: number;
+}
+
+export interface AdminRsvpCountsResult {
+  mode: RsvpMode;
+  guestCounts: boolean;
+  /** Only ids with at least one response appear; an absent id means zero
+   * responses (callers render their own "No responses yet"). */
+  byId: Record<string, AdminRsvpCounts>;
+}
+
+function emptyCounts(): AdminRsvpCounts {
+  return { totalResponses: 0, going: 0, maybe: 0, notGoing: 0, totalAttendees: 0 };
+}
+
+/**
+ * Batched planning counts for MANY events at once (admin list rows, the
+ * dashboard planning indicator) — one groupBy per call instead of a
+ * per-event N+1. Tenancy is structural: every row is WHERE-scoped to
+ * organizationId, so an eventId from another organization simply
+ * contributes nothing. Callers must still hold the manageEvents gate.
+ */
+export async function getAdminEventRsvpCounts(organizationId: string, eventIds: string[]): Promise<AdminRsvpCountsResult> {
+  const organization = await prisma.organization.findUnique({
+    where: { id: organizationId },
+    select: { primaryVertical: true },
+  });
+  const mode = organization ? getRsvpMode(organization.primaryVertical) : "none";
+  const guestCounts = mode === "household";
+  const byId: Record<string, AdminRsvpCounts> = {};
+  if (mode === "none" || eventIds.length === 0) return { mode, guestCounts, byId };
+
+  const ensure = (id: string) => (byId[id] ??= emptyCounts());
+
+  if (mode === "household") {
+    const groups = await prisma.ptaEventRsvp.groupBy({
+      by: ["eventId", "status"],
+      where: { organizationId, eventId: { in: eventIds } },
+      _count: { _all: true },
+      _sum: { attendeeCount: true },
+    });
+    for (const group of groups) {
+      const counts = ensure(group.eventId);
+      counts.totalResponses += group._count._all;
+      if (group.status === "GOING") {
+        counts.going += group._count._all;
+        counts.totalAttendees += group._sum.attendeeCount ?? 0;
+      } else if (group.status === "MAYBE") counts.maybe += group._count._all;
+      else counts.notGoing += group._count._all;
+    }
+  } else {
+    const groups = await prisma.eventRsvp.groupBy({
+      by: ["eventId", "status"],
+      where: { organizationId, eventId: { in: eventIds } },
+      _count: { _all: true },
+    });
+    for (const group of groups) {
+      const counts = ensure(group.eventId);
+      counts.totalResponses += group._count._all;
+      if (group.status === "GOING") {
+        counts.going += group._count._all;
+        counts.totalAttendees += group._count._all;
+      } else if (group.status === "MAYBE") counts.maybe += group._count._all;
+      else counts.notGoing += group._count._all;
+    }
+  }
+
+  return { mode, guestCounts, byId };
+}
+
 /**
  * The RSVP block for an ADMIN event-detail payload — the same mode
  * authority (getRsvpMode) and the same existing per-vertical services as

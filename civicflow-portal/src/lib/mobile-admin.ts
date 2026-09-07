@@ -34,6 +34,7 @@ export const ADMIN_CAPABILITY_FLAGS = [
   "adminDashboard",
   "manageMembers",
   "manageEvents",
+  "manageMeetings",
   "manageAttendance",
   "manageCommunications",
   "managePayments",
@@ -83,6 +84,9 @@ const FLAG_RULES: Record<
 > = {
   manageMembers: { permission: PERMISSIONS.MEMBERS_WRITE, excludedVerticals: ["PTA"] },
   manageEvents: { permission: PERMISSIONS.EVENTS_WRITE },
+  // Meetings administration is web-first; on mobile this flag currently
+  // gates only the dashboard's RSVP planning visibility for meetings.
+  manageMeetings: { permission: PERMISSIONS.MEETINGS_WRITE },
   manageAttendance: { permission: PERMISSIONS.ATTENDANCE_WRITE },
   manageCommunications: { permission: PERMISSIONS.COMMUNICATIONS_WRITE },
   managePayments: { permission: PERMISSIONS.CONTRIBUTIONS_WRITE },
