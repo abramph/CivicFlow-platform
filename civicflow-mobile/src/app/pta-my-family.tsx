@@ -7,7 +7,8 @@ import { LoadErrorBanner } from '@/components/load-error-banner';
 import { StudentAvatar, useStudentPhotos } from '@/components/student-avatar';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { Brand, Elevation, Spacing, WorkspaceColors } from '@/constants/theme';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useScreenTopPadding } from '@/hooks/use-screen-top-padding';
 import { useAuth } from '@/lib/auth-context';
 import { getMyPtaHousehold, getPtaHouseholdPhoto, getPtaProgression, type MyPtaHousehold, type PtaHouseholdPhoto } from '@/lib/mobile-api';
@@ -48,6 +49,13 @@ export default function PtaMyFamilyScreen() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const topPadding = useScreenTopPadding();
+  const scheme = useColorScheme() ?? 'light';
+  // Parent-workspace tint on the photo placeholder — the same documented-AA
+  // pairs the student avatars use, so the whole family card reads green.
+  const placeholderPalette =
+    scheme === 'dark'
+      ? { background: Brand.primaryTintDark, text: WorkspaceColors.parentHeaderSubtext }
+      : { background: Brand.primaryTintLight, text: Brand.primaryDark };
 
   const load = useCallback(async () => {
     if (!selectedOrganizationId || !hasPtaIdentity) return;
@@ -156,9 +164,14 @@ export default function PtaMyFamilyScreen() {
               // aloud as "family" and looked off-system next to the rest of
               // the app's typography. When there is no name to initial, the
               // circle stays empty and the label carries the meaning.
-              <ThemedView style={styles.placeholder} accessible accessibilityRole="image" accessibilityLabel="No family photo set">
+              <ThemedView
+                style={[styles.placeholder, { backgroundColor: placeholderPalette.background }]}
+                accessible
+                accessibilityRole="image"
+                accessibilityLabel="No family photo set"
+              >
                 {initial ? (
-                  <ThemedText type="title" style={styles.placeholderGlyph}>
+                  <ThemedText type="title" style={[styles.placeholderGlyph, { color: placeholderPalette.text }]}>
                     {initial}
                   </ThemedText>
                 ) : null}
@@ -270,6 +283,7 @@ const styles = StyleSheet.create({
     padding: Spacing.four,
     gap: Spacing.three,
     alignItems: 'center',
+    ...(Elevation.card as object),
   },
   cardLabel: {
     alignSelf: 'flex-start',

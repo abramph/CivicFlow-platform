@@ -5,7 +5,7 @@ import { Alert, FlatList, Pressable, RefreshControl, StyleSheet } from 'react-na
 import { LoadErrorBanner } from '@/components/load-error-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { ActionColors, Spacing } from '@/constants/theme';
+import { ActionColors, Elevation, Spacing } from '@/constants/theme';
 import { useScreenTopPadding } from '@/hooks/use-screen-top-padding';
 import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
@@ -120,7 +120,7 @@ export default function AnnouncementsScreen() {
             accessibilityRole="button"
             accessibilityLabel={`${item.isRead ? '' : 'Unread, '}${item.subject || item.title}${item.sentAt ? `, ${new Date(item.sentAt).toLocaleDateString()}` : ''}`}
           >
-            <ThemedView type="backgroundElement" style={styles.row}>
+            <ThemedView type="backgroundElement" style={[styles.row, !item.isRead && !showArchived ? styles.rowUnread : null]}>
               <ThemedView style={styles.rowHeader}>
                 <ThemedText type={item.isRead ? 'small' : 'smallBold'}>{item.subject || item.title}</ThemedText>
                 {!item.isRead ? <ThemedView style={styles.unreadDot} accessibilityElementsHidden importantForAccessibility="no" /> : null}
@@ -211,6 +211,13 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: Spacing.three,
     gap: 4,
+    ...(Elevation.card as object),
+  },
+  // Unread rows get the parent-accent left rail in addition to the bold
+  // subject and dot — color is never the only unread signal.
+  rowUnread: {
+    borderLeftWidth: 3,
+    borderLeftColor: ActionColors.primary,
   },
   rowHeader: {
     flexDirection: 'row',

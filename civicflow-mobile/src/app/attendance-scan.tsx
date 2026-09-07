@@ -6,8 +6,9 @@ import { ActivityIndicator, Linking, Pressable, StyleSheet } from 'react-native'
 import { PrimaryActionButton, SecondaryLinkButton } from '@/components/action-buttons';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { IconBadge, StatusChip } from '@/components/ui';
 import { UnauthorizedNotice } from '@/components/unauthorized-notice';
-import { ActionColors, Spacing } from '@/constants/theme';
+import { Elevation, Spacing } from '@/constants/theme';
 import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { checkInWithQrToken, type AttendanceCheckInResult } from '@/lib/mobile-api';
@@ -129,7 +130,7 @@ export default function AttendanceScanScreen() {
     const { result } = state;
     return (
       <ThemedView style={styles.centered} accessibilityLiveRegion="assertive">
-        <ThemedText style={styles.successIcon} accessibilityElementsHidden importantForAccessibility="no">✓</ThemedText>
+        <IconBadge glyph="✓" tone="approved" size={72} />
         <ThemedText type="title" style={styles.title}>
           {result.alreadyCheckedIn ? "You're Already Checked In" : "You're Checked In"}
         </ThemedText>
@@ -144,9 +145,10 @@ export default function AttendanceScanScreen() {
           <ThemedText type="small" themeColor="textSecondary">
             Checked in at {new Date(result.checkInTime).toLocaleTimeString()}
           </ThemedText>
-          <ThemedText type="smallBold" style={result.attendanceStatus === 'LATE' ? styles.lateBadge : styles.presentBadge}>
-            {result.attendanceStatus === 'LATE' ? 'Marked Late' : 'Present'}
-          </ThemedText>
+          <StatusChip
+            tone={result.attendanceStatus === 'LATE' ? 'pending' : 'approved'}
+            label={result.attendanceStatus === 'LATE' ? 'Marked Late' : 'Present'}
+          />
         </ThemedView>
         <Pressable style={styles.secondaryButton} onPress={() => router.replace('/dashboard')} accessibilityRole="button" accessibilityLabel="Back to dashboard">
           <ThemedText type="link">Back to Dashboard</ThemedText>
@@ -158,7 +160,7 @@ export default function AttendanceScanScreen() {
   if (state.kind === 'error') {
     return (
       <ThemedView style={styles.centered}>
-        <ThemedText style={styles.errorIcon} accessibilityElementsHidden importantForAccessibility="no">✕</ThemedText>
+        <IconBadge glyph="✕" tone="rejected" size={72} />
         <ThemedText type="title" style={styles.title} accessibilityRole="alert" accessibilityLiveRegion="assertive">
           Check-In Didn&apos;t Go Through
         </ThemedText>
@@ -229,22 +231,7 @@ const styles = StyleSheet.create({
     padding: Spacing.four,
     gap: Spacing.two,
     alignItems: 'center',
-  },
-  successIcon: {
-    fontSize: 48,
-    color: '#047857',
-  },
-  errorIcon: {
-    fontSize: 48,
-    color: '#B42318',
-  },
-  presentBadge: {
-    color: '#047857',
-  },
-  lateBadge: {
-    // Was #B45309, a one-off drift from the shared warning token (#B54708)
-    // used everywhere else in the app -- see constants/theme.ts.
-    color: ActionColors.warning,
+    ...(Elevation.card as object),
   },
   overlay: {
     position: 'absolute',

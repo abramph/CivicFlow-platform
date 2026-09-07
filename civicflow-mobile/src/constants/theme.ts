@@ -121,13 +121,15 @@ export const Radii = {
   pill: 999,
 } as const;
 
-/** Subtle elevation for layered cards — restrained on purpose (no heavy
- * drop shadows), and a no-op-ish elevation on Android to avoid harsh
- * banding on dark surfaces. */
+/** Elevation for layered cards — restrained (no heavy drop shadows) but
+ * PERCEPTIBLE: the Build 27 round-1 device walkthrough found the original
+ * 0.06 iOS opacity indistinguishable from a flat surface, which flattened
+ * the whole redesign. These values are the floor at which cards visibly
+ * lift in both schemes without reading as skeuomorphic. */
 export const Elevation = {
   card: Platform.select({
-    ios: { shadowColor: '#101828', shadowOpacity: 0.06, shadowRadius: 8, shadowOffset: { width: 0, height: 2 } },
-    android: { elevation: 2 },
+    ios: { shadowColor: '#101828', shadowOpacity: 0.14, shadowRadius: 10, shadowOffset: { width: 0, height: 3 } },
+    android: { elevation: 4 },
     default: {},
   }) as object,
 } as const;

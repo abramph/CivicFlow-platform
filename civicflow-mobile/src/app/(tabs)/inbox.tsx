@@ -5,7 +5,7 @@ import { FlatList, Pressable, RefreshControl, StyleSheet } from 'react-native';
 import { LoadErrorBanner } from '@/components/load-error-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { ActionColors, Spacing } from '@/constants/theme';
+import { ActionColors, Elevation, Spacing } from '@/constants/theme';
 import { useScreenTopPadding } from '@/hooks/use-screen-top-padding';
 import { useAuth } from '@/lib/auth-context';
 import { getConversations, type ConversationSummary } from '@/lib/mobile-api';
@@ -70,7 +70,7 @@ export default function InboxScreen() {
             accessibilityRole="button"
             accessibilityLabel={`${item.hasUnread ? 'Unread, ' : ''}${item.subject || otherParticipantNames(item)}${item.subject ? `, ${otherParticipantNames(item)}` : ''}${item.lastMessageAt ? `, ${new Date(item.lastMessageAt).toLocaleDateString()}` : ''}`}
           >
-            <ThemedView type="backgroundElement" style={styles.row}>
+            <ThemedView type="backgroundElement" style={[styles.row, item.hasUnread ? styles.rowUnread : null]}>
               <ThemedView style={styles.rowHeader}>
                 <ThemedText type={item.hasUnread ? 'smallBold' : 'small'}>
                   {item.subject || otherParticipantNames(item)}
@@ -109,6 +109,13 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: Spacing.three,
     gap: 4,
+    ...(Elevation.card as object),
+  },
+  // Same unread treatment as the announcements surfaces: an accent left
+  // rail on top of the bold subject and dot, never color alone.
+  rowUnread: {
+    borderLeftWidth: 3,
+    borderLeftColor: ActionColors.primary,
   },
   rowHeader: {
     flexDirection: 'row',
