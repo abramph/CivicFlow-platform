@@ -1,5 +1,5 @@
-import { router, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet } from 'react-native';
 
 import { LoadErrorBanner } from '@/components/load-error-banner';
@@ -44,7 +44,10 @@ export default function AdminEventDetailScreen() {
   const hasManageAttendance = Boolean(selectedOrganization?.capability?.adminCapabilities?.includes('manageAttendance'));
   const { eventId } = useLocalSearchParams<{ eventId: string }>();
 
-  const [event, setEvent] = useState<AdminEventDetail | null>(null);
+  // Org-tagged: RSVP respondent names are organization-wide data, so a
+  // previous organization's payload must never render after a switch.
+  const [loaded, setLoaded] = useState<{ organizationId: string; data: AdminEventDetail } | null>(null);
+  const event = loaded && loaded.organizationId === selectedOrganizationId ? loaded.data : null;
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -53,24 +56,30 @@ export default function AdminEventDetailScreen() {
   const load = useCallback(async () => {
     if (!selectedOrganizationId || !eventId || !hasManageEvents) return;
     try {
-      setEvent(await getAdminEvent(selectedOrganizationId, eventId));
+      const data = await getAdminEvent(selectedOrganizationId, eventId);
+      setLoaded({ organizationId: selectedOrganizationId, data });
       setLoadError(null);
     } catch (error) {
-      setEvent(null);
+      setLoaded(null);
       setLoadError(error instanceof ApiError && error.status === 404 ? 'This event could not be found.' : 'Unable to load this event. Check your connection and try again.');
     }
   }, [selectedOrganizationId, eventId, hasManageEvents]);
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        await load();
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [load]);
+  // useFocusEffect: RSVPs change while the screen sits in the stack (a
+  // response arrives, the edit screen above changes the event), so every
+  // return trip re-fetches; pull-to-refresh covers mid-view updates.
+  useFocusEffect(
+    useCallback(() => {
+      (async () => {
+        setLoading(true);
+        try {
+          await load();
+        } finally {
+          setLoading(false);
+        }
+      })();
+    }, [load])
+  );
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -208,6 +217,9 @@ export default function AdminEventDetailScreen() {
                         {response.attendeeCount} {response.attendeeCount === 1 ? 'person' : 'people'}
                       </ThemedText>
                     ) : null}
+                    <ThemedText type="small" themeColor="textSecondary">
+                      Updated {new Date(response.respondedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                    </ThemedText>
                   </ThemedView>
                   <StatusChip tone={RSVP_STATUS_TONES[response.status]} label={RSVP_STATUS_LABELS[response.status]} />
                 </ThemedView>

@@ -1,11 +1,11 @@
-import { Redirect, router } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { Redirect, router, useFocusEffect } from 'expo-router';
+import { useCallback, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet } from 'react-native';
 
 import { LoadErrorBanner } from '@/components/load-error-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { Elevation, Spacing, WorkspaceColors } from '@/constants/theme';
 import { useAuth } from '@/lib/auth-context';
 import { getAdminEvents, type AdminEventListRow, type EventStatusValue } from '@/lib/mobile-api';
 
@@ -21,6 +21,13 @@ function formatWhen(startAt: string | null) {
   return new Date(startAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
+/** Compact planning line for a card. Attendees, never raw row counts, is
+ * the headline number; household mode says so ("incl. guests"). */
+export function formatRsvpSummary(rsvp: NonNullable<AdminEventListRow['rsvp']>): string {
+  if (rsvp.totalResponses === 0) return 'No responses yet';
+  return `${rsvp.going} going · ${rsvp.totalAttendees} expected${rsvp.guestCounts ? ' incl. guests' : ''}`;
+}
+
 /**
  * Mobile Admin program (PR C) — event list. Double-gated like every other
  * admin screen: the Admin tab already hides this entry point for a caller
@@ -31,25 +38,35 @@ export default function AdminEventsScreen() {
   const { selectedOrganization, selectedOrganizationId } = useAuth();
   const hasManageEvents = Boolean(selectedOrganization?.capability?.adminCapabilities?.includes('manageEvents'));
 
-  const [events, setEvents] = useState<AdminEventListRow[]>([]);
+  // Org-tagged like pta-my-family's photo state: rows from a previous
+  // organization must never render (even for a frame) after a switch, and
+  // RSVP counts are organization-wide data, so this matters here too.
+  const [events, setEvents] = useState<{ organizationId: string; rows: AdminEventListRow[] } | null>(null);
+  const visibleEvents = events && events.organizationId === selectedOrganizationId ? events.rows : [];
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!selectedOrganizationId || !hasManageEvents) return;
     try {
-      setEvents(await getAdminEvents(selectedOrganizationId));
+      const rows = await getAdminEvents(selectedOrganizationId);
+      setEvents({ organizationId: selectedOrganizationId, rows });
       setLoadError(null);
     } catch {
       setLoadError('Unable to load events. Check your connection and try again.');
     }
   }, [selectedOrganizationId, hasManageEvents]);
 
-  useEffect(() => {
-    (async () => {
-      await load();
-    })();
-  }, [load]);
+  // useFocusEffect, not a mount-only effect: RSVP counts change out from
+  // under this list (new responses, withdrawals, edits on the pushed detail
+  // screen), so every return trip re-fetches.
+  useFocusEffect(
+    useCallback(() => {
+      (async () => {
+        await load();
+      })();
+    }, [load])
+  );
 
   async function handleRefresh() {
     setRefreshing(true);
@@ -90,12 +107,12 @@ export default function AdminEventsScreen() {
 
       <LoadErrorBanner message={loadError} onRetry={load} />
 
-      {events.length === 0 && !loadError ? (
+      {visibleEvents.length === 0 && !loadError ? (
         <ThemedText type="small" themeColor="textSecondary">
           No events yet.
         </ThemedText>
       ) : (
-        events.map((event) => (
+        visibleEvents.map((event) => (
           <Pressable
             key={event.id}
             onPress={() => router.push(`/admin-events/${event.id}`)}
@@ -110,6 +127,13 @@ export default function AdminEventsScreen() {
               {event.location ? (
                 <ThemedText type="small" themeColor="textSecondary">
                   {event.location}
+                </ThemedText>
+              ) : null}
+              {/* Compact planning summary — absent entirely against an older
+                  portal payload or when the org's RSVP mode is 'none'. */}
+              {event.rsvp ? (
+                <ThemedText type="small" themeColor="textSecondary">
+                  {formatRsvpSummary(event.rsvp)}
                 </ThemedText>
               ) : null}
             </ThemedView>
@@ -131,21 +155,25 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     backgroundColor: 'transparent',
   },
+  // Admin-slate action, matching admin-campaigns.tsx (this screen was
+  // missed in the first workspace-identity pass).
   addButton: {
-    backgroundColor: '#047857',
+    backgroundColor: WorkspaceColors.adminAccent,
     borderRadius: 10,
     paddingVertical: Spacing.two,
     paddingHorizontal: Spacing.three,
     minHeight: 44,
     justifyContent: 'center',
+    ...(Elevation.card as object),
   },
   addButtonText: {
-    color: '#fff',
+    color: WorkspaceColors.adminHeaderText,
     fontWeight: '600',
   },
   card: {
     borderRadius: 12,
     padding: Spacing.three,
     gap: 4,
+    ...(Elevation.card as object),
   },
 });

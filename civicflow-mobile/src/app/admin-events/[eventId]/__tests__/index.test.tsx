@@ -7,6 +7,10 @@ const mockPush = jest.fn();
 jest.mock('expo-router', () => ({
   router: { push: (...args: unknown[]) => mockPush(...args) },
   useLocalSearchParams: () => ({ eventId: 'evt-1' }),
+  useFocusEffect: (cb: () => void | (() => void)) => {
+    const { useEffect } = jest.requireActual('react');
+    useEffect(cb, [cb]);
+  },
 }));
 
 const mockUseAuth = jest.fn();
