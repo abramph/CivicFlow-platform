@@ -18,6 +18,7 @@ import {
   type PtaVolunteerOpportunitySummary,
   type PtaVolunteerTodaySummary,
 } from '@/lib/mobile-api';
+import { deriveOrgCapabilities } from '@/lib/org-capabilities';
 
 function formatMinutes(minutes: number): string {
   const hours = minutes / 60;
@@ -34,9 +35,17 @@ function formatMinutes(minutes: number): string {
  */
 export default function VolunteersScreen() {
   const { selectedOrganization, selectedOrganizationId } = useAuth();
-  const pta = selectedOrganization?.pta ?? null;
-  const isParent = Boolean(pta?.householdAdultId);
-  const isOfficer = Boolean(pta?.isOfficer);
+  // Build 27: every section keys off the exact capability it needs. The old
+  // gates conflated them — the staffing card showed for `isOfficer` while the
+  // check-in screen wanted `canCheckIn`, so an approvals-only officer tapped
+  // a visible card straight into a "no access" wall, and the today-fetch
+  // itself 403'd for them (it requires the check-in permission), turning the
+  // whole tab into an error banner.
+  const caps = deriveOrgCapabilities(selectedOrganization);
+  const hasPta = caps.hasPtaAccess;
+  const isParent = caps.hasParentIdentity;
+  const canCheckIn = caps.canCheckInVolunteers;
+  const canApproveHours = caps.canApproveHours;
 
   const [opportunities, setOpportunities] = useState<PtaVolunteerOpportunitySummary[]>([]);
   const [commitments, setCommitments] = useState<PtaVolunteerCommitment[]>([]);
@@ -46,7 +55,7 @@ export default function VolunteersScreen() {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!selectedOrganizationId || !pta) return;
+    if (!selectedOrganizationId || !hasPta) return;
     try {
       const tasks: Promise<void>[] = [];
       if (isParent) {
@@ -56,7 +65,7 @@ export default function VolunteersScreen() {
           getPtaVolunteerHours(selectedOrganizationId).then(setHours)
         );
       }
-      if (isOfficer) {
+      if (canCheckIn) {
         tasks.push(getPtaVolunteerToday(selectedOrganizationId).then(setToday));
       }
       await Promise.all(tasks);
@@ -64,7 +73,7 @@ export default function VolunteersScreen() {
     } catch {
       setLoadError('Unable to load volunteer data. Check your connection and try again.');
     }
-  }, [selectedOrganizationId, pta, isParent, isOfficer]);
+  }, [selectedOrganizationId, hasPta, isParent, canCheckIn]);
 
   useEffect(() => {
     (async () => {
@@ -80,10 +89,9 @@ export default function VolunteersScreen() {
 
   const topPadding = useScreenTopPadding();
 
-  if (!pta) {
-    // Not enrolled in PTA Labs, or no PTA identity for this org — the tab
-    // itself is hidden in this case (see (tabs)/_layout.tsx), but this
-    // guards direct navigation too.
+  if (!hasPta) {
+    // No PTA identity for this org — the tab itself is hidden in this case
+    // (see (tabs)/_layout.tsx), but this guards direct navigation too.
     return (
       <ThemedView style={[styles.container, topPadding]}>
         <ThemedText type="subtitle" themeColor="textSecondary">
@@ -104,7 +112,7 @@ export default function VolunteersScreen() {
       <ThemedText type="title">Volunteers</ThemedText>
       <LoadErrorBanner message={loadError} onRetry={load} />
 
-      {isOfficer && today ? (
+      {canCheckIn && today ? (
         <Pressable
           onPress={() => router.push('/volunteer-checkin')}
           accessibilityRole="button"
@@ -121,6 +129,28 @@ export default function VolunteersScreen() {
             </ThemedText>
           </ThemedView>
         </Pressable>
+      ) : null}
+
+      {canApproveHours ? (
+        <Pressable
+          onPress={() => router.push('/volunteer-hour-approvals')}
+          accessibilityRole="button"
+          accessibilityLabel="Open volunteer hour approvals"
+        >
+          <ThemedView type="backgroundElement" style={styles.card}>
+            <ThemedText type="smallBold">Hour approvals</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              Review and approve submitted volunteer hours.
+            </ThemedText>
+          </ThemedView>
+        </Pressable>
+      ) : null}
+
+      {!isParent ? (
+        <ThemedText type="small" themeColor="textSecondary">
+          Volunteer signups belong to families. Your login has no household link in this organization, so there are no
+          shifts or hours of your own to show.
+        </ThemedText>
       ) : null}
 
       {isParent ? (

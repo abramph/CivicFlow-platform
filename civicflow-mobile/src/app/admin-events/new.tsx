@@ -8,6 +8,7 @@ import { Spacing } from '@/constants/theme';
 import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { createAdminEvent, type EventStatusValue } from '@/lib/mobile-api';
+import { requireAdminCapability } from '@/components/require-admin-capability';
 
 const STATUS_OPTIONS: { value: EventStatusValue; label: string }[] = [
   { value: 'upcoming', label: 'Upcoming' },
@@ -26,7 +27,7 @@ function todayIsoDateTime() {
  * (civicflow-portal src/lib/event-mutations.ts) via POST
  * /api/mobile/admin/events.
  */
-export default function AdminEventCreateScreen() {
+function AdminEventCreateScreen() {
   const { selectedOrganizationId } = useAuth();
 
   const [title, setTitle] = useState('');
@@ -195,3 +196,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+export default requireAdminCapability('manageEvents', 'event administration', AdminEventCreateScreen);

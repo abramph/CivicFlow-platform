@@ -1,4 +1,4 @@
-import { isPtaVolunteerHoursOrgAllowed, isPtaVolunteerHoursPlatformEnabled } from "@/lib/env";
+import { isPtaVolunteerHoursOrgAllowed, isPtaVolunteerHoursPlatformEnabled, isPtaStudentProgressionPlatformEnabled } from "@/lib/env";
 import { getPtaPageGate } from "@/lib/labs/pta/guard";
 import { getPtaProfile } from "@/lib/labs/pta/profile";
 import { getSchoolYearContext } from "@/lib/labs/pta/school-years";
@@ -61,6 +61,7 @@ export default async function PtaSettingsPage() {
           initialProfile={profile}
           canManageConcerns={can("pta:concerns:manage")}
           canManageElections={can("pta:elections:manage")}
+          canManageStudentProgression={isPtaStudentProgressionPlatformEnabled() && can("pta:student-progression:commit")}
         />
       </SectionCard>
       {can("pta:school-years:manage") ? (

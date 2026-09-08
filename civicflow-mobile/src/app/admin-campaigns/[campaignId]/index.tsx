@@ -1,14 +1,22 @@
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet } from 'react-native';
 
 import { LoadErrorBanner } from '@/components/load-error-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { ActionColors, Spacing } from '@/constants/theme';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
-import { getAdminCampaign, sendAdminCampaign, type AdminCampaignDetail, type CampaignStatus } from '@/lib/mobile-api';
+import {
+  deleteAdminCampaignDraft,
+  getAdminCampaign,
+  sendAdminCampaign,
+  withdrawAdminCampaign,
+  type AdminCampaignDetail,
+  type CampaignStatus,
+} from '@/lib/mobile-api';
+import { requireAdminCapability } from '@/components/require-admin-capability';
 
 const STATUS_LABELS: Record<CampaignStatus, string> = {
   DRAFT: 'Draft',
@@ -27,7 +35,7 @@ const SENDABLE_STATUSES: CampaignStatus[] = ['DRAFT', 'READY', 'FAILED'];
  * idempotent/resumable sendCommunicationCampaign() the web "Send Campaign"
  * button uses -- safe to tap again if a prior send partially completed.
  */
-export default function AdminCampaignDetailScreen() {
+function AdminCampaignDetailScreen() {
   const { selectedOrganizationId } = useAuth();
   const { campaignId } = useLocalSearchParams<{ campaignId: string }>();
 
@@ -83,6 +91,52 @@ export default function AdminCampaignDetailScreen() {
     }
   }
 
+  function confirmWithdraw() {
+    Alert.alert(
+      'Withdraw this announcement?',
+      'It disappears from member views in the app, but the campaign, its delivery records, and the audit trail are all preserved. Emails and texts already delivered cannot be pulled back.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Withdraw', style: 'destructive', onPress: handleWithdraw },
+      ]
+    );
+  }
+
+  async function handleWithdraw() {
+    if (!selectedOrganizationId || !campaignId || sending) return;
+    setSending(true);
+    try {
+      await withdrawAdminCampaign(selectedOrganizationId, campaignId);
+      await load();
+    } catch (error) {
+      Alert.alert('Unable to withdraw', error instanceof ApiError ? error.message : 'Please try again.');
+      await load();
+    } finally {
+      setSending(false);
+    }
+  }
+
+  function confirmDeleteDraft() {
+    Alert.alert('Delete this draft?', 'The draft has never been sent. Deleting it is recorded in the audit log.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete Draft', style: 'destructive', onPress: handleDeleteDraft },
+    ]);
+  }
+
+  async function handleDeleteDraft() {
+    if (!selectedOrganizationId || !campaignId || sending) return;
+    setSending(true);
+    try {
+      await deleteAdminCampaignDraft(selectedOrganizationId, campaignId);
+      router.replace('/admin-campaigns');
+    } catch (error) {
+      Alert.alert('Unable to delete', error instanceof ApiError ? error.message : 'Please try again.');
+      await load();
+    } finally {
+      setSending(false);
+    }
+  }
+
   if (loading) {
     return (
       <ThemedView style={styles.loadingContainer} accessibilityRole="progressbar" accessibilityLabel="Loading campaign">
@@ -103,15 +157,21 @@ export default function AdminCampaignDetailScreen() {
     <ScrollView contentContainerStyle={styles.container}>
       <ThemedText type="title">{campaign.title}</ThemedText>
       <ThemedText type="small" themeColor="textSecondary">
-        {STATUS_LABELS[campaign.status]} · {campaign._count.recipients} recipient{campaign._count.recipients === 1 ? '' : 's'}
+        {campaign.withdrawnAt ? 'Withdrawn' : STATUS_LABELS[campaign.status]} · {campaign._count.recipients} recipient{campaign._count.recipients === 1 ? '' : 's'}
       </ThemedText>
+      {campaign.withdrawnAt ? (
+        <ThemedText type="small" style={styles.withdrawnNote} accessibilityRole="alert">
+          Withdrawn {new Date(campaign.withdrawnAt).toLocaleString()} — hidden from member views; delivery records and
+          audit history are preserved.
+        </ThemedText>
+      ) : null}
 
       <ThemedView type="backgroundElement" style={styles.card}>
         <ThemedText type="smallBold">{campaign.subject}</ThemedText>
         <ThemedText type="default">{campaign.body}</ThemedText>
       </ThemedView>
 
-      {SENDABLE_STATUSES.includes(campaign.status) ? (
+      {!campaign.withdrawnAt && SENDABLE_STATUSES.includes(campaign.status) ? (
         <Pressable
           style={[styles.button, sending && styles.buttonDisabled]}
           onPress={confirmSend}
@@ -121,6 +181,32 @@ export default function AdminCampaignDetailScreen() {
           accessibilityState={{ disabled: sending, busy: sending }}
         >
           {sending ? <ActivityIndicator color="#fff" /> : <ThemedText style={styles.buttonText}>Send Campaign</ThemedText>}
+        </Pressable>
+      ) : null}
+
+      {campaign.status === 'DRAFT' ? (
+        <Pressable
+          style={styles.dangerLink}
+          onPress={confirmDeleteDraft}
+          disabled={sending}
+          accessibilityRole="button"
+          accessibilityLabel="Delete draft"
+          accessibilityState={{ disabled: sending }}
+        >
+          <ThemedText type="link" style={styles.dangerText}>Delete Draft</ThemedText>
+        </Pressable>
+      ) : null}
+
+      {campaign.status === 'SENT' && !campaign.withdrawnAt ? (
+        <Pressable
+          style={styles.dangerLink}
+          onPress={confirmWithdraw}
+          disabled={sending}
+          accessibilityRole="button"
+          accessibilityLabel="Withdraw announcement"
+          accessibilityState={{ disabled: sending }}
+        >
+          <ThemedText type="link" style={styles.dangerText}>Withdraw Announcement</ThemedText>
         </Pressable>
       ) : null}
     </ScrollView>
@@ -157,4 +243,17 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '600',
   },
+  withdrawnNote: {
+    color: ActionColors.warning,
+  },
+  dangerLink: {
+    minHeight: 44,
+    justifyContent: 'center',
+    alignSelf: 'center',
+  },
+  dangerText: {
+    color: ActionColors.danger,
+  },
 });
+
+export default requireAdminCapability('manageCommunications', 'communications administration', AdminCampaignDetailScreen);

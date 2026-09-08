@@ -1,7 +1,8 @@
-import { router, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useCallback, useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet } from 'react-native';
 
+import { AdminRsvpSection } from '@/components/admin-rsvp-section';
 import { LoadErrorBanner } from '@/components/load-error-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -29,31 +30,50 @@ export default function AdminEventDetailScreen() {
   const hasManageAttendance = Boolean(selectedOrganization?.capability?.adminCapabilities?.includes('manageAttendance'));
   const { eventId } = useLocalSearchParams<{ eventId: string }>();
 
-  const [event, setEvent] = useState<AdminEventDetail | null>(null);
+  // Org-tagged: RSVP respondent names are organization-wide data, so a
+  // previous organization's payload must never render after a switch.
+  const [loaded, setLoaded] = useState<{ organizationId: string; data: AdminEventDetail } | null>(null);
+  const event = loaded && loaded.organizationId === selectedOrganizationId ? loaded.data : null;
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
 
   const load = useCallback(async () => {
     if (!selectedOrganizationId || !eventId || !hasManageEvents) return;
     try {
-      setEvent(await getAdminEvent(selectedOrganizationId, eventId));
+      const data = await getAdminEvent(selectedOrganizationId, eventId);
+      setLoaded({ organizationId: selectedOrganizationId, data });
       setLoadError(null);
     } catch (error) {
-      setEvent(null);
+      setLoaded(null);
       setLoadError(error instanceof ApiError && error.status === 404 ? 'This event could not be found.' : 'Unable to load this event. Check your connection and try again.');
     }
   }, [selectedOrganizationId, eventId, hasManageEvents]);
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        await load();
-      } finally {
-        setLoading(false);
-      }
-    })();
+  // useFocusEffect: RSVPs change while the screen sits in the stack (a
+  // response arrives, the edit screen above changes the event), so every
+  // return trip re-fetches; pull-to-refresh covers mid-view updates.
+  useFocusEffect(
+    useCallback(() => {
+      (async () => {
+        setLoading(true);
+        try {
+          await load();
+        } finally {
+          setLoading(false);
+        }
+      })();
+    }, [load])
+  );
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await load();
+    } finally {
+      setRefreshing(false);
+    }
   }, [load]);
 
   function confirmCancel() {
@@ -102,8 +122,13 @@ export default function AdminEventDetailScreen() {
     );
   }
 
+  const rsvp = event.rsvp && event.rsvp.mode !== 'none' ? event.rsvp : null;
+
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <ScrollView
+      contentContainerStyle={styles.container}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+    >
       <ThemedText type="title">{event.title}</ThemedText>
       <ThemedText type="small" themeColor="textSecondary">
         {STATUS_LABELS[event.status]}
@@ -124,6 +149,14 @@ export default function AdminEventDetailScreen() {
           </ThemedText>
         ) : null}
       </ThemedView>
+
+      {/* RSVP visibility for the authorized administrator — the shared
+          AdminRsvpSection (also used by the admin meeting planning screen).
+          The server decides the mode from the org's RSVP capability and
+          enforces manageEvents + tenancy; nothing renders for mode 'none'
+          (HOA) or an older server payload without the block.
+          Pull-to-refresh above re-fetches this. */}
+      {rsvp ? <AdminRsvpSection rsvp={rsvp} /> : null}
 
       <Pressable
         style={styles.secondaryButton}

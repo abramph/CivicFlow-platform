@@ -18,6 +18,10 @@
     },
     "android": {
       "package": "com.aphtechnologies.unestra",
+      "blockedPermissions": [
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -62,14 +66,15 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Unestra uses your photos to attach a receipt when you report a payment.",
+          "photosPermission": "Unestra uses your photos to attach a receipt when you report a payment, or to choose an optional family photo for your PTA household.",
+          "cameraPermission": "Unestra uses your camera to scan the meeting QR code so you can check in to attendance, or to take an optional family photo for your PTA household.",
           "microphonePermission": false
         }
       ],
       [
         "expo-camera",
         {
-          "cameraPermission": "Unestra uses your camera to scan the meeting QR code so you can check in to attendance.",
+          "cameraPermission": "Unestra uses your camera to scan the meeting QR code so you can check in to attendance, or to take an optional family photo for your PTA household.",
           "microphonePermission": false,
           "recordAudioAndroid": false
         }

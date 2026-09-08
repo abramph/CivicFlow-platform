@@ -50,7 +50,7 @@ export default function AttendanceHistoryScreen() {
   // Direct-route defense: attendance history is scoped by an OrgMember
   // identity a staff/owner login may not hold. Reachable by deep link even
   // though the Profile entry point gates on it.
-  if (status === 'signedIn' && selectedOrganization && !selectedOrganization.memberId) {
+  if (status === 'signedIn' && selectedOrganization && !(selectedOrganization.constituentMemberId ?? selectedOrganization.memberId)) {
     return <Redirect href="/dues" />;
   }
 

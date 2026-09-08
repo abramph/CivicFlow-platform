@@ -78,6 +78,70 @@ interface ApiFetchOptions extends RequestInit {
 /** No caller currently passes its own `signal` (verified: nothing in this codebase uses AbortController), so it's safe for apiFetch to own the controller outright rather than composing with a caller-supplied one. */
 const REQUEST_TIMEOUT_MS = 20_000;
 
+/**
+ * Fetches an image from the Unestra API as a self-contained `data:` URI.
+ *
+ * Family photos are household and children's data, so the API no longer hands
+ * out signed object-storage URLs for them — the bytes come from an endpoint
+ * that authorizes the bearer token first. That means <Image source={{uri}} />
+ * can't fetch the image itself: React Native's Image has no reliable, uniform
+ * way to attach an Authorization header across both platforms, and pushing the
+ * token into an <Image> request risks leaking it toward whatever host the URI
+ * happens to name. So the authenticated fetch happens here, in code that can
+ * only ever talk to API_BASE_URL, and the screen renders the returned local
+ * URI.
+ *
+ * A `data:` URI rather than a `blob:` one: React Native has no dependable
+ * blob-URL object store across platforms, whereas `data:` renders natively and
+ * needs no lifecycle management or revocation.
+ *
+ * Returns null for 404 ("no photo"), which is a normal state and not an error.
+ * Mirrors apiFetch's timeout and single 401-refresh-retry behaviour.
+ */
+export async function apiFetchImageDataUri(path: string, _isRetry = false): Promise<string | null> {
+  const headers = new Headers();
+  if (tokenState.accessToken) headers.set('Authorization', `Bearer ${tokenState.accessToken}`);
+  headers.set('Accept', 'image/*');
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let response: Response;
+  try {
+    // Always API_BASE_URL: the token is only ever sent to the Unestra API, and
+    // never to an object-storage host.
+    response = await fetch(`${API_BASE_URL}${path}`, { headers, signal: controller.signal });
+  } catch (error) {
+    throw new ApiError(
+      error instanceof Error && error.name === 'AbortError'
+        ? 'Request timed out. Check your connection and try again.'
+        : 'Network request failed. Check your connection and try again.',
+      0
+    );
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  if (response.status === 401 && !_isRetry) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) return apiFetchImageDataUri(path, true);
+    onSessionExpired?.();
+    throw new ApiError('Session expired', 401);
+  }
+
+  if (response.status === 404) return null;
+  if (!response.ok) throw new ApiError('Request failed', response.status);
+
+  // Trust the server's own normalized type, not anything the uploader
+  // declared; fall back to JPEG because that is what the pipeline re-encodes
+  // every stored family photo to.
+  const contentType = response.headers.get('content-type') ?? 'image/jpeg';
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+  // btoa is available in the React Native runtime.
+  return `data:${contentType};base64,${btoa(binary)}`;
+}
+
 export async function apiFetch<T = unknown>(path: string, options: ApiFetchOptions = {}): Promise<T> {
   const { authenticated = true, _isRetry, headers, ...rest } = options;
 

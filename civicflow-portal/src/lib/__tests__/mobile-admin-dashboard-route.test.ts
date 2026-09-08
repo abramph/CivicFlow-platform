@@ -38,11 +38,24 @@ const countPtaHousehold = vi.fn();
 const countProperty = vi.fn();
 const countViolation = vi.fn();
 const countArchitecturalRequest = vi.fn();
+const findUniqueOrganization = vi.fn();
+const findManyAuditEvent = vi.fn();
+const findManyEvent = vi.fn();
+const findManyMeeting = vi.fn();
+const groupByEventRsvp = vi.fn();
+const groupByPtaEventRsvp = vi.fn();
+const groupByMeetingRsvp = vi.fn();
+const groupByPtaMeetingRsvp = vi.fn();
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     orgMember: { groupBy: (...args: unknown[]) => groupByOrgMember(...args), count: (...args: unknown[]) => countOrgMember(...args) },
     conversationParticipant: { findMany: (...args: unknown[]) => findManyConversationParticipant(...args) },
-    event: { count: (...args: unknown[]) => countEvent(...args) },
+    event: { count: (...args: unknown[]) => countEvent(...args), findMany: (...args: unknown[]) => findManyEvent(...args) },
+    meeting: { findMany: (...args: unknown[]) => findManyMeeting(...args) },
+    eventRsvp: { groupBy: (...args: unknown[]) => groupByEventRsvp(...args) },
+    ptaEventRsvp: { groupBy: (...args: unknown[]) => groupByPtaEventRsvp(...args) },
+    meetingRsvp: { groupBy: (...args: unknown[]) => groupByMeetingRsvp(...args) },
+    ptaMeetingRsvp: { groupBy: (...args: unknown[]) => groupByPtaMeetingRsvp(...args) },
     communicationCampaign: { count: (...args: unknown[]) => countCommunicationCampaign(...args) },
     meetingAttendanceSession: { count: (...args: unknown[]) => countMeetingAttendanceSession(...args) },
     paymentReport: { count: (...args: unknown[]) => countPaymentReport(...args) },
@@ -51,7 +64,19 @@ vi.mock("@/lib/prisma", () => ({
     property: { count: (...args: unknown[]) => countProperty(...args) },
     violation: { count: (...args: unknown[]) => countViolation(...args) },
     architecturalRequest: { count: (...args: unknown[]) => countArchitecturalRequest(...args) },
+    organization: { findUnique: (...args: unknown[]) => findUniqueOrganization(...args) },
+    auditEvent: { findMany: (...args: unknown[]) => findManyAuditEvent(...args) },
   },
+}));
+
+const countPendingFamilyChangeRequests = vi.fn();
+vi.mock("@/lib/labs/pta/family-change-requests", () => ({
+  countPendingFamilyChangeRequests: (...args: unknown[]) => countPendingFamilyChangeRequests(...args),
+}));
+
+const getEffectivePermissions = vi.fn();
+vi.mock("@/lib/role-permissions", () => ({
+  getEffectivePermissions: (...args: unknown[]) => getEffectivePermissions(...args),
 }));
 
 const getMemberPaymentsFinancialSummary = vi.fn();
@@ -84,6 +109,16 @@ beforeEach(() => {
   countProperty.mockReset().mockResolvedValue(0);
   countViolation.mockReset().mockResolvedValue(0);
   countArchitecturalRequest.mockReset().mockResolvedValue(0);
+  findUniqueOrganization.mockReset().mockResolvedValue({ primaryVertical: "COMMUNITY" });
+  findManyAuditEvent.mockReset().mockResolvedValue([]);
+  findManyEvent.mockReset().mockResolvedValue([]);
+  findManyMeeting.mockReset().mockResolvedValue([]);
+  groupByEventRsvp.mockReset().mockResolvedValue([]);
+  groupByPtaEventRsvp.mockReset().mockResolvedValue([]);
+  groupByMeetingRsvp.mockReset().mockResolvedValue([]);
+  groupByPtaMeetingRsvp.mockReset().mockResolvedValue([]);
+  countPendingFamilyChangeRequests.mockReset().mockResolvedValue(0);
+  getEffectivePermissions.mockReset().mockResolvedValue([]);
   getMemberPaymentsFinancialSummary.mockReset().mockResolvedValue({
     totalDuesCollectedCents: 0,
     totalContributionsCents: 0,
@@ -261,8 +296,79 @@ describe("GET /api/mobile/admin/dashboard", () => {
     const response = await GET(request());
     const body = await response.json();
 
-    expect(body.data.metrics).toEqual([{ key: "ptaHouseholds", label: "Active Households", value: 12, href: "/admin-pta-households" }]);
+    expect(body.data.metrics).toEqual([
+      { key: "ptaHouseholds", label: "Active Households", value: 12, href: "/admin-pta-households" },
+      { key: "ptaPendingChangeRequests", label: "Family Changes Awaiting Review", value: 0, href: "/admin-pta-change-requests" },
+    ]);
     expect(countPtaHousehold).toHaveBeenCalledWith({ where: { organizationId: "org-a", status: "ACTIVE" } });
+  });
+
+  it("surfaces pending family change requests as a needsAttention item (Build 27)", async () => {
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "STAFF", adminCapabilities: ["adminDashboard", "managePtaHouseholds"] });
+    countPtaHousehold.mockResolvedValueOnce(12);
+    countPendingFamilyChangeRequests.mockResolvedValueOnce(3);
+
+    const response = await GET(request());
+    const body = await response.json();
+
+    expect(body.data.needsAttention).toContainEqual({
+      id: "pta-pending-change-requests",
+      label: "3 family change requests awaiting review",
+      href: "/admin-pta-change-requests",
+    });
+  });
+
+  it("shows the pending-hours queue for an approvals-only officer via the exact RBAC permission, not the managePtaVolunteers umbrella (Build 27)", async () => {
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "STAFF", adminCapabilities: ["adminDashboard", "manageAttendance"] });
+    findUniqueOrganization.mockResolvedValueOnce({ primaryVertical: "PTA" });
+    getEffectivePermissions.mockResolvedValueOnce(["pta:volunteer-hours:approve"]);
+    listPendingPtaVolunteerHourEntries.mockResolvedValueOnce([{ id: "entry-1" }, { id: "entry-2" }]);
+    countMeetingAttendanceSession.mockResolvedValueOnce(0);
+
+    const response = await GET(request());
+    const body = await response.json();
+
+    expect(body.data.metrics).toContainEqual(
+      expect.objectContaining({ key: "ptaPendingHourApprovals", value: 2, href: "/volunteer-hour-approvals" })
+    );
+    expect(body.data.needsAttention).toContainEqual(
+      expect.objectContaining({ id: "pta-pending-hour-approvals" })
+    );
+  });
+
+  it("includes the New Announcement quick action only for manageCommunications holders (Build 27)", async () => {
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "STAFF", adminCapabilities: ["adminDashboard", "manageCommunications"] });
+    findManyConversationParticipant.mockResolvedValueOnce([]);
+    countCommunicationCampaign.mockResolvedValueOnce(4);
+
+    const response = await GET(request());
+    const body = await response.json();
+    expect(body.data.quickActions).toEqual([{ key: "createAnnouncement", label: "New Announcement", href: "/admin-campaigns/new" }]);
+
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "STAFF", adminCapabilities: ["adminDashboard", "manageEvents"] });
+    countEvent.mockResolvedValueOnce(0);
+    const second = await (await GET(request())).json();
+    expect(second.data.quickActions).toEqual([]);
+  });
+
+  it("includes recent audit activity only for manageOrganization holders (Build 27)", async () => {
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "ORG_OWNER", adminCapabilities: ["adminDashboard", "manageOrganization"] });
+    findManyAuditEvent.mockResolvedValueOnce([
+      { id: "audit-1", action: "pta.household.updated", actorEmail: "officer@example.com", createdAt: new Date("2026-09-06T12:00:00.000Z") },
+    ]);
+
+    const response = await GET(request());
+    const body = await response.json();
+    expect(body.data.recentActivity).toEqual([
+      { id: "audit-1", action: "pta.household.updated", actorEmail: "officer@example.com", createdAt: "2026-09-06T12:00:00.000Z" },
+    ]);
+
+    resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "STAFF", adminCapabilities: ["adminDashboard", "manageEvents"] });
+    countEvent.mockResolvedValueOnce(0);
+    const second = await (await GET(request())).json();
+    expect(second.data.recentActivity).toEqual([]);
+    // The audit query itself never runs without the capability.
+    expect(findManyAuditEvent).toHaveBeenCalledTimes(1);
   });
 
   it("includes properties metric and a needsAttention entry for properties with no active resident when manageHoaProperties is held", async () => {
@@ -324,5 +430,95 @@ describe("GET /api/mobile/admin/dashboard", () => {
     const body = await response.json();
 
     expect(typeof body.data.generatedAt).toBe("string");
+  });
+
+  describe("rsvpPlanning (Build 27 round-1 expansion)", () => {
+    it("includes upcoming events with counts for manageEvents holders -- counts only, never respondent names", async () => {
+      resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "ORG_ADMIN", adminCapabilities: ["adminDashboard", "manageEvents"] });
+      countEvent.mockResolvedValueOnce(2);
+      findManyEvent.mockResolvedValueOnce([
+        { id: "evt-1", title: "Fall Festival", startAt: new Date("2026-09-20T18:00:00Z") },
+        { id: "evt-2", title: "Cleanup Day", startAt: new Date("2026-09-27T15:00:00Z") },
+      ]);
+      groupByEventRsvp.mockResolvedValueOnce([{ eventId: "evt-1", status: "GOING", _count: { _all: 4 } }]);
+
+      const response = await GET(request());
+      const body = await response.json();
+
+      expect(body.data.rsvpPlanning.mode).toBe("individual");
+      expect(body.data.rsvpPlanning.guestCounts).toBe(false);
+      expect(body.data.rsvpPlanning.items).toEqual([
+        {
+          type: "event",
+          id: "evt-1",
+          title: "Fall Festival",
+          startAt: "2026-09-20T18:00:00.000Z",
+          counts: { totalResponses: 4, going: 4, maybe: 0, notGoing: 0, totalAttendees: 4 },
+          href: "/admin-events/evt-1",
+        },
+        {
+          type: "event",
+          id: "evt-2",
+          title: "Cleanup Day",
+          startAt: "2026-09-27T15:00:00.000Z",
+          counts: { totalResponses: 0, going: 0, maybe: 0, notGoing: 0, totalAttendees: 0 },
+          href: "/admin-events/evt-2",
+        },
+      ]);
+      // Meetings section requires its own flag.
+      expect(findManyMeeting).not.toHaveBeenCalled();
+      expect(JSON.stringify(body.data.rsvpPlanning)).not.toMatch(/firstName|lastName|displayName|email/);
+    });
+
+    it("includes upcoming meetings (deep-linked to the meeting RSVP planning screen) only for manageMeetings holders, with household guest math", async () => {
+      resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "ORG_ADMIN", adminCapabilities: ["adminDashboard", "manageMeetings"] });
+      findUniqueOrganization.mockResolvedValue({ primaryVertical: "PTA" });
+      getEffectivePermissions.mockResolvedValue([]);
+      findManyMeeting.mockResolvedValueOnce([{ id: "mtg-1", title: "September General Meeting", meetingDate: new Date("2026-09-15T19:00:00Z") }]);
+      groupByPtaMeetingRsvp.mockResolvedValueOnce([
+        { meetingId: "mtg-1", status: "GOING", _count: { _all: 2 }, _sum: { attendeeCount: 7 } },
+      ]);
+
+      const response = await GET(request());
+      const body = await response.json();
+
+      expect(body.data.rsvpPlanning.guestCounts).toBe(true);
+      expect(body.data.rsvpPlanning.items).toEqual([
+        {
+          type: "meeting",
+          id: "mtg-1",
+          title: "September General Meeting",
+          startAt: "2026-09-15T19:00:00.000Z",
+          counts: { totalResponses: 2, going: 2, maybe: 0, notGoing: 0, totalAttendees: 7 },
+          href: "/admin-meetings/mtg-1",
+        },
+      ]);
+      expect(findManyEvent).not.toHaveBeenCalled();
+    });
+
+    it("is null when the caller holds neither manageEvents nor manageMeetings", async () => {
+      resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "STAFF", adminCapabilities: ["adminDashboard", "manageCommunications"] });
+      findManyConversationParticipant.mockResolvedValueOnce([]);
+
+      const response = await GET(request());
+      const body = await response.json();
+
+      expect(body.data.rsvpPlanning).toBeNull();
+      expect(findManyEvent).not.toHaveBeenCalled();
+      expect(findManyMeeting).not.toHaveBeenCalled();
+    });
+
+    it("is null for an HOA organization (RSVP mode none) even with both flags", async () => {
+      resolveMobileAdminCapabilities.mockResolvedValueOnce({ available: true, role: "ORG_ADMIN", adminCapabilities: ["adminDashboard", "manageEvents", "manageMeetings"] });
+      findUniqueOrganization.mockResolvedValue({ primaryVertical: "HOA" });
+      countEvent.mockResolvedValueOnce(0);
+
+      const response = await GET(request());
+      const body = await response.json();
+
+      expect(body.data.rsvpPlanning).toBeNull();
+      expect(findManyEvent).not.toHaveBeenCalled();
+      expect(findManyMeeting).not.toHaveBeenCalled();
+    });
   });
 });

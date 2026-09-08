@@ -21,6 +21,8 @@ export const attachmentEntityTypes = [
   "HOA_VIOLATION",
   "HOA_ARCHITECTURAL_REQUEST",
   "UNION_CASE",
+  "PTA_HOUSEHOLD",
+  "PTA_STUDENT",
   "OTHER",
 ] as const satisfies readonly AttachmentEntityType[];
 
@@ -62,6 +64,16 @@ const readPermissions: Record<AttachmentEntityType, Permission> = {
   // does NOT go through this at all; see requireUnionCaseMemberAccess() in
   // src/lib/union/cases-guard.ts.
   UNION_CASE: "union:cases:read",
+  // Staff/officer path only, same shape as HOA_ARCHITECTURAL_REQUEST and
+  // UNION_CASE above -- a parent's own family photo read access does NOT go
+  // through this at all; it goes through a dedicated household-linkage-
+  // gated route (requirePtaHouseholdSelfAccess), matching this codebase's
+  // "parent self-service never uses Permission" rule.
+  PTA_HOUSEHOLD: "pta:households:manage",
+  // Build 27 student photo — same staff/officer-path-only shape as
+  // PTA_HOUSEHOLD: a parent's read access to their own student's photo
+  // never goes through this; it uses the dedicated linkage-gated routes.
+  PTA_STUDENT: "pta:students:manage",
   OTHER: "org_settings:read",
 };
 
@@ -84,6 +96,8 @@ const writePermissions: Record<AttachmentEntityType, Permission> = {
   HOA_VIOLATION: "hoa:violations:write",
   HOA_ARCHITECTURAL_REQUEST: "hoa:architectural-requests:write",
   UNION_CASE: "union:cases:manage",
+  PTA_HOUSEHOLD: "pta:households:manage",
+  PTA_STUDENT: "pta:students:manage",
   OTHER: "org_settings:write",
 };
 
@@ -135,6 +149,11 @@ export async function verifyAttachmentOwnership(
  * later. */
 const ALLOWED_CONTENT_TYPES: Partial<Record<AttachmentEntityType, readonly string[]>> = {
   REIMBURSEMENT: ["application/pdf", "image/jpeg", "image/png", "image/heic", "image/heif"],
+  // Family photos: image-only, matches the allowlist enforced again (by
+  // decoded signature, not just declared content-type) in the dedicated
+  // upload route -- see the family-photo upload security review.
+  PTA_HOUSEHOLD: ["image/jpeg", "image/png", "image/heic", "image/heif", "image/webp"],
+  PTA_STUDENT: ["image/jpeg", "image/png", "image/heic", "image/heif", "image/webp"],
 };
 
 export function isAllowedAttachmentContentType(entityType: AttachmentEntityType, contentType: string): boolean {
@@ -181,6 +200,10 @@ export async function verifyAttachmentEntity(organizationId: string, entityType:
       return Boolean(await prisma.architecturalRequest.findFirst({ where: { id: entityId, organizationId }, select: { id: true } }));
     case "UNION_CASE":
       return Boolean(await prisma.unionCase.findFirst({ where: { id: entityId, organizationId }, select: { id: true } }));
+    case "PTA_HOUSEHOLD":
+      return Boolean(await prisma.ptaHousehold.findFirst({ where: { id: entityId, organizationId }, select: { id: true } }));
+    case "PTA_STUDENT":
+      return Boolean(await prisma.ptaStudent.findFirst({ where: { id: entityId, organizationId }, select: { id: true } }));
     case "OTHER":
       return true;
     default:

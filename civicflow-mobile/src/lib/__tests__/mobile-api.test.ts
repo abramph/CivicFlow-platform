@@ -5,7 +5,7 @@ import {
   checkOutPtaVolunteer,
   claimPtaVolunteerSlot,
   getAnnouncements,
-  getAnnouncementsForIdentity,
+  getAnnouncementsForIdentities,
   getCampaigns,
   getConversation,
   getConversations,
@@ -28,7 +28,7 @@ import {
   getPtaVolunteerToday,
   manageRecurringGiving,
   markAnnouncementRead,
-  markAnnouncementReadForIdentity,
+  markAnnouncementReadForSources,
   markPtaAnnouncementRead,
   reportPtaDuesPayment,
   sendConversationMessage,
@@ -341,29 +341,63 @@ describe('mobile-api', () => {
     });
   });
 
-  describe('identity routing — conventional OrgMember vs. PTA household parent', () => {
-    it('getAnnouncementsForIdentity calls the conventional route when hasMemberIdentity is true', async () => {
-      mockApiFetch.mockResolvedValueOnce([]);
-      await getAnnouncementsForIdentity('org-1', true);
+  describe('identity-union announcement routing (Build 27 dual-role)', () => {
+    const announcement = (id: string, extra: Record<string, unknown> = {}) => ({
+      id,
+      title: `t-${id}`,
+      subject: `s-${id}`,
+      body: 'body',
+      deepLink: null,
+      sentAt: '2026-01-01T00:00:00.000Z',
+      isRead: false,
+      ...extra,
+    });
+
+    it('member-only identity reads only the conventional route', async () => {
+      mockApiFetch.mockResolvedValueOnce([announcement('a')]);
+      const result = await getAnnouncementsForIdentities('org-1', { hasMemberIdentity: true, hasParentIdentity: false });
+      expect(mockApiFetch).toHaveBeenCalledTimes(1);
       expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/announcements?organizationId=org-1');
+      expect(result[0].sources).toEqual(['member']);
     });
 
-    it('getAnnouncementsForIdentity calls the PTA bridge route when hasMemberIdentity is false', async () => {
-      mockApiFetch.mockResolvedValueOnce([]);
-      await getAnnouncementsForIdentity('org-1', false);
+    it('parent-only identity reads only the PTA bridge route', async () => {
+      mockApiFetch.mockResolvedValueOnce([announcement('a')]);
+      const result = await getAnnouncementsForIdentities('org-1', { hasMemberIdentity: false, hasParentIdentity: true });
+      expect(mockApiFetch).toHaveBeenCalledTimes(1);
       expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/announcements?organizationId=org-1');
+      expect(result[0].sources).toEqual(['pta']);
     });
 
-    it('markAnnouncementReadForIdentity routes to the matching read endpoint for each identity', async () => {
-      mockApiFetch.mockResolvedValueOnce(undefined);
-      await markAnnouncementReadForIdentity('org-1', 'campaign-1', true);
-      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/announcements/campaign-1/read', expect.anything());
+    it('dual identity reads BOTH routes and de-duplicates by campaign id, read state winning over unread', async () => {
+      mockApiFetch
+        .mockResolvedValueOnce([announcement('shared', { isRead: true }), announcement('member-only')])
+        .mockResolvedValueOnce([announcement('shared', { isRead: false }), announcement('pta-only', { sentAt: '2026-02-01T00:00:00.000Z' })]);
 
-      mockApiFetch.mockResolvedValueOnce(undefined);
-      await markAnnouncementReadForIdentity('org-1', 'campaign-1', false);
+      const result = await getAnnouncementsForIdentities('org-1', { hasMemberIdentity: true, hasParentIdentity: true });
+
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/announcements?organizationId=org-1');
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/announcements?organizationId=org-1');
+      expect(result).toHaveLength(3);
+      const shared = result.find((item) => item.id === 'shared');
+      expect(shared?.sources).toEqual(['member', 'pta']);
+      expect(shared?.isRead).toBe(true);
+      // Sorted newest-first by sentAt.
+      expect(result[0].id).toBe('pta-only');
+    });
+
+    it('no identity at all resolves to an empty list without any request', async () => {
+      const result = await getAnnouncementsForIdentities('org-1', { hasMemberIdentity: false, hasParentIdentity: false });
+      expect(result).toEqual([]);
+      expect(mockApiFetch).not.toHaveBeenCalled();
+    });
+
+    it('markAnnouncementReadForSources stamps every source row, and one failure never blocks the other', async () => {
+      mockApiFetch.mockRejectedValueOnce(new Error('boom')).mockResolvedValueOnce(undefined);
+      await markAnnouncementReadForSources('org-1', 'campaign-1', ['member', 'pta']);
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/announcements/campaign-1/read', expect.anything());
       expect(mockApiFetch).toHaveBeenCalledWith('/api/mobile/pta/announcements/campaign-1/read', expect.anything());
     });
-
   });
 
   describe('capability-driven event routing (Core Event RSVP)', () => {

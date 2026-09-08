@@ -1,14 +1,18 @@
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 import { Redirect, router } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet } from 'react-native';
+import { ActivityIndicator, Linking, Pressable, StyleSheet } from 'react-native';
 
+import { PrimaryActionButton, SecondaryLinkButton } from '@/components/action-buttons';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { IconBadge, StatusChip } from '@/components/ui';
+import { UnauthorizedNotice } from '@/components/unauthorized-notice';
+import { Elevation, Spacing } from '@/constants/theme';
 import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { checkInWithQrToken, type AttendanceCheckInResult } from '@/lib/mobile-api';
+import { deriveOrgCapabilities } from '@/lib/org-capabilities';
 
 /** The scanned QR encodes the full web check-in URL — only the token query
  * param is meaningful to us; everything else about the URL is ignored. */
@@ -62,12 +66,17 @@ export default function AttendanceScanScreen() {
   if (status === 'signedOut') {
     return <Redirect href={{ pathname: '/login', params: { redirectTo: '/attendance-scan' } }} />;
   }
-  // Direct-route defense: check-in is recorded against an OrgMember identity a
-  // staff/owner login may not hold. The organization is derived server-side
-  // from the scanned QR, not from the client, so this only avoids a doomed
-  // scan — it does not weaken that guard.
-  if (status === 'signedIn' && selectedOrganization && !selectedOrganization.memberId) {
-    return <Redirect href="/dues" />;
+  // Direct-route defense (Build 27): scanning records attendance for a
+  // constituent identity — a personal OrgMember, or (for a PTA parent) the
+  // household's shared billing member, both resolved server-side. The old
+  // gate keyed on `memberId` alone, which hid the scanner from every PTA
+  // parent (their memberId is withheld — see org-capabilities.ts). Admin or
+  // officer status alone still doesn't qualify: they mint and control
+  // sessions instead of scanning themselves in. The organization is derived
+  // server-side from the scanned QR, not from the client, so this only
+  // avoids a doomed scan — it does not weaken that guard.
+  if (status === 'signedIn' && selectedOrganization && !deriveOrgCapabilities(selectedOrganization).canScanAttendance) {
+    return <UnauthorizedNotice title="Scan Attendance Code" message="Check-in records attendance for a member or family record, and your login doesn't have one in this organization." />;
   }
 
   if (!permission) {
@@ -79,18 +88,40 @@ export default function AttendanceScanScreen() {
   }
 
   if (!permission.granted) {
+    // Apple Guideline 5.1.1(iv) correction: this screen is only ever shown
+    // in-context (the user already navigated here specifically to scan a
+    // code), and its copy is neutral -- "Continue" only advances to the
+    // system's own permission dialog; it does not itself claim to grant,
+    // allow, or enable anything. This mirrors pta-family-photo.tsx's
+    // priming/blocked pattern (Phase F of the same program). The previous
+    // version's "Grant Camera Access" / "Open Settings to Grant Access"
+    // wording tried to influence the system decision, and — separately — its
+    // "Open Settings" label was misleading: the button's onPress was always
+    // requestPermission, which is a no-op once canAskAgain is false, so it
+    // never actually opened Settings. Both are corrected here.
+    if (!permission.canAskAgain) {
+      return (
+        <ThemedView style={styles.centered}>
+          <ThemedText type="title" style={styles.title}>Camera Access Is Off</ThemedText>
+          <ThemedText type="default" themeColor="textSecondary" style={styles.explainer}>
+            Camera access for Unestra is currently off. You can turn it back on in Settings if you want to scan a
+            meeting QR code.
+          </ThemedText>
+          <PrimaryActionButton label="Open Settings" onPress={() => Linking.openSettings()} />
+          <SecondaryLinkButton label="Back to Dashboard" onPress={() => router.replace('/dashboard')} />
+        </ThemedView>
+      );
+    }
     return (
       <ThemedView style={styles.centered}>
-        <ThemedText type="title" style={styles.title}>Camera Access Needed</ThemedText>
+        <ThemedText type="title" style={styles.title}>Use Your Camera</ThemedText>
         <ThemedText type="default" themeColor="textSecondary" style={styles.explainer}>
-          Unestra uses your camera to scan the meeting QR code so you can check in to attendance. Nothing is recorded
-          or stored from your camera — it&apos;s only used to read the code.
+          To scan the meeting QR code and check in to attendance, Unestra needs to use your camera. You&apos;ll be
+          asked to confirm on the next screen. Nothing is recorded or stored from your camera — it&apos;s only used
+          to read the code.
         </ThemedText>
-        <Pressable style={styles.primaryButton} onPress={requestPermission} accessibilityRole="button" accessibilityLabel={permission.canAskAgain ? 'Grant camera access' : 'Open settings to grant access'}>
-          <ThemedText style={styles.primaryButtonText}>
-            {permission.canAskAgain ? 'Grant Camera Access' : 'Open Settings to Grant Access'}
-          </ThemedText>
-        </Pressable>
+        <PrimaryActionButton label="Continue" onPress={requestPermission} />
+        <SecondaryLinkButton label="Not Now" onPress={() => router.replace('/dashboard')} />
       </ThemedView>
     );
   }
@@ -99,7 +130,7 @@ export default function AttendanceScanScreen() {
     const { result } = state;
     return (
       <ThemedView style={styles.centered} accessibilityLiveRegion="assertive">
-        <ThemedText style={styles.successIcon} accessibilityElementsHidden importantForAccessibility="no">✓</ThemedText>
+        <IconBadge glyph="✓" tone="approved" size={72} />
         <ThemedText type="title" style={styles.title}>
           {result.alreadyCheckedIn ? "You're Already Checked In" : "You're Checked In"}
         </ThemedText>
@@ -114,9 +145,10 @@ export default function AttendanceScanScreen() {
           <ThemedText type="small" themeColor="textSecondary">
             Checked in at {new Date(result.checkInTime).toLocaleTimeString()}
           </ThemedText>
-          <ThemedText type="smallBold" style={result.attendanceStatus === 'LATE' ? styles.lateBadge : styles.presentBadge}>
-            {result.attendanceStatus === 'LATE' ? 'Marked Late' : 'Present'}
-          </ThemedText>
+          <StatusChip
+            tone={result.attendanceStatus === 'LATE' ? 'pending' : 'approved'}
+            label={result.attendanceStatus === 'LATE' ? 'Marked Late' : 'Present'}
+          />
         </ThemedView>
         <Pressable style={styles.secondaryButton} onPress={() => router.replace('/dashboard')} accessibilityRole="button" accessibilityLabel="Back to dashboard">
           <ThemedText type="link">Back to Dashboard</ThemedText>
@@ -128,7 +160,7 @@ export default function AttendanceScanScreen() {
   if (state.kind === 'error') {
     return (
       <ThemedView style={styles.centered}>
-        <ThemedText style={styles.errorIcon} accessibilityElementsHidden importantForAccessibility="no">✕</ThemedText>
+        <IconBadge glyph="✕" tone="rejected" size={72} />
         <ThemedText type="title" style={styles.title} accessibilityRole="alert" accessibilityLiveRegion="assertive">
           Check-In Didn&apos;t Go Through
         </ThemedText>
@@ -199,20 +231,7 @@ const styles = StyleSheet.create({
     padding: Spacing.four,
     gap: Spacing.two,
     alignItems: 'center',
-  },
-  successIcon: {
-    fontSize: 48,
-    color: '#047857',
-  },
-  errorIcon: {
-    fontSize: 48,
-    color: '#B42318',
-  },
-  presentBadge: {
-    color: '#047857',
-  },
-  lateBadge: {
-    color: '#B45309',
+    ...(Elevation.card as object),
   },
   overlay: {
     position: 'absolute',

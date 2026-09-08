@@ -1,10 +1,15 @@
 import { withApiErrorHandling } from "@/lib/api-route";
 import { requireMobileAuth, MobileForbiddenError } from "@/lib/mobile-auth";
 import { requireMobileAdminAccess, type AdminCapabilityFlag } from "@/lib/mobile-admin";
+import { countPendingFamilyChangeRequests } from "@/lib/labs/pta/family-change-requests";
 import { listPendingPtaVolunteerHourEntries } from "@/lib/labs/pta/volunteers";
 import { getMemberPaymentsFinancialSummary } from "@/lib/financial-summary";
+import { getEffectivePermissions } from "@/lib/role-permissions";
 import { prisma } from "@/lib/prisma";
+import { PERMISSIONS, type Role } from "@/lib/rbac";
 import { ValidationError } from "@/lib/validation";
+import { getAdminEventRsvpCounts, getRsvpMode, type AdminRsvpCounts } from "@/lib/event-rsvp";
+import { getAdminMeetingRsvpCounts } from "@/lib/meeting-rsvp";
 
 function centsToCurrency(cents: number) {
   return `$${(cents / 100).toFixed(2)}`;
@@ -25,6 +30,42 @@ interface NeedsAttentionItem {
   id: string;
   label: string;
   href: string;
+}
+
+/** Build 27 — capability-gated shortcuts into the workflows an admin most
+ * often OPENS the app to do, as opposed to metrics they read. Old app builds
+ * that don't know this field exists simply ignore it. */
+interface AdminQuickAction {
+  key: string;
+  label: string;
+  href: string;
+}
+
+/** Build 27 — a recent-administrative-activity feed (manageOrganization
+ * only). Action slugs and timestamps only: audit metadata can carry entity
+ * detail that individual capability gates protect, so none of it is
+ * forwarded here. */
+interface AdminActivityItem {
+  id: string;
+  action: string;
+  actorEmail: string | null;
+  createdAt: string;
+}
+
+/** Build 27 round-1 expansion — one upcoming RSVP-enabled activity with its
+ * planning counts, so an admin sees expected attendance without opening
+ * every record. Events require manageEvents; meetings require the new
+ * manageMeetings flag (each section is independently gated below). No
+ * respondent names here — the list belongs on the detail surfaces. */
+interface RsvpPlanningItem {
+  type: "event" | "meeting";
+  id: string;
+  title: string;
+  startAt: string | null;
+  counts: AdminRsvpCounts;
+  /** Deep link into the matching planning screen: the admin event detail
+   * for events, the read-only meeting RSVP planning screen for meetings. */
+  href?: string;
 }
 
 /**
@@ -53,6 +94,18 @@ export async function GET(request: Request) {
 
     const metrics: AdminMetric[] = [];
     const needsAttention: NeedsAttentionItem[] = [];
+    const quickActions: AdminQuickAction[] = [];
+    let recentActivity: AdminActivityItem[] = [];
+
+    // Build 27 — hour-approval visibility follows the EXACT permission that
+    // gates the approval endpoints (pta:volunteer-hours:approve), not the
+    // managePtaVolunteers umbrella: the two are independently
+    // org-customizable, and an approvals-only officer previously saw no
+    // pending-work signal here at all.
+    const organization = await prisma.organization.findUnique({ where: { id: organizationId }, select: { primaryVertical: true } });
+    const effectivePermissions =
+      organization?.primaryVertical === "PTA" && admin.role ? await getEffectivePermissions(organizationId, admin.role as Role) : [];
+    const canApproveHours = effectivePermissions.includes(PERMISSIONS.PTA_VOLUNTEER_HOURS_APPROVE);
 
     if (has("manageMembers")) {
       const breakdown = await prisma.orgMember.groupBy({
@@ -71,7 +124,7 @@ export async function GET(request: Request) {
       );
     }
 
-    if (has("managePtaVolunteers")) {
+    if (has("managePtaVolunteers") || canApproveHours) {
       const pendingHourEntries = await listPendingPtaVolunteerHourEntries(organizationId);
       metrics.push({ key: "ptaPendingHourApprovals", label: "Volunteer Hours Awaiting Approval", value: pendingHourEntries.length, href: "/volunteer-hour-approvals" });
       if (pendingHourEntries.length > 0) {
@@ -106,6 +159,7 @@ export async function GET(request: Request) {
 
       const campaignCount = await prisma.communicationCampaign.count({ where: { organizationId } });
       metrics.push({ key: "campaigns", label: "Campaigns", value: campaignCount, href: "/admin-campaigns" });
+      quickActions.push({ key: "createAnnouncement", label: "New Announcement", href: "/admin-campaigns/new" });
     }
 
     if (has("manageEvents")) {
@@ -113,6 +167,58 @@ export async function GET(request: Request) {
         where: { organizationId, startAt: { gte: new Date() } },
       });
       metrics.push({ key: "eventsUpcoming", label: "Upcoming Events", value: upcomingEventsCount, href: "/admin-events" });
+    }
+
+    // RSVP planning indicator — upcoming RSVP-enabled activities with their
+    // expected attendance. Only for orgs whose RSVP mode isn't "none", and
+    // each activity family only behind its own capability flag.
+    let rsvpPlanning: { mode: string; guestCounts: boolean; items: RsvpPlanningItem[] } | null = null;
+    const rsvpMode = organization ? getRsvpMode(organization.primaryVertical) : "none";
+    if (rsvpMode !== "none" && (has("manageEvents") || has("manageMeetings"))) {
+      const items: RsvpPlanningItem[] = [];
+
+      if (has("manageEvents")) {
+        const upcoming = await prisma.event.findMany({
+          where: { organizationId, startAt: { gte: new Date() }, status: { not: "cancelled" } },
+          orderBy: { startAt: "asc" },
+          take: 5,
+          select: { id: true, title: true, startAt: true },
+        });
+        const counts = await getAdminEventRsvpCounts(organizationId, upcoming.map((e) => e.id));
+        for (const event of upcoming) {
+          items.push({
+            type: "event",
+            id: event.id,
+            title: event.title,
+            startAt: event.startAt ? event.startAt.toISOString() : null,
+            counts: counts.byId[event.id] ?? { totalResponses: 0, going: 0, maybe: 0, notGoing: 0, totalAttendees: 0 },
+            href: `/admin-events/${event.id}`,
+          });
+        }
+      }
+
+      if (has("manageMeetings")) {
+        const upcoming = await prisma.meeting.findMany({
+          where: { organizationId, meetingDate: { gte: new Date() }, status: "SCHEDULED" },
+          orderBy: { meetingDate: "asc" },
+          take: 5,
+          select: { id: true, title: true, meetingDate: true },
+        });
+        const counts = await getAdminMeetingRsvpCounts(organizationId, upcoming.map((m) => m.id));
+        for (const meeting of upcoming) {
+          items.push({
+            type: "meeting",
+            id: meeting.id,
+            title: meeting.title,
+            startAt: meeting.meetingDate.toISOString(),
+            counts: counts.byId[meeting.id] ?? { totalResponses: 0, going: 0, maybe: 0, notGoing: 0, totalAttendees: 0 },
+            href: `/admin-meetings/${meeting.id}`,
+          });
+        }
+      }
+
+      items.sort((a, b) => (a.startAt ?? "").localeCompare(b.startAt ?? ""));
+      rsvpPlanning = { mode: rsvpMode, guestCounts: rsvpMode === "household", items: items.slice(0, 6) };
     }
 
     if (has("managePayments")) {
@@ -156,8 +262,19 @@ export async function GET(request: Request) {
     }
 
     if (has("managePtaHouseholds")) {
-      const activeHouseholdCount = await prisma.ptaHousehold.count({ where: { organizationId, status: "ACTIVE" } });
+      const [activeHouseholdCount, pendingChangeRequestCount] = await Promise.all([
+        prisma.ptaHousehold.count({ where: { organizationId, status: "ACTIVE" } }),
+        countPendingFamilyChangeRequests(organizationId),
+      ]);
       metrics.push({ key: "ptaHouseholds", label: "Active Households", value: activeHouseholdCount, href: "/admin-pta-households" });
+      metrics.push({ key: "ptaPendingChangeRequests", label: "Family Changes Awaiting Review", value: pendingChangeRequestCount, href: "/admin-pta-change-requests" });
+      if (pendingChangeRequestCount > 0) {
+        needsAttention.push({
+          id: "pta-pending-change-requests",
+          label: `${pendingChangeRequestCount} family change request${pendingChangeRequestCount === 1 ? "" : "s"} awaiting review`,
+          href: "/admin-pta-change-requests",
+        });
+      }
     }
 
     if (has("manageHoaProperties")) {
@@ -203,9 +320,25 @@ export async function GET(request: Request) {
       }
     }
 
+    if (has("manageOrganization")) {
+      const events = await prisma.auditEvent.findMany({
+        where: { organizationId },
+        orderBy: { createdAt: "desc" },
+        take: 8,
+        select: { id: true, action: true, actorEmail: true, createdAt: true },
+      });
+      recentActivity = events.map((event) => ({
+        id: event.id,
+        action: event.action,
+        actorEmail: event.actorEmail,
+        createdAt: event.createdAt.toISOString(),
+      }));
+    }
+
     return Response.json({
       ok: true,
-      data: { metrics, needsAttention, generatedAt: new Date().toISOString() },
+      // rsvpPlanning is additive — fielded clients that predate it ignore it.
+      data: { metrics, needsAttention, quickActions, recentActivity, rsvpPlanning, generatedAt: new Date().toISOString() },
     });
   });
 }

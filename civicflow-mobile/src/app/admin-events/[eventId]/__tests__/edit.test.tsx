@@ -46,7 +46,7 @@ describe('Admin event edit screen', () => {
     mockGetAdminEvent.mockReset();
     mockUpdateAdminEvent.mockReset();
     alertSpy.mockClear();
-    mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a' });
+    mockUseAuth.mockReturnValue({ selectedOrganizationId: 'org-a', selectedOrganization: { capability: { adminCapabilities: ['manageEvents'] } } });
   });
 
   it('prepopulates the form from a fresh server fetch', async () => {

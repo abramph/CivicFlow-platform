@@ -9,6 +9,7 @@ import { Spacing } from '@/constants/theme';
 import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { getAdminPtaHousehold, updateAdminPtaHousehold, type PtaHouseholdStatus } from '@/lib/mobile-api';
+import { requireAdminCapability } from '@/components/require-admin-capability';
 
 const STATUS_OPTIONS: { value: PtaHouseholdStatus; label: string }[] = [
   { value: 'ACTIVE', label: 'Active' },
@@ -17,7 +18,7 @@ const STATUS_OPTIONS: { value: PtaHouseholdStatus; label: string }[] = [
 ];
 
 /** Mobile Admin program (PR E) — edit a PTA household. School year is immutable post-creation, matching the web edit form exactly. */
-export default function AdminPtaHouseholdEditScreen() {
+function AdminPtaHouseholdEditScreen() {
   const { selectedOrganizationId } = useAuth();
   const { householdId } = useLocalSearchParams<{ householdId: string }>();
 
@@ -205,3 +206,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+export default requireAdminCapability('managePtaHouseholds', 'household administration', AdminPtaHouseholdEditScreen);

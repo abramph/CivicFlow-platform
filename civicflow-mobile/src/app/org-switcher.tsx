@@ -1,17 +1,21 @@
-import { router } from 'expo-router';
+import { Redirect, router } from 'expo-router';
 import { FlatList, Pressable, StyleSheet } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { ActionColors, Brand, Spacing } from '@/constants/theme';
 import { useAuth } from '@/lib/auth-context';
 
 export default function OrgSwitcherScreen() {
-  const { organizations, selectedOrganizationId, selectOrganization, logout } = useAuth();
+  const { status, organizations, selectedOrganizationId, selectOrganization, logout } = useAuth();
 
   async function handleSelect(organizationId: string) {
     await selectOrganization(organizationId);
     router.replace('/dashboard');
+  }
+
+  if (status === 'signedOut') {
+    return <Redirect href="/login" />;
   }
 
   return (
@@ -20,7 +24,9 @@ export default function OrgSwitcherScreen() {
         Choose an Organization
       </ThemedText>
       <ThemedText type="subtitle" themeColor="textSecondary" style={styles.subtitle}>
-        You belong to more than one organization on Unestra.
+        {organizations.length > 1
+          ? 'You belong to more than one organization on Unestra.'
+          : 'This is the organization your account belongs to on Unestra.'}
       </ThemedText>
 
       <FlatList
@@ -82,7 +88,7 @@ const styles = StyleSheet.create({
   },
   row: {
     borderWidth: 1,
-    borderColor: '#D0D5DD',
+    borderColor: ActionColors.border,
     borderRadius: 12,
     padding: Spacing.three,
     gap: 4,
@@ -96,8 +102,8 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   rowSelected: {
-    borderColor: '#047857',
-    backgroundColor: '#ECFDF5',
+    borderColor: ActionColors.primary,
+    backgroundColor: Brand.primaryTintLight,
   },
   empty: {
     textAlign: 'center',

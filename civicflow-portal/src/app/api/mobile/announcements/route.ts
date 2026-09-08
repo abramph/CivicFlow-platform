@@ -17,7 +17,10 @@ export async function GET(request: Request) {
     if (!organizationId) throw new ValidationError("organizationId is required");
 
     const { organizationId: verifiedOrgId, memberId } = await requireMobileMembership(request, organizationId);
-    const data = await listAnnouncementsForMember(verifiedOrgId, memberId);
+    // Build 27: the default list excludes the caller's archived items;
+    // archived=1 lists exactly those instead. Withdrawn campaigns never
+    // appear in either (see mobile-announcements.ts).
+    const data = await listAnnouncementsForMember(verifiedOrgId, memberId, { archived: searchParams.get("archived") === "1" });
 
     return Response.json({ ok: true, data });
   });

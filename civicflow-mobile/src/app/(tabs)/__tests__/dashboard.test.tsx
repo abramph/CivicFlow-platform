@@ -21,7 +21,7 @@ jest.mock('@/lib/unread-count', () => ({
   useUnreadConversationCount: () => 0,
 }));
 
-const mockGetAnnouncementsForIdentity = jest.fn();
+const mockGetAnnouncementsForIdentities = jest.fn();
 const mockGetEventsForOrganization = jest.fn();
 const mockGetDues = jest.fn();
 const mockGetPaymentHistory = jest.fn();
@@ -31,7 +31,7 @@ const mockGetPtaVolunteerCommitments = jest.fn();
 const mockGetGiving = jest.fn();
 const mockGetUnionCases = jest.fn();
 jest.mock('@/lib/mobile-api', () => ({
-  getAnnouncementsForIdentity: (...args: unknown[]) => mockGetAnnouncementsForIdentity(...args),
+  getAnnouncementsForIdentities: (...args: unknown[]) => mockGetAnnouncementsForIdentities(...args),
   getEventsForOrganization: (...args: unknown[]) => mockGetEventsForOrganization(...args),
   getDues: (...args: unknown[]) => mockGetDues(...args),
   getPaymentHistory: (...args: unknown[]) => mockGetPaymentHistory(...args),
@@ -116,7 +116,7 @@ function memberAndPtaOrg() {
 describe('Dashboard "Report a Payment" quick action', () => {
   beforeEach(() => {
     mockRouterPush.mockReset();
-    mockGetAnnouncementsForIdentity.mockReset().mockResolvedValue([]);
+    mockGetAnnouncementsForIdentities.mockReset().mockResolvedValue([]);
     mockGetEventsForOrganization.mockReset().mockResolvedValue([]);
     mockGetDues.mockReset().mockResolvedValue({ outstandingBalance: 0, isDelinquent: false, delinquentSince: null, charges: [] });
     mockGetPaymentHistory.mockReset().mockResolvedValue({ payments: [], reports: [] });
@@ -176,5 +176,185 @@ describe('Dashboard "Report a Payment" quick action', () => {
     expect(mockRouterPush).not.toHaveBeenCalledWith('/report-payment');
     expect(mockRouterPush).not.toHaveBeenCalledWith('/pta-report-payment');
     expect(mockGetPtaDues).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Community/Nonprofit isolation for the "My Family" (family-photo) entry
+ * point. Existing coverage above (conventionalMemberOrg/staffOnlyOrg) only
+ * proves the button is absent for "no PTA identity" generically -- it never
+ * tags the fixture as a demonstrable Community/Nonprofit organization
+ * (capability.primaryVertical), which is the field this app's own
+ * vertical-gating logic actually keys off elsewhere (see
+ * (tabs)/__tests__/_layout.test.tsx, __tests__/org-switcher.test.tsx). This
+ * block closes that gap explicitly, mirroring dashboard-church.test.tsx and
+ * dashboard-union.test.tsx's per-vertical pattern.
+ */
+function communityMemberOrg() {
+  return {
+    organizationId: 'org-community',
+    organizationName: 'Riverdale Community Association',
+    memberId: 'member-9',
+    firstName: 'Alex',
+    lastName: 'Rivera',
+    pta: null,
+    capability: { primaryVertical: 'COMMUNITY' },
+  };
+}
+
+describe('Dashboard -- Community/Nonprofit isolation for the PTA "My Family" entry point', () => {
+  beforeEach(() => {
+    mockRouterPush.mockReset();
+    mockGetAnnouncementsForIdentities.mockReset().mockResolvedValue([]);
+    mockGetEventsForOrganization.mockReset().mockResolvedValue([]);
+    mockGetDues.mockReset().mockResolvedValue({ outstandingBalance: 0, isDelinquent: false, delinquentSince: null, charges: [] });
+    mockGetPaymentHistory.mockReset().mockResolvedValue({ payments: [], reports: [] });
+    mockGetPtaDues.mockReset().mockResolvedValue({
+      currentSchoolYear: null,
+      currentCharge: null,
+      hasBillingIdentity: true,
+      priorCharges: [],
+      onlinePaymentLinkSlug: null,
+    });
+    mockGetPtaVolunteerHours.mockReset().mockResolvedValue({ approvedMinutes: 0, requiredMinutes: null, remainingMinutes: null });
+    mockGetPtaVolunteerCommitments.mockReset().mockResolvedValue([]);
+    mockGetGiving.mockReset().mockResolvedValue({ enabled: false });
+    mockGetUnionCases.mockReset().mockResolvedValue([]);
+  });
+
+  it('a Community/Nonprofit organization member never sees the My Family entry point, even with a real member record', async () => {
+    mockUseAuth.mockReturnValue({ selectedOrganization: communityMemberOrg(), selectedOrganizationId: 'org-community' });
+
+    await render(<DashboardScreen />);
+    await waitFor(() => expect(mockGetDues).toHaveBeenCalled());
+
+    expect(screen.queryByLabelText('My family')).toBeNull();
+    expect(screen.queryByText('My Family')).toBeNull();
+    expect(mockRouterPush).not.toHaveBeenCalledWith('/pta-my-family');
+    // A real memberId/member-record presence doesn't upgrade a generic
+    // member into a PTA identity -- only a PtaHouseholdAdult link does.
+    expect(mockGetPtaDues).not.toHaveBeenCalled();
+  });
+
+  it('switching from a PTA organization to a Community/Nonprofit organization removes the My Family entry point and stops PTA data fetching', async () => {
+    mockUseAuth.mockReturnValue({ selectedOrganization: ptaParentOrg(), selectedOrganizationId: 'org-pta' });
+    const { rerender } = await render(<DashboardScreen />);
+    await waitFor(() => expect(mockGetPtaDues).toHaveBeenCalled());
+    expect(screen.getByLabelText('My family')).toBeTruthy();
+
+    mockGetPtaDues.mockClear();
+    mockUseAuth.mockReturnValue({ selectedOrganization: communityMemberOrg(), selectedOrganizationId: 'org-community' });
+    await rerender(<DashboardScreen />);
+    await waitFor(() => expect(mockGetDues).toHaveBeenCalled());
+
+    expect(screen.queryByLabelText('My family')).toBeNull();
+    expect(mockGetPtaDues).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Build 27 additive dual-role model. The Build 26 preview showed an
+ * admin-only login getting a completely blank dashboard (the whole data load
+ * was identity-gated with no admin affordance at all) and dual-role users
+ * flattened onto one identity. Capabilities are additive now: each block
+ * keys off exactly the capability it needs and none suppresses another.
+ */
+function adminOnlyOrg() {
+  return {
+    organizationId: 'org-admin',
+    organizationName: 'Pine Grove School PTA',
+    memberId: null,
+    firstName: null,
+    lastName: null,
+    pta: null,
+    capability: { primaryVertical: 'PTA', adminCapabilities: ['adminDashboard', 'manageMembers'] },
+  };
+}
+
+function adminAndParentOrg() {
+  return {
+    organizationId: 'org-dual',
+    organizationName: 'Pine Grove School PTA',
+    memberId: null,
+    firstName: 'Alex',
+    lastName: 'Morgan',
+    pta: { householdAdultId: 'adult-9', householdName: 'Morgan Family', isOfficer: true, canCheckIn: true, canApproveHours: true },
+    capability: { primaryVertical: 'PTA', adminCapabilities: ['adminDashboard', 'managePtaHouseholds', 'manageCommunications'] },
+  };
+}
+
+function officerScannerOrg() {
+  return {
+    organizationId: 'org-officer',
+    organizationName: 'Pine Grove School PTA',
+    memberId: null,
+    firstName: null,
+    lastName: null,
+    pta: { householdAdultId: null, householdName: null, isOfficer: true, canCheckIn: true, canApproveHours: false },
+    capability: { primaryVertical: 'PTA', adminCapabilities: [] },
+  };
+}
+
+describe('Dashboard — Build 27 additive dual-role capabilities', () => {
+  beforeEach(() => {
+    mockRouterPush.mockReset();
+    mockGetAnnouncementsForIdentities.mockReset().mockResolvedValue([]);
+    mockGetEventsForOrganization.mockReset().mockResolvedValue([]);
+    mockGetDues.mockReset().mockResolvedValue({ outstandingBalance: 0, isDelinquent: false, delinquentSince: null, charges: [] });
+    mockGetPaymentHistory.mockReset().mockResolvedValue({ payments: [], reports: [] });
+    mockGetPtaDues.mockReset().mockResolvedValue({
+      currentSchoolYear: null,
+      currentCharge: null,
+      hasBillingIdentity: true,
+      priorCharges: [],
+      onlinePaymentLinkSlug: null,
+    });
+    mockGetPtaVolunteerHours.mockReset().mockResolvedValue({ approvedMinutes: 0, requiredMinutes: null, remainingMinutes: null });
+    mockGetPtaVolunteerCommitments.mockReset().mockResolvedValue([]);
+    mockGetGiving.mockReset().mockResolvedValue({ enabled: false });
+    mockGetUnionCases.mockReset().mockResolvedValue([]);
+  });
+
+  it('an admin-only login gets a real dashboard: the admin workspace card, and events still load via the org-tie route', async () => {
+    mockUseAuth.mockReturnValue({ selectedOrganization: adminOnlyOrg(), selectedOrganizationId: 'org-admin' });
+
+    await render(<DashboardScreen />);
+    await waitFor(() => expect(mockGetEventsForOrganization).toHaveBeenCalled());
+
+    fireEvent.press(screen.getByLabelText('Open the admin dashboard'));
+    expect(mockRouterPush).toHaveBeenCalledWith('/admin');
+    // No recipient identity → no announcement request was fired for it.
+    expect(mockGetAnnouncementsForIdentities).toHaveBeenCalledWith('org-admin', { hasMemberIdentity: false, hasParentIdentity: false });
+  });
+
+  it('a dual admin+parent sees BOTH the admin workspace card and My Family — neither identity suppresses the other', async () => {
+    mockUseAuth.mockReturnValue({ selectedOrganization: adminAndParentOrg(), selectedOrganizationId: 'org-dual' });
+
+    await render(<DashboardScreen />);
+    await waitFor(() => expect(mockGetPtaDues).toHaveBeenCalled());
+
+    expect(screen.getByLabelText('Open the admin dashboard')).toBeTruthy();
+    expect(screen.getByLabelText('My family')).toBeTruthy();
+  });
+
+  it('a check-in officer without a household gets the volunteer check-in tile instead of a blank screen', async () => {
+    mockUseAuth.mockReturnValue({ selectedOrganization: officerScannerOrg(), selectedOrganizationId: 'org-officer' });
+
+    await render(<DashboardScreen />);
+    await waitFor(() => expect(mockGetEventsForOrganization).toHaveBeenCalled());
+
+    fireEvent.press(screen.getByLabelText('Volunteer check-in'));
+    expect(mockRouterPush).toHaveBeenCalledWith('/volunteer-checkin');
+    expect(screen.queryByLabelText('Open the admin dashboard')).toBeNull();
+    expect(screen.queryByLabelText('My family')).toBeNull();
+  });
+
+  it('a parent-only login never sees the admin workspace card', async () => {
+    mockUseAuth.mockReturnValue({ selectedOrganization: ptaParentOrg(), selectedOrganizationId: 'org-pta' });
+
+    await render(<DashboardScreen />);
+    await waitFor(() => expect(mockGetPtaDues).toHaveBeenCalled());
+
+    expect(screen.queryByLabelText('Open the admin dashboard')).toBeNull();
   });
 });

@@ -65,6 +65,7 @@ export default function RootLayout() {
           <Stack.Screen name="admin-events/[eventId]/index" options={{ headerTitle: 'Event' }} />
           <Stack.Screen name="admin-events/[eventId]/edit" options={{ headerTitle: 'Edit Event' }} />
           <Stack.Screen name="admin-events/[eventId]/attendance-session" options={{ headerTitle: 'Attendance' }} />
+          <Stack.Screen name="admin-meetings/[meetingId]" options={{ headerTitle: 'Meeting RSVPs' }} />
           <Stack.Screen name="admin-campaigns" options={{ headerTitle: 'Campaigns' }} />
           <Stack.Screen name="admin-campaigns/new" options={{ headerTitle: 'New Campaign' }} />
           <Stack.Screen name="admin-campaigns/[campaignId]/index" options={{ headerTitle: 'Campaign' }} />
@@ -79,6 +80,9 @@ export default function RootLayout() {
           <Stack.Screen name="admin-pta-households/new" options={{ headerTitle: 'New Household' }} />
           <Stack.Screen name="admin-pta-households/[householdId]/index" options={{ headerTitle: 'Household' }} />
           <Stack.Screen name="admin-pta-households/[householdId]/edit" options={{ headerTitle: 'Edit Household' }} />
+          <Stack.Screen name="admin-pta-change-requests" options={{ headerTitle: 'Family Change Requests' }} />
+          <Stack.Screen name="pta-edit-family" options={{ headerTitle: 'Edit Family' }} />
+          <Stack.Screen name="pta-student-photo" options={{ headerTitle: 'Student Photo' }} />
           <Stack.Screen name="admin-hoa-properties" options={{ headerTitle: 'Properties' }} />
           <Stack.Screen name="admin-hoa-properties/new" options={{ headerTitle: 'New Property' }} />
           <Stack.Screen name="admin-hoa-properties/[propertyId]/index" options={{ headerTitle: 'Property' }} />

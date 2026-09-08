@@ -17,6 +17,7 @@ interface PtaProfileLike {
   concernsEnabled?: boolean;
   concernsLabel?: string | null;
   electionsEnabled?: boolean;
+  studentProgressionEnabled?: boolean;
 }
 
 /** `canManageConcerns` — PTA-E: the concerns feature switch is governance
@@ -27,10 +28,12 @@ export function PtaProfileForm({
   initialProfile,
   canManageConcerns = false,
   canManageElections = false,
+  canManageStudentProgression = false,
 }: {
   initialProfile: PtaProfileLike | null;
   canManageConcerns?: boolean;
   canManageElections?: boolean;
+  canManageStudentProgression?: boolean;
 }) {
   const router = useRouter();
   const [schoolOrPtaName, setSchoolOrPtaName] = useState(initialProfile?.schoolOrPtaName ?? "");
@@ -46,6 +49,7 @@ export function PtaProfileForm({
   const [concernsEnabled, setConcernsEnabled] = useState(initialProfile?.concernsEnabled ?? true);
   const [concernsLabel, setConcernsLabel] = useState(initialProfile?.concernsLabel ?? "");
   const [electionsEnabled, setElectionsEnabled] = useState(initialProfile?.electionsEnabled ?? false);
+  const [studentProgressionEnabled, setStudentProgressionEnabled] = useState(initialProfile?.studentProgressionEnabled ?? false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -71,6 +75,7 @@ export function PtaProfileForm({
           gradesServed: gradesServed.split(",").map((g) => g.trim()).filter(Boolean),
           ...(canManageConcerns ? { concernsEnabled, concernsLabel: concernsLabel.trim() || null } : {}),
           ...(canManageElections ? { electionsEnabled } : {}),
+          ...(canManageStudentProgression ? { studentProgressionEnabled } : {}),
         }),
       });
       const data = await res.json().catch(() => null);
@@ -169,6 +174,24 @@ export function PtaProfileForm({
           <p className="text-xs font-normal text-slate-500">
             Off by default. Unestra elections are a tool for your own process — secret ballots are protected from ordinary
             administrator access, but Unestra makes no legal election-compliance claims. Follow your bylaws and state rules.
+          </p>
+        </div>
+      ) : null}
+      {canManageStudentProgression ? (
+        <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <h3 className="text-sm font-semibold text-slate-900">Student Progression</h3>
+          <label className="flex items-center gap-2 text-sm font-medium text-slate-900">
+            <input
+              type="checkbox"
+              checked={studentProgressionEnabled}
+              onChange={(e) => setStudentProgressionEnabled(e.target.checked)}
+              className="h-4 w-4"
+            />
+            <span>Enable academic-year student progression for this PTA</span>
+          </label>
+          <p className="text-xs font-normal text-slate-500">
+            Off by default. Lets an administrator advance students to the next school year — the same student record and
+            family relationships carry forward; prior-year enrollment, volunteer hours, and payments are never overwritten.
           </p>
         </div>
       ) : null}

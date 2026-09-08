@@ -71,3 +71,6 @@ scripts/private/
 *.keychain
 *.keychain-db
 .local-dev-postgres/
+
+# Local credential files (found untracked, never intended for commit)
+.claude/Application Password WP

@@ -5,7 +5,8 @@ import { Pressable, RefreshControl, ScrollView, StyleSheet } from 'react-native'
 import { LoadErrorBanner } from '@/components/load-error-banner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { StatusChip } from '@/components/ui';
+import { Elevation, Spacing, WorkspaceColors, type StatusTone } from '@/constants/theme';
 import { useAuth } from '@/lib/auth-context';
 import { getAdminCampaigns, type AdminCampaignListRow, type CampaignStatus } from '@/lib/mobile-api';
 
@@ -16,6 +17,15 @@ const STATUS_LABELS: Record<CampaignStatus, string> = {
   SENT: 'Sent',
   FAILED: 'Failed',
   CANCELED: 'Canceled',
+};
+
+const STATUS_TONES: Record<CampaignStatus, StatusTone> = {
+  DRAFT: 'neutral',
+  READY: 'info',
+  SENDING: 'pending',
+  SENT: 'approved',
+  FAILED: 'rejected',
+  CANCELED: 'neutral',
 };
 
 /**
@@ -98,9 +108,12 @@ export default function AdminCampaignsScreen() {
             accessibilityLabel={campaign.title}
           >
             <ThemedView type="backgroundElement" style={styles.card}>
-              <ThemedText type="smallBold">{campaign.title}</ThemedText>
+              <ThemedView style={styles.cardHeader}>
+                <ThemedText type="smallBold" style={styles.cardTitle}>{campaign.title}</ThemedText>
+                <StatusChip tone={STATUS_TONES[campaign.status]} label={STATUS_LABELS[campaign.status]} />
+              </ThemedView>
               <ThemedText type="small" themeColor="textSecondary">
-                {STATUS_LABELS[campaign.status]} · {campaign._count.recipients} recipient{campaign._count.recipients === 1 ? '' : 's'}
+                {campaign._count.recipients} recipient{campaign._count.recipients === 1 ? '' : 's'}
               </ThemedText>
             </ThemedView>
           </Pressable>
@@ -121,21 +134,35 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     backgroundColor: 'transparent',
   },
+  // Slate, not green: campaign administration is an admin-workspace
+  // surface, and its primary action should read as one.
   addButton: {
-    backgroundColor: '#047857',
+    backgroundColor: WorkspaceColors.adminAccent,
     borderRadius: 10,
     paddingVertical: Spacing.two,
     paddingHorizontal: Spacing.three,
     minHeight: 44,
     justifyContent: 'center',
+    ...(Elevation.card as object),
   },
   addButtonText: {
-    color: '#fff',
+    color: WorkspaceColors.adminHeaderText,
     fontWeight: '600',
   },
   card: {
     borderRadius: 12,
     padding: Spacing.three,
     gap: 4,
+    ...(Elevation.card as object),
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+    backgroundColor: 'transparent',
+  },
+  cardTitle: {
+    flexShrink: 1,
   },
 });

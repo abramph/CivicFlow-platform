@@ -8,6 +8,7 @@ import { Spacing } from '@/constants/theme';
 import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { createAdminHoaViolation, getAdminHoaProperties, type AdminHoaPropertyListRow } from '@/lib/mobile-api';
+import { requireAdminCapability } from '@/components/require-admin-capability';
 
 function propertyLabel(property: AdminHoaPropertyListRow) {
   if (property.displayName) return property.displayName;
@@ -20,7 +21,7 @@ function propertyLabel(property: AdminHoaPropertyListRow) {
  * form uses. Creates a DRAFT only — issuing (which sends the resident's
  * first notice) happens as a separate step on the detail screen.
  */
-export default function AdminHoaViolationCreateScreen() {
+function AdminHoaViolationCreateScreen() {
   const { selectedOrganizationId } = useAuth();
 
   const [propertySearch, setPropertySearch] = useState('');
@@ -187,3 +188,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+export default requireAdminCapability('manageHoaViolations', 'violation administration', AdminHoaViolationCreateScreen);

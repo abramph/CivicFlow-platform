@@ -1,13 +1,20 @@
 import { router } from 'expo-router';
-import { useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { MinTouchTarget, Spacing, WorkspaceColors } from '@/constants/theme';
 import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
-import { createAdminCampaign, type CampaignChannel, type CampaignCommunicationType } from '@/lib/mobile-api';
+import {
+  createAdminCampaign,
+  getAdminCampaignTargetingOptions,
+  previewAdminCampaignRecipients,
+  type CampaignChannel,
+  type CampaignCommunicationType,
+} from '@/lib/mobile-api';
+import { requireAdminCapability } from '@/components/require-admin-capability';
 
 const TYPE_OPTIONS: { value: CampaignCommunicationType; label: string }[] = [
   { value: 'ANNOUNCEMENT', label: 'Announcement' },
@@ -23,16 +30,30 @@ const CHANNEL_OPTIONS: { value: CampaignChannel; label: string }[] = [
   { value: 'INTERNAL_LOG_ONLY', label: 'Log Only' },
 ];
 
+type AudienceKey = 'active_with_email' | 'outstanding_dues' | 'delinquent' | 'pta_all' | 'pta_unpaid';
+
+interface AudienceOption {
+  key: AudienceKey;
+  label: string;
+}
+
 /**
- * Mobile Admin program (PR C) — create campaign. Uses the exact same
- * createCommunicationCampaign() service the web Communications form uses
- * (entitlement gates, default active_with_email audience, audit) via
- * POST /api/mobile/admin/campaigns. Deliberately omits WhatsApp template
- * selection and custom audience filtering -- those stay web-only for now;
- * the default "active members with email/phone" audience covers the
- * common officer use case.
+ * The announcement composer (Build 27 completion of Mobile Admin PR C).
+ * Still the exact same createCommunicationCampaign() backend the web form
+ * uses — entitlement gates, server-resolved audiences, audit attribution —
+ * now with the audience choices that backend already supports: the base
+ * selectors, plus PTA "all families" / "unpaid households" targeting for
+ * PTA organizations (resolved server-side by resolvePtaTargetMemberIds —
+ * the client only ever names a rule). Grade/class/committee/event
+ * targeting stays web-only until those entity lists have mobile admin
+ * endpoints; the composer says so instead of showing broken pickers.
+ *
+ * Send is a two-step: preview/confirm with the real recipient count (the
+ * same resolver the create uses), then create+send. A duplicate create of
+ * identical content within two minutes is answered by the server with a
+ * conflict, so a retry after a timeout can't fan out twice.
  */
-export default function AdminCampaignCreateScreen() {
+function AdminCampaignCreateScreen() {
   const { selectedOrganizationId } = useAuth();
 
   const [title, setTitle] = useState('');
@@ -40,14 +61,78 @@ export default function AdminCampaignCreateScreen() {
   const [channel, setChannel] = useState<CampaignChannel>('EMAIL');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
+  const [audience, setAudience] = useState<AudienceKey>('active_with_email');
+  const [isPta, setIsPta] = useState(false);
+  const [currentSchoolYear, setCurrentSchoolYear] = useState<string | null>(null);
+  const [previewCount, setPreviewCount] = useState<number | null>(null);
+  const [previewing, setPreviewing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      if (!selectedOrganizationId) return;
+      try {
+        const options = await getAdminCampaignTargetingOptions(selectedOrganizationId);
+        setIsPta(options.isPta);
+        setCurrentSchoolYear(options.currentSchoolYear);
+        if (options.isPta) setAudience('pta_all');
+      } catch {
+        // Older portal without the endpoint — base audience only.
+      }
+    })();
+  }, [selectedOrganizationId]);
+
+  const audienceOptions: AudienceOption[] = isPta
+    ? [
+        { key: 'pta_all', label: 'All families' },
+        ...(currentSchoolYear ? [{ key: 'pta_unpaid' as const, label: 'Unpaid households' }] : []),
+        { key: 'active_with_email', label: 'All active with email' },
+      ]
+    : [
+        { key: 'active_with_email', label: 'All active with email' },
+        { key: 'outstanding_dues', label: 'Outstanding dues' },
+        { key: 'delinquent', label: 'Delinquent members' },
+      ];
+
+  const buildRecipientFilter = useCallback((): Record<string, unknown> => {
+    switch (audience) {
+      case 'pta_all':
+        return { selector: 'pta_target', ptaRule: { type: 'all' } };
+      case 'pta_unpaid':
+        return { selector: 'pta_target', ptaRule: { type: 'unpaid', schoolYear: currentSchoolYear } };
+      default:
+        return { selector: audience };
+    }
+  }, [audience, currentSchoolYear]);
+
+  // The previewed count belongs to one (audience, channel) pair — switching
+  // either invalidates it so a stale count can never be confirmed.
+  useEffect(() => {
+    setPreviewCount(null);
+  }, [audience, channel]);
 
   function validate(): string | null {
     if (!title.trim()) return 'Title is required.';
     if (!subject.trim()) return 'Subject is required.';
     if (!body.trim()) return 'Message body is required.';
     return null;
+  }
+
+  async function previewAudience(): Promise<number | null> {
+    if (!selectedOrganizationId || previewing) return previewCount;
+    setPreviewing(true);
+    setError(null);
+    try {
+      const { count } = await previewAdminCampaignRecipients(selectedOrganizationId, buildRecipientFilter(), channel);
+      setPreviewCount(count);
+      return count;
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Unable to preview the audience. Check your connection and try again.');
+      return null;
+    } finally {
+      setPreviewing(false);
+    }
   }
 
   async function submit(sendNow: boolean) {
@@ -69,24 +154,48 @@ export default function AdminCampaignCreateScreen() {
         subject: subject.trim(),
         body: body.trim(),
         sendNow,
+        recipientFilter: buildRecipientFilter(),
       });
       router.replace(`/admin-campaigns/${created.id}`);
     } catch (err) {
+      // Form state is preserved on every failure path, so a retry never
+      // re-types anything; the server's duplicate window makes the retry
+      // itself safe.
       setError(err instanceof ApiError ? err.message : 'Unable to create this campaign. Check your connection and try again.');
     } finally {
       setSubmitting(false);
     }
   }
 
+  async function confirmAndSend() {
+    if (submitting || previewing) return;
+    const validationError = validate();
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    const count = previewCount ?? (await previewAudience());
+    if (count == null) return;
+    const audienceLabel = audienceOptions.find((option) => option.key === audience)?.label ?? 'the selected audience';
+    Alert.alert(
+      'Send this announcement?',
+      `“${subject.trim()}” will go to ${count} recipient${count === 1 ? '' : 's'} (${audienceLabel}) via ${CHANNEL_OPTIONS.find((c) => c.value === channel)?.label ?? channel}. This can't be unsent.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: `Send to ${count}`, onPress: () => submit(true) },
+      ]
+    );
+  }
+
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={styles.container}>
-        <ThemedText type="title">New Campaign</ThemedText>
+        <ThemedText type="title">New Announcement</ThemedText>
 
-        <ThemedText type="small" themeColor="textSecondary">Title</ThemedText>
+        <ThemedText type="smallBold">Title</ThemedText>
         <TextInput style={styles.input} value={title} onChangeText={setTitle} accessibilityLabel="Title" />
 
-        <ThemedText type="small" themeColor="textSecondary">Type</ThemedText>
+        <ThemedText type="smallBold">Type</ThemedText>
         <ThemedView style={styles.chipRow} accessibilityRole="radiogroup" accessibilityLabel="Campaign type">
           {TYPE_OPTIONS.map((option) => (
             <Pressable
@@ -104,7 +213,7 @@ export default function AdminCampaignCreateScreen() {
           ))}
         </ThemedView>
 
-        <ThemedText type="small" themeColor="textSecondary">Channel</ThemedText>
+        <ThemedText type="smallBold">Channel</ThemedText>
         <ThemedView style={styles.chipRow} accessibilityRole="radiogroup" accessibilityLabel="Channel">
           {CHANNEL_OPTIONS.map((option) => (
             <Pressable
@@ -122,10 +231,49 @@ export default function AdminCampaignCreateScreen() {
           ))}
         </ThemedView>
 
-        <ThemedText type="small" themeColor="textSecondary">Subject</ThemedText>
+        <ThemedText type="smallBold">Audience</ThemedText>
+        <ThemedView style={styles.chipRow} accessibilityRole="radiogroup" accessibilityLabel="Audience">
+          {audienceOptions.map((option) => (
+            <Pressable
+              key={option.key}
+              style={[styles.chip, option.key === audience && styles.chipSelected]}
+              onPress={() => setAudience(option.key)}
+              accessibilityRole="radio"
+              accessibilityLabel={option.label}
+              accessibilityState={{ selected: option.key === audience }}
+            >
+              <ThemedText type="small" style={option.key === audience ? styles.chipTextSelected : undefined}>
+                {option.label}
+              </ThemedText>
+            </Pressable>
+          ))}
+        </ThemedView>
+        {isPta ? (
+          <ThemedText type="small" themeColor="textSecondary">
+            Grade, class, committee, and event targeting are available on the web.
+          </ThemedText>
+        ) : null}
+
+        <Pressable
+          style={styles.secondaryButton}
+          onPress={() => previewAudience()}
+          disabled={previewing || submitting}
+          accessibilityRole="button"
+          accessibilityLabel="Preview audience size"
+          accessibilityState={{ disabled: previewing || submitting, busy: previewing }}
+        >
+          <ThemedText type="link">{previewing ? 'Counting…' : 'Preview audience size'}</ThemedText>
+        </Pressable>
+        {previewCount != null ? (
+          <ThemedText type="small" accessibilityLiveRegion="polite">
+            {previewCount} recipient{previewCount === 1 ? '' : 's'} will receive this.
+          </ThemedText>
+        ) : null}
+
+        <ThemedText type="smallBold">Subject</ThemedText>
         <TextInput style={styles.input} value={subject} onChangeText={setSubject} accessibilityLabel="Subject" />
 
-        <ThemedText type="small" themeColor="textSecondary">Message</ThemedText>
+        <ThemedText type="smallBold">Message</ThemedText>
         <TextInput style={[styles.input, styles.multiline]} value={body} onChangeText={setBody} accessibilityLabel="Message body" multiline />
 
         {error ? (
@@ -146,7 +294,7 @@ export default function AdminCampaignCreateScreen() {
 
         <Pressable
           style={[styles.button, submitting && styles.buttonDisabled]}
-          onPress={() => submit(true)}
+          onPress={confirmAndSend}
           disabled={submitting}
           accessibilityRole="button"
           accessibilityLabel="Send now"
@@ -189,13 +337,16 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.one,
+    minHeight: MinTouchTarget,
+    justifyContent: 'center',
   },
+  // Slate selection, not green: the composer is an admin-workspace surface.
   chipSelected: {
-    backgroundColor: '#047857',
-    borderColor: '#047857',
+    backgroundColor: WorkspaceColors.adminAccent,
+    borderColor: WorkspaceColors.adminAccent,
   },
   chipTextSelected: {
-    color: '#fff',
+    color: WorkspaceColors.adminHeaderText,
   },
   error: {
     color: '#B42318',
@@ -207,7 +358,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.two,
   },
   button: {
-    backgroundColor: '#047857',
+    backgroundColor: WorkspaceColors.adminAccent,
     borderRadius: 10,
     paddingVertical: Spacing.three,
     alignItems: 'center',
@@ -222,3 +373,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+export default requireAdminCapability('manageCommunications', 'communications administration', AdminCampaignCreateScreen);
