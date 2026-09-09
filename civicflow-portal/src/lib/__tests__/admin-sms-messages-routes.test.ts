@@ -37,6 +37,15 @@ vi.mock("@/lib/subscription-gate", () => ({
   }),
 }));
 
+// The canonical send authorization has its own suite
+// (sms-send-authorization.test.ts) and its wiring into retries is covered by
+// sms-queue.test.ts — here it defaults to allowed so the route mechanics are
+// what's under test.
+const authorizeSmsSend = vi.fn();
+vi.mock("@/lib/sms-send-authorization", () => ({
+  authorizeSmsSend: (...args: unknown[]) => authorizeSmsSend(...args),
+}));
+
 import { POST as retry } from "@/app/api/admin/sms/messages/[id]/retry/route";
 import { POST as cancel } from "@/app/api/admin/sms/messages/[id]/cancel/route";
 
@@ -51,6 +60,7 @@ describe("POST /api/admin/sms/messages/[id]/retry", () => {
     updateSmsMessage.mockReset();
     updateManySmsMessage.mockReset();
     sendSms.mockReset();
+    authorizeSmsSend.mockReset().mockResolvedValue({ allowed: true, normalizedPhone: "+15551234567" });
     createAuditEvent.mockClear();
   });
 
@@ -107,6 +117,28 @@ describe("POST /api/admin/sms/messages/[id]/retry", () => {
     expect(updateSmsMessage).toHaveBeenCalledWith({
       where: { id: "msg-1" },
       data: { status: "FAILED", errorMessage: "Still failing" },
+    });
+  });
+
+  it("COMPLIANCE: the manual Retry button honors a send-authorization denial (e.g. STOP after the original failure) — no Twilio call", async () => {
+    findUniqueSmsMessage.mockResolvedValueOnce({
+      id: "msg-1",
+      status: "FAILED",
+      phone: "+15551234567",
+      body: "hi",
+      organizationId: "org-1",
+      memberId: "member-1",
+    });
+    updateManySmsMessage.mockResolvedValueOnce({ count: 1 });
+    authorizeSmsSend.mockResolvedValueOnce({ allowed: false, reason: "Member opted out of SMS." });
+    updateSmsMessage.mockResolvedValueOnce({ id: "msg-1", status: "FAILED" });
+
+    await retry(new Request("https://x"), params);
+
+    expect(sendSms).not.toHaveBeenCalled();
+    expect(updateSmsMessage).toHaveBeenCalledWith({
+      where: { id: "msg-1" },
+      data: { status: "FAILED", errorMessage: "Member opted out of SMS." },
     });
   });
 

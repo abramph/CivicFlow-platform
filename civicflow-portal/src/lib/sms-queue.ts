@@ -1,6 +1,7 @@
 import type { SmsMessage } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { sendSms } from "@/lib/sms";
+import { authorizeSmsSend } from "@/lib/sms-send-authorization";
 import { resolveOrganizationAccess } from "@/lib/subscription-gate";
 
 const BATCH_SIZE = 50;
@@ -19,9 +20,21 @@ const BATCH_SIZE = 50;
  * retries it forever and so it's visible in the admin SMS message list;
  * resuming it is then an explicit manual Retry click after the organization
  * resubscribes, never an automatic backlog blast.
+ *
+ * COMPLIANCE gate (2026-09 audit): beyond the subscription check, every
+ * retry re-runs the full canonical send authorization (authorizeSmsSend) —
+ * entitlement/add-on status, tenant-scoped member identity, consent, and
+ * STOP state are all re-resolved at retry time. A member who texted STOP
+ * after the original attempt failed, an org whose add-on was deactivated,
+ * or a recipient who was removed from the organization (memberId nulled via
+ * onDelete: SetNull) must never be reachable through Retry or the cron
+ * sweep. Twilio is not called for any blocked row; the row is FAILED with
+ * the same auditable reason convention used at initial send time. Retries
+ * always pass required:false — the original "required" flag is not
+ * persisted, so the stricter preference rule applies (fail closed).
  */
 export async function attemptSmsMessageResend(
-  message: Pick<SmsMessage, "id" | "phone" | "body" | "organizationId">
+  message: Pick<SmsMessage, "id" | "phone" | "body" | "organizationId" | "memberId">
 ): Promise<SmsMessage> {
   const access = await resolveOrganizationAccess(message.organizationId);
   if (!access.allowed) {
@@ -31,7 +44,21 @@ export async function attemptSmsMessageResend(
     });
   }
 
-  const result = await sendSms({ to: message.phone, body: message.body });
+  const authorization = await authorizeSmsSend({
+    organizationId: message.organizationId,
+    memberId: message.memberId,
+    phone: message.phone,
+    required: false,
+    requireMember: true,
+  });
+  if (!authorization.allowed) {
+    return prisma.smsMessage.update({
+      where: { id: message.id },
+      data: { status: "FAILED", errorMessage: authorization.reason },
+    });
+  }
+
+  const result = await sendSms({ to: authorization.normalizedPhone, body: message.body });
   return prisma.smsMessage.update({
     where: { id: message.id },
     data: result.sent

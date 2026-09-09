@@ -1,8 +1,8 @@
 import type { SmsMessage } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { normalizeToE164 } from "@/lib/phone";
-import { getSmsEntitlement, recordSmsUsage } from "@/lib/sms-entitlement";
-import { isSmsConfigured, sendSms } from "@/lib/sms";
+import { recordSmsUsage } from "@/lib/sms-entitlement";
+import { sendSms } from "@/lib/sms";
+import { authorizeSmsSend } from "@/lib/sms-send-authorization";
 import { SMS_ADDON } from "@/lib/sms-pricing";
 
 const OPT_OUT_SUFFIX = "Reply STOP to opt out.";
@@ -59,41 +59,19 @@ function failedRow(params: SendMemberSmsParams, errorMessage: string) {
  * Sends a single SMS to a member, recording every attempt. Never throws —
  * every failure mode (unconfigured, no entitlement, invalid phone, opted
  * out, Twilio error) is captured as a FAILED SmsMessage row instead.
+ *
+ * All eligibility rules live in authorizeSmsSend (lib/sms-send-authorization)
+ * — the same canonical decision the retry/cron path applies — so a rule can
+ * never exist here without also protecting retries.
  */
 export async function sendMemberSms(params: SendMemberSmsParams): Promise<SmsMessage> {
   const { organizationId, memberId, phone, body, campaignId, sentById, required } = params;
 
-  if (!(await isSmsConfigured())) {
-    return failedRow(params, "SMS delivery is not configured.");
+  const authorization = await authorizeSmsSend({ organizationId, memberId, phone, required });
+  if (!authorization.allowed) {
+    return failedRow(params, authorization.reason);
   }
-
-  const entitlement = await getSmsEntitlement(organizationId);
-  if (!entitlement.allowed) {
-    return failedRow(params, entitlement.reason ?? "SMS is not enabled for this organization.");
-  }
-
-  const normalizedPhone = normalizeToE164(phone);
-  if (!normalizedPhone) {
-    return failedRow(params, "Invalid phone number.");
-  }
-
-  if (memberId) {
-    const member = await prisma.orgMember.findUnique({
-      where: { id: memberId },
-      select: { commsSmsEnabled: true, smsOptedOutAt: true, smsOptIn: true },
-    });
-    if (member) {
-      if (!member.smsOptIn) {
-        return failedRow(params, "Member has not opted in to SMS.");
-      }
-      if (member.smsOptedOutAt) {
-        return failedRow(params, "Member opted out of SMS.");
-      }
-      if (!required && !member.commsSmsEnabled) {
-        return failedRow(params, "Member has SMS notifications turned off.");
-      }
-    }
-  }
+  const normalizedPhone = authorization.normalizedPhone;
 
   const finalBody = withOptOutSuffix(body);
 
