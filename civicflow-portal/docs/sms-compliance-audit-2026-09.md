@@ -69,7 +69,13 @@ paths skip E.164 normalization.
    `sms_admin.addon_activated` / `sms_admin.addon_deactivated` audit events
    carry actor, organization, reason, quota, and before/after state. The
    route never touches Stripe (no fake customer, subscription, invoice, or
-   line item).
+   line item). Every genuine inactive→active enrollment (including
+   reactivation) initializes a clean monthly billing window —
+   `smsBillingPeriodStart` = now (UTC), `End` = one month later, usage and
+   threshold-notification state zeroed — and is rejected unless the
+   resulting monthly quota is positive; idempotent re-sends of
+   `smsAddOnActive: true` never reset a live period, and deactivation
+   preserves historical counters.
 3. **Hard-stop quota, concurrency-safe** (owner-selected Option A,
    `SMS_OVERAGE_POLICY = "hard_stop"`): the quota is enforced by a
    **database-atomic reservation** — `reserveSmsAllowance()` issues one
@@ -77,16 +83,31 @@ paths skip E.164 normalization.
    (row-locked by Postgres) immediately before each Twilio call on both send
    paths, so with N concurrent workers and R remaining allowance exactly R
    sends can reach Twilio (integration-tested at the exact 999/1,000
-   boundary with 20 racers). A synchronous Twilio failure releases its unit
-   (`releaseSmsAllowance()`, floor-guarded at zero); a crash between
-   reservation and send conservatively consumes the unit — we accept losing
-   capacity over any risk of an over-quota send, and avoiding that would
-   need a per-message reservation ledger (schema change, not authorized).
-   The same statement atomically rolls an elapsed billing period
-   (reset-and-claim), and `getSmsEntitlement`'s lazy rollover is now
-   conditioned on the exact period it read, so rollover cannot race a
-   reservation into an over- or under-count. Retried sends consume quota
-   like first sends (the original failure released its unit). All
+   boundary with 20 racers). A successful reservation returns a
+   **period-bound token** (`SmsAllowanceReservation`: the organization plus
+   the exact post-update `smsBillingPeriodStart`/`End` the unit was charged
+   into, straight from the UPDATE's `RETURNING`); a synchronous Twilio
+   failure releases against that token only — `releaseSmsAllowance()`
+   decrements solely where the organization AND both period columns still
+   match (`IS NOT DISTINCT FROM`, so NULL periods compare), so a stale
+   release from before a rollover or webhook reconciliation affects zero
+   rows and can never erase a newer period's successful send or reopen
+   capacity (integration-tested: reserve in period A → roll into period B →
+   send in B → release A → B still shows its one used unit). Floor-guarded
+   at zero as before. A crash between reservation and send conservatively
+   consumes the unit — we accept losing capacity over any risk of an
+   over-quota send, and avoiding that would need a per-message reservation
+   ledger (schema change, not authorized). The same statement atomically
+   rolls an elapsed billing period (reset-and-claim) and defensively
+   initializes a legacy NULL-period row as a fresh month (claimed as unit
+   #1, zero-limit rows still refused); `getSmsEntitlement`'s lazy rollover
+   is conditioned on the exact period it read, and a check that LOSES that
+   CAS refetches the winner's fresh counter instead of keeping the stale
+   at-limit value — concurrent entitlement checks during rollover cannot
+   falsely strand available capacity (integration-tested), and the atomic
+   reservation remains the sole final quota authority immediately before
+   Twilio. Retried sends consume quota like first sends (the original
+   failure released its unit). All
    customer-facing $0.02/message overage promises were removed (billing
    card, 100%-threshold email, billing API response, docs); approved
    wording: "$10/month includes up to 1,000 messages. Sending pauses when
@@ -109,8 +130,14 @@ No database migration is required: every field used already exists
 - No organization enrollment or SMS entitlement grant.
 - No live SMS.
 - No mobile code change (would invalidate the shipped 1.1.0 artifacts).
-- No customer-facing pricing copy change.
-- No decision on the overage policy — that is the owner's.
+- No schema migration (the reservation's crash-consumes-capacity tradeoff is
+  accepted precisely to avoid a reservation-ledger table).
+
+(Two earlier bullets — "no customer-facing pricing copy change" and "no
+decision on the overage policy" — described the pre-decision state and no
+longer apply: the owner explicitly selected Option A on 2026-09-08, and the
+approved hard-stop wording replaced the $0.02 overage copy on this branch.
+See `docs/sms-overage-policy-options.md`.)
 
 ## Later production sequence (owner-authorized, in order — none performed here)
 

@@ -101,7 +101,10 @@ Usage past `smsMonthlyLimit` is a **hard stop** (owner-selected Option A,
 docs/sms-overage-policy-options.md): a database-atomic allowance reservation
 (`reserveSmsAllowance()` in `src/lib/sms-entitlement.ts`) runs immediately before every
 organization-message Twilio call, so sending pauses at the allowance even under concurrent
-sends — there is no customer-facing overage billing of any kind. The legacy
+sends — there is no customer-facing overage billing of any kind. Each successful reservation
+returns a period-bound token (org + the exact billing-period window the unit was charged
+into); a synchronous Twilio failure releases against that token only, so a release that
+straddles a period rollover is a no-op instead of corrupting the new period's count. The legacy
 `smsOverageRateCents` column and the Platform Admin dashboard's cost figures are internal
 tooling only and must not be surfaced to customers as billing behavior. Raising a specific
 org's limit is a super-admin action (SMS Administration → organizations).
