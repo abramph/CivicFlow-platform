@@ -13,7 +13,7 @@ document by design.
 | 2 | **Missing entitlement re-check on retries.** The retry path checked only the base subscription gate, not `getSmsEntitlement` — an org whose add-on was deactivated or suspended could still push queued messages out. | `src/lib/sms-queue.ts` | **Release blocker** — fixed here |
 | 3 | **Billing-exempt enrollment defect.** `getSmsEntitlement` required a live `Subscription` row and never consulted `Organization.billingExempt`, so a billing-exempt org (all demo orgs) could never send SMS even after an explicit super-admin enrollment — the admin toggle produced a grant the send path then denied. | `src/lib/sms-entitlement.ts` | **Release blocker** for the demo-org enrollment plan — fixed here |
 | 4 | **`STRIPE_PRICE_SMS_ADDON_MONTHLY` missing in production.** The paid purchase flow throws at runtime (fail-safe: before any DB write). The live Stripe product/price exist; only the env binding is absent. | production app spec (verified 2026-09-08); `src/lib/stripe.ts` | **Release blocker** for paid activation — env-var change documented below, deliberately **not** applied |
-| 5 | **Uninvoiced $0.02 overage.** Usage above `smsMonthlyLimit` was metered (`smsUsedThisPeriod`) but never billed, while the UI advertises $0.02/message overage — a silent unbilled soft cap. | `src/lib/sms-entitlement.ts`, `src/components/app/SmsAddOnCard.tsx` | **Release blocker** (pricing integrity) — fail-closed decision gate here; final policy is an owner decision (`docs/sms-overage-policy-options.md`) |
+| 5 | **Uninvoiced $0.02 overage.** Usage above `smsMonthlyLimit` was metered (`smsUsedThisPeriod`) but never billed, while the UI advertised $0.02/message overage — a silent unbilled soft cap. | `src/lib/sms-entitlement.ts`, `src/components/app/SmsAddOnCard.tsx` | **Release blocker** (pricing integrity) — RESOLVED: owner selected Option A (hard stop) 2026-09-08; concurrency-safe enforcement + all overage copy removed on this branch (`docs/sms-overage-policy-options.md`) |
 | 6 | **Stale internal toll-free verification tracker.** `PlatformSmsSettings.tollFreeVerificationStatus` says NOT_SUBMITTED with a null verification SID, while Twilio's authoritative status is approved — the super-admin SMS dashboard shows a false "unverified" banner. | DB singleton (verified read-only 2026-09-08) | **Cosmetic/operational** — refresh procedure below; no mutation in this branch |
 | 7 | **Mobile composer capability gap.** The mobile campaign composer hardcodes SMS/EMAIL_AND_SMS as selectable and never fetches entitlement; a non-entitled org's admin discovers the block only via the server's ValidationError. Server enforcement is intact. | `civicflow-mobile/src/app/admin-campaigns/new.tsx` | **Deferred UX** — next mobile release only (see below); no mobile change in this branch |
 
@@ -28,46 +28,77 @@ paths skip E.164 normalization.
 ## What this branch changes
 
 1. **One canonical send-time decision** — `src/lib/sms-send-authorization.ts`
-   (`authorizeSmsSend`). Applied immediately before every Twilio call:
+   (`authorizeSmsSend`). Applied immediately before every
+   **organization-message** Twilio call:
    - initial campaign sends via `sendMemberSms` (`src/lib/sms-service.ts`);
    - manual admin Retry and the cron queue sweep via
      `attemptSmsMessageResend` (`src/lib/sms-queue.ts`), which both routes
      already funnel through.
    Every send attempt re-resolves fresh: platform configuration, org
    entitlement (platform switch, add-on, suspension, subscription or
-   billing-exempt eligibility, quota policy), E.164 normalization,
-   tenant-scoped recipient identity (`findFirst({ id, organizationId })` — a
-   removed or cross-tenant member is a denial, and a retry row whose
-   `memberId` was nulled by member deletion is blocked as unverifiable), and
-   consent (opt-in hard, STOP hard — including for `required` sends and all
-   retries; the preference toggle alone is bypassable by `required`).
+   billing-exempt eligibility, quota pre-check), E.164 normalization,
+   tenant-scoped recipient identity, and consent (opt-in hard, STOP hard —
+   including for `required` sends and all retries; the preference toggle
+   alone is bypassable by `required`). **A member is mandatory:**
+   `SendMemberSmsParams.memberId` is a required field, a null memberId (or a
+   removed/cross-tenant member, or a retry row whose `memberId` was nulled by
+   member deletion) is always a denial — organization messaging without a
+   verifiable roster member never reaches Twilio, on either path.
    Denials are recorded through the existing FAILED-row/`errorMessage`
    convention; Twilio is never called for a blocked row; the retry route's
    atomic FAILED→RETRYING claim (concurrency guard) is untouched; no phone
    numbers or bodies are logged.
-2. **Billing-exempt semantics** (`src/lib/sms-entitlement.ts`):
-   `billingExempt` now satisfies only the base-subscription prerequisite.
-   Explicit `smsAddOnActive` enrollment through the super-admin endpoint is
-   still required; exemption alone never grants SMS. Because entitlement is
-   recomputed live per send, removing an org's exemption reconciles
-   immediately (tested). The super-admin endpoint
-   (`src/app/api/admin/sms/organizations/[id]/route.ts`) now records
-   distinct `sms_admin.addon_activated` / `sms_admin.addon_deactivated`
-   audit events carrying actor, organization, reason, quota, and before/after
-   state — and it still never touches Stripe (no fake customer, subscription,
-   invoice, or line item for exempt orgs).
-3. **Overage decision gate** (`src/lib/sms-pricing.ts`
-   `SMS_OVERAGE_POLICY = "unresolved"`): new activations are refused on both
-   the paid self-serve route and the super-admin route, and send-time quota
-   hard-stops at `smsMonthlyLimit`, until the owner picks Option A or B in
-   `docs/sms-overage-policy-options.md`. Customer-facing price copy is
-   unchanged.
+   *Scope note:* MFA sign-in codes, login verification, and user-requested
+   phone-verification texts intentionally use the lower-level transactional
+   `sendSms()` (platform-wide switches only) — they are outside the
+   organization add-on entitlement and this member-consent model, since
+   their recipient is the authenticating user's own just-provided number.
+2. **Billing-exempt semantics + Stripe-bypass guard**
+   (`src/lib/sms-entitlement.ts`,
+   `src/app/api/admin/sms/organizations/[id]/route.ts`): `billingExempt`
+   satisfies only the base-subscription prerequisite; explicit
+   `smsAddOnActive` enrollment is still required; exemption alone never
+   grants SMS, and removing an org's exemption reconciles immediately
+   because entitlement is recomputed live (tested). The super-admin endpoint
+   is now **enforced** (not just documented) as the exempt-orgs-only
+   enrollment path: it 404s on a nonexistent organization, refuses to newly
+   activate a non-exempt organization (those must purchase via the Stripe
+   subscription-item flow at `/api/billing/sms-addon`), keeps already-active
+   re-sends idempotent without opening a bypass, and requires a trimmed
+   non-empty reason (≤500 chars) for every activation/deactivation. Distinct
+   `sms_admin.addon_activated` / `sms_admin.addon_deactivated` audit events
+   carry actor, organization, reason, quota, and before/after state. The
+   route never touches Stripe (no fake customer, subscription, invoice, or
+   line item).
+3. **Hard-stop quota, concurrency-safe** (owner-selected Option A,
+   `SMS_OVERAGE_POLICY = "hard_stop"`): the quota is enforced by a
+   **database-atomic reservation** — `reserveSmsAllowance()` issues one
+   conditional `UPDATE ... WHERE smsUsedThisPeriod < smsMonthlyLimit`
+   (row-locked by Postgres) immediately before each Twilio call on both send
+   paths, so with N concurrent workers and R remaining allowance exactly R
+   sends can reach Twilio (integration-tested at the exact 999/1,000
+   boundary with 20 racers). A synchronous Twilio failure releases its unit
+   (`releaseSmsAllowance()`, floor-guarded at zero); a crash between
+   reservation and send conservatively consumes the unit — we accept losing
+   capacity over any risk of an over-quota send, and avoiding that would
+   need a per-message reservation ledger (schema change, not authorized).
+   The same statement atomically rolls an elapsed billing period
+   (reset-and-claim), and `getSmsEntitlement`'s lazy rollover is now
+   conditioned on the exact period it read, so rollover cannot race a
+   reservation into an over- or under-count. Retried sends consume quota
+   like first sends (the original failure released its unit). All
+   customer-facing $0.02/message overage promises were removed (billing
+   card, 100%-threshold email, billing API response, docs); approved
+   wording: "$10/month includes up to 1,000 messages. Sending pauses when
+   the monthly allowance is reached; contact support to increase your
+   limit." The `smsOverageRateCents` column remains internal-only.
 4. **Stripe config readiness**: `STRIPE_PRICE_SMS_ADDON_MONTHLY` added to the
    env schema (`src/lib/env.ts`, optional — required only by the paid flow)
    and `.env.example`; fail-closed behavior of `smsAddOnPriceId()` /
    `isSmsAddOnPriceId()` is tested; the GET billing endpoint is tested to
-   never expose Stripe identifiers to clients; audited billing-exempt
-   enrollment is verified to work with no Stripe configuration at all.
+   never expose Stripe identifiers (or the legacy overage rate) to clients;
+   audited billing-exempt enrollment is verified to work with no Stripe
+   configuration at all.
 
 No database migration is required: every field used already exists
 (`Organization.billingExempt`, `OrganizationSmsSettings.*`, `SmsMessage.memberId`).
@@ -83,8 +114,9 @@ No database migration is required: every field used already exists
 
 ## Later production sequence (owner-authorized, in order — none performed here)
 
-1. **Owner decides the overage policy** (see `docs/sms-overage-policy-options.md`)
-   and the chosen `SMS_OVERAGE_POLICY` value ships in a follow-up commit.
+1. ~~Owner decides the overage policy~~ **DONE 2026-09-08: Option A
+   (hard stop) selected and implemented on this branch**
+   (`docs/sms-overage-policy-options.md`).
 2. **Merge this PR** and deploy the portal normally.
 3. **Env change (only if/when paid self-serve purchase should open):** in the
    DigitalOcean app spec for the portal, add env var
