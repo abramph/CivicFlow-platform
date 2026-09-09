@@ -1,11 +1,21 @@
 # SMS Overage Billing — Owner Decision (Option A vs. Option B)
 
-Status: **UNRESOLVED** — `SMS_OVERAGE_POLICY = "unresolved"` in
-`src/lib/sms-pricing.ts`. While unresolved, the add-on cannot be newly
-activated anywhere (paid route or super-admin route) and sending hard-stops at
-the monthly limit. Nothing in this document changes customer-facing copy; the
-advertised terms remain $10/month, 1,000 included messages, $0.02/message
-overage.
+Status: **RESOLVED — Option A selected by the owner on 2026-09-08.**
+`SMS_OVERAGE_POLICY = "hard_stop"` in `src/lib/sms-pricing.ts`. Sending stops
+at the monthly allowance, enforced by a database-atomic reservation
+(`reserveSmsAllowance()` in `src/lib/sms-entitlement.ts`) immediately before
+every organization-message Twilio call — strict even under concurrent
+senders (proven by `sms-quota-reservation.integration.test.ts` at the exact
+999-of-1,000 boundary with 20 racers). All customer-facing $0.02/message
+overage promises were removed (billing card, usage-threshold emails, billing
+API response, docs); the approved customer wording is:
+
+> "$10/month includes up to 1,000 messages. Sending pauses when the monthly
+> allowance is reached; contact support to increase your limit."
+
+The `smsOverageRateCents` DB column and the super-admin cost dashboard
+remain as internal-only tooling, never presented as billing behavior.
+Option B's design below is retained for future reference only.
 
 Background: the 2026-09 audit found overage was metered
 (`OrganizationSmsSettings.smsUsedThisPeriod`) but never invoiced — revenue
@@ -76,7 +86,7 @@ Implementation-ready design:
 - **Effort:** meaningful — new Stripe price + env + migration + cron +
   webhook reconciliation + tests (est. several days incl. review).
 
-## Recommendation
+## Recommendation (as presented before the decision)
 
 **Option A now, Option B later if overage demand materializes.** Rationale:
 (1) safety — A is fail-closed and cannot mis-bill anyone; (2) complexity — A
@@ -86,8 +96,8 @@ has ever sent a message), so B's revenue upside is currently hypothetical
 while its leakage-prevention value is moot under A (nothing unbilled exists);
 (4) customer clarity — "you used your 1,000 included messages; raise your
 limit or wait for renewal" is clearer than a surprise metered line item.
-The one open item under A is the $0.02 copy on the billing card — owner must
-approve the replacement wording before activation opens.
-
-**This recommendation is not a decision.** Until the owner selects an option,
-`SMS_OVERAGE_POLICY` stays `"unresolved"` and the add-on remains unavailable.
+**Outcome:** the owner selected Option A on 2026-09-08 and approved the
+hard-stop wording above; the policy constant, enforcement, and copy changes
+shipped together on `fix/sms-addon-compliance-and-entitlement` (PR #196).
+Moving to Option B later requires a new explicit owner decision AND the
+implementation in §Option B first.

@@ -6,7 +6,6 @@ interface SmsAddOnStatus {
   smsAddOnActive: boolean;
   smsMonthlyLimit: number;
   smsUsedThisPeriod: number;
-  smsOverageRateCents: number;
   smsBillingPeriodEnd: string | null;
   monthlyPriceCents: number;
   includedMessagesPerMonth: number;
@@ -68,9 +67,9 @@ export function SmsAddOnCard({
           <p className="font-semibold text-slate-900">SMS Add-on</p>
           <p className="mt-1 text-sm text-slate-600">
             Send dues reminders, announcements, and event notices by text message. $
-            {(status.monthlyPriceCents / 100).toFixed(0)}/mo, includes{" "}
-            {status.includedMessagesPerMonth.toLocaleString()} messages, then $
-            {(status.smsOverageRateCents / 100).toFixed(2)}/message overage.
+            {(status.monthlyPriceCents / 100).toFixed(0)}/month includes up to{" "}
+            {status.includedMessagesPerMonth.toLocaleString()} messages. Sending pauses when the monthly
+            allowance is reached; contact support to increase your limit.
           </p>
         </div>
         <span
@@ -83,24 +82,28 @@ export function SmsAddOnCard({
       </div>
 
       {status.smsAddOnActive ? (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <div>
-            <p className="text-xs text-slate-500">Monthly limit</p>
-            <p className="text-lg font-semibold text-slate-900">{status.smsMonthlyLimit.toLocaleString()}</p>
+        <>
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <p className="text-xs text-slate-500">Monthly limit</p>
+              <p className="text-lg font-semibold text-slate-900">{status.smsMonthlyLimit.toLocaleString()}</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-500">Used this period</p>
+              <p className="text-lg font-semibold text-slate-900">{status.smsUsedThisPeriod.toLocaleString()}</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-500">Remaining</p>
+              <p className="text-lg font-semibold text-slate-900">{remaining.toLocaleString()}</p>
+            </div>
           </div>
-          <div>
-            <p className="text-xs text-slate-500">Used this period</p>
-            <p className="text-lg font-semibold text-slate-900">{status.smsUsedThisPeriod.toLocaleString()}</p>
-          </div>
-          <div>
-            <p className="text-xs text-slate-500">Remaining</p>
-            <p className="text-lg font-semibold text-slate-900">{remaining.toLocaleString()}</p>
-          </div>
-          <div>
-            <p className="text-xs text-slate-500">Overage rate</p>
-            <p className="text-lg font-semibold text-slate-900">${(status.smsOverageRateCents / 100).toFixed(2)}/msg</p>
-          </div>
-        </div>
+          {remaining === 0 ? (
+            <p className="mt-3 text-sm font-medium text-amber-700">
+              Monthly allowance reached — sending is paused until your next billing period. Contact support to
+              increase your limit.
+            </p>
+          ) : null}
+        </>
       ) : null}
 
       {error ? <p className="mt-3 text-sm text-red-600">{error}</p> : null}

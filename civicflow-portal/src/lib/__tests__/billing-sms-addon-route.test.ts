@@ -46,7 +46,7 @@ describe("/api/billing/sms-addon", () => {
     createAuditEvent.mockClear();
   });
 
-  it("GET reports quota/pricing numbers only — the Stripe price ID is never exposed to clients", async () => {
+  it("GET reports quota/pricing numbers only — no Stripe identifiers and no legacy overage rate presented to clients", async () => {
     findUniqueOrgSmsSettings.mockResolvedValueOnce({
       smsAddOnActive: true,
       smsMonthlyLimit: 1000,
@@ -60,25 +60,25 @@ describe("/api/billing/sms-addon", () => {
     const json = await res.json();
 
     expect(res.status).toBe(200);
-    expect(JSON.stringify(json)).not.toMatch(/price_|si_/);
+    expect(JSON.stringify(json)).not.toMatch(/price_|si_|[Oo]verage/);
     expect(Object.keys(json.data).sort()).toEqual([
       "includedMessagesPerMonth",
       "monthlyPriceCents",
       "smsAddOnActive",
       "smsBillingPeriodEnd",
       "smsMonthlyLimit",
-      "smsOverageRateCents",
       "smsUsedThisPeriod",
     ]);
   });
 
-  it("OWNER GATE: POST refuses paid activation while the overage billing policy is unresolved — before any Stripe or DB write", async () => {
+  it("POST is open under the resolved hard-stop policy but still requires a paid Stripe subscription first — fail-safe order, no Stripe call, no entitlement write", async () => {
+    findFirstSubscription.mockResolvedValueOnce(null);
+
     const res = await POST();
 
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toMatch(/overage billing policy/);
-    expect(findFirstSubscription).not.toHaveBeenCalled();
+    expect(json.error).toMatch(/Subscribe to a paid plan/);
     expect(addSmsAddOnToSubscription).not.toHaveBeenCalled();
     expect(upsertOrgSmsSettings).not.toHaveBeenCalled();
     expect(createAuditEvent).not.toHaveBeenCalled();

@@ -45,8 +45,10 @@ export async function notifyOrgAdminsOfSmsUsageThresholds(): Promise<{ notified:
     const subject = `${orgName} has used ${crossedThreshold}% of its monthly SMS allowance`;
     const text = [
       `${orgName} has used ${settings.smsUsedThisPeriod} of ${settings.smsMonthlyLimit} SMS messages this billing period (${crossedThreshold}%+).`,
+      // Hard-stop policy (docs/sms-overage-policy-options.md): there is no
+      // overage billing — sending pauses at the allowance.
       crossedThreshold >= 100
-        ? "Additional messages will be billed as overage."
+        ? "Sending is paused until your next billing period. Contact support to increase your limit."
         : "Consider reviewing usage before reaching the monthly limit.",
     ].join(" ");
 
