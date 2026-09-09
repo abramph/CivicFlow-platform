@@ -3,7 +3,7 @@ import { withApiErrorHandling } from "@/lib/api-route";
 import { createAuditEvent } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 import { addSmsAddOnToSubscription, removeSmsAddOnFromSubscription } from "@/lib/stripe";
-import { SMS_ADDON } from "@/lib/sms-pricing";
+import { SMS_ADDON, SMS_OVERAGE_POLICY } from "@/lib/sms-pricing";
 import { ValidationError } from "@/lib/validation";
 
 export async function GET() {
@@ -29,6 +29,15 @@ export async function GET() {
 export async function POST() {
   return withApiErrorHandling(async () => {
     const { session, organizationId } = await requirePermission("billing:manage", "throw");
+
+    // Owner decision gate (docs/sms-overage-policy-options.md): the
+    // advertised $0.02/message overage is metered but not yet invoiced, so
+    // new activations are blocked until the overage billing policy is
+    // decided. Fail-closed on purpose — remove only via an explicit
+    // SMS_OVERAGE_POLICY decision in lib/sms-pricing.ts.
+    if (SMS_OVERAGE_POLICY === "unresolved") {
+      throw new ValidationError("The SMS add-on is temporarily unavailable while its overage billing policy is finalized.");
+    }
 
     const subscription = await prisma.subscription.findFirst({
       where: { organizationId, status: { in: ["active", "trialing", "past_due"] } },
