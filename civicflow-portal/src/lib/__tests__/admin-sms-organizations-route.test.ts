@@ -11,11 +11,15 @@ vi.mock("@/lib/audit", () => ({ createAuditEvent: (...args: unknown[]) => create
 
 const upsertOrgSmsSettings = vi.fn();
 const findUniqueOrgSmsSettings = vi.fn();
+const findUniqueOrganization = vi.fn();
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     organizationSmsSettings: {
       upsert: (...args: unknown[]) => upsertOrgSmsSettings(...args),
       findUnique: (...args: unknown[]) => findUniqueOrgSmsSettings(...args),
+    },
+    organization: {
+      findUnique: (...args: unknown[]) => findUniqueOrganization(...args),
     },
   },
 }));
@@ -37,41 +41,128 @@ describe("PUT /api/admin/sms/organizations/[id]", () => {
     upsertOrgSmsSettings.mockResolvedValue({ id: "settings-1", smsAddOnActive: false, smsMonthlyLimit: 0 });
     findUniqueOrgSmsSettings.mockReset();
     findUniqueOrgSmsSettings.mockResolvedValue(null);
+    findUniqueOrganization.mockReset();
+    // Default: existing, NON-exempt organization.
+    findUniqueOrganization.mockResolvedValue({ billingExempt: false });
     createAuditEvent.mockClear();
   });
 
   it("rejects a caller who is not a platform super admin — an org cannot grant itself an entitlement", async () => {
     requireSuperAdmin.mockRejectedValueOnce(new ForbiddenError());
 
-    const res = await PUT(makeRequest({ smsAddOnActive: true }), { params: Promise.resolve({ id: "org-1" }) });
+    const res = await PUT(makeRequest({ smsAddOnActive: true, reason: "x" }), { params: Promise.resolve({ id: "org-1" }) });
 
     expect(res.status).toBe(403);
     expect(upsertOrgSmsSettings).not.toHaveBeenCalled();
     expect(createAuditEvent).not.toHaveBeenCalled();
   });
 
-  it("OWNER GATE: refuses to newly activate the add-on while the overage billing policy is unresolved", async () => {
-    findUniqueOrgSmsSettings.mockResolvedValueOnce(null); // not currently active
+  it("returns 404 for a nonexistent organization and writes nothing", async () => {
+    findUniqueOrganization.mockResolvedValueOnce(null);
 
-    const res = await PUT(makeRequest({ smsAddOnActive: true }), { params: Promise.resolve({ id: "org-1" }) });
+    const res = await PUT(makeRequest({ smsAddOnActive: true, reason: "x" }), { params: Promise.resolve({ id: "org-missing" }) });
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(404);
     const json = await res.json();
-    expect(json.error).toMatch(/overage billing policy/);
+    expect(json.error).toMatch(/not found/i);
     expect(upsertOrgSmsSettings).not.toHaveBeenCalled();
     expect(createAuditEvent).not.toHaveBeenCalled();
   });
 
-  it("re-sending smsAddOnActive:true for an ALREADY-active org is not a new activation and is not blocked", async () => {
+  it("STRIPE BYPASS GUARD: refuses to newly activate the add-on for a NON-exempt organization — paid orgs must use the Stripe flow", async () => {
+    findUniqueOrganization.mockResolvedValueOnce({ billingExempt: false });
+    findUniqueOrgSmsSettings.mockResolvedValueOnce(null); // not currently active
+
+    const res = await PUT(
+      makeRequest({ smsAddOnActive: true, reason: "trying to skip billing" }),
+      { params: Promise.resolve({ id: "org-1" }) }
+    );
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toMatch(/billing-exempt/i);
+    expect(json.error).toMatch(/Stripe/);
+    expect(upsertOrgSmsSettings).not.toHaveBeenCalled();
+    expect(createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("rejects activation with a MISSING reason", async () => {
+    findUniqueOrganization.mockResolvedValueOnce({ billingExempt: true });
+
+    const res = await PUT(makeRequest({ smsAddOnActive: true }), { params: Promise.resolve({ id: "org-1" }) });
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/reason is required/i);
+    expect(upsertOrgSmsSettings).not.toHaveBeenCalled();
+  });
+
+  it("rejects activation with a BLANK (whitespace-only) reason", async () => {
+    findUniqueOrganization.mockResolvedValueOnce({ billingExempt: true });
+
+    const res = await PUT(
+      makeRequest({ smsAddOnActive: true, reason: "   " }),
+      { params: Promise.resolve({ id: "org-1" }) }
+    );
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/reason is required/i);
+    expect(upsertOrgSmsSettings).not.toHaveBeenCalled();
+  });
+
+  it("rejects deactivation without a reason", async () => {
+    findUniqueOrgSmsSettings.mockResolvedValueOnce({ id: "settings-1", smsAddOnActive: true, smsMonthlyLimit: 1000 });
+
+    const res = await PUT(makeRequest({ smsAddOnActive: false }), { params: Promise.resolve({ id: "org-1" }) });
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/reason is required/i);
+    expect(upsertOrgSmsSettings).not.toHaveBeenCalled();
+  });
+
+  it("activates a BILLING-EXEMPT org with a reason, audits the trimmed reason + quota, and never touches Stripe", async () => {
+    findUniqueOrganization.mockResolvedValueOnce({ billingExempt: true });
+    findUniqueOrgSmsSettings.mockResolvedValueOnce(null);
+    upsertOrgSmsSettings.mockResolvedValueOnce({ id: "settings-1", smsAddOnActive: true, smsMonthlyLimit: 1000 });
+
+    const res = await PUT(
+      makeRequest({ smsAddOnActive: true, plan: "STARTER", reason: "  Controlled demo enrollment  " }),
+      { params: Promise.resolve({ id: "org-1" }) }
+    );
+
+    expect(res.status).toBe(200);
+    expect(createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: "org-1",
+        actorUserId: "user-1",
+        action: "sms_admin.addon_activated",
+        metadata: expect.objectContaining({
+          reason: "Controlled demo enrollment",
+          billingExempt: true,
+          previousAddOnActive: false,
+          newAddOnActive: true,
+          quota: 1000,
+        }),
+      })
+    );
+    // No Stripe dependency: "@/lib/stripe" is deliberately NOT mocked in this
+    // suite — any Stripe call from the route would hit the real module and
+    // throw on a missing key, failing this test.
+  });
+
+  it("re-sending smsAddOnActive:true for an ALREADY-active non-exempt org is an idempotent update, not a fresh activation — and is not blocked", async () => {
+    findUniqueOrganization.mockResolvedValueOnce({ billingExempt: false });
     findUniqueOrgSmsSettings.mockResolvedValueOnce({ id: "settings-1", smsAddOnActive: true, smsMonthlyLimit: 1000 });
     upsertOrgSmsSettings.mockResolvedValueOnce({ id: "settings-1", smsAddOnActive: true, smsMonthlyLimit: 1000 });
 
     const res = await PUT(makeRequest({ smsAddOnActive: true }), { params: Promise.resolve({ id: "org-1" }) });
 
     expect(res.status).toBe(200);
+    expect(createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "sms_admin.org_settings_updated" })
+    );
   });
 
-  it("deactivation is always allowed and writes a distinct audit action with actor, reason, and quota", async () => {
+  it("deactivation with a reason succeeds and writes the distinct audit action", async () => {
     findUniqueOrgSmsSettings.mockResolvedValueOnce({ id: "settings-1", smsAddOnActive: true, smsMonthlyLimit: 1000 });
     upsertOrgSmsSettings.mockResolvedValueOnce({ id: "settings-1", smsAddOnActive: false, smsMonthlyLimit: 1000 });
 
@@ -83,29 +174,13 @@ describe("PUT /api/admin/sms/organizations/[id]", () => {
     expect(res.status).toBe(200);
     expect(createAuditEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        organizationId: "org-1",
-        actorUserId: "user-1",
         action: "sms_admin.addon_deactivated",
-        metadata: expect.objectContaining({
-          reason: "Demo wrap-up",
-          previousAddOnActive: true,
-          newAddOnActive: false,
-          quota: 1000,
-        }),
+        metadata: expect.objectContaining({ reason: "Demo wrap-up", previousAddOnActive: true, newAddOnActive: false }),
       })
     );
   });
 
-  it("never touches Stripe — the route has no Stripe dependency, so exempt enrollment cannot create fake billing objects", async () => {
-    // Import-level assertion: the route module's imports are prisma/audit/
-    // auth/pricing/validation only. A Stripe call would require mocking
-    // "@/lib/stripe" here; this file deliberately does not, and the suite
-    // fails on any unmocked Stripe usage.
-    await PUT(makeRequest({ suspended: true }), { params: Promise.resolve({ id: "org-1" }) });
-    expect(upsertOrgSmsSettings).toHaveBeenCalled();
-  });
-
-  it("auto-fills limit/overage/price from the plan tier for STARTER", async () => {
+  it("auto-fills limit/overage/price from the plan tier for STARTER (ordinary edit, no reason needed)", async () => {
     await PUT(makeRequest({ plan: "STARTER" }), { params: Promise.resolve({ id: "org-1" }) });
 
     expect(upsertOrgSmsSettings).toHaveBeenCalledWith({
