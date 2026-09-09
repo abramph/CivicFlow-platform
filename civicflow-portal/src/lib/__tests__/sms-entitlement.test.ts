@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const findUniqueSmsSettings = vi.fn();
 const findFirstSubscription = vi.fn();
+const findUniqueOrganization = vi.fn();
 const updateSmsSettings = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("@/lib/prisma", () => ({
@@ -12,6 +13,9 @@ vi.mock("@/lib/prisma", () => ({
     },
     subscription: {
       findFirst: (...args: unknown[]) => findFirstSubscription(...args),
+    },
+    organization: {
+      findUnique: (...args: unknown[]) => findUniqueOrganization(...args),
     },
   },
 }));
@@ -27,9 +31,12 @@ describe("getSmsEntitlement", () => {
   beforeEach(() => {
     findUniqueSmsSettings.mockReset();
     findFirstSubscription.mockReset();
+    findUniqueOrganization.mockReset();
     updateSmsSettings.mockClear();
     getPlatformSmsSettings.mockReset();
     getPlatformSmsSettings.mockResolvedValue({ orgMessagingEnabled: true });
+    // Default: a normal (non-exempt) organization.
+    findUniqueOrganization.mockResolvedValue({ billingExempt: false });
   });
 
   it("denies every org when org messaging is disabled platform-wide", async () => {
@@ -72,6 +79,34 @@ describe("getSmsEntitlement", () => {
     expect(result.allowed).toBe(false);
   });
 
+  it("deactivating the add-on removes the entitlement immediately — the check is recomputed live, never cached", async () => {
+    const settingsRow = {
+      smsAddOnActive: true,
+      smsMonthlyLimit: 1000,
+      smsUsedThisPeriod: 10,
+      smsBillingPeriodEnd: new Date(Date.now() + 100_000),
+    };
+    findUniqueSmsSettings.mockResolvedValueOnce(settingsRow);
+    findFirstSubscription.mockResolvedValue({ status: "active" });
+    expect((await getSmsEntitlement("org-a")).allowed).toBe(true);
+
+    findUniqueSmsSettings.mockResolvedValueOnce({ ...settingsRow, smsAddOnActive: false });
+    expect((await getSmsEntitlement("org-a")).allowed).toBe(false);
+  });
+
+  it("allows a paid org with an active subscription and the add-on active", async () => {
+    findUniqueSmsSettings.mockResolvedValueOnce({
+      smsAddOnActive: true,
+      smsMonthlyLimit: 1000,
+      smsUsedThisPeriod: 10,
+      smsBillingPeriodEnd: new Date(Date.now() + 100_000),
+    });
+    findFirstSubscription.mockResolvedValueOnce({ status: "active" });
+    const result = await getSmsEntitlement("org-a");
+    expect(result.allowed).toBe(true);
+    expect(result.remaining).toBe(990);
+  });
+
   it("denies an org with the add-on active but a cancelled subscription", async () => {
     findUniqueSmsSettings.mockResolvedValueOnce({
       smsAddOnActive: true,
@@ -98,17 +133,99 @@ describe("getSmsEntitlement", () => {
     expect(result.remaining).toBe(990);
   });
 
-  it("allows sending past the monthly limit as a soft cap (overage), not a hard block", async () => {
-    findUniqueSmsSettings.mockResolvedValueOnce({
-      smsAddOnActive: true,
-      smsMonthlyLimit: 100,
-      smsUsedThisPeriod: 150,
-      smsBillingPeriodEnd: new Date(Date.now() + 100_000),
+  describe("billing-exempt organizations", () => {
+    it("denies a billing-exempt org WITHOUT explicit SMS enrollment — exemption alone never grants SMS", async () => {
+      findUniqueOrganization.mockResolvedValue({ billingExempt: true });
+      findUniqueSmsSettings.mockResolvedValueOnce(null);
+      const result = await getSmsEntitlement("org-exempt");
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toMatch(/does not have the SMS add-on/);
     });
-    findFirstSubscription.mockResolvedValueOnce({ status: "active" });
-    const result = await getSmsEntitlement("org-a");
-    expect(result.allowed).toBe(true);
-    expect(result.remaining).toBe(-50);
+
+    it("allows a billing-exempt org WITH explicit audited enrollment and no subscription — exemption satisfies only the base-billing prerequisite", async () => {
+      findUniqueOrganization.mockResolvedValue({ billingExempt: true });
+      findUniqueSmsSettings.mockResolvedValueOnce({
+        smsAddOnActive: true,
+        smsMonthlyLimit: 1000,
+        smsUsedThisPeriod: 5,
+        smsBillingPeriodEnd: new Date(Date.now() + 100_000),
+      });
+      findFirstSubscription.mockResolvedValueOnce(null);
+      const result = await getSmsEntitlement("org-exempt");
+      expect(result.allowed).toBe(true);
+      expect(result.remaining).toBe(995);
+    });
+
+    it("removing billing exemption reconciles immediately: with no active subscription, the next check denies", async () => {
+      const settingsRow = {
+        smsAddOnActive: true,
+        smsMonthlyLimit: 1000,
+        smsUsedThisPeriod: 5,
+        smsBillingPeriodEnd: new Date(Date.now() + 100_000),
+      };
+      findUniqueOrganization.mockResolvedValueOnce({ billingExempt: true });
+      findUniqueSmsSettings.mockResolvedValueOnce(settingsRow);
+      findFirstSubscription.mockResolvedValue(null);
+      expect((await getSmsEntitlement("org-exempt")).allowed).toBe(true);
+
+      findUniqueOrganization.mockResolvedValueOnce({ billingExempt: false });
+      findUniqueSmsSettings.mockResolvedValueOnce(settingsRow);
+      const revoked = await getSmsEntitlement("org-exempt");
+      expect(revoked.allowed).toBe(false);
+      expect(revoked.reason).toMatch(/not active/);
+    });
+
+    it("one org's exempt enrollment does not leak to another org — every lookup is keyed by the requested organizationId", async () => {
+      findUniqueOrganization.mockResolvedValue({ billingExempt: true });
+      findUniqueSmsSettings.mockResolvedValueOnce(null); // org-b has no enrollment of its own
+      const result = await getSmsEntitlement("org-b");
+      expect(result.allowed).toBe(false);
+      expect(findUniqueSmsSettings).toHaveBeenCalledWith({ where: { organizationId: "org-b" } });
+      expect(findUniqueOrganization).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: "org-b" } })
+      );
+    });
+
+    it("a deleted/unknown organization is denied even with an enrolled settings row (fail closed)", async () => {
+      findUniqueOrganization.mockResolvedValue(null);
+      findUniqueSmsSettings.mockResolvedValueOnce({
+        smsAddOnActive: true,
+        smsMonthlyLimit: 1000,
+        smsUsedThisPeriod: 0,
+        smsBillingPeriodEnd: new Date(Date.now() + 100_000),
+      });
+      findFirstSubscription.mockResolvedValueOnce(null);
+      const result = await getSmsEntitlement("org-gone");
+      expect(result.allowed).toBe(false);
+    });
+  });
+
+  describe("monthly quota (SMS_OVERAGE_POLICY owner decision gate)", () => {
+    it("hard-stops at the monthly limit while the overage policy is unresolved — no unbilled overage", async () => {
+      findUniqueSmsSettings.mockResolvedValueOnce({
+        smsAddOnActive: true,
+        smsMonthlyLimit: 100,
+        smsUsedThisPeriod: 150,
+        smsBillingPeriodEnd: new Date(Date.now() + 100_000),
+      });
+      findFirstSubscription.mockResolvedValueOnce({ status: "active" });
+      const result = await getSmsEntitlement("org-a");
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toMatch(/monthly SMS allowance/);
+      expect(result.remaining).toBe(0);
+    });
+
+    it("blocks exactly at the limit boundary (used === limit)", async () => {
+      findUniqueSmsSettings.mockResolvedValueOnce({
+        smsAddOnActive: true,
+        smsMonthlyLimit: 100,
+        smsUsedThisPeriod: 100,
+        smsBillingPeriodEnd: new Date(Date.now() + 100_000),
+      });
+      findFirstSubscription.mockResolvedValueOnce({ status: "active" });
+      const result = await getSmsEntitlement("org-a");
+      expect(result.allowed).toBe(false);
+    });
   });
 
   it("resets usage and rolls the billing period forward once it has elapsed", async () => {
