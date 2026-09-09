@@ -99,6 +99,36 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     if (input.smsOverageRateCents !== undefined) data.smsOverageRateCents = input.smsOverageRateCents;
     if (input.planPriceCents !== undefined) data.planPriceCents = input.planPriceCents;
 
+    if (activating) {
+      // Every genuine inactive→active enrollment (first activation OR
+      // re-activation after a deactivation) starts a clean monthly billing
+      // period: zero usage, reset threshold-notification state, and a fresh
+      // start/end window. Without this, a billing-exempt enrollment (which
+      // has no Stripe webhook to seed its period) would carry NULL period
+      // columns and accumulate usage forever with no monthly rollover.
+      // Idempotent re-sends of smsAddOnActive:true for an already-active
+      // org never reach this branch, so they cannot reset a live period,
+      // and deactivation deliberately preserves the historical counters.
+      // (Dates are written through Prisma, which stores UTC — the same
+      // naive-UTC convention reserveSmsAllowance's SQL compares against.)
+      const periodStart = new Date();
+      const periodEnd = new Date(periodStart);
+      periodEnd.setMonth(periodEnd.getMonth() + 1);
+      data.smsBillingPeriodStart = periodStart;
+      data.smsBillingPeriodEnd = periodEnd;
+      data.smsUsedThisPeriod = 0;
+      data.lastUsageThresholdNotified = 0;
+
+      // An activation must yield a usable allowance — a zero/absent quota
+      // would create an entitlement that hard-stops on its very first send.
+      const effectiveLimit = (data.smsMonthlyLimit as number | undefined) ?? existing?.smsMonthlyLimit ?? 0;
+      if (effectiveLimit <= 0) {
+        throw new ValidationError(
+          "Activation requires a positive monthly quota — choose a plan or set smsMonthlyLimit."
+        );
+      }
+    }
+
     const settings = await prisma.organizationSmsSettings.upsert({
       where: { organizationId },
       create: { organizationId, ...data },
