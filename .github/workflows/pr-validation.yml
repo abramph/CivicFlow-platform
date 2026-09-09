@@ -195,3 +195,22 @@ jobs:
         env:
           DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/ci_migrations?schema=public
         run: npm run db:verify:progression
+
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      # The SMS monthly-quota hard stop is a row-locked conditional UPDATE
+      # (reserveSmsAllowance) whose guarantee — 20 concurrent senders at
+      # 999/1,000 used yield exactly ONE Twilio-eligible reservation, and a
+      # stale pre-rollover release can never erase a newer period's send —
+      # only means anything against a real database. The unit suite mocks
+      # $queryRaw and cannot prove it, and the normal portal test job skips
+      # this file by design. It runs here, in the only job with a real
+      # (throwaway, job-scoped) Postgres; the DATABASE_URL below points at
+      # that container and nothing else. HOA_RUN_DB_INTEGRATION_TEST is the
+      # repo-wide opt-in flag these integration files gate on.
+      - name: SMS quota reservation concurrency suite (real Postgres)
+        env:
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/ci_migrations?schema=public
+          HOA_RUN_DB_INTEGRATION_TEST: "1"
+        run: npx vitest run src/lib/__tests__/sms-quota-reservation.integration.test.ts
