@@ -1,5 +1,6 @@
 import type { SmsMessage } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { releaseSmsAllowance, reserveSmsAllowance } from "@/lib/sms-entitlement";
 import { sendSms } from "@/lib/sms";
 import { authorizeSmsSend } from "@/lib/sms-send-authorization";
 import { resolveOrganizationAccess } from "@/lib/subscription-gate";
@@ -27,11 +28,17 @@ const BATCH_SIZE = 50;
  * STOP state are all re-resolved at retry time. A member who texted STOP
  * after the original attempt failed, an org whose add-on was deactivated,
  * or a recipient who was removed from the organization (memberId nulled via
- * onDelete: SetNull) must never be reachable through Retry or the cron
- * sweep. Twilio is not called for any blocked row; the row is FAILED with
- * the same auditable reason convention used at initial send time. Retries
- * always pass required:false — the original "required" flag is not
- * persisted, so the stricter preference rule applies (fail closed).
+ * onDelete: SetNull — authorizeSmsSend denies every null member) must never
+ * be reachable through Retry or the cron sweep. Twilio is not called for
+ * any blocked row; the row is FAILED with the same auditable reason
+ * convention used at initial send time. Retries always pass required:false
+ * — the original "required" flag is not persisted, so the stricter
+ * preference rule applies (fail closed).
+ *
+ * QUOTA: retries claim their allowance unit through the same database-
+ * atomic reserveSmsAllowance as initial sends (a retried message consumes
+ * quota exactly like a first send — the original failed attempt released
+ * its unit), and return it on a synchronous failure.
  */
 export async function attemptSmsMessageResend(
   message: Pick<SmsMessage, "id" | "phone" | "body" | "organizationId" | "memberId">
@@ -49,7 +56,6 @@ export async function attemptSmsMessageResend(
     memberId: message.memberId,
     phone: message.phone,
     required: false,
-    requireMember: true,
   });
   if (!authorization.allowed) {
     return prisma.smsMessage.update({
@@ -58,7 +64,18 @@ export async function attemptSmsMessageResend(
     });
   }
 
+  const reserved = await reserveSmsAllowance(message.organizationId);
+  if (!reserved) {
+    return prisma.smsMessage.update({
+      where: { id: message.id },
+      data: { status: "FAILED", errorMessage: "Your organization has used its full monthly SMS allowance." },
+    });
+  }
+
   const result = await sendSms({ to: authorization.normalizedPhone, body: message.body });
+  if (!result.sent) {
+    await releaseSmsAllowance(message.organizationId);
+  }
   return prisma.smsMessage.update({
     where: { id: message.id },
     data: result.sent

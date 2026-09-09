@@ -87,8 +87,8 @@ describe("authorizeSmsSend", () => {
     expect(result).toEqual({ allowed: false, reason: "Recipient is no longer a member of this organization." });
   });
 
-  it("denies a member-less input when requireMember is set (retry path: memberId nulled by member deletion)", async () => {
-    const result = await authorizeSmsSend(baseInput({ memberId: null, requireMember: true }));
+  it("ALWAYS denies a null memberId — organization messages without a verifiable member never reach Twilio (initial sends and retries alike)", async () => {
+    const result = await authorizeSmsSend(baseInput({ memberId: null }));
 
     expect(result).toEqual({ allowed: false, reason: "Recipient consent cannot be verified for this message." });
     expect(findFirstOrgMember).not.toHaveBeenCalled();

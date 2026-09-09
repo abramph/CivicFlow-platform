@@ -46,6 +46,15 @@ vi.mock("@/lib/sms-send-authorization", () => ({
   authorizeSmsSend: (...args: unknown[]) => authorizeSmsSend(...args),
 }));
 
+// Same story for the atomic quota reservation (sms-quota-reservation
+// integration test + sms-queue.test.ts cover it): default to available.
+const reserveSmsAllowance = vi.fn();
+const releaseSmsAllowance = vi.fn().mockResolvedValue(undefined);
+vi.mock("@/lib/sms-entitlement", () => ({
+  reserveSmsAllowance: (...args: unknown[]) => reserveSmsAllowance(...args),
+  releaseSmsAllowance: (...args: unknown[]) => releaseSmsAllowance(...args),
+}));
+
 import { POST as retry } from "@/app/api/admin/sms/messages/[id]/retry/route";
 import { POST as cancel } from "@/app/api/admin/sms/messages/[id]/cancel/route";
 
@@ -61,6 +70,8 @@ describe("POST /api/admin/sms/messages/[id]/retry", () => {
     updateManySmsMessage.mockReset();
     sendSms.mockReset();
     authorizeSmsSend.mockReset().mockResolvedValue({ allowed: true, normalizedPhone: "+15551234567" });
+    reserveSmsAllowance.mockReset().mockResolvedValue(true);
+    releaseSmsAllowance.mockClear();
     createAuditEvent.mockClear();
   });
 

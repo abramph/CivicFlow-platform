@@ -24,6 +24,13 @@ vi.mock("@/lib/sms-send-authorization", () => ({
   authorizeSmsSend: (...args: unknown[]) => authorizeSmsSend(...args),
 }));
 
+const reserveSmsAllowance = vi.fn();
+const releaseSmsAllowance = vi.fn().mockResolvedValue(undefined);
+vi.mock("@/lib/sms-entitlement", () => ({
+  reserveSmsAllowance: (...args: unknown[]) => reserveSmsAllowance(...args),
+  releaseSmsAllowance: (...args: unknown[]) => releaseSmsAllowance(...args),
+}));
+
 const ALLOWED = { allowed: true, reason: null, trialEndsAt: null, subscriptionStatus: null, billingExempt: false } as const;
 const AUTHORIZED = { allowed: true, normalizedPhone: "+15551234567" } as const;
 
@@ -37,6 +44,8 @@ describe("attemptSmsMessageResend", () => {
     sendSms.mockReset();
     resolveOrganizationAccess.mockReset().mockResolvedValue(ALLOWED);
     authorizeSmsSend.mockReset().mockResolvedValue(AUTHORIZED);
+    reserveSmsAllowance.mockReset().mockResolvedValue(true);
+    releaseSmsAllowance.mockClear();
   });
 
   it("marks SENT on a successful resend", async () => {
@@ -77,7 +86,7 @@ describe("attemptSmsMessageResend", () => {
     });
   });
 
-  it("re-runs the full canonical authorization at retry time, member-required and with no preference bypass", async () => {
+  it("re-runs the full canonical authorization at retry time with no preference bypass, then reserves allowance before Twilio", async () => {
     sendSms.mockResolvedValueOnce({ sent: true, skipped: false, to: "+15551234567", providerMessageId: "SM1" });
     updateSmsMessage.mockResolvedValueOnce({ id: "msg-1", status: "SENT" });
 
@@ -88,8 +97,32 @@ describe("attemptSmsMessageResend", () => {
       memberId: "member-1",
       phone: "+15551234567",
       required: false,
-      requireMember: true,
     });
+    expect(reserveSmsAllowance).toHaveBeenCalledWith("org-a");
+    expect(reserveSmsAllowance.mock.invocationCallOrder[0]).toBeLessThan(sendSms.mock.invocationCallOrder[0]);
+    expect(releaseSmsAllowance).not.toHaveBeenCalled();
+  });
+
+  it("HARD STOP: a retry whose atomic reservation is refused fails with the allowance reason and never calls Twilio", async () => {
+    reserveSmsAllowance.mockResolvedValueOnce(false);
+    updateSmsMessage.mockResolvedValueOnce({ id: "msg-1", status: "FAILED" });
+
+    await attemptSmsMessageResend(MESSAGE);
+
+    expect(sendSms).not.toHaveBeenCalled();
+    expect(updateSmsMessage).toHaveBeenCalledWith({
+      where: { id: "msg-1" },
+      data: { status: "FAILED", errorMessage: "Your organization has used its full monthly SMS allowance." },
+    });
+  });
+
+  it("releases the reserved unit when the retry's Twilio call fails synchronously", async () => {
+    sendSms.mockResolvedValueOnce({ sent: false, skipped: false, to: "+15551234567", reason: "carrier rejected" });
+    updateSmsMessage.mockResolvedValueOnce({ id: "msg-1", status: "FAILED" });
+
+    await attemptSmsMessageResend(MESSAGE);
+
+    expect(releaseSmsAllowance).toHaveBeenCalledWith("org-a");
   });
 
   it("COMPLIANCE: a member who texted STOP after the original failure cannot be reached by a retry — no Twilio call", async () => {
@@ -127,8 +160,9 @@ describe("attemptSmsMessageResend", () => {
 
     await attemptSmsMessageResend({ ...MESSAGE, memberId: null });
 
-    expect(authorizeSmsSend).toHaveBeenCalledWith(expect.objectContaining({ memberId: null, requireMember: true }));
+    expect(authorizeSmsSend).toHaveBeenCalledWith(expect.objectContaining({ memberId: null }));
     expect(sendSms).not.toHaveBeenCalled();
+    expect(reserveSmsAllowance).not.toHaveBeenCalled();
   });
 
   it("sends to the freshly normalized phone returned by the authorization, not the raw stored value", async () => {
@@ -149,6 +183,8 @@ describe("processRetryableSmsMessages", () => {
     sendSms.mockReset();
     resolveOrganizationAccess.mockReset().mockResolvedValue(ALLOWED);
     authorizeSmsSend.mockReset().mockResolvedValue(AUTHORIZED);
+    reserveSmsAllowance.mockReset().mockResolvedValue(true);
+    releaseSmsAllowance.mockClear();
   });
 
   it("processes every due RETRYING message", async () => {

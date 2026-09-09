@@ -3,13 +3,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const findUniqueSmsSettings = vi.fn();
 const findFirstSubscription = vi.fn();
 const findUniqueOrganization = vi.fn();
-const updateSmsSettings = vi.fn().mockResolvedValue(undefined);
+const updateManySmsSettings = vi.fn().mockResolvedValue({ count: 1 });
+const executeRaw = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     organizationSmsSettings: {
       findUnique: (...args: unknown[]) => findUniqueSmsSettings(...args),
-      update: (...args: unknown[]) => updateSmsSettings(...args),
+      updateMany: (...args: unknown[]) => updateManySmsSettings(...args),
     },
     subscription: {
       findFirst: (...args: unknown[]) => findFirstSubscription(...args),
@@ -17,6 +18,7 @@ vi.mock("@/lib/prisma", () => ({
     organization: {
       findUnique: (...args: unknown[]) => findUniqueOrganization(...args),
     },
+    $executeRaw: (...args: unknown[]) => executeRaw(...args),
   },
 }));
 
@@ -25,14 +27,14 @@ vi.mock("@/lib/sms-credentials", () => ({
   getPlatformSmsSettings: (...args: unknown[]) => getPlatformSmsSettings(...args),
 }));
 
-import { getSmsEntitlement, recordSmsUsage } from "@/lib/sms-entitlement";
+import { getSmsEntitlement, releaseSmsAllowance, reserveSmsAllowance } from "@/lib/sms-entitlement";
 
 describe("getSmsEntitlement", () => {
   beforeEach(() => {
     findUniqueSmsSettings.mockReset();
     findFirstSubscription.mockReset();
     findUniqueOrganization.mockReset();
-    updateSmsSettings.mockClear();
+    updateManySmsSettings.mockClear();
     getPlatformSmsSettings.mockReset();
     getPlatformSmsSettings.mockResolvedValue({ orgMessagingEnabled: true });
     // Default: a normal (non-exempt) organization.
@@ -200,8 +202,8 @@ describe("getSmsEntitlement", () => {
     });
   });
 
-  describe("monthly quota (SMS_OVERAGE_POLICY owner decision gate)", () => {
-    it("hard-stops at the monthly limit while the overage policy is unresolved — no unbilled overage", async () => {
+  describe("monthly quota (SMS_OVERAGE_POLICY = hard_stop, owner-selected Option A)", () => {
+    it("hard-stops at the monthly limit — no unbilled overage", async () => {
       findUniqueSmsSettings.mockResolvedValueOnce({
         smsAddOnActive: true,
         smsMonthlyLimit: 100,
@@ -228,33 +230,60 @@ describe("getSmsEntitlement", () => {
     });
   });
 
-  it("resets usage and rolls the billing period forward once it has elapsed", async () => {
+  it("resets usage and rolls the billing period forward once it has elapsed — conditioned on the exact period it read, so concurrent rollovers cannot double-reset", async () => {
+    const elapsedEnd = new Date(Date.now() - 1000);
     findUniqueSmsSettings.mockResolvedValueOnce({
       smsAddOnActive: true,
       smsMonthlyLimit: 1000,
       smsUsedThisPeriod: 500,
-      smsBillingPeriodEnd: new Date(Date.now() - 1000), // already elapsed
+      smsBillingPeriodEnd: elapsedEnd, // already elapsed
     });
     findFirstSubscription.mockResolvedValueOnce({ status: "active" });
     const result = await getSmsEntitlement("org-a");
     expect(result.allowed).toBe(true);
     expect(result.remaining).toBe(1000); // usage reset to 0
-    expect(updateSmsSettings).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ smsUsedThisPeriod: 0 }) })
+    expect(updateManySmsSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { organizationId: "org-a", smsBillingPeriodEnd: elapsedEnd },
+        data: expect.objectContaining({ smsUsedThisPeriod: 0 }),
+      })
     );
+  });
+
+  it("does not treat usage as reset when it LOSES the rollover race (updateMany matched 0 rows)", async () => {
+    findUniqueSmsSettings.mockResolvedValueOnce({
+      smsAddOnActive: true,
+      smsMonthlyLimit: 1000,
+      smsUsedThisPeriod: 1000,
+      smsBillingPeriodEnd: new Date(Date.now() - 1000),
+    });
+    findFirstSubscription.mockResolvedValueOnce({ status: "active" });
+    updateManySmsSettings.mockResolvedValueOnce({ count: 0 }); // another racer already rolled it
+    const result = await getSmsEntitlement("org-a");
+    // Stale usage still reads as at-limit → fail closed rather than oversubscribe.
+    expect(result.allowed).toBe(false);
   });
 });
 
-describe("recordSmsUsage", () => {
+describe("reserveSmsAllowance / releaseSmsAllowance", () => {
   beforeEach(() => {
-    updateSmsSettings.mockClear();
+    executeRaw.mockReset();
   });
 
-  it("atomically increments smsUsedThisPeriod", async () => {
-    await recordSmsUsage("org-a");
-    expect(updateSmsSettings).toHaveBeenCalledWith({
-      where: { organizationId: "org-a" },
-      data: { smsUsedThisPeriod: { increment: 1 } },
-    });
+  it("reserves when the atomic conditional UPDATE claims a row", async () => {
+    executeRaw.mockResolvedValueOnce(1);
+    await expect(reserveSmsAllowance("org-a")).resolves.toBe(true);
+    expect(executeRaw).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed when the UPDATE matches no row (allowance exhausted or no settings row)", async () => {
+    executeRaw.mockResolvedValueOnce(0);
+    await expect(reserveSmsAllowance("org-a")).resolves.toBe(false);
+  });
+
+  it("release issues a guarded decrement (never below zero)", async () => {
+    executeRaw.mockResolvedValueOnce(1);
+    await releaseSmsAllowance("org-a");
+    expect(executeRaw).toHaveBeenCalledTimes(1);
   });
 });

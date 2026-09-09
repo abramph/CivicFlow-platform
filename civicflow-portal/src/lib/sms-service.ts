@@ -1,6 +1,6 @@
 import type { SmsMessage } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { recordSmsUsage } from "@/lib/sms-entitlement";
+import { releaseSmsAllowance, reserveSmsAllowance } from "@/lib/sms-entitlement";
 import { sendSms } from "@/lib/sms";
 import { authorizeSmsSend } from "@/lib/sms-send-authorization";
 import { SMS_ADDON } from "@/lib/sms-pricing";
@@ -24,7 +24,13 @@ export function applySmsTemplateTokens(body: string, tokens: { organizationName:
 
 export interface SendMemberSmsParams {
   organizationId: string;
-  memberId?: string | null;
+  /**
+   * REQUIRED tenant-scoped OrgMember id. Organization messaging always
+   * addresses a roster member — consent is unverifiable otherwise, so a
+   * null (representable only because upstream recipient rows are nullable)
+   * fails closed inside authorizeSmsSend and never reaches Twilio.
+   */
+  memberId: string | null;
   phone: string;
   body: string;
   campaignId?: string | null;
@@ -87,25 +93,38 @@ export async function sendMemberSms(params: SendMemberSmsParams): Promise<SmsMes
     },
   });
 
+  // Database-atomic hard-stop: claim one unit of the monthly allowance
+  // BEFORE Twilio. Under concurrency (campaign workers run 20-wide) only as
+  // many sends as there is remaining allowance can pass — the entitlement
+  // pre-check inside authorizeSmsSend cannot guarantee that on its own. The
+  // unit is consumed up-front and returned only on a synchronous failure;
+  // see reserveSmsAllowance's doc for the crash-consumes-capacity tradeoff.
+  const reserved = await reserveSmsAllowance(organizationId);
+  if (!reserved) {
+    return prisma.smsMessage.update({
+      where: { id: queued.id },
+      data: { status: "FAILED", errorMessage: "Your organization has used its full monthly SMS allowance." },
+    });
+  }
+
   const result = await sendSms({ to: normalizedPhone, body: finalBody });
 
-  const updated = await prisma.smsMessage.update({
+  if (!result.sent) {
+    await releaseSmsAllowance(organizationId);
+  }
+
+  return prisma.smsMessage.update({
     where: { id: queued.id },
     data: result.sent
       ? {
           status: "SENT",
           sentAt: new Date(),
           providerMessageId: result.providerMessageId ?? null,
-          // A flat per-message estimate, not an exact included-vs-overage
-          // split — good enough for admin visibility, not a billing ledger.
+          // A flat per-message estimate for internal admin cost visibility
+          // only — NOT a customer billing rate (hard-stop policy: no
+          // customer-facing overage billing exists).
           costEstimateCents: SMS_ADDON.overageRateCents,
         }
       : { status: "FAILED", errorMessage: result.reason ?? "SMS send failed." },
   });
-
-  if (result.sent) {
-    await recordSmsUsage(organizationId);
-  }
-
-  return updated;
 }

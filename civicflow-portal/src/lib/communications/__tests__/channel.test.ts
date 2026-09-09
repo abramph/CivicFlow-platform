@@ -39,7 +39,9 @@ describe("SmsChannel", () => {
 
   it("delegates to sendMemberSms unmodified and normalizes SENT", async () => {
     sendMemberSms.mockResolvedValueOnce({ status: "SENT", errorMessage: null, providerMessageId: "SM1" });
-    const params = { organizationId: "org-a", phone: "+15551234567", body: "Hi" };
+    // memberId is a REQUIRED field of the org-message contract (consent is
+    // unverifiable without a roster member) — the compiler enforces it here.
+    const params = { organizationId: "org-a", memberId: "member-1", phone: "+15551234567", body: "Hi" };
     const result = await SmsChannel.send(params);
     expect(sendMemberSms).toHaveBeenCalledWith(params);
     expect(result).toEqual({ status: "SENT", errorMessage: null, providerMessageId: "SM1" });
@@ -47,7 +49,7 @@ describe("SmsChannel", () => {
 
   it("normalizes a FAILED SmsMessage to FAILED", async () => {
     sendMemberSms.mockResolvedValueOnce({ status: "FAILED", errorMessage: "Member opted out of SMS.", providerMessageId: null });
-    const result = await SmsChannel.send({ organizationId: "org-a", phone: "+15551234567", body: "Hi" });
+    const result = await SmsChannel.send({ organizationId: "org-a", memberId: "member-1", phone: "+15551234567", body: "Hi" });
     expect(result.status).toBe("FAILED");
   });
 });
