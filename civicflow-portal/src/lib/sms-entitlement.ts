@@ -79,8 +79,13 @@ export async function getSmsEntitlement(organizationId: string): Promise<SmsEnti
   // webhook also does this on each renewal event, but this is a backup for
   // when a webhook is delayed or missed. Conditioned on the exact
   // smsBillingPeriodEnd we just read so two concurrent checks (or this and
-  // reserveSmsAllowance's own atomic rollover below) can never double-reset
-  // the counter: the loser's where-clause simply matches nothing.
+  // reserveSmsAllowance's own atomic rollover) can never double-reset the
+  // counter: the loser's where-clause simply matches nothing. A loser must
+  // NOT keep the stale pre-rollover usage it read (at the boundary that
+  // could falsely deny a send whose capacity the winner just refreshed) —
+  // it refetches the post-rollover truth instead. Either way this remains a
+  // pre-check for good error messages; reserveSmsAllowance below is the
+  // sole final quota authority immediately before Twilio.
   let usedThisPeriod = settings.smsUsedThisPeriod;
   const now = new Date();
   if (settings.smsBillingPeriodEnd && now > settings.smsBillingPeriodEnd) {
@@ -90,7 +95,15 @@ export async function getSmsEntitlement(organizationId: string): Promise<SmsEnti
       where: { organizationId, smsBillingPeriodEnd: settings.smsBillingPeriodEnd },
       data: { smsUsedThisPeriod: 0, smsBillingPeriodStart: now, smsBillingPeriodEnd: newEnd },
     });
-    if (rolled.count === 1) usedThisPeriod = 0;
+    if (rolled.count === 1) {
+      usedThisPeriod = 0;
+    } else {
+      const fresh = await prisma.organizationSmsSettings.findUnique({
+        where: { organizationId },
+        select: { smsUsedThisPeriod: true },
+      });
+      usedThisPeriod = fresh?.smsUsedThisPeriod ?? usedThisPeriod;
+    }
   }
 
   // Monthly quota. Under "metered_overage" (Option B — requires the Stripe
@@ -113,6 +126,21 @@ export async function getSmsEntitlement(organizationId: string): Promise<SmsEnti
 }
 
 /**
+ * Opaque proof of one successfully reserved allowance unit, bound to the
+ * EXACT billing period the unit was counted in (the post-update period
+ * values returned by the reservation's own UPDATE). releaseSmsAllowance
+ * only ever decrements a row whose organization AND period still match this
+ * token — so a stale release from before a rollover (or a webhook period
+ * reconciliation) affects zero rows instead of erasing a unit that a NEWER
+ * period's successful send legitimately consumed.
+ */
+export interface SmsAllowanceReservation {
+  organizationId: string;
+  periodStart: Date | null;
+  periodEnd: Date | null;
+}
+
+/**
  * Database-atomic allowance reservation — THE hard-stop enforcement point,
  * called immediately before every organization-message Twilio call (initial
  * sends in sms-service.ts and retries in sms-queue.ts). getSmsEntitlement's
@@ -122,23 +150,32 @@ export async function getSmsEntitlement(organizationId: string): Promise<SmsEnti
  * A single conditional UPDATE claims one unit only while
  * smsUsedThisPeriod < smsMonthlyLimit — Postgres row-locks the settings row
  * for the statement, so with N concurrent senders and R remaining allowance,
- * exactly R reservations succeed and the rest observe an affected-row count
- * of 0 and fail closed. The same statement atomically handles an elapsed
- * billing period (reset-and-claim as unit #1 of the new period), so rollover
- * can never race a reservation into an over- or under-count.
+ * exactly R reservations succeed and the rest observe zero matched rows and
+ * fail closed. The same statement atomically handles an elapsed billing
+ * period (reset-and-claim as unit #1 of the new period), so rollover can
+ * never race a reservation into an over- or under-count. A row whose period
+ * columns are NULL (legacy/manually-created enrollment predating the
+ * activation-time period initialization) is treated exactly like an elapsed
+ * period: defensively initialized to a fresh month and claimed as unit #1 —
+ * never reserved against indefinitely with no rollover, and never allowed
+ * to oversubscribe (a zero limit still refuses).
+ *
+ * Returns an SmsAllowanceReservation naming the period actually charged
+ * (RETURNING the post-update values), or null when nothing could be
+ * reserved. Callers must pass that token back to releaseSmsAllowance on a
+ * synchronous failure.
  *
  * Fail-closed tradeoff, documented deliberately: a crash between a
  * successful reservation and the Twilio call permanently consumes that unit
  * (the send never happened, the counter says it did). We accept losing a
  * unit of capacity over any risk of an over-quota send — undoing it safely
  * would require a per-message reservation ledger (schema change), which the
- * owner has not authorized. Synchronous Twilio failures DO release their
- * unit via releaseSmsAllowance below.
+ * owner has not authorized.
  *
  * NOTE for a future "metered_overage" policy: this reservation enforces the
  * hard stop by construction; Option B would need a different claim rule.
  */
-export async function reserveSmsAllowance(organizationId: string): Promise<boolean> {
+export async function reserveSmsAllowance(organizationId: string): Promise<SmsAllowanceReservation | null> {
   // Timestamp columns are Prisma DateTime → `timestamp(3)` WITHOUT time
   // zone, storing UTC wall-clock values. Comparing them against bare NOW()
   // (a timestamptz) makes Postgres interpret the stored naive value in the
@@ -146,41 +183,59 @@ export async function reserveSmsAllowance(organizationId: string): Promise<boole
   // server. `NOW() AT TIME ZONE 'UTC'` yields the naive-UTC "now" that
   // matches Prisma's storage convention (caught by
   // sms-quota-reservation.integration.test.ts on a non-UTC dev server).
-  const reserved = await prisma.$executeRaw`
+  const rows = await prisma.$queryRaw<Array<{ periodStart: Date | null; periodEnd: Date | null }>>`
     UPDATE "OrganizationSmsSettings"
     SET
       "smsUsedThisPeriod" = CASE
-        WHEN "smsBillingPeriodEnd" IS NOT NULL AND "smsBillingPeriodEnd" < (NOW() AT TIME ZONE 'UTC') THEN 1
+        WHEN "smsBillingPeriodEnd" IS NULL OR "smsBillingPeriodEnd" < (NOW() AT TIME ZONE 'UTC') THEN 1
         ELSE "smsUsedThisPeriod" + 1
       END,
       "smsBillingPeriodStart" = CASE
-        WHEN "smsBillingPeriodEnd" IS NOT NULL AND "smsBillingPeriodEnd" < (NOW() AT TIME ZONE 'UTC') THEN (NOW() AT TIME ZONE 'UTC')
+        WHEN "smsBillingPeriodEnd" IS NULL OR "smsBillingPeriodEnd" < (NOW() AT TIME ZONE 'UTC') THEN (NOW() AT TIME ZONE 'UTC')
         ELSE "smsBillingPeriodStart"
       END,
       "smsBillingPeriodEnd" = CASE
-        WHEN "smsBillingPeriodEnd" IS NOT NULL AND "smsBillingPeriodEnd" < (NOW() AT TIME ZONE 'UTC') THEN (NOW() AT TIME ZONE 'UTC') + interval '1 month'
+        WHEN "smsBillingPeriodEnd" IS NULL OR "smsBillingPeriodEnd" < (NOW() AT TIME ZONE 'UTC') THEN (NOW() AT TIME ZONE 'UTC') + interval '1 month'
         ELSE "smsBillingPeriodEnd"
       END,
       "updatedAt" = (NOW() AT TIME ZONE 'UTC')
     WHERE "organizationId" = ${organizationId}
       AND (
-        ("smsBillingPeriodEnd" IS NOT NULL AND "smsBillingPeriodEnd" < (NOW() AT TIME ZONE 'UTC') AND "smsMonthlyLimit" > 0)
+        (("smsBillingPeriodEnd" IS NULL OR "smsBillingPeriodEnd" < (NOW() AT TIME ZONE 'UTC')) AND "smsMonthlyLimit" > 0)
         OR "smsUsedThisPeriod" < "smsMonthlyLimit"
-      )`;
-  return reserved === 1;
+      )
+    RETURNING "smsBillingPeriodStart" AS "periodStart", "smsBillingPeriodEnd" AS "periodEnd"`;
+  if (rows.length !== 1) return null;
+  return { organizationId, periodStart: rows[0].periodStart, periodEnd: rows[0].periodEnd };
 }
 
 /**
  * Returns one reserved unit after a SYNCHRONOUS send failure (Twilio said
  * no, or a platform switch skipped the send) — the message never left, so
- * the allowance should not stay consumed. Guarded to never go below zero:
- * if a period rollover reset the counter between the reservation and this
- * release, the release becomes a no-op rather than corrupting the new
- * period's count.
+ * the allowance should not stay consumed. Period-safe by construction: the
+ * decrement matches the organization AND the exact billing period recorded
+ * in the reservation token (IS NOT DISTINCT FROM, so NULL periods compare
+ * too). If a rollover or webhook reconciliation replaced the period between
+ * reservation and release, zero rows match and nothing is decremented — a
+ * stale old-period release can never erase a newer period's successful send
+ * or reopen capacity it isn't entitled to. Floor-guarded at zero as before.
+ *
+ * The period comparison is done in epoch MILLISECONDS on both sides, not by
+ * binding the Dates directly: the columns are naive-UTC timestamp(3), and a
+ * bound Date parameter is interpreted through the server session time zone,
+ * which silently mismatches on any non-UTC server (the integration suite
+ * caught a matching release affecting zero rows exactly this way).
+ * `extract(epoch from <naive timestamp>)` applies no time-zone conversion,
+ * so it recovers the same UTC epoch that Date#getTime() carries.
  */
-export async function releaseSmsAllowance(organizationId: string): Promise<void> {
+export async function releaseSmsAllowance(reservation: SmsAllowanceReservation): Promise<void> {
+  const periodStartMs = reservation.periodStart ? BigInt(reservation.periodStart.getTime()) : null;
+  const periodEndMs = reservation.periodEnd ? BigInt(reservation.periodEnd.getTime()) : null;
   await prisma.$executeRaw`
     UPDATE "OrganizationSmsSettings"
     SET "smsUsedThisPeriod" = "smsUsedThisPeriod" - 1, "updatedAt" = (NOW() AT TIME ZONE 'UTC')
-    WHERE "organizationId" = ${organizationId} AND "smsUsedThisPeriod" > 0`;
+    WHERE "organizationId" = ${reservation.organizationId}
+      AND "smsUsedThisPeriod" > 0
+      AND (extract(epoch from "smsBillingPeriodStart") * 1000)::bigint IS NOT DISTINCT FROM ${periodStartMs}
+      AND (extract(epoch from "smsBillingPeriodEnd") * 1000)::bigint IS NOT DISTINCT FROM ${periodEndMs}`;
 }

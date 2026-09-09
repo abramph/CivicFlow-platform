@@ -5,6 +5,7 @@ const findFirstSubscription = vi.fn();
 const findUniqueOrganization = vi.fn();
 const updateManySmsSettings = vi.fn().mockResolvedValue({ count: 1 });
 const executeRaw = vi.fn();
+const queryRaw = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -19,6 +20,7 @@ vi.mock("@/lib/prisma", () => ({
       findUnique: (...args: unknown[]) => findUniqueOrganization(...args),
     },
     $executeRaw: (...args: unknown[]) => executeRaw(...args),
+    $queryRaw: (...args: unknown[]) => queryRaw(...args),
   },
 }));
 
@@ -250,7 +252,26 @@ describe("getSmsEntitlement", () => {
     );
   });
 
-  it("does not treat usage as reset when it LOSES the rollover race (updateMany matched 0 rows)", async () => {
+  it("BOUNDARY: losing the rollover CAS does NOT strand capacity — the loser refetches the winner's fresh usage instead of keeping the stale at-limit value", async () => {
+    findUniqueSmsSettings.mockResolvedValueOnce({
+      smsAddOnActive: true,
+      smsMonthlyLimit: 1000,
+      smsUsedThisPeriod: 1000, // stale pre-rollover reading, at the limit
+      smsBillingPeriodEnd: new Date(Date.now() - 1000),
+    });
+    findFirstSubscription.mockResolvedValueOnce({ status: "active" });
+    updateManySmsSettings.mockResolvedValueOnce({ count: 0 }); // another racer already rolled it
+    // Refetch shows the winner's freshly reset counter.
+    findUniqueSmsSettings.mockResolvedValueOnce({ smsUsedThisPeriod: 3 });
+
+    const result = await getSmsEntitlement("org-a");
+
+    expect(result.allowed).toBe(true);
+    expect(result.remaining).toBe(997);
+    expect(findUniqueSmsSettings).toHaveBeenCalledTimes(2);
+  });
+
+  it("fails closed if the post-CAS refetch finds no row (settings deleted mid-flight)", async () => {
     findUniqueSmsSettings.mockResolvedValueOnce({
       smsAddOnActive: true,
       smsMonthlyLimit: 1000,
@@ -258,32 +279,54 @@ describe("getSmsEntitlement", () => {
       smsBillingPeriodEnd: new Date(Date.now() - 1000),
     });
     findFirstSubscription.mockResolvedValueOnce({ status: "active" });
-    updateManySmsSettings.mockResolvedValueOnce({ count: 0 }); // another racer already rolled it
+    updateManySmsSettings.mockResolvedValueOnce({ count: 0 });
+    findUniqueSmsSettings.mockResolvedValueOnce(null);
+
     const result = await getSmsEntitlement("org-a");
-    // Stale usage still reads as at-limit → fail closed rather than oversubscribe.
+
+    // Falls back to the stale at-limit value → denied, never oversubscribed.
     expect(result.allowed).toBe(false);
   });
 });
 
 describe("reserveSmsAllowance / releaseSmsAllowance", () => {
+  const periodStart = new Date("2026-09-01T00:00:00.000Z");
+  const periodEnd = new Date("2026-10-01T00:00:00.000Z");
+
   beforeEach(() => {
     executeRaw.mockReset();
+    queryRaw.mockReset();
   });
 
-  it("reserves when the atomic conditional UPDATE claims a row", async () => {
+  it("returns a token naming the exact billing period charged when the atomic conditional UPDATE claims a row", async () => {
+    queryRaw.mockResolvedValueOnce([{ periodStart, periodEnd }]);
+
+    const reservation = await reserveSmsAllowance("org-a");
+
+    expect(reservation).toEqual({ organizationId: "org-a", periodStart, periodEnd });
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed with null when the UPDATE matches no row (allowance exhausted or no settings row)", async () => {
+    queryRaw.mockResolvedValueOnce([]);
+    await expect(reserveSmsAllowance("org-a")).resolves.toBeNull();
+  });
+
+  it("release decrements against the token's organization AND exact period (guarded, single statement)", async () => {
     executeRaw.mockResolvedValueOnce(1);
-    await expect(reserveSmsAllowance("org-a")).resolves.toBe(true);
+    await releaseSmsAllowance({ organizationId: "org-a", periodStart, periodEnd });
     expect(executeRaw).toHaveBeenCalledTimes(1);
+    // The tagged-template call carries the token's values as bind params —
+    // org id, then the period bounds as timezone-agnostic epoch-ms bigints
+    // (never raw Dates, whose binding shifts on non-UTC servers).
+    const call = executeRaw.mock.calls[0];
+    expect(call.slice(1)).toEqual(["org-a", BigInt(periodStart.getTime()), BigInt(periodEnd.getTime())]);
   });
 
-  it("fails closed when the UPDATE matches no row (allowance exhausted or no settings row)", async () => {
+  it("release binds NULL period bounds for a token from a legacy NULL-period row", async () => {
     executeRaw.mockResolvedValueOnce(0);
-    await expect(reserveSmsAllowance("org-a")).resolves.toBe(false);
-  });
-
-  it("release issues a guarded decrement (never below zero)", async () => {
-    executeRaw.mockResolvedValueOnce(1);
-    await releaseSmsAllowance("org-a");
-    expect(executeRaw).toHaveBeenCalledTimes(1);
+    await releaseSmsAllowance({ organizationId: "org-a", periodStart: null, periodEnd: null });
+    const call = executeRaw.mock.calls[0];
+    expect(call.slice(1)).toEqual(["org-a", null, null]);
   });
 });

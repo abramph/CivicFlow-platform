@@ -70,7 +70,7 @@ describe("POST /api/admin/sms/messages/[id]/retry", () => {
     updateManySmsMessage.mockReset();
     sendSms.mockReset();
     authorizeSmsSend.mockReset().mockResolvedValue({ allowed: true, normalizedPhone: "+15551234567" });
-    reserveSmsAllowance.mockReset().mockResolvedValue(true);
+    reserveSmsAllowance.mockReset().mockResolvedValue({ organizationId: "org-1", periodStart: new Date("2026-09-01T00:00:00.000Z"), periodEnd: new Date("2026-10-01T00:00:00.000Z") });
     releaseSmsAllowance.mockClear();
     createAuditEvent.mockClear();
   });

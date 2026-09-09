@@ -64,8 +64,8 @@ export async function attemptSmsMessageResend(
     });
   }
 
-  const reserved = await reserveSmsAllowance(message.organizationId);
-  if (!reserved) {
+  const reservation = await reserveSmsAllowance(message.organizationId);
+  if (!reservation) {
     return prisma.smsMessage.update({
       where: { id: message.id },
       data: { status: "FAILED", errorMessage: "Your organization has used its full monthly SMS allowance." },
@@ -74,7 +74,7 @@ export async function attemptSmsMessageResend(
 
   const result = await sendSms({ to: authorization.normalizedPhone, body: message.body });
   if (!result.sent) {
-    await releaseSmsAllowance(message.organizationId);
+    await releaseSmsAllowance(reservation);
   }
   return prisma.smsMessage.update({
     where: { id: message.id },

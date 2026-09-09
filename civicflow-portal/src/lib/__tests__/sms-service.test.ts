@@ -36,6 +36,14 @@ vi.mock("@/lib/sms-entitlement", () => ({
 
 import { applySmsTemplateTokens, sendMemberSms } from "@/lib/sms-service";
 
+// Period-bound reservation token as returned by reserveSmsAllowance — the
+// release must be called with this exact token, never a bare org id.
+const RESERVATION = {
+  organizationId: "org-a",
+  periodStart: new Date("2026-09-01T00:00:00.000Z"),
+  periodEnd: new Date("2026-10-01T00:00:00.000Z"),
+} as const;
+
 function baseParams(overrides: Partial<Parameters<typeof sendMemberSms>[0]> = {}) {
   return {
     organizationId: "org-a",
@@ -54,7 +62,7 @@ describe("sendMemberSms", () => {
     isSmsConfigured.mockReset();
     sendSms.mockReset();
     getSmsEntitlement.mockReset();
-    reserveSmsAllowance.mockReset().mockResolvedValue(true);
+    reserveSmsAllowance.mockReset().mockResolvedValue(RESERVATION);
     releaseSmsAllowance.mockClear();
     createSmsMessage.mockResolvedValue({ id: "sms-1", status: "FAILED" });
   });
@@ -208,7 +216,7 @@ describe("sendMemberSms", () => {
     getSmsEntitlement.mockResolvedValueOnce({ allowed: true, remaining: 1, limit: 1000 });
     findFirstOrgMember.mockResolvedValueOnce({ smsOptIn: true, commsSmsEnabled: true, smsOptedOutAt: null });
     createSmsMessage.mockResolvedValueOnce({ id: "sms-1", status: "QUEUED" });
-    reserveSmsAllowance.mockResolvedValueOnce(false);
+    reserveSmsAllowance.mockResolvedValueOnce(null);
     updateSmsMessage.mockResolvedValueOnce({ id: "sms-1", status: "FAILED" });
 
     const result = await sendMemberSms(baseParams());
@@ -255,7 +263,7 @@ describe("sendMemberSms", () => {
 
     expect(result.status).toBe("FAILED");
     expect(reserveSmsAllowance).toHaveBeenCalledTimes(1);
-    expect(releaseSmsAllowance).toHaveBeenCalledWith("org-a");
+    expect(releaseSmsAllowance).toHaveBeenCalledWith(RESERVATION);
   });
 
   it("appends the opt-out compliance suffix to the message body", async () => {

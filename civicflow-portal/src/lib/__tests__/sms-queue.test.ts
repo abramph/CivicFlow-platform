@@ -33,6 +33,13 @@ vi.mock("@/lib/sms-entitlement", () => ({
 
 const ALLOWED = { allowed: true, reason: null, trialEndsAt: null, subscriptionStatus: null, billingExempt: false } as const;
 const AUTHORIZED = { allowed: true, normalizedPhone: "+15551234567" } as const;
+// Period-bound reservation token as returned by reserveSmsAllowance — the
+// release must be called with this exact token, never a bare org id.
+const RESERVATION = {
+  organizationId: "org-a",
+  periodStart: new Date("2026-09-01T00:00:00.000Z"),
+  periodEnd: new Date("2026-10-01T00:00:00.000Z"),
+} as const;
 
 const MESSAGE = { id: "msg-1", organizationId: "org-a", memberId: "member-1", phone: "+15551234567", body: "hi" };
 
@@ -44,7 +51,7 @@ describe("attemptSmsMessageResend", () => {
     sendSms.mockReset();
     resolveOrganizationAccess.mockReset().mockResolvedValue(ALLOWED);
     authorizeSmsSend.mockReset().mockResolvedValue(AUTHORIZED);
-    reserveSmsAllowance.mockReset().mockResolvedValue(true);
+    reserveSmsAllowance.mockReset().mockResolvedValue(RESERVATION);
     releaseSmsAllowance.mockClear();
   });
 
@@ -104,7 +111,7 @@ describe("attemptSmsMessageResend", () => {
   });
 
   it("HARD STOP: a retry whose atomic reservation is refused fails with the allowance reason and never calls Twilio", async () => {
-    reserveSmsAllowance.mockResolvedValueOnce(false);
+    reserveSmsAllowance.mockResolvedValueOnce(null);
     updateSmsMessage.mockResolvedValueOnce({ id: "msg-1", status: "FAILED" });
 
     await attemptSmsMessageResend(MESSAGE);
@@ -122,7 +129,7 @@ describe("attemptSmsMessageResend", () => {
 
     await attemptSmsMessageResend(MESSAGE);
 
-    expect(releaseSmsAllowance).toHaveBeenCalledWith("org-a");
+    expect(releaseSmsAllowance).toHaveBeenCalledWith(RESERVATION);
   });
 
   it("COMPLIANCE: a member who texted STOP after the original failure cannot be reached by a retry — no Twilio call", async () => {
@@ -183,7 +190,7 @@ describe("processRetryableSmsMessages", () => {
     sendSms.mockReset();
     resolveOrganizationAccess.mockReset().mockResolvedValue(ALLOWED);
     authorizeSmsSend.mockReset().mockResolvedValue(AUTHORIZED);
-    reserveSmsAllowance.mockReset().mockResolvedValue(true);
+    reserveSmsAllowance.mockReset().mockResolvedValue(RESERVATION);
     releaseSmsAllowance.mockClear();
   });
 

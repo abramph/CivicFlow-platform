@@ -97,10 +97,13 @@ export async function sendMemberSms(params: SendMemberSmsParams): Promise<SmsMes
   // BEFORE Twilio. Under concurrency (campaign workers run 20-wide) only as
   // many sends as there is remaining allowance can pass — the entitlement
   // pre-check inside authorizeSmsSend cannot guarantee that on its own. The
-  // unit is consumed up-front and returned only on a synchronous failure;
-  // see reserveSmsAllowance's doc for the crash-consumes-capacity tradeoff.
-  const reserved = await reserveSmsAllowance(organizationId);
-  if (!reserved) {
+  // unit is consumed up-front; the returned token names the exact billing
+  // period charged, and a synchronous failure releases against that token
+  // only (a rollover in between makes the release a period-mismatch no-op —
+  // see releaseSmsAllowance). Crash-consumes-capacity tradeoff documented on
+  // reserveSmsAllowance.
+  const reservation = await reserveSmsAllowance(organizationId);
+  if (!reservation) {
     return prisma.smsMessage.update({
       where: { id: queued.id },
       data: { status: "FAILED", errorMessage: "Your organization has used its full monthly SMS allowance." },
@@ -110,7 +113,7 @@ export async function sendMemberSms(params: SendMemberSmsParams): Promise<SmsMes
   const result = await sendSms({ to: normalizedPhone, body: finalBody });
 
   if (!result.sent) {
-    await releaseSmsAllowance(organizationId);
+    await releaseSmsAllowance(reservation);
   }
 
   return prisma.smsMessage.update({
