@@ -227,11 +227,24 @@ export async function reserveSmsAllowance(organizationId: string): Promise<SmsAl
  * caught a matching release affecting zero rows exactly this way).
  * `extract(epoch from <naive timestamp>)` applies no time-zone conversion,
  * so it recovers the same UTC epoch that Date#getTime() carries.
+ *
+ * NOTE the token is deliberately NOT per-attempt (it carries no message
+ * identity), so this function alone is not idempotent — calling it twice
+ * for the same failed attempt would decrement twice. The exactly-once
+ * guarantee lives in finalizeSmsAttemptFailure
+ * (lib/sms-attempt-finalization.ts), which is the ONLY caller and invokes
+ * this inside the same transaction as the attempt's single winning
+ * FAILED transition. Do not call this from anywhere else. The optional
+ * `db` parameter exists precisely so that finalizer can pass its
+ * transaction client.
  */
-export async function releaseSmsAllowance(reservation: SmsAllowanceReservation): Promise<void> {
+export async function releaseSmsAllowance(
+  reservation: SmsAllowanceReservation,
+  db: { $executeRaw: typeof prisma.$executeRaw } = prisma
+): Promise<void> {
   const periodStartMs = reservation.periodStart ? BigInt(reservation.periodStart.getTime()) : null;
   const periodEndMs = reservation.periodEnd ? BigInt(reservation.periodEnd.getTime()) : null;
-  await prisma.$executeRaw`
+  await db.$executeRaw`
     UPDATE "OrganizationSmsSettings"
     SET "smsUsedThisPeriod" = "smsUsedThisPeriod" - 1, "updatedAt" = (NOW() AT TIME ZONE 'UTC')
     WHERE "organizationId" = ${reservation.organizationId}

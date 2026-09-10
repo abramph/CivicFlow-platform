@@ -1,6 +1,7 @@
 import type { SmsMessage } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { releaseSmsAllowance, reserveSmsAllowance } from "@/lib/sms-entitlement";
+import { reserveSmsAllowance } from "@/lib/sms-entitlement";
+import { finalizeSmsAttemptFailure, finalizeSmsAttemptSuccess } from "@/lib/sms-attempt-finalization";
 import { sendSms } from "@/lib/sms";
 import { authorizeSmsSend } from "@/lib/sms-send-authorization";
 import { SMS_ADDON } from "@/lib/sms-pricing";
@@ -93,41 +94,44 @@ export async function sendMemberSms(params: SendMemberSmsParams): Promise<SmsMes
     },
   });
 
+  // The QUEUED row created above IS this attempt's one-time claim: every
+  // terminal outcome below commits through the fenced finalizers in
+  // lib/sms-attempt-finalization.ts, whose conditional QUEUED-scoped
+  // transition can succeed at most once — so a replayed failure path can
+  // never release the same allowance unit twice, and this request can
+  // never overwrite a status someone else (e.g. the admin Cancel action,
+  // or the delivery webhook after a later retry) already committed.
+  const claim = { kind: "initial", messageId: queued.id } as const;
+  const refetch = async () => (await prisma.smsMessage.findUnique({ where: { id: queued.id } })) ?? queued;
+
   // Database-atomic hard-stop: claim one unit of the monthly allowance
-  // BEFORE Twilio. Under concurrency (campaign workers run 20-wide) only as
-  // many sends as there is remaining allowance can pass — the entitlement
-  // pre-check inside authorizeSmsSend cannot guarantee that on its own. The
-  // unit is consumed up-front; the returned token names the exact billing
-  // period charged, and a synchronous failure releases against that token
-  // only (a rollover in between makes the release a period-mismatch no-op —
-  // see releaseSmsAllowance). Crash-consumes-capacity tradeoff documented on
+  // immediately BEFORE Twilio. Under concurrency (campaign workers run
+  // 20-wide) only as many sends as there is remaining allowance can pass —
+  // the entitlement pre-check inside authorizeSmsSend cannot guarantee that
+  // on its own. The unit is consumed up-front; the returned token names the
+  // exact billing period charged, and the one-time failure finalizer
+  // releases against that token only, inside the same transaction as the
+  // FAILED transition. Crash-consumes-capacity tradeoff documented on
   // reserveSmsAllowance.
   const reservation = await reserveSmsAllowance(organizationId);
   if (!reservation) {
-    return prisma.smsMessage.update({
-      where: { id: queued.id },
-      data: { status: "FAILED", errorMessage: "Your organization has used its full monthly SMS allowance." },
-    });
+    await finalizeSmsAttemptFailure(claim, null, "Your organization has used its full monthly SMS allowance.");
+    return refetch();
   }
 
   const result = await sendSms({ to: normalizedPhone, body: finalBody });
 
-  if (!result.sent) {
-    await releaseSmsAllowance(reservation);
+  if (result.sent) {
+    await finalizeSmsAttemptSuccess(claim, {
+      providerMessageId: result.providerMessageId ?? null,
+      // A flat per-message estimate for internal admin cost visibility
+      // only — NOT a customer billing rate (hard-stop policy: no
+      // customer-facing overage billing exists).
+      costEstimateCents: SMS_ADDON.overageRateCents,
+    });
+  } else {
+    await finalizeSmsAttemptFailure(claim, reservation, result.reason ?? "SMS send failed.");
   }
 
-  return prisma.smsMessage.update({
-    where: { id: queued.id },
-    data: result.sent
-      ? {
-          status: "SENT",
-          sentAt: new Date(),
-          providerMessageId: result.providerMessageId ?? null,
-          // A flat per-message estimate for internal admin cost visibility
-          // only — NOT a customer billing rate (hard-stop policy: no
-          // customer-facing overage billing exists).
-          costEstimateCents: SMS_ADDON.overageRateCents,
-        }
-      : { status: "FAILED", errorMessage: result.reason ?? "SMS send failed." },
-  });
+  return refetch();
 }
