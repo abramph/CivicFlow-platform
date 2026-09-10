@@ -113,7 +113,37 @@ paths skip E.164 normalization.
    wording: "$10/month includes up to 1,000 messages. Sending pauses when
    the monthly allowance is reached; contact support to increase your
    limit." The `smsOverageRateCents` column remains internal-only.
-4. **Stripe config readiness**: `STRIPE_PRICE_SMS_ADDON_MONTHLY` added to the
+4. **Single-owner retries and exactly-once finalization** (Round 4):
+   every retry attempt — manual admin Retry and the cron sweep alike — must
+   first win an atomic database lease (`claimSmsRetryAttempt` in
+   `lib/sms-queue.ts`, one CAS over existing columns: eligible `RETRYING`
+   or lease-expired `SENDING` rows transition to `SENDING` with the lease
+   expiry stored in `nextRetryAt`, +2 minutes). Exactly one concurrent
+   worker wins; `retryCount` increments inside that CAS, once per claimed
+   attempt; the manual route only makes a FAILED row eligible
+   (`nextRetryAt = now`, no increment) and then calls the same centralized
+   executor, auditing once per claim it actually won. A crashed worker's
+   row is recoverable only after its lease expires, through the same CAS.
+   The lease value doubles as a fencing token: terminal commits go through
+   `lib/sms-attempt-finalization.ts`, whose conditional transition requires
+   the in-flight state (`QUEUED` for initial sends; `SENDING` + the
+   worker's exact lease value for retries) — a stale worker matches zero
+   rows and can neither overwrite a recovered attempt's result nor release
+   quota, and the request path can never overwrite a webhook-written
+   terminal status (DELIVERED/FAILED). Allowance release happens ONLY
+   inside the single winning FAILED transition, in the same transaction —
+   one failed attempt returns at most one unit, replays release nothing,
+   and a release can never erase a different successful attempt's unit
+   (real-database-proven, incl. N concurrent duplicate finalizers). The
+   Twilio HTTP request now has an explicit 30s timeout
+   (`TWILIO_REQUEST_TIMEOUT_MS`, `AbortSignal.timeout`) — Node fetch's
+   undici defaults (~300s) would have outlived the lease — giving a 4×
+   margin under the 120s lease, asserted in tests; a timeout flows through
+   the same one-time failure finalizer. Ordering on both paths: ownership →
+   billing gate → canonical authorization → reservation immediately before
+   Twilio → one fenced commit. No schema change: the `SENDING` enum value
+   and `nextRetryAt` already existed.
+5. **Stripe config readiness**: `STRIPE_PRICE_SMS_ADDON_MONTHLY` added to the
    env schema (`src/lib/env.ts`, optional — required only by the paid flow)
    and `.env.example`; fail-closed behavior of `smsAddOnPriceId()` /
    `isSmsAddOnPriceId()` is tested; the GET billing endpoint is tested to
