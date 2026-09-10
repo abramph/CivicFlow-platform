@@ -199,18 +199,19 @@ jobs:
       - name: Generate Prisma client
         run: npm run db:generate
 
-      # The SMS monthly-quota hard stop is a row-locked conditional UPDATE
-      # (reserveSmsAllowance) whose guarantee — 20 concurrent senders at
-      # 999/1,000 used yield exactly ONE Twilio-eligible reservation, and a
-      # stale pre-rollover release can never erase a newer period's send —
-      # only means anything against a real database. The unit suite mocks
-      # $queryRaw and cannot prove it, and the normal portal test job skips
-      # this file by design. It runs here, in the only job with a real
-      # (throwaway, job-scoped) Postgres; the DATABASE_URL below points at
-      # that container and nothing else. HOA_RUN_DB_INTEGRATION_TEST is the
+      # The SMS quota hard stop and the retry single-owner lease are
+      # row-locked conditional UPDATEs whose guarantees — 20 concurrent
+      # senders at 999/1,000 yield exactly ONE Twilio-eligible reservation;
+      # N racing workers get exactly one lease per attempt; a stale or
+      # replayed failure finalizer releases nothing — only mean anything
+      # against a real database. The unit suite mocks Prisma and cannot
+      # prove them, and the normal portal test job skips these files by
+      # design. They run here, in the only job with a real (throwaway,
+      # job-scoped) Postgres; the DATABASE_URL below points at that
+      # container and nothing else. HOA_RUN_DB_INTEGRATION_TEST is the
       # repo-wide opt-in flag these integration files gate on.
-      - name: SMS quota reservation concurrency suite (real Postgres)
+      - name: SMS quota + retry-lease concurrency suites (real Postgres)
         env:
           DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/ci_migrations?schema=public
           HOA_RUN_DB_INTEGRATION_TEST: "1"
-        run: npx vitest run src/lib/__tests__/sms-quota-reservation.integration.test.ts
+        run: npx vitest run src/lib/__tests__/sms-quota-reservation.integration.test.ts src/lib/__tests__/sms-retry-lease.integration.test.ts
