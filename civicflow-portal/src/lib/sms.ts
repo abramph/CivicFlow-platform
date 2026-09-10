@@ -9,6 +9,18 @@ type SendSmsResult = {
   providerMessageId?: string;
 };
 
+/**
+ * Hard ceiling on the Twilio HTTP request. Node's fetch (undici) has NO
+ * usable default here — its headers/body timeouts are 300s — so without
+ * this, a hung Twilio call could outlive the retry lease
+ * (SMS_RETRY_LEASE_MS in lib/sms-queue.ts, 120s) and a recovery worker
+ * could double-send. This value MUST stay comfortably below that lease
+ * (4x margin today; asserted by sms-queue.test.ts). A timeout aborts the
+ * fetch, lands in the same catch as any thrown error, and therefore flows
+ * through the same one-time failure finalizer as every synchronous failure.
+ */
+export const TWILIO_REQUEST_TIMEOUT_MS = 30_000;
+
 /** Whether we currently have enough Twilio credentials (database or env-var) to attempt a send at all — not a check of the platform enable/pause/test-mode gates in sendSms() itself. */
 export async function isSmsConfigured(): Promise<boolean> {
   const credentials = await getEffectiveTwilioCredentials();
@@ -83,6 +95,7 @@ async function sendViaTwilio(
         "Content-Type": "application/x-www-form-urlencoded",
       },
       body,
+      signal: AbortSignal.timeout(TWILIO_REQUEST_TIMEOUT_MS),
     });
 
     const payload = (await response.json().catch(() => null)) as { sid?: string; message?: string; code?: number } | null;

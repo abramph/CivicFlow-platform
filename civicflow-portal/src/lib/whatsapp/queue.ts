@@ -4,8 +4,9 @@ import { sendWhatsAppMessage } from "@/lib/whatsapp/send";
 import { ValidationError } from "@/lib/validation";
 
 /**
- * Resends a FAILED WhatsApp message, mirroring attemptSmsMessageResend()
- * (src/lib/sms-queue.ts). Only freeform/Sandbox sends (a literal `body`) can
+ * Resends a FAILED WhatsApp message, loosely mirroring the SMS retry path
+ * (src/lib/sms-queue.ts — since Round 4 that path is lease-claimed via
+ * executeClaimedSmsRetry; this WhatsApp path has no such lease yet). Only freeform/Sandbox sends (a literal `body`) can
  * be retried — an approved-template send never has its Content SID or the
  * variables used for that specific send stored on the row by design
  * (WhatsAppMessage.body is null for template sends; see the model's own

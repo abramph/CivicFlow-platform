@@ -22,37 +22,12 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
-const sendSms = vi.fn();
-vi.mock("@/lib/sms", () => ({ sendSms: (...args: unknown[]) => sendSms(...args) }));
-
-// This suite tests the retry/cancel routes, not the subscription gate —
-// assume every organization is allowed.
-vi.mock("@/lib/subscription-gate", () => ({
-  resolveOrganizationAccess: vi.fn().mockResolvedValue({
-    allowed: true,
-    reason: null,
-    trialEndsAt: null,
-    subscriptionStatus: null,
-    billingExempt: false,
-  }),
-}));
-
-// The canonical send authorization has its own suite
-// (sms-send-authorization.test.ts) and its wiring into retries is covered by
-// sms-queue.test.ts — here it defaults to allowed so the route mechanics are
-// what's under test.
-const authorizeSmsSend = vi.fn();
-vi.mock("@/lib/sms-send-authorization", () => ({
-  authorizeSmsSend: (...args: unknown[]) => authorizeSmsSend(...args),
-}));
-
-// Same story for the atomic quota reservation (sms-quota-reservation
-// integration test + sms-queue.test.ts cover it): default to available.
-const reserveSmsAllowance = vi.fn();
-const releaseSmsAllowance = vi.fn().mockResolvedValue(undefined);
-vi.mock("@/lib/sms-entitlement", () => ({
-  reserveSmsAllowance: (...args: unknown[]) => reserveSmsAllowance(...args),
-  releaseSmsAllowance: (...args: unknown[]) => releaseSmsAllowance(...args),
+// Retry ownership and execution are fully centralized in the sms-queue
+// claimant (own suite: sms-queue.test.ts + the real-database lease suite);
+// the route's job is eligibility, delegation, and once-per-claim auditing.
+const executeClaimedSmsRetry = vi.fn();
+vi.mock("@/lib/sms-queue", () => ({
+  executeClaimedSmsRetry: (...args: unknown[]) => executeClaimedSmsRetry(...args),
 }));
 
 import { POST as retry } from "@/app/api/admin/sms/messages/[id]/retry/route";
@@ -61,6 +36,8 @@ import { POST as cancel } from "@/app/api/admin/sms/messages/[id]/cancel/route";
 const session = { userId: "user-1", userEmail: "admin@example.com" };
 const params = { params: Promise.resolve({ id: "msg-1" }) };
 
+const FAILED_ROW = { id: "msg-1", status: "FAILED", phone: "+15551234567", body: "hi", organizationId: "org-1", memberId: "member-1" };
+
 describe("POST /api/admin/sms/messages/[id]/retry", () => {
   beforeEach(() => {
     requireSuperAdmin.mockReset();
@@ -68,99 +45,68 @@ describe("POST /api/admin/sms/messages/[id]/retry", () => {
     findUniqueSmsMessage.mockReset();
     updateSmsMessage.mockReset();
     updateManySmsMessage.mockReset();
-    sendSms.mockReset();
-    authorizeSmsSend.mockReset().mockResolvedValue({ allowed: true, normalizedPhone: "+15551234567" });
-    reserveSmsAllowance.mockReset().mockResolvedValue({ organizationId: "org-1", periodStart: new Date("2026-09-01T00:00:00.000Z"), periodEnd: new Date("2026-10-01T00:00:00.000Z") });
-    releaseSmsAllowance.mockClear();
+    executeClaimedSmsRetry.mockReset();
     createAuditEvent.mockClear();
   });
 
-  it("rejects retrying a message that isn't FAILED", async () => {
+  it("rejects retrying a message that isn't FAILED — the eligibility CAS matches nothing", async () => {
     findUniqueSmsMessage.mockResolvedValueOnce({ id: "msg-1", status: "SENT" });
     updateManySmsMessage.mockResolvedValueOnce({ count: 0 });
+
     const response = await retry(new Request("https://x"), params);
+
     expect(response.status).toBe(400);
-    expect(sendSms).not.toHaveBeenCalled();
+    expect(executeClaimedSmsRetry).not.toHaveBeenCalled();
   });
 
-  it("resends a FAILED message and marks it SENT on success", async () => {
-    findUniqueSmsMessage.mockResolvedValueOnce({
-      id: "msg-1",
-      status: "FAILED",
-      phone: "+15551234567",
-      body: "hi",
-      organizationId: "org-1",
-    });
+  it("makes the row eligible (RETRYING, immediately due, NO retryCount increment) then delegates to the centralized claimant, auditing once", async () => {
+    findUniqueSmsMessage.mockResolvedValueOnce(FAILED_ROW);
     updateManySmsMessage.mockResolvedValueOnce({ count: 1 });
-    updateSmsMessage.mockResolvedValueOnce({ id: "msg-1", status: "SENT" });
-    sendSms.mockResolvedValueOnce({ sent: true, skipped: false, to: "+15551234567", providerMessageId: "SM99" });
+    executeClaimedSmsRetry.mockResolvedValueOnce({ claimed: true, message: { ...FAILED_ROW, status: "SENT" } });
 
     const response = await retry(new Request("https://x"), params);
     const payload = await response.json();
 
-    expect(sendSms).toHaveBeenCalledWith({ to: "+15551234567", body: "hi" });
-    expect(payload.data.status).toBe("SENT");
     expect(updateManySmsMessage).toHaveBeenCalledWith({
       where: { id: "msg-1", status: "FAILED" },
-      data: { status: "RETRYING", retryCount: { increment: 1 }, nextRetryAt: expect.any(Date) },
+      // retryCount deliberately absent: it increments inside the claim CAS,
+      // once per actual claimed attempt — never per competing request.
+      data: { status: "RETRYING", nextRetryAt: expect.any(Date) },
     });
-    expect(updateSmsMessage).toHaveBeenCalledWith({
-      where: { id: "msg-1" },
-      data: { status: "SENT", sentAt: expect.any(Date), providerMessageId: "SM99", errorMessage: null },
-    });
-    expect(createAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ organizationId: "org-1" }));
+    expect(executeClaimedSmsRetry).toHaveBeenCalledWith("msg-1");
+    expect(payload.data.status).toBe("SENT");
+    expect(createAuditEvent).toHaveBeenCalledTimes(1);
+    expect(createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: "org-1", action: "sms_admin.message_retried", metadata: { sent: true } })
+    );
   });
 
-  it("marks FAILED again with the new reason when the retry also fails", async () => {
-    findUniqueSmsMessage.mockResolvedValueOnce({
-      id: "msg-1",
-      status: "FAILED",
-      phone: "+15551234567",
-      body: "hi",
-      organizationId: "org-1",
-    });
+  it("reports a failed retry outcome with sent:false in the single audit event", async () => {
+    findUniqueSmsMessage.mockResolvedValue(FAILED_ROW);
     updateManySmsMessage.mockResolvedValueOnce({ count: 1 });
-    updateSmsMessage.mockResolvedValueOnce({ id: "msg-1", status: "FAILED" });
-    sendSms.mockResolvedValueOnce({ sent: false, skipped: false, to: "+15551234567", reason: "Still failing" });
+    executeClaimedSmsRetry.mockResolvedValueOnce({ claimed: true, message: { ...FAILED_ROW, status: "FAILED", errorMessage: "Still failing" } });
 
     await retry(new Request("https://x"), params);
 
-    expect(updateSmsMessage).toHaveBeenCalledWith({
-      where: { id: "msg-1" },
-      data: { status: "FAILED", errorMessage: "Still failing" },
-    });
+    expect(createAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ metadata: { sent: false } }));
   });
 
-  it("COMPLIANCE: the manual Retry button honors a send-authorization denial (e.g. STOP after the original failure) — no Twilio call", async () => {
-    findUniqueSmsMessage.mockResolvedValueOnce({
-      id: "msg-1",
-      status: "FAILED",
-      phone: "+15551234567",
-      body: "hi",
-      organizationId: "org-1",
-      memberId: "member-1",
-    });
+  it("RACE with cron: when the sweep wins the claim first, the route neither audits nor double-executes — the attempt has exactly one owner", async () => {
+    findUniqueSmsMessage.mockResolvedValueOnce(FAILED_ROW);
     updateManySmsMessage.mockResolvedValueOnce({ count: 1 });
-    authorizeSmsSend.mockResolvedValueOnce({ allowed: false, reason: "Member opted out of SMS." });
-    updateSmsMessage.mockResolvedValueOnce({ id: "msg-1", status: "FAILED" });
+    executeClaimedSmsRetry.mockResolvedValueOnce({ claimed: false });
+    findUniqueSmsMessage.mockResolvedValueOnce({ ...FAILED_ROW, status: "SENDING" });
 
-    await retry(new Request("https://x"), params);
+    const response = await retry(new Request("https://x"), params);
+    const payload = await response.json();
 
-    expect(sendSms).not.toHaveBeenCalled();
-    expect(updateSmsMessage).toHaveBeenCalledWith({
-      where: { id: "msg-1" },
-      data: { status: "FAILED", errorMessage: "Member opted out of SMS." },
-    });
+    expect(response.status).toBe(200);
+    expect(payload.alreadyClaimed).toBe(true);
+    expect(createAuditEvent).not.toHaveBeenCalled();
   });
 
-  it("E2E-6 finding: closes a TOCTOU race — a second concurrent retry for the same message loses the atomic claim (count 0) and fails cleanly instead of double-sending", async () => {
-    findUniqueSmsMessage.mockResolvedValueOnce({
-      id: "msg-1",
-      status: "FAILED",
-      phone: "+15551234567",
-      body: "hi",
-      organizationId: "org-1",
-    });
+  it("E2E-6 finding: closes a TOCTOU race — a second concurrent retry for the same message loses the eligibility CAS (count 0) and fails cleanly instead of double-sending", async () => {
+    findUniqueSmsMessage.mockResolvedValueOnce(FAILED_ROW);
     // Simulate the second of two concurrent requests: the first request's
     // updateMany already flipped the row to RETRYING, so this one's
     // FAILED-scoped where clause matches nothing.
@@ -169,8 +115,8 @@ describe("POST /api/admin/sms/messages/[id]/retry", () => {
     const response = await retry(new Request("https://x"), params);
 
     expect(response.status).toBe(400);
-    expect(sendSms).not.toHaveBeenCalled();
-    expect(updateSmsMessage).not.toHaveBeenCalled();
+    expect(executeClaimedSmsRetry).not.toHaveBeenCalled();
+    expect(createAuditEvent).not.toHaveBeenCalled();
   });
 });
 

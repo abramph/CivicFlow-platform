@@ -33,7 +33,7 @@ export type SmsSendAuthorization =
  * The single canonical "may this ORGANIZATION message be sent, right now?"
  * decision, applied immediately before every organization-message Twilio
  * call — initial campaign sends (sms-service.ts sendMemberSms) and manual
- * admin Retry / the cron queue sweep (sms-queue.ts attemptSmsMessageResend).
+ * admin Retry / the cron queue sweep (sms-queue.ts executeClaimedSmsRetry).
  * Everything is re-resolved fresh from the database at the moment of
  * sending; nothing is trusted from when the message was first queued:
  *
