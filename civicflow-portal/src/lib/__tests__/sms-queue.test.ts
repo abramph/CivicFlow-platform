@@ -78,7 +78,7 @@ describe("claimSmsRetryAttempt", () => {
     updateManySmsMessage.mockReset();
   });
 
-  it("wins ownership via one CAS: eligible RETRYING or lease-expired SENDING rows move to SENDING with a fresh lease and ONE retryCount increment", async () => {
+  it("wins ownership via one CAS over due RETRYING rows ONLY — expired SENDING leases are never re-claimable for another provider attempt", async () => {
     updateManySmsMessage.mockResolvedValueOnce({ count: 1 });
     const before = Date.now();
 
@@ -86,7 +86,7 @@ describe("claimSmsRetryAttempt", () => {
 
     expect(lease).not.toBeNull();
     expect(updateManySmsMessage).toHaveBeenCalledWith({
-      where: { id: "msg-1", status: { in: ["RETRYING", "SENDING"] }, nextRetryAt: { lte: expect.any(Date) } },
+      where: { id: "msg-1", status: "RETRYING", nextRetryAt: { lte: expect.any(Date) } },
       data: { status: "SENDING", nextRetryAt: lease!.leaseExpiry, retryCount: { increment: 1 } },
     });
     const expiryMs = lease!.leaseExpiry.getTime() - before;
@@ -250,8 +250,11 @@ describe("processRetryableSmsMessages", () => {
     finalizeSmsAttemptFailure.mockReset().mockResolvedValue(true);
   });
 
-  it("sweeps eligible RETRYING rows AND lease-expired SENDING rows (crash recovery), claiming each atomically", async () => {
-    findManySmsMessage.mockResolvedValueOnce([{ id: "msg-1" }, { id: "msg-2" }]);
+  it("claims and executes due RETRYING rows atomically", async () => {
+    findManySmsMessage.mockResolvedValueOnce([
+      { id: "msg-1", status: "RETRYING" },
+      { id: "msg-2", status: "RETRYING" },
+    ]);
     updateManySmsMessage.mockResolvedValue({ count: 1 });
     sendSms.mockResolvedValue({ sent: true, skipped: false, outcome: "sent", to: "x", providerMessageId: "SM1" });
 
@@ -260,27 +263,57 @@ describe("processRetryableSmsMessages", () => {
     expect(findManySmsMessage).toHaveBeenCalledWith({
       where: { status: { in: ["RETRYING", "SENDING"] }, nextRetryAt: { lte: expect.any(Date) } },
       take: 50,
-      select: { id: true },
+      select: { id: true, status: true },
     });
     expect(result.processed).toBe(2);
+    expect(result.parked).toBe(0);
     expect(sendSms).toHaveBeenCalledTimes(2);
   });
 
-  it("OVERLAPPING SWEEPS: a sweep whose per-row claims all lose (another worker owns them) sends nothing and reports zero processed", async () => {
-    findManySmsMessage.mockResolvedValueOnce([{ id: "msg-1" }, { id: "msg-2" }]);
+  it("NEVER RE-SENDS an expired SENDING lease: the sweep PARKS it as outcome-unknown — no claim, no reservation, no Twilio, no retryCount", async () => {
+    findManySmsMessage.mockResolvedValueOnce([{ id: "msg-1", status: "SENDING" }]);
+    updateManySmsMessage.mockResolvedValueOnce({ count: 1 }); // the park CAS
+
+    const result = await processRetryableSmsMessages();
+
+    expect(result).toEqual({ processed: 0, parked: 1 });
+    // Exactly one updateMany: the park CAS — SENDING kept, lease cleared,
+    // honest reason recorded, retryCount untouched.
+    expect(updateManySmsMessage).toHaveBeenCalledTimes(1);
+    expect(updateManySmsMessage).toHaveBeenCalledWith({
+      where: { id: "msg-1", status: "SENDING", nextRetryAt: { lte: expect.any(Date) } },
+      data: {
+        nextRetryAt: null,
+        errorMessage:
+          "Send attempt was interrupted before its outcome was recorded; delivery outcome is unknown — verify in Twilio before retrying.",
+      },
+    });
+    expect(updateManySmsMessage.mock.calls[0][0].data).not.toHaveProperty("status");
+    expect(updateManySmsMessage.mock.calls[0][0].data).not.toHaveProperty("retryCount");
+    expect(sendSms).not.toHaveBeenCalled();
+    expect(reserveSmsAllowance).not.toHaveBeenCalled();
+    expect(authorizeSmsSend).not.toHaveBeenCalled();
+    expect(finalizeSmsAttemptFailure).not.toHaveBeenCalled(); // never releases the dead worker's possible unit
+  });
+
+  it("OVERLAPPING SWEEPS: losers of the per-row CAS (claim or park) do nothing — zero sends, zero reservations", async () => {
+    findManySmsMessage.mockResolvedValueOnce([
+      { id: "msg-1", status: "RETRYING" },
+      { id: "msg-2", status: "SENDING" },
+    ]);
     updateManySmsMessage.mockResolvedValue({ count: 0 });
 
     const result = await processRetryableSmsMessages();
 
-    expect(result.processed).toBe(0);
+    expect(result).toEqual({ processed: 0, parked: 0 });
     expect(sendSms).not.toHaveBeenCalled();
     expect(reserveSmsAllowance).not.toHaveBeenCalled();
   });
 
-  it("returns processed: 0 when nothing is due", async () => {
+  it("returns zeros when nothing is due", async () => {
     findManySmsMessage.mockResolvedValueOnce([]);
     const result = await processRetryableSmsMessages();
-    expect(result.processed).toBe(0);
+    expect(result).toEqual({ processed: 0, parked: 0 });
     expect(sendSms).not.toHaveBeenCalled();
   });
 });

@@ -27,31 +27,29 @@ export const SMS_RETRY_LEASE_MS = SMS_ATTEMPT_LEASE_MS;
  * Atomic single-owner lease over one retry attempt — the ONLY way any
  * worker (manual Retry route or the cron sweep) may take ownership of a
  * message before authorizing, reserving quota, or calling Twilio. One
- * compare-and-set UPDATE, no new columns:
+ * compare-and-set UPDATE, no new columns: a due RETRYING row
+ * (nextRetryAt <= now) transitions to SENDING with nextRetryAt =
+ * now + SMS_RETRY_LEASE_MS. Exactly one concurrent caller can win
+ * (Postgres row-locks the row for the UPDATE; losers match zero rows) —
+ * so a manual retry racing the cron, or two overlapping cron invocations,
+ * produce exactly one owner, one quota reservation, and one Twilio call.
  *
- *   RETRYING + nextRetryAt <= now   → normal eligible retry
- *   SENDING  + nextRetryAt <= now   → crash recovery: a previous claimant
- *                                     (initial OR retry) died mid-attempt
- *                                     and its lease has expired
- *
- * both transition to SENDING with nextRetryAt = now + SMS_RETRY_LEASE_MS.
- * Exactly one concurrent caller can win (Postgres row-locks the row for
- * the UPDATE; losers match zero rows) — so a manual retry racing the cron,
- * or two overlapping cron invocations, produce exactly one owner, one
- * quota reservation, and one Twilio call. While the lease is live
- * (nextRetryAt in the future) the row matches neither arm, so a second
- * worker does nothing at all. An attempt parked as outcome-unknown
- * (SENDING with nextRetryAt NULL) matches neither arm EVER — ambiguous
- * rows are manual-reconciliation only. retryCount increments HERE, once
- * per won claim — never per competing request, and never for the original
- * initial claim (claimInitialSmsAttempt keeps it at zero).
+ * ONLY RETRYING rows are claimable — deliberately (Round 6). An expired
+ * SENDING lease is NOT a license to send again: the dead worker may have
+ * already reached Twilio and crashed before recording the outcome, and
+ * fencing can stop a stale database write but not a duplicate external
+ * text. Expired SENDING rows are parked as outcome-unknown by
+ * parkExpiredSmsAttempt below instead, and parked rows (SENDING with
+ * nextRetryAt NULL) match nothing here ever — manual reconciliation only.
+ * retryCount increments HERE, once per won claim — never per competing
+ * request, and never for the original initial claim
+ * (claimInitialSmsAttempt keeps it at zero).
  *
  * The returned claim's leaseExpiry is the fencing token: finalization
- * requires `status = SENDING AND nextRetryAt = <exact lease value>`, and a
- * recovery claim always writes a strictly later lease value (it can only
- * happen after the old value has expired), so a stale worker's finalize
- * matches zero rows and can neither overwrite the recovered attempt's
- * result nor release quota it no longer owns.
+ * requires `status = SENDING AND nextRetryAt = <exact lease value>`, so a
+ * stale worker's finalize matches zero rows once the row was parked or
+ * terminalized and can neither overwrite that state nor release quota it
+ * no longer owns.
  *
  * `leaseMs` is overridable only so integration tests can mint an
  * already-expired lease without waiting out the real duration.
@@ -64,12 +62,44 @@ export async function claimSmsRetryAttempt(
   const claimed = await prisma.smsMessage.updateMany({
     where: {
       id: messageId,
-      status: { in: ["RETRYING", "SENDING"] },
+      status: "RETRYING",
       nextRetryAt: { lte: new Date() },
     },
     data: { status: "SENDING", nextRetryAt: leaseExpiry, retryCount: { increment: 1 } },
   });
   return claimed.count === 1 ? { messageId, leaseExpiry } : null;
+}
+
+/** Honest operator-facing reason recorded when a lease expires with the outcome unrecorded. */
+export const SMS_INTERRUPTED_OUTCOME_MESSAGE =
+  "Send attempt was interrupted before its outcome was recorded; delivery outcome is unknown — verify in Twilio before retrying.";
+
+/**
+ * Parks an expired in-flight attempt as OUTCOME-UNKNOWN (Round 6). A
+ * SENDING row whose lease has lapsed means a worker died (or stalled past
+ * its lease) somewhere between claiming and finalizing — possibly AFTER
+ * Twilio accepted the message. Re-sending would risk a duplicate text, so
+ * recovery is deliberately not automatic: one atomic CAS keeps
+ * status = SENDING, clears the lease (nextRetryAt: null — invisible to the
+ * sweep, unclaimable, un-retryable by the ordinary Retry button,
+ * un-cancellable), and records the honest manual-reconciliation message.
+ * It never calls Twilio, never reserves another unit, never releases the
+ * unit the dead worker may have reserved (the message may have gone out),
+ * and never touches retryCount. Concurrent sweep workers racing this CAS
+ * are harmless: one wins, the rest match zero rows.
+ *
+ * Conservative tradeoff, documented deliberately: a worker that crashed
+ * BEFORE its provider call also lands here, stranding its reserved unit
+ * and requiring the same manual reconciliation — we accept that over any
+ * chance of duplicating a text, since the row alone cannot prove which
+ * side of the Twilio call the crash happened on.
+ */
+export async function parkExpiredSmsAttempt(messageId: string): Promise<boolean> {
+  const parked = await prisma.smsMessage.updateMany({
+    where: { id: messageId, status: "SENDING", nextRetryAt: { lte: new Date() } },
+    data: { nextRetryAt: null, errorMessage: SMS_INTERRUPTED_OUTCOME_MESSAGE },
+  });
+  return parked.count === 1;
 }
 
 export type ClaimedSmsRetryResult =
@@ -162,32 +192,42 @@ export async function executeClaimedSmsRetry(messageId: string): Promise<Claimed
 }
 
 /**
- * Sweeps retry candidates: RETRYING rows whose nextRetryAt has passed
- * (normal eligibility — including a manual retry whose request died
- * between making the row eligible and claiming it) and SENDING rows whose
- * lease has expired (a claimant crashed mid-attempt; this is the
- * deliberate recovery path, and the ONLY way a second worker ever touches
- * a previously claimed attempt). Outcome-unknown rows (SENDING with
- * nextRetryAt NULL) never match this query — ambiguous attempts are
- * excluded from every automatic path by construction. The findMany is
- * purely advisory candidate discovery — every row is then individually
- * claimed through the same atomic claimSmsRetryAttempt CAS as the manual
- * route, so two overlapping sweeps (or a sweep racing a manual retry)
- * still yield exactly one owner per row; losers count as skipped, not
- * processed.
+ * Sweeps in-flight candidates and routes them by what is SAFE, not just by
+ * what is due:
+ *
+ *   RETRYING + due  → a genuine retry: individually claimed through the
+ *                     same atomic claimSmsRetryAttempt CAS the manual
+ *                     route uses, then executed (one owner, one
+ *                     reservation, at most one Twilio call);
+ *   SENDING  + due  → an expired lease: the previous worker died with the
+ *                     outcome UNRECORDED, possibly after Twilio accepted —
+ *                     PARKED as outcome-unknown via parkExpiredSmsAttempt,
+ *                     never re-sent, never re-reserved (Round 6).
+ *
+ * Outcome-unknown rows (SENDING with nextRetryAt NULL) never match this
+ * query — ambiguous attempts are excluded from every automatic path by
+ * construction. The findMany is purely advisory candidate discovery —
+ * every row is then individually claimed or parked through an atomic CAS,
+ * so two overlapping sweeps (or a sweep racing a manual retry or cancel)
+ * still yield exactly one actor per row; losers count as skipped.
  */
-export async function processRetryableSmsMessages(): Promise<{ processed: number }> {
+export async function processRetryableSmsMessages(): Promise<{ processed: number; parked: number }> {
   const due = await prisma.smsMessage.findMany({
     where: { status: { in: ["RETRYING", "SENDING"] }, nextRetryAt: { lte: new Date() } },
     take: BATCH_SIZE,
-    select: { id: true },
+    select: { id: true, status: true },
   });
 
   let processed = 0;
-  for (const { id } of due) {
+  let parked = 0;
+  for (const { id, status } of due) {
+    if (status === "SENDING") {
+      if (await parkExpiredSmsAttempt(id)) parked += 1;
+      continue;
+    }
     const result = await executeClaimedSmsRetry(id);
     if (result.claimed) processed += 1;
   }
 
-  return { processed };
+  return { processed, parked };
 }

@@ -6,8 +6,8 @@ import { releaseSmsAllowance, type SmsAllowanceReservation } from "@/lib/sms-ent
  * row before the sweep may recover it. MUST stay comfortably above the
  * Twilio HTTP timeout (TWILIO_REQUEST_TIMEOUT_MS in lib/sms.ts, 30s — 4x
  * margin, asserted in sms-queue.test.ts): a worker whose Twilio call is
- * legitimately in flight must never lose its lease, or a recovery could
- * double-send.
+ * legitimately in flight must never lose its lease and be parked as
+ * outcome-unknown mid-send.
  */
 export const SMS_ATTEMPT_LEASE_MS = 120_000;
 
@@ -18,9 +18,9 @@ export const SMS_ATTEMPT_LEASE_MS = 120_000;
  * in-flight state IS the claim. Since Round 5, initial sends and retries
  * share ONE fencing shape: the attempt owns the row while
  * `status = SENDING AND nextRetryAt = <this worker's exact lease value>`.
- * A recovered attempt carries a strictly later lease value (recovery is
- * only possible after the old value expired), a cancelled or finalized row
- * is no longer SENDING, and the delivery webhook never writes nextRetryAt —
+ * A parked outcome-unknown row carries nextRetryAt NULL, a cancelled or
+ * finalized row is no longer SENDING, a fresh RETRYING claim carries a
+ * strictly later lease value, and the delivery webhook never writes nextRetryAt —
  * so every stale/duplicate finalizer matches zero rows. There is no
  * unfenced finalizer of any kind.
  */
@@ -40,10 +40,13 @@ function inFlightWhere(claim: SmsAttemptClaim) {
  * campaign-level partial unique index guarantees no duplicate creator
  * exists), so a lost claim means "cancellation won": the caller must not
  * reserve quota or call Twilio. Deliberately does NOT touch retryCount —
- * the original initial attempt is attempt zero; only genuine retry or
- * lease-expiry recovery claims (claimSmsRetryAttempt in lib/sms-queue.ts)
- * increment it. An initial SENDING row whose worker crashes is recovered
- * through that same sweep path once its lease expires — no special case.
+ * the original initial attempt is attempt zero; only genuine retry claims
+ * (claimSmsRetryAttempt in lib/sms-queue.ts) increment it.
+ *
+ * An initial SENDING row whose worker crashes is PARKED as outcome-unknown
+ * by the sweep once its lease expires (parkExpiredSmsAttempt in
+ * lib/sms-queue.ts) — never automatically re-sent, since the crash may
+ * have happened after Twilio accepted the message.
  *
  * `leaseMs` is overridable only so integration tests can mint an
  * already-expired lease without waiting out the real duration.
@@ -62,8 +65,8 @@ export async function claimInitialSmsAttempt(
 
 /**
  * Commits a successful Twilio acceptance exactly once. Returns false when
- * the fenced transition matched zero rows — the attempt was recovered by
- * another worker, cancelled, or already terminalized (e.g. the delivery
+ * the fenced transition matched zero rows — the attempt was parked as
+ * outcome-unknown, cancelled, or already terminalized (e.g. the delivery
  * webhook raced ahead); in that case NOTHING is overwritten. nextRetryAt
  * is cleared so a finished row can never look lease-expired to the sweep.
  */

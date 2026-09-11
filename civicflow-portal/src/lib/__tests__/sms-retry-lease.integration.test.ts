@@ -119,26 +119,36 @@ describe.skipIf(!RUN_INTEGRATION)("SMS retry lease + one-time finalization — r
     expect(after.retryCount).toBe(1);
   });
 
-  it("CRASH RECOVERY: once the lease has expired, exactly one of several concurrent recovery workers claims the SENDING row", async () => {
-    const { claimSmsRetryAttempt } = await import("@/lib/sms-queue");
+  it("EXPIRED LEASE = PARK, NEVER RE-SEND: exactly one of several concurrent sweep workers parks the expired SENDING row; it is never re-claimable and retryCount never moves", async () => {
+    const { SMS_INTERRUPTED_OUTCOME_MESSAGE, claimSmsRetryAttempt, parkExpiredSmsAttempt } = await import("@/lib/sms-queue");
     const row = await createRetryRow();
 
     // Simulated crash: the worker claims (leaseMs < 0 mints an already-
-    // expired lease with the exact stored value) and then dies.
+    // expired lease with the exact stored value) and then dies — possibly
+    // AFTER Twilio accepted the message.
     const crashed = await claimSmsRetryAttempt(row.id, -60_000);
     expect(crashed).not.toBeNull();
 
-    const recoveries = await Promise.all(Array.from({ length: 5 }, () => claimSmsRetryAttempt(row.id)));
+    // The expired SENDING row is NOT claimable for another provider attempt…
+    await expect(claimSmsRetryAttempt(row.id)).resolves.toBeNull();
 
-    expect(recoveries.filter(Boolean)).toHaveLength(1);
+    // …concurrent sweep workers race to PARK it; exactly one wins, harmlessly.
+    const parkers = await Promise.all(Array.from({ length: 5 }, () => parkExpiredSmsAttempt(row.id)));
+    expect(parkers.filter(Boolean)).toHaveLength(1);
+
     const after = await prisma.smsMessage.findUnique({ where: { id: row.id } });
-    expect(after.status).toBe("SENDING");
-    expect(after.retryCount).toBe(2); // crashed claim + recovery claim
-    expect(after.nextRetryAt.getTime()).toBeGreaterThan(Date.now());
+    expect(after.status).toBe("SENDING"); // parked, not resurrected
+    expect(after.nextRetryAt).toBeNull();
+    expect(after.errorMessage).toBe(SMS_INTERRUPTED_OUTCOME_MESSAGE);
+    expect(after.retryCount).toBe(1); // the crashed claim only — parking never increments
+
+    // Parked rows stay outside every automatic path.
+    await expect(claimSmsRetryAttempt(row.id)).resolves.toBeNull();
+    await expect(parkExpiredSmsAttempt(row.id)).resolves.toBe(false);
   });
 
-  it("FENCING: a stale worker can neither release quota nor overwrite the recovered worker's terminal result", async () => {
-    const { claimSmsRetryAttempt } = await import("@/lib/sms-queue");
+  it("FENCING: a stale worker can neither release quota nor overwrite the parked outcome-unknown state", async () => {
+    const { SMS_INTERRUPTED_OUTCOME_MESSAGE, claimSmsRetryAttempt, parkExpiredSmsAttempt } = await import("@/lib/sms-queue");
     const { finalizeSmsAttemptFailure, finalizeSmsAttemptSuccess } = await import("@/lib/sms-attempt-finalization");
     const { reserveSmsAllowance } = await import("@/lib/sms-entitlement");
     await resetUsage(0);
@@ -151,30 +161,23 @@ describe.skipIf(!RUN_INTEGRATION)("SMS retry lease + one-time finalization — r
     const staleReservation = await reserveSmsAllowance(orgId);
     expect(await usage()).toBe(1);
 
-    // Worker B recovers the row under a new lease.
-    const recoveredLease = await claimSmsRetryAttempt(row.id);
-    expect(recoveredLease).not.toBeNull();
-    const recoveredClaim = recoveredLease!;
+    // The sweep parks the expired attempt as outcome-unknown.
+    await expect(parkExpiredSmsAttempt(row.id)).resolves.toBe(true);
 
     // Stale A tries to finalize its failure WITH its reservation: the fence
-    // (status SENDING + A's exact lease value) matches nothing — no status
-    // write, and crucially NO release.
+    // (status SENDING + A's exact lease value) matches nothing — the row's
+    // nextRetryAt is now NULL — no status write, and crucially NO release.
     await expect(finalizeSmsAttemptFailure(staleClaim, staleReservation, "stale failure")).resolves.toBe(false);
-    expect(await usage()).toBe(1); // A's unit stays conservatively consumed
+    expect(await usage()).toBe(1); // A's possibly-sent unit stays conservatively consumed
 
-    // B commits success under its own lease.
-    await expect(finalizeSmsAttemptSuccess(recoveredClaim, { providerMessageId: "SMrecovered" })).resolves.toBe(true);
-    const afterB = await prisma.smsMessage.findUnique({ where: { id: row.id } });
-    expect(afterB.status).toBe("SENT");
-    expect(afterB.providerMessageId).toBe("SMrecovered");
-    expect(afterB.nextRetryAt).toBeNull();
-
-    // Stale A tries again, both ways — the terminal result is untouchable.
+    // Stale A cannot claim success over the parked state either.
     await expect(finalizeSmsAttemptSuccess(staleClaim, { providerMessageId: "SMstale" })).resolves.toBe(false);
-    await expect(finalizeSmsAttemptFailure(staleClaim, staleReservation, "stale again")).resolves.toBe(false);
+
     const final = await prisma.smsMessage.findUnique({ where: { id: row.id } });
-    expect(final.status).toBe("SENT");
-    expect(final.providerMessageId).toBe("SMrecovered");
+    expect(final.status).toBe("SENDING"); // still parked
+    expect(final.nextRetryAt).toBeNull();
+    expect(final.errorMessage).toBe(SMS_INTERRUPTED_OUTCOME_MESSAGE);
+    expect(final.providerMessageId).toBeNull();
     expect(await usage()).toBe(1);
   });
 

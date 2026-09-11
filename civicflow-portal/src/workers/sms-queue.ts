@@ -2,7 +2,7 @@ import { processRetryableSmsMessages } from "@/lib/sms-queue";
 
 async function main() {
   const result = await processRetryableSmsMessages();
-  console.log(`[sms-queue-worker] processed=${result.processed}`);
+  console.log(`[sms-queue-worker] processed=${result.processed} parked=${result.parked}`);
 }
 
 main()
