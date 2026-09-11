@@ -210,8 +210,12 @@ jobs:
       # job-scoped) Postgres; the DATABASE_URL below points at that
       # container and nothing else. HOA_RUN_DB_INTEGRATION_TEST is the
       # repo-wide opt-in flag these integration files gate on.
-      - name: SMS quota + retry-lease concurrency suites (real Postgres)
+      # --no-file-parallelism: all three suites share this one database and
+      # the campaign/rollover cases temporarily flip the
+      # PlatformSmsSettings.orgMessagingEnabled singleton (restored in
+      # afterAll) — file-parallel workers would race that state.
+      - name: SMS quota + retry-lease + campaign-idempotency suites (real Postgres)
         env:
           DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/ci_migrations?schema=public
           HOA_RUN_DB_INTEGRATION_TEST: "1"
-        run: npx vitest run src/lib/__tests__/sms-quota-reservation.integration.test.ts src/lib/__tests__/sms-retry-lease.integration.test.ts
+        run: npx vitest run --no-file-parallelism src/lib/__tests__/sms-quota-reservation.integration.test.ts src/lib/__tests__/sms-retry-lease.integration.test.ts src/lib/__tests__/sms-campaign-idempotency.integration.test.ts
