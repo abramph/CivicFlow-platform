@@ -145,7 +145,33 @@ async function sendViaTwilio(
       };
     }
 
-    return { sent: true, skipped: false, outcome: "sent", to: input.to, providerMessageId: payload?.sid };
+    // A 2xx alone does not prove acceptance we can reconcile: without a
+    // valid message SID there is no provider identity to match a delivery
+    // callback or a Twilio Console lookup against. Malformed JSON, a null
+    // payload, or an absent/blank/invalid SID on a "successful" response is
+    // therefore an AMBIGUOUS outcome — the message may well be on its way —
+    // never a SENT commit and never a releasable failure. Twilio message
+    // SIDs are "SM" + 32 hex chars.
+    const sid = payload?.sid;
+    if (typeof sid !== "string" || !/^SM[0-9a-fA-F]{32}$/.test(sid)) {
+      // No PII — HTTP status and a coarse cause only.
+      console.error(
+        JSON.stringify({
+          event: "sms_send_outcome_unknown",
+          status: response.status,
+          cause: "missing_or_invalid_message_sid",
+        })
+      );
+      return {
+        sent: false,
+        skipped: false,
+        outcome: "unknown",
+        reason: "Delivery outcome is unknown; verify in Twilio before retrying.",
+        to: input.to,
+      };
+    }
+
+    return { sent: true, skipped: false, outcome: "sent", to: input.to, providerMessageId: sid };
   } catch (error) {
     // Thrown transport errors (abort/timeout, connection reset, DNS/socket
     // failures) prove nothing about whether Twilio accepted the request —

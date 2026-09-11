@@ -11,6 +11,10 @@ import { isSmsConfigured, sendSms } from "@/lib/sms";
 
 const originalEnv = { ...process.env };
 
+// A syntactically valid Twilio message SID (SM + 32 hex chars) — anything
+// less on a 2xx response is an ambiguous outcome, not a send.
+const VALID_SID = "SM0123456789abcdef0123456789abcdef";
+
 function enabledSettings(overrides: Record<string, unknown> = {}) {
   return {
     platformEnabled: true,
@@ -92,7 +96,7 @@ describe("isSmsConfigured / sendSms", () => {
     expect(blocked.skipped).toBe(true);
     expect(blocked.reason).toMatch(/Safe Launch Mode/);
 
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ sid: "SM1" }) }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ sid: VALID_SID }) }));
     const allowed = await sendSms({ to: "+15559999999", body: "hello" });
     expect(allowed.sent).toBe(true);
   });
@@ -101,12 +105,12 @@ describe("isSmsConfigured / sendSms", () => {
     getEffectiveTwilioCredentials.mockResolvedValue(credentials());
     getPlatformSmsSettings.mockResolvedValue(enabledSettings());
 
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ sid: "SM123" }) });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ sid: VALID_SID }) });
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await sendSms({ to: "+15551234567", body: "your code is 123456" });
 
-    expect(result).toEqual({ sent: true, skipped: false, outcome: "sent", to: "+15551234567", providerMessageId: "SM123" });
+    expect(result).toEqual({ sent: true, skipped: false, outcome: "sent", to: "+15551234567", providerMessageId: VALID_SID });
     expect(fetchMock).toHaveBeenCalledWith(
       "https://api.twilio.com/2010-04-01/Accounts/ACxxxx/Messages.json",
       expect.objectContaining({ method: "POST" })
@@ -121,7 +125,7 @@ describe("isSmsConfigured / sendSms", () => {
     getEffectiveTwilioCredentials.mockResolvedValue(credentials({ messagingServiceSid: "MGxxxx" }));
     getPlatformSmsSettings.mockResolvedValue(enabledSettings());
 
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ sid: "SM123" }) });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ sid: VALID_SID }) });
     vi.stubGlobal("fetch", fetchMock);
 
     await sendSms({ to: "+15551234567", body: "hi" });
@@ -195,6 +199,41 @@ describe("isSmsConfigured / sendSms", () => {
     const logged = JSON.parse(errorSpy.mock.calls[0][0] as string);
     expect(logged.event).toBe("sms_send_outcome_unknown");
     expect(logged.errorName).toBe("TimeoutError");
+  });
+
+  it("SID VALIDATION: a 2xx with a VALID Twilio SID is 'sent' with that SID as the provider identity", async () => {
+    getEffectiveTwilioCredentials.mockResolvedValue(credentials());
+    getPlatformSmsSettings.mockResolvedValue(enabledSettings());
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 201, json: async () => ({ sid: VALID_SID }) }));
+
+    const result = await sendSms({ to: "+15551234567", body: "hi" });
+    expect(result.outcome).toBe("sent");
+    expect(result.providerMessageId).toBe(VALID_SID);
+  });
+
+  it.each([
+    ["malformed JSON", { ok: true, status: 201, json: async () => { throw new Error("bad json"); } }],
+    ["missing SID", { ok: true, status: 201, json: async () => ({}) }],
+    ["blank SID", { ok: true, status: 201, json: async () => ({ sid: "   " }) }],
+    ["invalid SID format", { ok: true, status: 201, json: async () => ({ sid: "SM1" }) }],
+  ])("SID VALIDATION: a 2xx with %s is outcome 'unknown' — acceptance may have occurred but cannot be reconciled — with a PII-free log", async (_label, response) => {
+    getEffectiveTwilioCredentials.mockResolvedValue(credentials());
+    getPlatformSmsSettings.mockResolvedValue(enabledSettings());
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+
+    const result = await sendSms({ to: "+15551234567", body: "your one-time code is 123456" });
+
+    expect(result.sent).toBe(false);
+    expect(result.outcome).toBe("unknown");
+    expect(result.reason).toBe("Delivery outcome is unknown; verify in Twilio before retrying.");
+    expect(result.providerMessageId).toBeUndefined();
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    const logged = JSON.parse(errorSpy.mock.calls[0][0] as string);
+    expect(logged.event).toBe("sms_send_outcome_unknown");
+    expect(logged.cause).toBe("missing_or_invalid_message_sid");
+    expect(JSON.stringify(logged)).not.toMatch(/5551234567|one-time code/);
   });
 
   it("platform gates report outcome 'definitive_failure' — the request was never attempted, so quota handling may treat it as a provable non-send", async () => {
