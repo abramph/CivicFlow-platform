@@ -1,5 +1,6 @@
 import type { SmsMessage } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { normalizeToE164 } from "@/lib/phone";
 import { reserveSmsAllowance } from "@/lib/sms-entitlement";
 import {
   claimInitialSmsAttempt,
@@ -57,7 +58,7 @@ function isUniqueConstraintViolation(error: unknown): boolean {
 }
 
 /**
- * Creates this attempt's SmsMessage row — or, for campaign messages,
+ * Creates this attempt's QUEUED SmsMessage row — or, for campaign messages,
  * resolves the ONE canonical row the partial unique index
  * (SmsMessage_org_campaign_member_attempt_key) allows per
  * (organization, campaign, member). A unique-violation loser is NOT a send
@@ -71,7 +72,7 @@ function isUniqueConstraintViolation(error: unknown): boolean {
  */
 async function createOrResolveAttemptRow(
   params: SendMemberSmsParams,
-  data: { status: "QUEUED" | "FAILED"; phone: string; body: string; errorMessage?: string }
+  data: { phone: string; body: string }
 ): Promise<{ row: SmsMessage; created: boolean }> {
   try {
     const row = await prisma.smsMessage.create({
@@ -80,10 +81,9 @@ async function createOrResolveAttemptRow(
         memberId: params.memberId ?? null,
         phone: data.phone,
         body: data.body,
-        status: data.status,
+        status: "QUEUED",
         campaignId: params.campaignId ?? null,
         sentById: params.sentById ?? null,
-        ...(data.errorMessage ? { errorMessage: data.errorMessage } : {}),
       },
     });
     return { row, created: true };
@@ -103,50 +103,43 @@ async function createOrResolveAttemptRow(
  * every failure mode (unconfigured, no entitlement, invalid phone, opted
  * out, Twilio error) is captured as a FAILED SmsMessage row instead.
  *
- * All eligibility rules live in authorizeSmsSend (lib/sms-send-authorization)
- * — the same canonical decision the retry/cron path applies — so a rule can
- * never exist here without also protecting retries. Authorization runs
- * immediately before the attempt is created and claimed (it is a pure
- * read-only pre-check with no side effects; every side effect — quota,
- * Twilio, terminal status — is owned by the claim/fence machinery below),
- * and the retry path re-authorizes independently after ITS claim.
- *
- * Initial-send state machine (Round 5):
- *   1. create-or-resolve the canonical row (campaign sends are unique per
- *      organization/campaign/member at the database level — a duplicate
- *      invocation gets the existing row back and stops);
+ * Initial-send state machine (Rounds 5–6) — ownership FIRST, authorization
+ * under that ownership:
+ *   1. create-or-resolve the canonical QUEUED row (campaign sends are
+ *      unique per organization/campaign/member at the database level — a
+ *      duplicate invocation gets the existing row back and stops). Only a
+ *      pure, side-effect-free normalization precheck runs before this, to
+ *      store a normalized number on the row.
  *   2. atomically claim QUEUED → SENDING with a lease/fencing value
  *      (claimInitialSmsAttempt; retryCount stays 0). Losing the claim means
- *      the admin Cancel action won — no reservation, no Twilio;
- *   3. reserve allowance immediately before Twilio;
- *   4. finalize exactly once under the lease fence, keyed to the provider
+ *      the admin Cancel action won — no reservation, no Twilio.
+ *   3. run the FULL canonical authorization (authorizeSmsSend — the same
+ *      decision the retry path applies after ITS claim) now that this
+ *      worker owns the attempt, immediately before quota and the provider.
+ *      Only this post-claim result may authorize Twilio; a member who
+ *      opted out, was removed, or whose org lost the add-on moments
+ *      earlier is denied here and the attempt finalizes as one truthful
+ *      FAILED row under the fence — with zero reservation and zero
+ *      provider calls.
+ *   4. reserve allowance immediately before Twilio;
+ *   5. finalize exactly once under the lease fence, keyed to the provider
  *      outcome: "sent" → SENT; "definitive_failure" → FAILED + single
- *      same-transaction release; "unknown" (timeout/transport) → parked
- *      SENDING with the lease cleared for manual reconciliation — quota
- *      stays consumed and no automatic path may touch the row again.
- *   A crashed initial attempt (SENDING, lease expired) is recovered by the
- *   same leased sweep that recovers retries.
+ *      same-transaction release; "unknown" (timeout/transport/no-valid-SID)
+ *      → parked SENDING with the lease cleared for manual reconciliation —
+ *      quota stays consumed and no automatic path may touch the row again.
+ *   A crashed initial attempt (SENDING, lease expired) is PARKED as
+ *   outcome-unknown by the sweep — never automatically re-sent.
  */
 export async function sendMemberSms(params: SendMemberSmsParams): Promise<SmsMessage> {
   const { organizationId, memberId, phone, body } = params;
 
-  const authorization = await authorizeSmsSend({ organizationId, memberId, phone, required: params.required });
-  if (!authorization.allowed) {
-    // One auditable FAILED attempt; for campaign messages the unique index
-    // makes even this the single canonical row — retryable only through
-    // the controlled retry flow.
-    const denied = await createOrResolveAttemptRow(params, {
-      status: "FAILED",
-      phone,
-      body,
-      errorMessage: authorization.reason,
-    });
-    return denied.row;
-  }
-  const normalizedPhone = authorization.normalizedPhone;
+  // Pure precheck only (no reads, no side effects): prefer storing the
+  // normalized number on the row. The authoritative decision runs after
+  // the claim.
+  const normalizedForRow = normalizeToE164(phone) ?? phone;
   const finalBody = withOptOutSuffix(body);
 
-  const attempt = await createOrResolveAttemptRow(params, { status: "QUEUED", phone: normalizedPhone, body: finalBody });
+  const attempt = await createOrResolveAttemptRow(params, { phone: normalizedForRow, body: finalBody });
   if (!attempt.created) {
     // Duplicate campaign invocation: the canonical attempt already exists
     // (possibly still in flight, possibly terminal). Treat as already
@@ -161,6 +154,15 @@ export async function sendMemberSms(params: SendMemberSmsParams): Promise<SmsMes
     // The admin Cancel action consumed the QUEUED state first: the
     // cancellation is truthful — nothing was reserved, Twilio was never
     // called.
+    return refetch();
+  }
+
+  // POST-CLAIM canonical authorization — consent/STOP/member/tenant/
+  // entitlement re-resolved under this worker's ownership, as close as
+  // possible to the reservation and the provider call.
+  const authorization = await authorizeSmsSend({ organizationId, memberId, phone, required: params.required });
+  if (!authorization.allowed) {
+    await finalizeSmsAttemptFailure(claim, null, authorization.reason);
     return refetch();
   }
 
@@ -179,7 +181,7 @@ export async function sendMemberSms(params: SendMemberSmsParams): Promise<SmsMes
     return refetch();
   }
 
-  const result = await sendSms({ to: normalizedPhone, body: finalBody });
+  const result = await sendSms({ to: authorization.normalizedPhone, body: finalBody });
 
   if (result.outcome === "sent") {
     await finalizeSmsAttemptSuccess(claim, {

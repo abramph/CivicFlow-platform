@@ -316,6 +316,87 @@ describe.skipIf(!RUN_INTEGRATION)("campaign idempotency + cancel races + ambiguo
     expect(await usage()).toBe(1);
   });
 
+  it("CRASH AFTER ACCEPTANCE: a worker that dies post-claim (possibly post-Twilio) produces ZERO further provider calls — the sweep parks the row and never reserves again", async () => {
+    const { claimInitialSmsAttempt } = await import("@/lib/sms-attempt-finalization");
+    const { SMS_INTERRUPTED_OUTCOME_MESSAGE, executeClaimedSmsRetry, processRetryableSmsMessages } = await import("@/lib/sms-queue");
+    const { reserveSmsAllowance } = await import("@/lib/sms-entitlement");
+    const { POST: retry } = await import("@/app/api/admin/sms/messages/[id]/retry/route");
+    requireSuperAdmin.mockResolvedValue({ session: { userId: "admin-1", userEmail: "admin@example.com" } });
+    sendSmsMock.mockReset(); // any provider invocation from here on is a failure
+    await resetUsage(0);
+
+    // Simulated crash: claim the initial attempt with an instantly-expired
+    // lease and reserve the unit (exactly what a worker does right before
+    // its Twilio call), then "die" without finalizing.
+    const row = await prisma.smsMessage.create({
+      data: { organizationId: orgId, memberId, phone: "+15550001111", body: "crashed mid-send", status: "QUEUED" },
+    });
+    const crashedClaim = await claimInitialSmsAttempt(row.id, -60_000);
+    expect(crashedClaim).not.toBeNull();
+    await reserveSmsAllowance(orgId);
+    expect(await usage()).toBe(1);
+
+    // The sweep PARKS the expired attempt — no claim, no reservation, no send.
+    const sweep = await processRetryableSmsMessages();
+    expect(sweep.parked).toBeGreaterThanOrEqual(1);
+
+    const after = await prisma.smsMessage.findUnique({ where: { id: row.id } });
+    expect(after.status).toBe("SENDING");
+    expect(after.nextRetryAt).toBeNull();
+    expect(after.errorMessage).toBe(SMS_INTERRUPTED_OUTCOME_MESSAGE);
+    expect(after.retryCount).toBe(0); // parking is not a retry
+    expect(sendSmsMock).not.toHaveBeenCalled();
+    expect(await usage()).toBe(1); // the possibly-consumed unit is conservatively kept
+
+    // No automatic or ordinary manual path can resurrect it.
+    await expect(executeClaimedSmsRetry(row.id)).resolves.toEqual({ claimed: false });
+    const retryResponse = await retry(new Request("https://x"), { params: Promise.resolve({ id: row.id }) });
+    expect(retryResponse.status).toBe(400);
+    expect(sendSmsMock).not.toHaveBeenCalled();
+    expect(await usage()).toBe(1);
+  }, 30_000);
+
+  it("CONCURRENT SWEEPS cannot produce a retry from an expired SENDING row: at most one parks, zero provider calls", async () => {
+    const { claimInitialSmsAttempt } = await import("@/lib/sms-attempt-finalization");
+    const { processRetryableSmsMessages } = await import("@/lib/sms-queue");
+    sendSmsMock.mockReset();
+    await resetUsage(0);
+
+    const row = await prisma.smsMessage.create({
+      data: { organizationId: orgId, memberId, phone: "+15550001111", body: "concurrent sweep target", status: "QUEUED" },
+    });
+    await claimInitialSmsAttempt(row.id, -60_000);
+
+    const sweeps = await Promise.all(Array.from({ length: 3 }, () => processRetryableSmsMessages()));
+
+    expect(sweeps.reduce((sum, s) => sum + s.parked, 0)).toBe(1); // exactly one parker
+    expect(sweeps.reduce((sum, s) => sum + s.processed, 0)).toBe(0);
+    const after = await prisma.smsMessage.findUnique({ where: { id: row.id } });
+    expect(after.status).toBe("SENDING");
+    expect(after.nextRetryAt).toBeNull();
+    expect(sendSmsMock).not.toHaveBeenCalled();
+    expect(await usage()).toBe(0); // parking never reserves
+  }, 30_000);
+
+  it("POST-CLAIM AUTHORIZATION e2e: a member who opted out just before the send is denied AFTER ownership — one truthful FAILED row, zero reservations, zero provider calls", async () => {
+    const { sendMemberSms } = await import("@/lib/sms-service");
+    sendSmsMock.mockReset();
+    await resetUsage(0);
+
+    await prisma.orgMember.update({ where: { id: memberId }, data: { smsOptedOutAt: new Date() } });
+    try {
+      const result = await sendMemberSms({ organizationId: orgId, memberId, phone: "+15550001111", body: "post-claim denial" });
+
+      expect(result.status).toBe("FAILED");
+      expect(result.errorMessage).toBe("Member opted out of SMS.");
+      expect(result.nextRetryAt).toBeNull();
+      expect(sendSmsMock).not.toHaveBeenCalled();
+      expect(await usage()).toBe(0);
+    } finally {
+      await prisma.orgMember.update({ where: { id: memberId }, data: { smsOptedOutAt: null } });
+    }
+  });
+
   it("MIGRATION SAFETY: with duplicate campaign rows present, creating the unique index fails explicitly and deletes nothing", async () => {
     // Test-owned database only: temporarily drop the index, plant real
     // duplicates, and prove `CREATE UNIQUE INDEX` refuses loudly — the
