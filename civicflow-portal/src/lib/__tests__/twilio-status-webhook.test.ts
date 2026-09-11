@@ -96,9 +96,20 @@ describe("Twilio delivery-status webhook", () => {
     });
   });
 
-  it("maps queued/sending/sent statuses", async () => {
+  it("maps queued/sending/sent statuses — but a non-terminal event can never regress an already-DELIVERED row", async () => {
     await POST(makeRequest({ MessageSid: "SM3", MessageStatus: "sending" }));
-    expect(updateManySmsMessage).toHaveBeenCalledWith({ where: { providerMessageId: "SM3" }, data: { status: "SENDING" } });
+    expect(updateManySmsMessage).toHaveBeenCalledWith({
+      where: { providerMessageId: "SM3", status: { not: "DELIVERED" } },
+      data: { status: "SENDING" },
+    });
+
+    updateManySmsMessage.mockClear();
+    // Late out-of-order "sent" after "delivered": the guard keeps DELIVERED.
+    await POST(makeRequest({ MessageSid: "SM3", MessageStatus: "sent" }));
+    expect(updateManySmsMessage).toHaveBeenCalledWith({
+      where: { providerMessageId: "SM3", status: { not: "DELIVERED" } },
+      data: { status: "SENT" },
+    });
   });
 
   it("ignores an unrecognized status without erroring", async () => {

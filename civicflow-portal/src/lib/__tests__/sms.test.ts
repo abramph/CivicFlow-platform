@@ -53,7 +53,7 @@ describe("isSmsConfigured / sendSms", () => {
 
     expect(await isSmsConfigured()).toBe(false);
     const result = await sendSms({ to: "+15551234567", body: "hello" });
-    expect(result).toEqual({ sent: false, skipped: true, reason: "SMS delivery is not configured", to: "+15551234567" });
+    expect(result).toEqual({ sent: false, skipped: true, outcome: "definitive_failure", reason: "SMS delivery is not configured", to: "+15551234567" });
   });
 
   it("skips with a clear reason when the platform is disabled", async () => {
@@ -106,7 +106,7 @@ describe("isSmsConfigured / sendSms", () => {
 
     const result = await sendSms({ to: "+15551234567", body: "your code is 123456" });
 
-    expect(result).toEqual({ sent: true, skipped: false, to: "+15551234567", providerMessageId: "SM123" });
+    expect(result).toEqual({ sent: true, skipped: false, outcome: "sent", to: "+15551234567", providerMessageId: "SM123" });
     expect(fetchMock).toHaveBeenCalledWith(
       "https://api.twilio.com/2010-04-01/Accounts/ACxxxx/Messages.json",
       expect.objectContaining({ method: "POST" })
@@ -144,6 +144,7 @@ describe("isSmsConfigured / sendSms", () => {
     const result = await sendSms({ to: "+15551234567", body: "your one-time code is 123456" });
     expect(result.sent).toBe(false);
     expect(result.skipped).toBe(false);
+    expect(result.outcome).toBe("definitive_failure"); // Twilio answered: provably not accepted
     expect(result.reason).toBe("Invalid To number");
 
     expect(errorSpy).toHaveBeenCalledTimes(1);
@@ -157,22 +158,51 @@ describe("isSmsConfigured / sendSms", () => {
     expect(JSON.stringify(logged)).not.toMatch(/your one-time code/); // never the message body
   });
 
-  it("logs a structured failure event when the Twilio request itself throws (network error)", async () => {
+  it("AMBIGUOUS: a thrown transport error (connection reset) is outcome 'unknown' — never described as a provider rejection — with an honest reason and a PII-free log", async () => {
     getEffectiveTwilioCredentials.mockResolvedValue(credentials());
     getPlatformSmsSettings.mockResolvedValue(enabledSettings());
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network unreachable")));
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("read ECONNRESET")));
 
     const result = await sendSms({ to: "+15551234567", body: "hi" });
     expect(result.sent).toBe(false);
-    expect(result.reason).toBe("network unreachable");
+    expect(result.outcome).toBe("unknown");
+    expect(result.reason).toBe("Delivery outcome is unknown; verify in Twilio before retrying.");
 
     expect(errorSpy).toHaveBeenCalledTimes(1);
     const logged = JSON.parse(errorSpy.mock.calls[0][0] as string);
-    expect(logged.event).toBe("sms_send_failed");
+    expect(logged.event).toBe("sms_send_outcome_unknown");
     expect(logged.errorName).toBe("Error");
     expect(logged.to).toBeUndefined();
     expect(logged.error).toBeUndefined();
+    expect(JSON.stringify(logged)).not.toMatch(/5551234567/);
+  });
+
+  it("AMBIGUOUS: a timeout/abort of the Twilio request is outcome 'unknown' — acceptance cannot be proven either way", async () => {
+    getEffectiveTwilioCredentials.mockResolvedValue(credentials());
+    getPlatformSmsSettings.mockResolvedValue(enabledSettings());
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const abortError = new Error("The operation was aborted due to timeout");
+    abortError.name = "TimeoutError";
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(abortError));
+
+    const result = await sendSms({ to: "+15551234567", body: "hi" });
+    expect(result.outcome).toBe("unknown");
+    expect(result.reason).toBe("Delivery outcome is unknown; verify in Twilio before retrying.");
+
+    const logged = JSON.parse(errorSpy.mock.calls[0][0] as string);
+    expect(logged.event).toBe("sms_send_outcome_unknown");
+    expect(logged.errorName).toBe("TimeoutError");
+  });
+
+  it("platform gates report outcome 'definitive_failure' — the request was never attempted, so quota handling may treat it as a provable non-send", async () => {
+    getEffectiveTwilioCredentials.mockResolvedValue(credentials());
+    getPlatformSmsSettings.mockResolvedValue(enabledSettings({ outboundPaused: true }));
+
+    const result = await sendSms({ to: "+15551234567", body: "hi" });
+    expect(result.outcome).toBe("definitive_failure");
+    expect(result.skipped).toBe(true);
   });
 });

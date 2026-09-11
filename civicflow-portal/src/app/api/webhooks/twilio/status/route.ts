@@ -61,7 +61,16 @@ export async function POST(request: Request) {
   const costCents = parsePriceCents(params.Price);
 
   await prisma.smsMessage.updateMany({
-    where: { providerMessageId: messageSid },
+    where: {
+      providerMessageId: messageSid,
+      // Late or out-of-order provider events must not regress a message
+      // that already reached DELIVERED (e.g. a delayed "sent" callback
+      // arriving after "delivered"). Terminal-failure updates still apply —
+      // Twilio itself reports delivered→failed reversals only as new
+      // terminal truth. Request-side finalization never conflicts here: it
+      // is fenced on status SENDING + the attempt's exact lease value.
+      ...(mappedStatus === "DELIVERED" || mappedStatus === "FAILED" ? {} : { status: { not: "DELIVERED" } }),
+    },
     data: {
       status: mappedStatus,
       ...(costCents !== null ? { actualCostCents: costCents } : {}),
