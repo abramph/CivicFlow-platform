@@ -187,7 +187,41 @@ paths skip E.164 normalization.
      `sending`/`sent`) can no longer regress an already-DELIVERED row;
      request-side finalization was already fenced away from webhook
      terminal states.
-6. **Stripe config readiness**: `STRIPE_PRICE_SMS_ADDON_MONTHLY` added to the
+6. **Expired leases park, provider acceptance requires a SID, and
+   authorization runs under ownership** (Round 6):
+   - **An expired SENDING lease is never a license to send again.** The
+     dead worker may have reached Twilio and crashed before recording the
+     outcome; fencing stops stale database writes but cannot un-send a
+     text. `claimSmsRetryAttempt` therefore claims due RETRYING rows ONLY,
+     and the sweep atomically PARKS an expired SENDING row as
+     outcome-unknown (`parkExpiredSmsAttempt`: status stays SENDING,
+     nextRetryAt → null, honest message "Send attempt was interrupted
+     before its outcome was recorded; delivery outcome is unknown — verify
+     in Twilio before retrying.") — no Twilio, no new reservation, no
+     release of the possibly-consumed unit, no retryCount change;
+     concurrent sweep parkers are harmless (one CAS winner). Conservative
+     tradeoff, accepted deliberately: a worker that crashed BEFORE its
+     provider call is parked identically and strands its reserved unit,
+     because the row alone cannot prove which side of the Twilio call the
+     crash occurred on — safer than ever duplicating a text.
+   - **A 2xx without a valid message SID is not "sent."** `sendViaTwilio`
+     commits `outcome: "sent"` only when the successful response carries a
+     nonblank SID matching Twilio's `SM` + 32-hex format; malformed JSON, a
+     null payload, or an absent/blank/invalid SID is `outcome: "unknown"`
+     (acceptance may have occurred but cannot be reconciled without a
+     provider identity) — parked, quota kept, PII-free log.
+   - **Initial sends authorize AFTER the claim.** Only a pure
+     normalization precheck precedes row creation; the full canonical
+     authorization (consent/STOP/member/tenant/entitlement) runs once the
+     worker owns the attempt, immediately before reservation and the
+     provider call — a member who opted out, was deleted, or whose org
+     lost the add-on moments earlier yields one truthful FAILED attempt
+     with zero reservations and zero Twilio calls. Retries already
+     re-authorize after their own claim.
+   - **DELIVERED is strictly monotonic in the webhook**: no later callback
+     — including delayed `failed`/`undelivered` — may replace DELIVERED;
+     a repeated `delivered` callback may still update cost metadata.
+7. **Stripe config readiness**: `STRIPE_PRICE_SMS_ADDON_MONTHLY` added to the
    env schema (`src/lib/env.ts`, optional — required only by the paid flow)
    and `.env.example`; fail-closed behavior of `smsAddOnPriceId()` /
    `isSmsAddOnPriceId()` is tested; the GET billing endpoint is tested to
@@ -200,10 +234,15 @@ One database migration exists, explicitly owner-authorized in Round 5:
 partial `CREATE UNIQUE INDEX` on `SmsMessage(organizationId, campaignId,
 memberId) WHERE campaignId IS NOT NULL AND memberId IS NOT NULL`. It never
 deletes or rewrites data; on conflicting duplicates it fails loudly and
-applies nothing (real-database-tested). Pre-deployment duplicate check ran
-read-only against production on 2026-09-10: 0 SmsMessage rows total, 0
-campaign/member rows, 0 conflicting groups (no portal staging database
-exists — `.env.staging` is an unfilled placeholder). Leaving the index in
+applies nothing (real-database-tested). Pre-deployment duplicate checks ran
+read-only with the migration's own query: PRODUCTION (`civicflowprod`,
+2026-09-10) — 0 SmsMessage rows total, 0 campaign/member rows, 0
+conflicting groups; STAGING (the Build-27 staging service's live
+`build26_staging` database, 2026-09-11) — 0 total rows, 0 campaign/member
+rows, 0 conflicting groups. Both preflights pass. (An earlier revision of
+this document wrongly claimed no staging database exists based on the
+local `.env.staging` placeholder — corrected in Round 6; the staging env
+lives on the staging host, not in the repo.) Leaving the index in
 place under a code rollback is safe: pre-Round-5 code never relied on it,
 and a duplicate insert failing is the protective behavior. Everything else
 uses existing fields (`Organization.billingExempt`,
