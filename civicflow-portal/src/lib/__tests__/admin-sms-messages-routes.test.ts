@@ -126,27 +126,59 @@ describe("POST /api/admin/sms/messages/[id]/cancel", () => {
     requireSuperAdmin.mockResolvedValue({ session });
     findUniqueSmsMessage.mockReset();
     updateSmsMessage.mockReset();
+    updateManySmsMessage.mockReset();
     createAuditEvent.mockClear();
   });
 
-  it("rejects cancelling a message that's already terminal", async () => {
-    findUniqueSmsMessage.mockResolvedValueOnce({ id: "msg-1", status: "SENT" });
-    const response = await cancel(new Request("https://x"), params);
-    expect(response.status).toBe(400);
-    expect(updateSmsMessage).not.toHaveBeenCalled();
-  });
-
-  it("cancels a QUEUED message without attempting a send", async () => {
-    findUniqueSmsMessage.mockResolvedValueOnce({ id: "msg-1", status: "QUEUED", organizationId: "org-1" });
-    updateSmsMessage.mockResolvedValueOnce({ id: "msg-1", status: "FAILED" });
+  it("cancels a QUEUED or RETRYING message via one compare-and-set, clears its eligibility, and audits exactly once", async () => {
+    findUniqueSmsMessage.mockResolvedValueOnce({ id: "msg-1", status: "RETRYING", organizationId: "org-1" });
+    updateManySmsMessage.mockResolvedValueOnce({ count: 1 });
+    findUniqueSmsMessage.mockResolvedValueOnce({ id: "msg-1", status: "FAILED", errorMessage: "Cancelled by admin." });
 
     const response = await cancel(new Request("https://x"), params);
     const payload = await response.json();
 
     expect(payload.data.status).toBe("FAILED");
-    expect(updateSmsMessage).toHaveBeenCalledWith({
-      where: { id: "msg-1" },
-      data: { status: "FAILED", errorMessage: "Cancelled by admin." },
+    expect(updateManySmsMessage).toHaveBeenCalledWith({
+      where: { id: "msg-1", status: { in: ["QUEUED", "RETRYING"] } },
+      data: { status: "FAILED", errorMessage: "Cancelled by admin.", nextRetryAt: null },
     });
+    expect(createAuditEvent).toHaveBeenCalledTimes(1);
+    expect(createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: "org-1", action: "sms_admin.message_cancelled" })
+    );
+  });
+
+  it("TRUTHFUL CONFLICT: a message a send worker already claimed (SENDING) cannot be cancelled — clear conflict, no write, no audit", async () => {
+    findUniqueSmsMessage.mockResolvedValueOnce({ id: "msg-1", status: "QUEUED", organizationId: "org-1" }); // stale read
+    updateManySmsMessage.mockResolvedValueOnce({ count: 0 }); // the claim won first
+    findUniqueSmsMessage.mockResolvedValueOnce({ id: "msg-1", status: "SENDING" });
+
+    const response = await cancel(new Request("https://x"), params);
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toMatch(/already being sent/);
+    expect(createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("SIMULTANEOUS CANCELS: the CAS loser (row already FAILED-cancelled) neither rewrites the row nor audits", async () => {
+    findUniqueSmsMessage.mockResolvedValueOnce({ id: "msg-1", status: "RETRYING", organizationId: "org-1" });
+    updateManySmsMessage.mockResolvedValueOnce({ count: 0 });
+    findUniqueSmsMessage.mockResolvedValueOnce({ id: "msg-1", status: "FAILED", errorMessage: "Cancelled by admin." });
+
+    const response = await cancel(new Request("https://x"), params);
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toMatch(/Only queued or retrying/);
+    expect(createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("rejects cancelling a message that's already terminal", async () => {
+    findUniqueSmsMessage.mockResolvedValueOnce({ id: "msg-1", status: "SENT" });
+    updateManySmsMessage.mockResolvedValueOnce({ count: 0 });
+    findUniqueSmsMessage.mockResolvedValueOnce({ id: "msg-1", status: "SENT" });
+
+    const response = await cancel(new Request("https://x"), params);
+    expect(response.status).toBe(400);
   });
 });

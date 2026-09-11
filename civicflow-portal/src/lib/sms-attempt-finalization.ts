@@ -2,39 +2,70 @@ import { prisma } from "@/lib/prisma";
 import { releaseSmsAllowance, type SmsAllowanceReservation } from "@/lib/sms-entitlement";
 
 /**
- * Identity of ONE in-flight send attempt — the exactly-once authority for
- * finalizing that attempt and (on failure) returning its reserved allowance
- * unit. No schema change: the SmsMessage row's own in-flight state IS the
- * claim.
- *
- * - "initial" (sendMemberSms): the row was created QUEUED by this very
- *   request and only this request advances it, so `status = QUEUED` is the
- *   one-time transition condition. (The admin Cancel action also consumes
- *   QUEUED — if it wins the race, this attempt's finalizer matches zero
- *   rows and deliberately does nothing.)
- * - "retry" (sms-queue): the claimant CAS put the row into SENDING with the
- *   lease expiry stored in nextRetryAt; `status = SENDING AND nextRetryAt =
- *   <this worker's exact lease value>` fences out every stale worker — a
- *   recovered attempt carries a different lease value, and a finalized row
- *   is no longer SENDING.
+ * How long a claimed send attempt (initial OR retry) owns its SmsMessage
+ * row before the sweep may recover it. MUST stay comfortably above the
+ * Twilio HTTP timeout (TWILIO_REQUEST_TIMEOUT_MS in lib/sms.ts, 30s — 4x
+ * margin, asserted in sms-queue.test.ts): a worker whose Twilio call is
+ * legitimately in flight must never lose its lease, or a recovery could
+ * double-send.
  */
-export type SmsAttemptClaim =
-  | { kind: "initial"; messageId: string }
-  | { kind: "retry"; messageId: string; leaseExpiry: Date };
+export const SMS_ATTEMPT_LEASE_MS = 120_000;
+
+/**
+ * Identity of ONE in-flight send attempt — the exactly-once authority for
+ * finalizing that attempt and (on definitive failure) returning its
+ * reserved allowance unit. No schema change: the SmsMessage row's own
+ * in-flight state IS the claim. Since Round 5, initial sends and retries
+ * share ONE fencing shape: the attempt owns the row while
+ * `status = SENDING AND nextRetryAt = <this worker's exact lease value>`.
+ * A recovered attempt carries a strictly later lease value (recovery is
+ * only possible after the old value expired), a cancelled or finalized row
+ * is no longer SENDING, and the delivery webhook never writes nextRetryAt —
+ * so every stale/duplicate finalizer matches zero rows. There is no
+ * unfenced finalizer of any kind.
+ */
+export interface SmsAttemptClaim {
+  messageId: string;
+  leaseExpiry: Date;
+}
 
 function inFlightWhere(claim: SmsAttemptClaim) {
-  return claim.kind === "initial"
-    ? { id: claim.messageId, status: "QUEUED" as const }
-    : { id: claim.messageId, status: "SENDING" as const, nextRetryAt: claim.leaseExpiry };
+  return { id: claim.messageId, status: "SENDING" as const, nextRetryAt: claim.leaseExpiry };
 }
 
 /**
- * Commits a successful Twilio hand-off exactly once. Returns false when the
- * conditional transition matched zero rows — the attempt was recovered by
+ * Atomically claims a freshly created initial-send row: QUEUED → SENDING
+ * with the lease expiry stored in nextRetryAt. Exactly one winner —
+ * the ONLY competitor for a QUEUED row is the admin Cancel action (the
+ * campaign-level partial unique index guarantees no duplicate creator
+ * exists), so a lost claim means "cancellation won": the caller must not
+ * reserve quota or call Twilio. Deliberately does NOT touch retryCount —
+ * the original initial attempt is attempt zero; only genuine retry or
+ * lease-expiry recovery claims (claimSmsRetryAttempt in lib/sms-queue.ts)
+ * increment it. An initial SENDING row whose worker crashes is recovered
+ * through that same sweep path once its lease expires — no special case.
+ *
+ * `leaseMs` is overridable only so integration tests can mint an
+ * already-expired lease without waiting out the real duration.
+ */
+export async function claimInitialSmsAttempt(
+  messageId: string,
+  leaseMs: number = SMS_ATTEMPT_LEASE_MS
+): Promise<SmsAttemptClaim | null> {
+  const leaseExpiry = new Date(Date.now() + leaseMs);
+  const claimed = await prisma.smsMessage.updateMany({
+    where: { id: messageId, status: "QUEUED" },
+    data: { status: "SENDING", nextRetryAt: leaseExpiry },
+  });
+  return claimed.count === 1 ? { messageId, leaseExpiry } : null;
+}
+
+/**
+ * Commits a successful Twilio acceptance exactly once. Returns false when
+ * the fenced transition matched zero rows — the attempt was recovered by
  * another worker, cancelled, or already terminalized (e.g. the delivery
- * webhook raced ahead to DELIVERED/FAILED); in that case NOTHING is
- * overwritten. nextRetryAt is cleared so a finished row can never look
- * lease-expired to the cron sweep.
+ * webhook raced ahead); in that case NOTHING is overwritten. nextRetryAt
+ * is cleared so a finished row can never look lease-expired to the sweep.
  */
 export async function finalizeSmsAttemptSuccess(
   claim: SmsAttemptClaim,
@@ -55,17 +86,19 @@ export async function finalizeSmsAttemptSuccess(
 }
 
 /**
- * Commits a SYNCHRONOUS attempt failure exactly once, and releases the
+ * Commits a DEFINITIVE attempt failure exactly once, and releases the
  * attempt's reserved allowance unit ONLY inside that single winning
  * transition — status change and quota release ride the same transaction,
  * so they cannot diverge into a double release. A duplicate or stale
- * finalizer (conditional update matches zero rows) returns false and
- * releases nothing: one failed attempt can return at most one unit, and can
- * never erase the unit a different successful attempt consumed in the same
+ * finalizer (fenced update matches zero rows) returns false and releases
+ * nothing: one failed attempt can return at most one unit, and can never
+ * erase the unit a different successful attempt consumed in the same
  * period. Pass reservation: null for failures that never reserved
- * (authorization denials, exhausted allowance). A crash after the
- * reservation but before this commit conservatively consumes the unit —
- * the documented fail-closed tradeoff.
+ * (authorization denials, exhausted allowance). Only for outcomes that
+ * PROVE the message did not go out — ambiguous transport outcomes go
+ * through finalizeSmsAttemptUnknown instead. A crash after the reservation
+ * but before this commit conservatively consumes the unit — the documented
+ * fail-closed tradeoff.
  */
 export async function finalizeSmsAttemptFailure(
   claim: SmsAttemptClaim,
@@ -81,4 +114,27 @@ export async function finalizeSmsAttemptFailure(
     if (reservation) await releaseSmsAllowance(reservation, tx);
     return true;
   });
+}
+
+/**
+ * Parks an attempt whose provider outcome is AMBIGUOUS (timeout,
+ * connection reset — Twilio may have accepted the message while the
+ * response was lost). Exactly once, under the same fence: the row keeps
+ * status SENDING but its lease is cleared (nextRetryAt: null), which makes
+ * it invisible to the cron sweep (lte-null never matches), un-retryable by
+ * the ordinary Retry button (FAILED-only), and un-cancellable (the Cancel
+ * CAS matches QUEUED/RETRYING only) — a deliberate manual-reconciliation
+ * parking state built from existing fields, no new enum value. The
+ * reserved unit is NOT released: the message may genuinely have gone out.
+ * Reconciliation is a human step: verify the message in the Twilio
+ * Console; a platform operator then resolves the row through a controlled
+ * follow-up (documented in docs/sms-compliance-audit-2026-09.md) — never
+ * an automatic retry.
+ */
+export async function finalizeSmsAttemptUnknown(claim: SmsAttemptClaim, errorMessage: string): Promise<boolean> {
+  const finalized = await prisma.smsMessage.updateMany({
+    where: inFlightWhere(claim),
+    data: { errorMessage, nextRetryAt: null },
+  });
+  return finalized.count === 1;
 }

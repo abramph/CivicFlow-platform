@@ -1,7 +1,12 @@
 import type { SmsMessage } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { reserveSmsAllowance } from "@/lib/sms-entitlement";
-import { finalizeSmsAttemptFailure, finalizeSmsAttemptSuccess } from "@/lib/sms-attempt-finalization";
+import {
+  claimInitialSmsAttempt,
+  finalizeSmsAttemptFailure,
+  finalizeSmsAttemptSuccess,
+  finalizeSmsAttemptUnknown,
+} from "@/lib/sms-attempt-finalization";
 import { sendSms } from "@/lib/sms";
 import { authorizeSmsSend } from "@/lib/sms-send-authorization";
 import { SMS_ADDON } from "@/lib/sms-pricing";
@@ -47,19 +52,50 @@ export interface SendMemberSmsParams {
   required?: boolean;
 }
 
-function failedRow(params: SendMemberSmsParams, errorMessage: string) {
-  return prisma.smsMessage.create({
-    data: {
-      organizationId: params.organizationId,
-      memberId: params.memberId ?? null,
-      phone: params.phone,
-      body: params.body,
-      status: "FAILED",
-      campaignId: params.campaignId ?? null,
-      sentById: params.sentById ?? null,
-      errorMessage,
-    },
-  });
+function isUniqueConstraintViolation(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "P2002";
+}
+
+/**
+ * Creates this attempt's SmsMessage row — or, for campaign messages,
+ * resolves the ONE canonical row the partial unique index
+ * (SmsMessage_org_campaign_member_attempt_key) allows per
+ * (organization, campaign, member). A unique-violation loser is NOT a send
+ * failure: some other invocation (a concurrent Send Now racing the cron,
+ * or an earlier completed run) already owns that recipient's attempt, so
+ * the loser returns the existing canonical row and must do nothing else —
+ * no claim, no reservation, no Twilio. Subsequent delivery problems are
+ * handled by retrying THAT row through the leased retry system, never by
+ * creating another campaign message. Non-campaign transactional rows
+ * (campaignId null) are outside the index and always create normally.
+ */
+async function createOrResolveAttemptRow(
+  params: SendMemberSmsParams,
+  data: { status: "QUEUED" | "FAILED"; phone: string; body: string; errorMessage?: string }
+): Promise<{ row: SmsMessage; created: boolean }> {
+  try {
+    const row = await prisma.smsMessage.create({
+      data: {
+        organizationId: params.organizationId,
+        memberId: params.memberId ?? null,
+        phone: data.phone,
+        body: data.body,
+        status: data.status,
+        campaignId: params.campaignId ?? null,
+        sentById: params.sentById ?? null,
+        ...(data.errorMessage ? { errorMessage: data.errorMessage } : {}),
+      },
+    });
+    return { row, created: true };
+  } catch (error) {
+    if (isUniqueConstraintViolation(error) && params.campaignId && params.memberId) {
+      const existing = await prisma.smsMessage.findFirst({
+        where: { organizationId: params.organizationId, campaignId: params.campaignId, memberId: params.memberId },
+      });
+      if (existing) return { row: existing, created: false };
+    }
+    throw error;
+  }
 }
 
 /**
@@ -69,40 +105,64 @@ function failedRow(params: SendMemberSmsParams, errorMessage: string) {
  *
  * All eligibility rules live in authorizeSmsSend (lib/sms-send-authorization)
  * — the same canonical decision the retry/cron path applies — so a rule can
- * never exist here without also protecting retries.
+ * never exist here without also protecting retries. Authorization runs
+ * immediately before the attempt is created and claimed (it is a pure
+ * read-only pre-check with no side effects; every side effect — quota,
+ * Twilio, terminal status — is owned by the claim/fence machinery below),
+ * and the retry path re-authorizes independently after ITS claim.
+ *
+ * Initial-send state machine (Round 5):
+ *   1. create-or-resolve the canonical row (campaign sends are unique per
+ *      organization/campaign/member at the database level — a duplicate
+ *      invocation gets the existing row back and stops);
+ *   2. atomically claim QUEUED → SENDING with a lease/fencing value
+ *      (claimInitialSmsAttempt; retryCount stays 0). Losing the claim means
+ *      the admin Cancel action won — no reservation, no Twilio;
+ *   3. reserve allowance immediately before Twilio;
+ *   4. finalize exactly once under the lease fence, keyed to the provider
+ *      outcome: "sent" → SENT; "definitive_failure" → FAILED + single
+ *      same-transaction release; "unknown" (timeout/transport) → parked
+ *      SENDING with the lease cleared for manual reconciliation — quota
+ *      stays consumed and no automatic path may touch the row again.
+ *   A crashed initial attempt (SENDING, lease expired) is recovered by the
+ *   same leased sweep that recovers retries.
  */
 export async function sendMemberSms(params: SendMemberSmsParams): Promise<SmsMessage> {
-  const { organizationId, memberId, phone, body, campaignId, sentById, required } = params;
+  const { organizationId, memberId, phone, body } = params;
 
-  const authorization = await authorizeSmsSend({ organizationId, memberId, phone, required });
+  const authorization = await authorizeSmsSend({ organizationId, memberId, phone, required: params.required });
   if (!authorization.allowed) {
-    return failedRow(params, authorization.reason);
+    // One auditable FAILED attempt; for campaign messages the unique index
+    // makes even this the single canonical row — retryable only through
+    // the controlled retry flow.
+    const denied = await createOrResolveAttemptRow(params, {
+      status: "FAILED",
+      phone,
+      body,
+      errorMessage: authorization.reason,
+    });
+    return denied.row;
   }
   const normalizedPhone = authorization.normalizedPhone;
-
   const finalBody = withOptOutSuffix(body);
 
-  const queued = await prisma.smsMessage.create({
-    data: {
-      organizationId,
-      memberId: memberId ?? null,
-      phone: normalizedPhone,
-      body: finalBody,
-      status: "QUEUED",
-      campaignId: campaignId ?? null,
-      sentById: sentById ?? null,
-    },
-  });
-
-  // The QUEUED row created above IS this attempt's one-time claim: every
-  // terminal outcome below commits through the fenced finalizers in
-  // lib/sms-attempt-finalization.ts, whose conditional QUEUED-scoped
-  // transition can succeed at most once — so a replayed failure path can
-  // never release the same allowance unit twice, and this request can
-  // never overwrite a status someone else (e.g. the admin Cancel action,
-  // or the delivery webhook after a later retry) already committed.
-  const claim = { kind: "initial", messageId: queued.id } as const;
+  const attempt = await createOrResolveAttemptRow(params, { status: "QUEUED", phone: normalizedPhone, body: finalBody });
+  if (!attempt.created) {
+    // Duplicate campaign invocation: the canonical attempt already exists
+    // (possibly still in flight, possibly terminal). Treat as already
+    // claimed/processed — report its current state, touch nothing.
+    return attempt.row;
+  }
+  const queued = attempt.row;
   const refetch = async () => (await prisma.smsMessage.findUnique({ where: { id: queued.id } })) ?? queued;
+
+  const claim = await claimInitialSmsAttempt(queued.id);
+  if (!claim) {
+    // The admin Cancel action consumed the QUEUED state first: the
+    // cancellation is truthful — nothing was reserved, Twilio was never
+    // called.
+    return refetch();
+  }
 
   // Database-atomic hard-stop: claim one unit of the monthly allowance
   // immediately BEFORE Twilio. Under concurrency (campaign workers run
@@ -121,7 +181,7 @@ export async function sendMemberSms(params: SendMemberSmsParams): Promise<SmsMes
 
   const result = await sendSms({ to: normalizedPhone, body: finalBody });
 
-  if (result.sent) {
+  if (result.outcome === "sent") {
     await finalizeSmsAttemptSuccess(claim, {
       providerMessageId: result.providerMessageId ?? null,
       // A flat per-message estimate for internal admin cost visibility
@@ -129,6 +189,8 @@ export async function sendMemberSms(params: SendMemberSmsParams): Promise<SmsMes
       // customer-facing overage billing exists).
       costEstimateCents: SMS_ADDON.overageRateCents,
     });
+  } else if (result.outcome === "unknown") {
+    await finalizeSmsAttemptUnknown(claim, result.reason ?? "Delivery outcome is unknown; verify in Twilio before retrying.");
   } else {
     await finalizeSmsAttemptFailure(claim, reservation, result.reason ?? "SMS send failed.");
   }

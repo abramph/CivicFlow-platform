@@ -18,7 +18,13 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
-import { finalizeSmsAttemptFailure, finalizeSmsAttemptSuccess } from "@/lib/sms-attempt-finalization";
+import {
+  SMS_ATTEMPT_LEASE_MS,
+  claimInitialSmsAttempt,
+  finalizeSmsAttemptFailure,
+  finalizeSmsAttemptSuccess,
+  finalizeSmsAttemptUnknown,
+} from "@/lib/sms-attempt-finalization";
 
 const RESERVATION = {
   organizationId: "org-a",
@@ -26,23 +32,50 @@ const RESERVATION = {
   periodEnd: new Date("2026-10-01T00:00:00.000Z"),
 };
 
-const INITIAL_CLAIM = { kind: "initial", messageId: "msg-1" } as const;
 const LEASE = new Date("2026-09-10T00:02:00.000Z");
-const RETRY_CLAIM = { kind: "retry", messageId: "msg-1", leaseExpiry: LEASE } as const;
+const CLAIM = { messageId: "msg-1", leaseExpiry: LEASE } as const;
+
+describe("claimInitialSmsAttempt", () => {
+  beforeEach(() => {
+    updateManySmsMessage.mockReset();
+  });
+
+  it("atomically claims QUEUED → SENDING with a lease, WITHOUT touching retryCount (the original attempt is attempt zero)", async () => {
+    updateManySmsMessage.mockResolvedValueOnce({ count: 1 });
+    const before = Date.now();
+
+    const claim = await claimInitialSmsAttempt("msg-1");
+
+    expect(claim).not.toBeNull();
+    expect(updateManySmsMessage).toHaveBeenCalledWith({
+      where: { id: "msg-1", status: "QUEUED" },
+      data: { status: "SENDING", nextRetryAt: claim!.leaseExpiry },
+    });
+    expect(updateManySmsMessage.mock.calls[0][0].data).not.toHaveProperty("retryCount");
+    const expiryMs = claim!.leaseExpiry.getTime() - before;
+    expect(expiryMs).toBeGreaterThanOrEqual(SMS_ATTEMPT_LEASE_MS - 1000);
+    expect(expiryMs).toBeLessThanOrEqual(SMS_ATTEMPT_LEASE_MS + 1000);
+  });
+
+  it("returns null when the QUEUED state is gone — cancellation won, so the caller must not reserve or send", async () => {
+    updateManySmsMessage.mockResolvedValueOnce({ count: 0 });
+    await expect(claimInitialSmsAttempt("msg-1")).resolves.toBeNull();
+  });
+});
 
 describe("finalizeSmsAttemptSuccess", () => {
   beforeEach(() => {
     updateManySmsMessage.mockReset();
   });
 
-  it("commits an initial-send success only through the QUEUED in-flight state", async () => {
+  it("commits success only under the unified fence (status SENDING + this worker's exact lease value)", async () => {
     updateManySmsMessage.mockResolvedValueOnce({ count: 1 });
 
-    const ok = await finalizeSmsAttemptSuccess(INITIAL_CLAIM, { providerMessageId: "SM1", costEstimateCents: 2 });
+    const ok = await finalizeSmsAttemptSuccess(CLAIM, { providerMessageId: "SM1", costEstimateCents: 2 });
 
     expect(ok).toBe(true);
     expect(updateManySmsMessage).toHaveBeenCalledWith({
-      where: { id: "msg-1", status: "QUEUED" },
+      where: { id: "msg-1", status: "SENDING", nextRetryAt: LEASE },
       data: expect.objectContaining({
         status: "SENT",
         providerMessageId: "SM1",
@@ -52,20 +85,9 @@ describe("finalizeSmsAttemptSuccess", () => {
     });
   });
 
-  it("commits a retry success only under the exact lease fence (status SENDING + this worker's lease value)", async () => {
-    updateManySmsMessage.mockResolvedValueOnce({ count: 1 });
-
-    const ok = await finalizeSmsAttemptSuccess(RETRY_CLAIM, { providerMessageId: "SM2" });
-
-    expect(ok).toBe(true);
-    expect(updateManySmsMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: "msg-1", status: "SENDING", nextRetryAt: LEASE } })
-    );
-  });
-
   it("returns false and overwrites nothing when the in-flight state is gone (recovered, cancelled, or webhook-terminalized)", async () => {
     updateManySmsMessage.mockResolvedValueOnce({ count: 0 });
-    const ok = await finalizeSmsAttemptSuccess(RETRY_CLAIM, { providerMessageId: "SM2" });
+    const ok = await finalizeSmsAttemptSuccess(CLAIM, { providerMessageId: "SM2" });
     expect(ok).toBe(false);
   });
 });
@@ -80,7 +102,7 @@ describe("finalizeSmsAttemptFailure", () => {
     txUpdateManySmsMessage.mockResolvedValueOnce({ count: 1 });
     txExecuteRaw.mockResolvedValueOnce(1);
 
-    const ok = await finalizeSmsAttemptFailure(RETRY_CLAIM, RESERVATION, "carrier rejected");
+    const ok = await finalizeSmsAttemptFailure(CLAIM, RESERVATION, "carrier rejected");
 
     expect(ok).toBe(true);
     expect(txUpdateManySmsMessage).toHaveBeenCalledWith({
@@ -99,7 +121,7 @@ describe("finalizeSmsAttemptFailure", () => {
   it("a duplicate or stale finalizer (transition matches zero rows) releases NOTHING", async () => {
     txUpdateManySmsMessage.mockResolvedValueOnce({ count: 0 });
 
-    const ok = await finalizeSmsAttemptFailure(RETRY_CLAIM, RESERVATION, "carrier rejected");
+    const ok = await finalizeSmsAttemptFailure(CLAIM, RESERVATION, "carrier rejected");
 
     expect(ok).toBe(false);
     expect(txExecuteRaw).not.toHaveBeenCalled();
@@ -108,12 +130,34 @@ describe("finalizeSmsAttemptFailure", () => {
   it("a failure that never reserved (reservation: null) finalizes without touching the allowance", async () => {
     txUpdateManySmsMessage.mockResolvedValueOnce({ count: 1 });
 
-    const ok = await finalizeSmsAttemptFailure(INITIAL_CLAIM, null, "Member opted out of SMS.");
+    const ok = await finalizeSmsAttemptFailure(CLAIM, null, "Member opted out of SMS.");
 
     expect(ok).toBe(true);
-    expect(txUpdateManySmsMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: "msg-1", status: "QUEUED" } })
-    );
     expect(txExecuteRaw).not.toHaveBeenCalled();
+  });
+});
+
+describe("finalizeSmsAttemptUnknown", () => {
+  beforeEach(() => {
+    updateManySmsMessage.mockReset();
+  });
+
+  it("parks the attempt under the fence: status stays SENDING, the lease is cleared, the honest reason is recorded, and NO release occurs", async () => {
+    updateManySmsMessage.mockResolvedValueOnce({ count: 1 });
+
+    const ok = await finalizeSmsAttemptUnknown(CLAIM, "Delivery outcome is unknown; verify in Twilio before retrying.");
+
+    expect(ok).toBe(true);
+    expect(updateManySmsMessage).toHaveBeenCalledWith({
+      where: { id: "msg-1", status: "SENDING", nextRetryAt: LEASE },
+      data: { errorMessage: "Delivery outcome is unknown; verify in Twilio before retrying.", nextRetryAt: null },
+    });
+    // No status change, no transaction, no release path at all.
+    expect(updateManySmsMessage.mock.calls[0][0].data).not.toHaveProperty("status");
+  });
+
+  it("a stale worker's unknown-parking matches zero rows and does nothing", async () => {
+    updateManySmsMessage.mockResolvedValueOnce({ count: 0 });
+    await expect(finalizeSmsAttemptUnknown(CLAIM, "x")).resolves.toBe(false);
   });
 });

@@ -2143,6 +2143,14 @@ model OrganizationSmsSettings {
 /// One row per SMS send attempt. Doubles as the delivery log (status field
 /// covers queued→sent→delivered→failed) — mirrors how CommunicationRecipient
 /// already tracks delivery status inline rather than a separate log table.
+///
+/// INVARIANT enforced by a PostgreSQL PARTIAL unique index that Prisma's
+/// schema language cannot express (migration
+/// 20260910120000_sms_campaign_member_unique_attempt, same precedent as the
+/// progression active-transition key): at most ONE row per
+/// (organizationId, campaignId, memberId) when campaignId AND memberId are
+/// non-null — the database-level guard against duplicate campaign sends for
+/// the same recipient. Non-campaign transactional rows are unconstrained.
 model SmsMessage {
   id                String           @id @default(cuid())
   organizationId    String

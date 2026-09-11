@@ -147,14 +147,14 @@ describe.skipIf(!RUN_INTEGRATION)("SMS retry lease + one-time finalization — r
     // Worker A claims with an instantly-expired lease (its exact value IS
     // stored) and reserves a unit, then stalls past its lease.
     const staleLease = await claimSmsRetryAttempt(row.id, -60_000);
-    const staleClaim = { kind: "retry", messageId: row.id, leaseExpiry: staleLease!.leaseExpiry } as const;
+    const staleClaim = staleLease!; // the returned claim IS the fencing token
     const staleReservation = await reserveSmsAllowance(orgId);
     expect(await usage()).toBe(1);
 
     // Worker B recovers the row under a new lease.
     const recoveredLease = await claimSmsRetryAttempt(row.id);
     expect(recoveredLease).not.toBeNull();
-    const recoveredClaim = { kind: "retry", messageId: row.id, leaseExpiry: recoveredLease!.leaseExpiry } as const;
+    const recoveredClaim = recoveredLease!;
 
     // Stale A tries to finalize its failure WITH its reservation: the fence
     // (status SENDING + A's exact lease value) matches nothing — no status
@@ -193,12 +193,19 @@ describe.skipIf(!RUN_INTEGRATION)("SMS retry lease + one-time finalization — r
   });
 
   it("ONE-TIME RELEASE: a failed attempt releases exactly once; replays release nothing and never erase another successful attempt's unit", async () => {
-    const { finalizeSmsAttemptFailure, finalizeSmsAttemptSuccess } = await import("@/lib/sms-attempt-finalization");
+    const { claimInitialSmsAttempt, finalizeSmsAttemptFailure, finalizeSmsAttemptSuccess } = await import("@/lib/sms-attempt-finalization");
     const { reserveSmsAllowance } = await import("@/lib/sms-entitlement");
     await resetUsage(0);
 
     const msg1 = await createRetryRow({ status: "QUEUED", nextRetryAt: null });
     const msg2 = await createRetryRow({ status: "QUEUED", nextRetryAt: null });
+
+    // Real initial-attempt claims: QUEUED → SENDING with a lease, exactly as
+    // sendMemberSms does, and retryCount stays 0 for both.
+    const claim1 = await claimInitialSmsAttempt(msg1.id);
+    const claim2 = await claimInitialSmsAttempt(msg2.id);
+    expect(claim1).not.toBeNull();
+    expect(claim2).not.toBeNull();
 
     const r1 = await reserveSmsAllowance(orgId);
     const r2 = await reserveSmsAllowance(orgId);
@@ -207,31 +214,34 @@ describe.skipIf(!RUN_INTEGRATION)("SMS retry lease + one-time finalization — r
     expect(await usage()).toBe(2);
 
     // First message succeeds — its unit is permanently consumed.
-    await expect(finalizeSmsAttemptSuccess({ kind: "initial", messageId: msg1.id }, { providerMessageId: "SMok" })).resolves.toBe(true);
+    await expect(finalizeSmsAttemptSuccess(claim1!, { providerMessageId: "SMok" })).resolves.toBe(true);
 
     // Second message fails and releases exactly once.
-    const msg2Claim = { kind: "initial", messageId: msg2.id } as const;
-    await expect(finalizeSmsAttemptFailure(msg2Claim, r2, "boom")).resolves.toBe(true);
+    await expect(finalizeSmsAttemptFailure(claim2!, r2, "boom")).resolves.toBe(true);
     expect(await usage()).toBe(1);
 
     // Replaying msg2's failure/finalization path releases NOTHING more —
     // msg1's successful unit survives.
-    await expect(finalizeSmsAttemptFailure(msg2Claim, r2, "boom replay")).resolves.toBe(false);
+    await expect(finalizeSmsAttemptFailure(claim2!, r2, "boom replay")).resolves.toBe(false);
     expect(await usage()).toBe(1);
+
+    const rows = await prisma.smsMessage.findMany({ where: { id: { in: [msg1.id, msg2.id] } } });
+    for (const row of rows) expect(row.retryCount).toBe(0); // initial claims never increment
   });
 
   it("CONCURRENT FINALIZERS: many duplicate failure finalizers for one message — exactly one wins and exactly one unit is released", async () => {
-    const { finalizeSmsAttemptFailure } = await import("@/lib/sms-attempt-finalization");
+    const { claimInitialSmsAttempt, finalizeSmsAttemptFailure } = await import("@/lib/sms-attempt-finalization");
     const { reserveSmsAllowance } = await import("@/lib/sms-entitlement");
     await resetUsage(0);
 
     const msg = await createRetryRow({ status: "QUEUED", nextRetryAt: null });
+    const claim = await claimInitialSmsAttempt(msg.id);
+    expect(claim).not.toBeNull();
     const reservation = await reserveSmsAllowance(orgId);
     expect(await usage()).toBe(1);
 
-    const claim = { kind: "initial", messageId: msg.id } as const;
     const results = await Promise.all(
-      Array.from({ length: 5 }, () => finalizeSmsAttemptFailure(claim, reservation, "concurrent boom"))
+      Array.from({ length: 5 }, () => finalizeSmsAttemptFailure(claim!, reservation, "concurrent boom"))
     );
 
     expect(results.filter(Boolean)).toHaveLength(1);
