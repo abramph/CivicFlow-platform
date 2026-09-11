@@ -143,7 +143,51 @@ paths skip E.164 normalization.
    billing gate → canonical authorization → reservation immediately before
    Twilio → one fenced commit. No schema change: the `SENDING` enum value
    and `nextRetryAt` already existed.
-5. **Stripe config readiness**: `STRIPE_PRICE_SMS_ADDON_MONTHLY` added to the
+5. **Campaign idempotency, truthful cancel, and ambiguous provider
+   outcomes** (Round 5, owner-authorized migration):
+   - **Database-enforced campaign idempotency**: partial unique index
+     `SmsMessage_org_campaign_member_attempt_key` (migration
+     `20260910120000_sms_campaign_member_unique_attempt`) allows at most ONE
+     campaign SMS attempt per (organization, campaign, member). A
+     unique-violation loser is treated as "already claimed/processed" — it
+     resolves the existing canonical row and performs no claim, no
+     reservation, and no Twilio call; delivery problems are handled by
+     retrying that one row through the leased retry system.
+     *Honest scope:* this protects the SMS boundary only — the shared
+     `CommunicationRecipient` pipeline can still double-process a PENDING
+     recipient's EMAIL/PUSH legs and its per-recipient bookkeeping under
+     concurrent campaign invocations; that is a known, separate follow-up.
+   - **Initial sends claim ownership**: `claimInitialSmsAttempt` moves the
+     canonical row QUEUED → SENDING with the same lease/fence retries use
+     (`retryCount` stays 0 for the original attempt; only recovery/retry
+     claims increment). Losing the claim means the atomic admin Cancel won:
+     nothing is reserved and Twilio is never called. There is no unfenced
+     finalizer of any kind; a crashed initial attempt is recovered by the
+     same lease-expiry sweep as retries.
+   - **Atomic truthful cancel**: the Cancel route is one CAS over
+     QUEUED/RETRYING. A row a worker already claimed returns "Message is
+     already being sent … can no longer be cancelled"; only the single CAS
+     winner writes the audit event; losers change nothing.
+   - **Ambiguous provider outcomes**: `sendSms` now returns a discriminated
+     outcome — `sent`, `definitive_failure` (platform gate or a definite
+     Twilio non-success response), or `unknown` (timeout/abort, connection
+     reset, any thrown transport error; never described as a provider
+     rejection — Twilio publishes no verifiable idempotency key for message
+     creation, so a blind retry could duplicate the text). Unknown outcomes
+     do NOT release quota and are parked exactly once under the fence as
+     `SENDING` with `nextRetryAt: null` and the honest error "Delivery
+     outcome is unknown; verify in Twilio before retrying." — invisible to
+     the cron sweep, unclaimable, un-retryable by the ordinary Retry
+     button, un-cancellable, and displayed as-is in the admin queue table.
+     *Reconciliation is a human step*: verify the SID-less attempt in the
+     Twilio Console; resolving the parked row (to FAILED-for-retry or
+     SENT) is a controlled platform-operator follow-up — deliberately not
+     an endpoint yet.
+   - **Webhook ordering**: a late non-terminal provider event (`queued`/
+     `sending`/`sent`) can no longer regress an already-DELIVERED row;
+     request-side finalization was already fenced away from webhook
+     terminal states.
+6. **Stripe config readiness**: `STRIPE_PRICE_SMS_ADDON_MONTHLY` added to the
    env schema (`src/lib/env.ts`, optional — required only by the paid flow)
    and `.env.example`; fail-closed behavior of `smsAddOnPriceId()` /
    `isSmsAddOnPriceId()` is tested; the GET billing endpoint is tested to
@@ -151,8 +195,19 @@ paths skip E.164 normalization.
    audited billing-exempt enrollment is verified to work with no Stripe
    configuration at all.
 
-No database migration is required: every field used already exists
-(`Organization.billingExempt`, `OrganizationSmsSettings.*`, `SmsMessage.memberId`).
+One database migration exists, explicitly owner-authorized in Round 5:
+`20260910120000_sms_campaign_member_unique_attempt` — a single additive
+partial `CREATE UNIQUE INDEX` on `SmsMessage(organizationId, campaignId,
+memberId) WHERE campaignId IS NOT NULL AND memberId IS NOT NULL`. It never
+deletes or rewrites data; on conflicting duplicates it fails loudly and
+applies nothing (real-database-tested). Pre-deployment duplicate check ran
+read-only against production on 2026-09-10: 0 SmsMessage rows total, 0
+campaign/member rows, 0 conflicting groups (no portal staging database
+exists — `.env.staging` is an unfilled placeholder). Leaving the index in
+place under a code rollback is safe: pre-Round-5 code never relied on it,
+and a duplicate insert failing is the protective behavior. Everything else
+uses existing fields (`Organization.billingExempt`,
+`OrganizationSmsSettings.*`, `SmsMessage.memberId/status/nextRetryAt`).
 
 ## Deliberately NOT done in this branch
 
@@ -160,8 +215,11 @@ No database migration is required: every field used already exists
 - No organization enrollment or SMS entitlement grant.
 - No live SMS.
 - No mobile code change (would invalidate the shipped 1.1.0 artifacts).
-- No schema migration (the reservation's crash-consumes-capacity tradeoff is
-  accepted precisely to avoid a reservation-ledger table).
+- No schema migration beyond the single owner-authorized Round-5 additive
+  index above (the reservation's crash-consumes-capacity tradeoff is still
+  accepted precisely to avoid a reservation-ledger table, and production
+  migration execution remains gated on the separate merge/deploy
+  authorization).
 
 (Two earlier bullets — "no customer-facing pricing copy change" and "no
 decision on the overage policy" — described the pre-decision state and no
