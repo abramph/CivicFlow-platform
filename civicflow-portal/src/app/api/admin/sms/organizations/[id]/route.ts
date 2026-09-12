@@ -1,15 +1,18 @@
 import { requireSuperAdmin } from "@/lib/auth-guards";
 import { withApiErrorHandling } from "@/lib/api-route";
-import { createAuditEvent } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
-import { SMS_PLAN_TIERS } from "@/lib/sms-admin-pricing";
 import { SMS_OVERAGE_POLICY } from "@/lib/sms-pricing";
+import { SMS_MAX_MONTHLY_QUOTA } from "@/lib/sms-admin-enrollment";
+import { applySmsAdminOrgSettings } from "@/lib/sms-admin-settings";
 import { parseJsonBody, ValidationError, z } from "@/lib/validation";
 
 const bodySchema = z.object({
   smsAddOnActive: z.boolean().optional(),
   plan: z.enum(["STARTER", "GROWTH", "ENTERPRISE"]).optional(),
-  smsMonthlyLimit: z.number().int().min(0).optional(),
+  // Upper bound mirrors the int4 storage ceiling (SMS_MAX_MONTHLY_QUOTA) so a
+  // client and this route reject an over-range/unsafe quota identically —
+  // .int() also rejects decimals/non-numbers before they reach the column.
+  smsMonthlyLimit: z.number().int().min(0).max(SMS_MAX_MONTHLY_QUOTA).optional(),
   smsOverageRateCents: z.number().min(0).optional(),
   planPriceCents: z.number().int().min(0).optional(),
   suspended: z.boolean().optional(),
@@ -26,20 +29,21 @@ const bodySchema = z.object({
  * directly, and any explicit override always wins over the plan default),
  * and suspend/unsuspend.
  *
+ * This handler owns AUTHORIZATION and request VALIDATION; the actual write is
+ * delegated to applySmsAdminOrgSettings(), which performs the enable/disable
+ * transition as a database-atomic conditional UPDATE committed together with
+ * its audit event (so two concurrent requests can never both activate, double-
+ * reset the period, or emit two addon_activated events).
+ *
  * ENROLLMENT SCOPE — enforced, not just documented: this endpoint may NEWLY
- * activate the add-on only for organizations with billingExempt === true
- * (they have no Stripe subscription to attach the add-on price to). For
- * every other organization, activation must go through the Stripe
- * subscription-item flow at /api/billing/sms-addon so a real line item backs
- * the entitlement; requests here are rejected. Re-sending
- * smsAddOnActive: true for an ALREADY-active org is an idempotent no-op-
- * style update (never a fresh activation), so it cannot be used to bypass
- * Stripe. This route deliberately never calls Stripe — no fake customer,
- * subscription, invoice, or line item is ever created here. Guarded by
- * requireSuperAdmin: an ordinary ORG_OWNER/ORG_ADMIN can never reach it, so
- * an org cannot grant itself an entitlement. Activation/deactivation
- * transitions require a non-empty audit reason and get their own distinct
- * audit actions carrying actor, organization, reason, and quota.
+ * activate the add-on only for organizations with billingExempt === true (they
+ * have no Stripe subscription to attach the add-on price to). For every other
+ * organization, activation must go through the Stripe subscription-item flow at
+ * /api/billing/sms-addon; requests here are rejected. Re-sending
+ * smsAddOnActive: true for an ALREADY-active org is an idempotent update (never
+ * a fresh activation), so it cannot be used to bypass Stripe. This route (and
+ * applySmsAdminOrgSettings) deliberately never call Stripe. Guarded by
+ * requireSuperAdmin: an ordinary ORG_OWNER/ORG_ADMIN can never reach it.
  */
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   return withApiErrorHandling(async () => {
@@ -55,73 +59,39 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       return Response.json({ ok: false, error: "Organization not found." }, { status: 404 });
     }
 
-    const activating = input.smsAddOnActive === true && !existing?.smsAddOnActive;
-    const deactivating = input.smsAddOnActive === false && existing?.smsAddOnActive === true;
+    // Intent, from a best-effort read — used ONLY to decide which validation
+    // gates apply. The authoritative activate/deactivate decision is made
+    // atomically inside applySmsAdminOrgSettings via a conditional UPDATE, so a
+    // request the read thinks is "activating" but that loses a concurrent race
+    // is correctly downgraded to an idempotent no-op there (no extra audit).
+    const wantsActivate = input.smsAddOnActive === true && !existing?.smsAddOnActive;
+    const wantsDeactivate = input.smsAddOnActive === false && existing?.smsAddOnActive === true;
 
     const reason = input.reason?.trim() || undefined;
-    if ((activating || deactivating) && !reason) {
-      throw new ValidationError(
-        "A non-empty reason is required when activating or deactivating the SMS add-on."
-      );
+    if ((wantsActivate || wantsDeactivate) && !reason) {
+      throw new ValidationError("A non-empty reason is required when activating or deactivating the SMS add-on.");
     }
 
     // Owner decision gate (docs/sms-overage-policy-options.md): resolved to
     // "hard_stop" (Option A), so this guard is currently inert — kept so a
     // revert of SMS_OVERAGE_POLICY to "unresolved" re-closes activation
     // everywhere, fail-safe.
-    if (activating && SMS_OVERAGE_POLICY === "unresolved") {
+    if (wantsActivate && SMS_OVERAGE_POLICY === "unresolved") {
       throw new ValidationError(
         "SMS add-on activation is temporarily unavailable until the overage billing policy is decided (docs/sms-overage-policy-options.md)."
       );
     }
 
-    if (activating && !organization.billingExempt) {
+    if (wantsActivate && !organization.billingExempt) {
       throw new ValidationError(
         "This endpoint can only enroll billing-exempt organizations. Paid organizations must purchase the SMS add-on through Settings → Billing so the entitlement is backed by a Stripe subscription item."
       );
     }
 
-    const data: Record<string, unknown> = {};
-    if (input.smsAddOnActive !== undefined) data.smsAddOnActive = input.smsAddOnActive;
-    if (input.suspended !== undefined) data.suspendedAt = input.suspended ? new Date() : null;
-
-    if (input.plan) {
-      data.plan = input.plan;
-      const tier = SMS_PLAN_TIERS[input.plan];
-      if (!tier.custom) {
-        data.smsMonthlyLimit = tier.includedMessages;
-        data.smsOverageRateCents = tier.overageRateCents;
-        data.planPriceCents = tier.monthlyPriceCents;
-      }
-    }
-    // Explicit numeric overrides always win — required for ENTERPRISE, also allowed as an ad-hoc adjustment on any plan.
-    if (input.smsMonthlyLimit !== undefined) data.smsMonthlyLimit = input.smsMonthlyLimit;
-    if (input.smsOverageRateCents !== undefined) data.smsOverageRateCents = input.smsOverageRateCents;
-    if (input.planPriceCents !== undefined) data.planPriceCents = input.planPriceCents;
-
-    if (activating) {
-      // Every genuine inactive→active enrollment (first activation OR
-      // re-activation after a deactivation) starts a clean monthly billing
-      // period: zero usage, reset threshold-notification state, and a fresh
-      // start/end window. Without this, a billing-exempt enrollment (which
-      // has no Stripe webhook to seed its period) would carry NULL period
-      // columns and accumulate usage forever with no monthly rollover.
-      // Idempotent re-sends of smsAddOnActive:true for an already-active
-      // org never reach this branch, so they cannot reset a live period,
-      // and deactivation deliberately preserves the historical counters.
-      // (Dates are written through Prisma, which stores UTC — the same
-      // naive-UTC convention reserveSmsAllowance's SQL compares against.)
-      const periodStart = new Date();
-      const periodEnd = new Date(periodStart);
-      periodEnd.setMonth(periodEnd.getMonth() + 1);
-      data.smsBillingPeriodStart = periodStart;
-      data.smsBillingPeriodEnd = periodEnd;
-      data.smsUsedThisPeriod = 0;
-      data.lastUsageThresholdNotified = 0;
-
+    if (wantsActivate) {
       // An activation must yield a usable allowance — a zero/absent quota
       // would create an entitlement that hard-stops on its very first send.
-      const effectiveLimit = (data.smsMonthlyLimit as number | undefined) ?? existing?.smsMonthlyLimit ?? 0;
+      const effectiveLimit = input.smsMonthlyLimit ?? existing?.smsMonthlyLimit ?? 0;
       if (effectiveLimit <= 0) {
         throw new ValidationError(
           "Activation requires a positive monthly quota — choose a plan or set smsMonthlyLimit."
@@ -129,33 +99,17 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       }
     }
 
-    const settings = await prisma.organizationSmsSettings.upsert({
-      where: { organizationId },
-      create: { organizationId, ...data },
-      update: data,
-    });
-
-    await createAuditEvent({
+    const { settings } = await applySmsAdminOrgSettings({
       organizationId,
-      actorUserId: session.userId,
-      actorEmail: session.userEmail,
-      action: activating
-        ? "sms_admin.addon_activated"
-        : deactivating
-          ? "sms_admin.addon_deactivated"
-          : "sms_admin.org_settings_updated",
-      entityType: "OrganizationSmsSettings",
-      entityId: settings.id,
-      metadata: {
-        ...input,
-        reason: reason ?? null,
-        billingExempt: organization.billingExempt,
-        previousAddOnActive: existing?.smsAddOnActive ?? false,
-        newAddOnActive: settings.smsAddOnActive,
-        quota: settings.smsMonthlyLimit,
-      },
+      input,
+      reason: reason ?? null,
+      billingExempt: organization.billingExempt,
+      actor: { userId: session.userId, userEmail: session.userEmail },
     });
 
-    return Response.json({ ok: true, data: settings });
+    // Never expose a Stripe identifier in the API response — the admin UI
+    // doesn't use it, and it must not leak to any client. `undefined` values
+    // are dropped by JSON serialization, so the key is absent from the body.
+    return Response.json({ ok: true, data: { ...settings, stripeSmsSubscriptionItemId: undefined } });
   });
 }

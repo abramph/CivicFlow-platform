@@ -3,10 +3,12 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { computeOrgSmsCharges, SMS_PLAN_TIERS, type SmsPlanId } from "@/lib/sms-admin-pricing";
+import { SmsEnrollmentControl } from "@/components/admin/SmsEnrollmentControl";
 
 interface OrgRow {
   id: string;
   name: string;
+  billingExempt: boolean;
   smsAddOnActive: boolean;
   plan: string | null;
   planPriceCents: number;
@@ -81,16 +83,15 @@ function OrgRowActions({ org }: { org: OrgRow }) {
     <tr className="border-t border-slate-100 align-top">
       <td className="px-4 py-3 font-semibold text-slate-900">{org.name}</td>
       <td className="px-4 py-3">
-        <button
-          type="button"
-          disabled={pending === "smsAddOnActive"}
-          onClick={() => put({ smsAddOnActive: !org.smsAddOnActive }, "smsAddOnActive")}
-          className={`rounded-full px-3 py-1 text-xs font-semibold disabled:opacity-60 ${
-            org.smsAddOnActive ? "bg-emerald-600 text-white" : "bg-slate-200 text-slate-700"
-          }`}
-        >
-          {org.smsAddOnActive ? "Enabled" : "Disabled"}
-        </button>
+        <SmsEnrollmentControl
+          org={{
+            id: org.id,
+            name: org.name,
+            billingExempt: org.billingExempt,
+            smsAddOnActive: org.smsAddOnActive,
+            smsMonthlyLimit: org.smsMonthlyLimit,
+          }}
+        />
       </td>
       <td className="px-4 py-3">
         <select
