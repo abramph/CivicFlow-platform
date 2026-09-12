@@ -11,6 +11,7 @@ export default async function SmsOrganizationsPage() {
     select: {
       id: true,
       name: true,
+      billingExempt: true,
       smsSettings: {
         select: {
           smsAddOnActive: true,
@@ -39,6 +40,7 @@ export default async function SmsOrganizationsPage() {
           organizations={organizations.map((org) => ({
             id: org.id,
             name: org.name,
+            billingExempt: org.billingExempt,
             smsAddOnActive: org.smsSettings?.smsAddOnActive ?? false,
             plan: org.smsSettings?.plan ?? null,
             planPriceCents: org.smsSettings?.planPriceCents ?? 0,
