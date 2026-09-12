@@ -84,8 +84,8 @@ not a new checkout flow:
 
 1. In the Stripe Dashboard, create a recurring Product (e.g. "Unestra SMS Add-On") with a
    monthly Price matching `SMS_ADDON.monthlyPriceCents` in `src/lib/sms-pricing.ts` (currently
-   $10.00/month, 1,000 included messages, $0.02/message overage — all three values live in that
-   one file so pricing changes don't need to be hunted down across the codebase).
+   $10.00/month including up to 1,000 messages — the values live in that one file so pricing
+   changes don't need to be hunted down across the codebase).
 2. Copy the Price ID (`price_...`) into `STRIPE_PRICE_SMS_ADDON_MONTHLY`.
 3. `POST /api/billing/sms-addon` calls `addSmsAddOnToSubscription()`
    (`stripe.subscriptionItems.create`) to attach that price to the org's existing subscription;
@@ -97,11 +97,17 @@ not a new checkout flow:
    support action) rather than through the app's own buttons. `customer.subscription.deleted`
    deactivates the add-on.
 
-Overage (usage past `smsMonthlyLimit` in a billing period) is currently a **soft cap**: sends are
-never blocked for being over the limit, only tracked (`SmsMessage.costEstimateCents`,
-`OrganizationSmsSettings.smsUsedThisPeriod`) for future invoicing. There is no automated overage
-invoicing yet — the Platform Admin dashboard's "Est. Overage Revenue" figure is for visibility, not
-an automated charge.
+Usage past `smsMonthlyLimit` is a **hard stop** (owner-selected Option A,
+docs/sms-overage-policy-options.md): a database-atomic allowance reservation
+(`reserveSmsAllowance()` in `src/lib/sms-entitlement.ts`) runs immediately before every
+organization-message Twilio call, so sending pauses at the allowance even under concurrent
+sends — there is no customer-facing overage billing of any kind. Each successful reservation
+returns a period-bound token (org + the exact billing-period window the unit was charged
+into); a synchronous Twilio failure releases against that token only, so a release that
+straddles a period rollover is a no-op instead of corrupting the new period's count. The legacy
+`smsOverageRateCents` column and the Platform Admin dashboard's cost figures are internal
+tooling only and must not be surfaced to customers as billing behavior. Raising a specific
+org's limit is a super-admin action (SMS Administration → organizations).
 
 ## 6. Testing checklist
 

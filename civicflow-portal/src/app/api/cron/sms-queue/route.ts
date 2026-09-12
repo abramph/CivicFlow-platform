@@ -18,6 +18,6 @@ export async function POST(request: Request) {
 
   return withApiErrorHandling(async () => {
     const result = await processRetryableSmsMessages();
-    return Response.json({ ok: true, processed: result.processed });
+    return Response.json({ ok: true, processed: result.processed, parked: result.parked });
   });
 }

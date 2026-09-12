@@ -1,0 +1,34 @@
+-- Round-5 SMS launch hardening (docs/sms-compliance-audit-2026-09.md):
+-- database-enforced campaign-send idempotency. At most ONE campaign SMS
+-- attempt may exist per (organization, campaign, member) — concurrent
+-- campaign invocations (manual Send Now racing the cron, or overlapping
+-- sends) that try to create a second attempt for the same recipient hit a
+-- unique violation, which the application treats as "already
+-- claimed/processed", never as a send failure. Retries reuse the one
+-- canonical SmsMessage row through the leased retry system instead of
+-- creating another row.
+--
+-- PARTIAL index on purpose (Prisma's schema language cannot express this —
+-- same precedent as PtaStudentProgressionBatch_active_transition_key):
+-- non-campaign transactional messages (campaignId IS NULL) and member-less
+-- rows are deliberately unconstrained.
+--
+-- Deployment safety: this migration only CREATEs the index. If conflicting
+-- duplicate rows exist, index creation fails loudly and applies nothing —
+-- it never deletes or consolidates data. Pre-deployment duplicate check
+-- (counts only; verified 0 conflicting groups in production on 2026-09-10):
+--
+--   SELECT count(*) FROM (
+--     SELECT "organizationId", "campaignId", "memberId"
+--     FROM "SmsMessage"
+--     WHERE "campaignId" IS NOT NULL AND "memberId" IS NOT NULL
+--     GROUP BY 1, 2, 3 HAVING count(*) > 1
+--   ) d;
+--
+-- Rollback safety: application code older than this round simply never
+-- relied on the index; leaving it in place under a code rollback is safe
+-- (older code creating a genuine duplicate would now fail that one insert,
+-- which is the protective behavior, not a regression).
+CREATE UNIQUE INDEX "SmsMessage_org_campaign_member_attempt_key"
+  ON "SmsMessage"("organizationId", "campaignId", "memberId")
+  WHERE "campaignId" IS NOT NULL AND "memberId" IS NOT NULL;

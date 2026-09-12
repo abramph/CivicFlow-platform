@@ -3,7 +3,7 @@ import { withApiErrorHandling } from "@/lib/api-route";
 import { createAuditEvent } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 import { addSmsAddOnToSubscription, removeSmsAddOnFromSubscription } from "@/lib/stripe";
-import { SMS_ADDON } from "@/lib/sms-pricing";
+import { SMS_ADDON, SMS_OVERAGE_POLICY } from "@/lib/sms-pricing";
 import { ValidationError } from "@/lib/validation";
 
 export async function GET() {
@@ -11,13 +11,16 @@ export async function GET() {
     const { organizationId } = await requirePermission("billing:read", "throw");
     const settings = await prisma.organizationSmsSettings.findUnique({ where: { organizationId } });
 
+    // Deliberately no smsOverageRateCents here: under the owner-selected
+    // hard-stop policy there is no customer-facing overage billing — the DB
+    // column survives for compatibility/internal cost tooling only and must
+    // not be presented to org admins as an active rate.
     return Response.json({
       ok: true,
       data: {
         smsAddOnActive: settings?.smsAddOnActive ?? false,
         smsMonthlyLimit: settings?.smsMonthlyLimit ?? 0,
         smsUsedThisPeriod: settings?.smsUsedThisPeriod ?? 0,
-        smsOverageRateCents: settings?.smsOverageRateCents ?? SMS_ADDON.overageRateCents,
         smsBillingPeriodEnd: settings?.smsBillingPeriodEnd ?? null,
         monthlyPriceCents: SMS_ADDON.monthlyPriceCents,
         includedMessagesPerMonth: SMS_ADDON.includedMessagesPerMonth,
@@ -29,6 +32,14 @@ export async function GET() {
 export async function POST() {
   return withApiErrorHandling(async () => {
     const { session, organizationId } = await requirePermission("billing:manage", "throw");
+
+    // Owner decision gate (docs/sms-overage-policy-options.md): the policy
+    // is resolved to "hard_stop" (Option A), so this guard is currently
+    // inert — it exists so that reverting SMS_OVERAGE_POLICY to "unresolved"
+    // immediately re-closes activation everywhere, fail-safe.
+    if (SMS_OVERAGE_POLICY === "unresolved") {
+      throw new ValidationError("The SMS add-on is temporarily unavailable while its overage billing policy is finalized.");
+    }
 
     const subscription = await prisma.subscription.findFirst({
       where: { organizationId, status: { in: ["active", "trialing", "past_due"] } },

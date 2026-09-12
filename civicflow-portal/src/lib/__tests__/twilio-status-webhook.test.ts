@@ -83,7 +83,7 @@ describe("Twilio delivery-status webhook", () => {
     });
   });
 
-  it("maps undelivered/failed to FAILED and records the error message", async () => {
+  it("maps undelivered/failed to FAILED with the error message — but never over an already-DELIVERED row (DELIVERED is monotonic)", async () => {
     const request = makeRequest({
       MessageSid: "SM2",
       MessageStatus: "undelivered",
@@ -91,14 +91,39 @@ describe("Twilio delivery-status webhook", () => {
     });
     await POST(request);
     expect(updateManySmsMessage).toHaveBeenCalledWith({
-      where: { providerMessageId: "SM2" },
+      where: { providerMessageId: "SM2", status: { not: "DELIVERED" } },
       data: { status: "FAILED", errorMessage: "Landline or unreachable carrier" },
+    });
+
+    updateManySmsMessage.mockClear();
+    await POST(makeRequest({ MessageSid: "SM2", MessageStatus: "failed", ErrorMessage: "late failure" }));
+    expect(updateManySmsMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { providerMessageId: "SM2", status: { not: "DELIVERED" } } })
+    );
+  });
+
+  it("DELIVERED MONOTONICITY: a repeated 'delivered' callback still matches (legitimate cost metadata may update), with no status guard", async () => {
+    await POST(makeRequest({ MessageSid: "SM9", MessageStatus: "delivered", Price: "-0.0158" }));
+    expect(updateManySmsMessage).toHaveBeenCalledWith({
+      where: { providerMessageId: "SM9" },
+      data: { status: "DELIVERED", actualCostCents: 2 },
     });
   });
 
-  it("maps queued/sending/sent statuses", async () => {
+  it("maps queued/sending/sent statuses — but a non-terminal event can never regress an already-DELIVERED row", async () => {
     await POST(makeRequest({ MessageSid: "SM3", MessageStatus: "sending" }));
-    expect(updateManySmsMessage).toHaveBeenCalledWith({ where: { providerMessageId: "SM3" }, data: { status: "SENDING" } });
+    expect(updateManySmsMessage).toHaveBeenCalledWith({
+      where: { providerMessageId: "SM3", status: { not: "DELIVERED" } },
+      data: { status: "SENDING" },
+    });
+
+    updateManySmsMessage.mockClear();
+    // Late out-of-order "sent" after "delivered": the guard keeps DELIVERED.
+    await POST(makeRequest({ MessageSid: "SM3", MessageStatus: "sent" }));
+    expect(updateManySmsMessage).toHaveBeenCalledWith({
+      where: { providerMessageId: "SM3", status: { not: "DELIVERED" } },
+      data: { status: "SENT" },
+    });
   });
 
   it("ignores an unrecognized status without erroring", async () => {

@@ -1,103 +1,319 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const findManySmsMessage = vi.fn();
-const updateSmsMessage = vi.fn();
+const findUniqueSmsMessage = vi.fn();
+const updateManySmsMessage = vi.fn();
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     smsMessage: {
       findMany: (...args: unknown[]) => findManySmsMessage(...args),
-      update: (...args: unknown[]) => updateSmsMessage(...args),
+      findUnique: (...args: unknown[]) => findUniqueSmsMessage(...args),
+      updateMany: (...args: unknown[]) => updateManySmsMessage(...args),
     },
   },
 }));
 
 const sendSms = vi.fn();
-vi.mock("@/lib/sms", () => ({ sendSms: (...args: unknown[]) => sendSms(...args) }));
+vi.mock("@/lib/sms", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/sms")>("@/lib/sms");
+  return { ...actual, sendSms: (...args: unknown[]) => sendSms(...args) };
+});
 
 const resolveOrganizationAccess = vi.fn();
 vi.mock("@/lib/subscription-gate", () => ({
   resolveOrganizationAccess: (...args: unknown[]) => resolveOrganizationAccess(...args),
 }));
 
+const authorizeSmsSend = vi.fn();
+vi.mock("@/lib/sms-send-authorization", () => ({
+  authorizeSmsSend: (...args: unknown[]) => authorizeSmsSend(...args),
+}));
+
+const reserveSmsAllowance = vi.fn();
+vi.mock("@/lib/sms-entitlement", () => ({
+  reserveSmsAllowance: (...args: unknown[]) => reserveSmsAllowance(...args),
+}));
+
+const finalizeSmsAttemptSuccess = vi.fn();
+const finalizeSmsAttemptFailure = vi.fn();
+const finalizeSmsAttemptUnknown = vi.fn();
+vi.mock("@/lib/sms-attempt-finalization", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/sms-attempt-finalization")>("@/lib/sms-attempt-finalization");
+  return {
+    SMS_ATTEMPT_LEASE_MS: actual.SMS_ATTEMPT_LEASE_MS,
+    finalizeSmsAttemptSuccess: (...args: unknown[]) => finalizeSmsAttemptSuccess(...args),
+    finalizeSmsAttemptFailure: (...args: unknown[]) => finalizeSmsAttemptFailure(...args),
+    finalizeSmsAttemptUnknown: (...args: unknown[]) => finalizeSmsAttemptUnknown(...args),
+  };
+});
+
 const ALLOWED = { allowed: true, reason: null, trialEndsAt: null, subscriptionStatus: null, billingExempt: false } as const;
+const AUTHORIZED = { allowed: true, normalizedPhone: "+15551234567" } as const;
+const RESERVATION = {
+  organizationId: "org-a",
+  periodStart: new Date("2026-09-01T00:00:00.000Z"),
+  periodEnd: new Date("2026-10-01T00:00:00.000Z"),
+} as const;
 
-import { attemptSmsMessageResend, processRetryableSmsMessages } from "@/lib/sms-queue";
+const ROW = { id: "msg-1", organizationId: "org-a", memberId: "member-1", phone: "+15551234567", body: "hi", status: "SENDING" };
 
-describe("attemptSmsMessageResend", () => {
+import { TWILIO_REQUEST_TIMEOUT_MS } from "@/lib/sms";
+import {
+  SMS_RETRY_LEASE_MS,
+  claimSmsRetryAttempt,
+  executeClaimedSmsRetry,
+  processRetryableSmsMessages,
+} from "@/lib/sms-queue";
+
+describe("lease vs Twilio timeout invariant", () => {
+  it("the retry lease comfortably outlives the Twilio HTTP timeout (a hung Twilio call must never lose its lease mid-flight)", () => {
+    expect(TWILIO_REQUEST_TIMEOUT_MS).toBe(30_000);
+    expect(SMS_RETRY_LEASE_MS).toBe(120_000);
+    expect(SMS_RETRY_LEASE_MS).toBeGreaterThanOrEqual(TWILIO_REQUEST_TIMEOUT_MS * 4);
+  });
+});
+
+describe("claimSmsRetryAttempt", () => {
   beforeEach(() => {
-    updateSmsMessage.mockReset();
+    updateManySmsMessage.mockReset();
+  });
+
+  it("wins ownership via one CAS over due RETRYING rows ONLY — expired SENDING leases are never re-claimable for another provider attempt", async () => {
+    updateManySmsMessage.mockResolvedValueOnce({ count: 1 });
+    const before = Date.now();
+
+    const lease = await claimSmsRetryAttempt("msg-1");
+
+    expect(lease).not.toBeNull();
+    expect(updateManySmsMessage).toHaveBeenCalledWith({
+      where: { id: "msg-1", status: "RETRYING", nextRetryAt: { lte: expect.any(Date) } },
+      data: { status: "SENDING", nextRetryAt: lease!.leaseExpiry, retryCount: { increment: 1 } },
+    });
+    const expiryMs = lease!.leaseExpiry.getTime() - before;
+    expect(expiryMs).toBeGreaterThanOrEqual(SMS_RETRY_LEASE_MS - 1000);
+    expect(expiryMs).toBeLessThanOrEqual(SMS_RETRY_LEASE_MS + 1000);
+  });
+
+  it("returns null when another worker owns the row (CAS matched zero rows)", async () => {
+    updateManySmsMessage.mockResolvedValueOnce({ count: 0 });
+    await expect(claimSmsRetryAttempt("msg-1")).resolves.toBeNull();
+  });
+});
+
+describe("executeClaimedSmsRetry", () => {
+  beforeEach(() => {
+    updateManySmsMessage.mockReset();
+    findUniqueSmsMessage.mockReset();
     sendSms.mockReset();
     resolveOrganizationAccess.mockReset().mockResolvedValue(ALLOWED);
+    authorizeSmsSend.mockReset().mockResolvedValue(AUTHORIZED);
+    reserveSmsAllowance.mockReset().mockResolvedValue(RESERVATION);
+    finalizeSmsAttemptSuccess.mockReset().mockResolvedValue(true);
+    finalizeSmsAttemptFailure.mockReset().mockResolvedValue(true);
+    finalizeSmsAttemptUnknown.mockReset().mockResolvedValue(true);
+    updateManySmsMessage.mockResolvedValue({ count: 1 }); // claim wins by default
+    findUniqueSmsMessage.mockResolvedValue(ROW);
   });
 
-  it("marks SENT on a successful resend", async () => {
-    sendSms.mockResolvedValueOnce({ sent: true, skipped: false, to: "+15551234567", providerMessageId: "SM1" });
-    updateSmsMessage.mockResolvedValueOnce({ id: "msg-1", status: "SENT" });
+  it("SINGLE OWNER: a lost claim does nothing at all — no read, no authorization, no reservation, no Twilio, no finalize", async () => {
+    updateManySmsMessage.mockReset().mockResolvedValueOnce({ count: 0 });
 
-    await attemptSmsMessageResend({ id: "msg-1", organizationId: "org-a", phone: "+15551234567", body: "hi" });
+    const result = await executeClaimedSmsRetry("msg-1");
 
-    expect(updateSmsMessage).toHaveBeenCalledWith({
-      where: { id: "msg-1" },
-      data: { status: "SENT", sentAt: expect.any(Date), providerMessageId: "SM1", errorMessage: null },
-    });
+    expect(result).toEqual({ claimed: false });
+    expect(findUniqueSmsMessage).not.toHaveBeenCalled();
+    expect(authorizeSmsSend).not.toHaveBeenCalled();
+    expect(reserveSmsAllowance).not.toHaveBeenCalled();
+    expect(sendSms).not.toHaveBeenCalled();
+    expect(finalizeSmsAttemptSuccess).not.toHaveBeenCalled();
+    expect(finalizeSmsAttemptFailure).not.toHaveBeenCalled();
   });
 
-  it("marks FAILED with the failure reason on an unsuccessful resend", async () => {
-    sendSms.mockResolvedValueOnce({ sent: false, skipped: false, to: "+15551234567", reason: "carrier rejected" });
-    updateSmsMessage.mockResolvedValueOnce({ id: "msg-1", status: "FAILED" });
+  it("a won claim executes in order — ownership, gates, reservation immediately before Twilio, one fenced success commit", async () => {
+    sendSms.mockResolvedValueOnce({ sent: true, skipped: false, outcome: "sent", to: "+15551234567", providerMessageId: "SM1" });
+    findUniqueSmsMessage.mockResolvedValue({ ...ROW, status: "SENT" });
 
-    await attemptSmsMessageResend({ id: "msg-1", organizationId: "org-a", phone: "+15551234567", body: "hi" });
+    const result = await executeClaimedSmsRetry("msg-1");
 
-    expect(updateSmsMessage).toHaveBeenCalledWith({
-      where: { id: "msg-1" },
-      data: { status: "FAILED", errorMessage: "carrier rejected" },
-    });
+    expect(result.claimed).toBe(true);
+    // authorization happens only after the worker owns the attempt
+    expect(updateManySmsMessage.mock.invocationCallOrder[0]).toBeLessThan(authorizeSmsSend.mock.invocationCallOrder[0]);
+    expect(reserveSmsAllowance.mock.invocationCallOrder[0]).toBeLessThan(sendSms.mock.invocationCallOrder[0]);
+    expect(finalizeSmsAttemptSuccess).toHaveBeenCalledWith(
+      { messageId: "msg-1", leaseExpiry: expect.any(Date) },
+      { providerMessageId: "SM1" }
+    );
+    expect(finalizeSmsAttemptFailure).not.toHaveBeenCalled();
   });
 
-  it("LAUNCH-BLOCKER: marks FAILED without calling sendSms when the organization is billing-inactive — applies to the manual Retry button too, since it shares this function", async () => {
+  it("LAUNCH-BLOCKER: a billing-inactive org finalizes FAILED (no allowance involved) without authorization or Twilio", async () => {
     resolveOrganizationAccess.mockResolvedValueOnce({ allowed: false, reason: "TRIAL_EXPIRED", trialEndsAt: null, subscriptionStatus: null, billingExempt: false });
-    updateSmsMessage.mockResolvedValueOnce({ id: "msg-1", status: "FAILED" });
 
-    await attemptSmsMessageResend({ id: "msg-1", organizationId: "org-a", phone: "+15551234567", body: "hi" });
+    const result = await executeClaimedSmsRetry("msg-1");
+
+    expect(result.claimed).toBe(true);
+    expect(authorizeSmsSend).not.toHaveBeenCalled();
+    expect(sendSms).not.toHaveBeenCalled();
+    expect(finalizeSmsAttemptFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ messageId: "msg-1", leaseExpiry: expect.any(Date) }),
+      null,
+      "Organization subscription is not active."
+    );
+  });
+
+  it("COMPLIANCE: an authorization denial (STOP, revoked add-on, removed member) finalizes FAILED with the canonical reason — no reservation, no Twilio", async () => {
+    authorizeSmsSend.mockResolvedValueOnce({ allowed: false, reason: "Member opted out of SMS." });
+
+    await executeClaimedSmsRetry("msg-1");
+
+    expect(reserveSmsAllowance).not.toHaveBeenCalled();
+    expect(sendSms).not.toHaveBeenCalled();
+    expect(finalizeSmsAttemptFailure).toHaveBeenCalledWith(expect.anything(), null, "Member opted out of SMS.");
+  });
+
+  it("passes required:false and the row's own memberId to the canonical authorization", async () => {
+    sendSms.mockResolvedValueOnce({ sent: true, skipped: false, outcome: "sent", to: "+15551234567" });
+
+    await executeClaimedSmsRetry("msg-1");
+
+    expect(authorizeSmsSend).toHaveBeenCalledWith({
+      organizationId: "org-a",
+      memberId: "member-1",
+      phone: "+15551234567",
+      required: false,
+    });
+  });
+
+  it("HARD STOP: a refused reservation finalizes FAILED with the allowance reason and never calls Twilio", async () => {
+    reserveSmsAllowance.mockResolvedValueOnce(null);
+
+    await executeClaimedSmsRetry("msg-1");
 
     expect(sendSms).not.toHaveBeenCalled();
-    expect(updateSmsMessage).toHaveBeenCalledWith({
-      where: { id: "msg-1" },
-      data: { status: "FAILED", errorMessage: "Organization subscription is not active." },
+    expect(finalizeSmsAttemptFailure).toHaveBeenCalledWith(
+      expect.anything(),
+      null,
+      "Your organization has used its full monthly SMS allowance."
+    );
+  });
+
+  it("a synchronous Twilio failure finalizes FAILED once WITH the reservation token, so the single winning transition releases the unit", async () => {
+    sendSms.mockResolvedValueOnce({ sent: false, skipped: false, outcome: "definitive_failure", to: "+15551234567", reason: "carrier rejected" });
+
+    await executeClaimedSmsRetry("msg-1");
+
+    expect(finalizeSmsAttemptFailure).toHaveBeenCalledTimes(1);
+    expect(finalizeSmsAttemptFailure).toHaveBeenCalledWith(expect.anything(), RESERVATION, "carrier rejected");
+    expect(finalizeSmsAttemptSuccess).not.toHaveBeenCalled();
+  });
+
+  it("AMBIGUOUS OUTCOME: a timeout/transport 'unknown' parks the attempt — no failure finalize, NO release path, quota stays consumed", async () => {
+    sendSms.mockResolvedValueOnce({
+      sent: false,
+      skipped: false,
+      outcome: "unknown",
+      to: "+15551234567",
+      reason: "Delivery outcome is unknown; verify in Twilio before retrying.",
     });
+
+    const result = await executeClaimedSmsRetry("msg-1");
+
+    expect(result.claimed).toBe(true);
+    expect(finalizeSmsAttemptUnknown).toHaveBeenCalledWith(
+      expect.objectContaining({ messageId: "msg-1", leaseExpiry: expect.any(Date) }),
+      "Delivery outcome is unknown; verify in Twilio before retrying."
+    );
+    expect(finalizeSmsAttemptFailure).not.toHaveBeenCalled();
+    expect(finalizeSmsAttemptSuccess).not.toHaveBeenCalled();
+  });
+
+  it("sends to the freshly normalized phone from the authorization, not the raw stored value", async () => {
+    authorizeSmsSend.mockResolvedValueOnce({ allowed: true, normalizedPhone: "+12159174391" });
+    sendSms.mockResolvedValueOnce({ sent: true, skipped: false, outcome: "sent", to: "+12159174391" });
+
+    await executeClaimedSmsRetry("msg-1");
+
+    expect(sendSms).toHaveBeenCalledWith({ to: "+12159174391", body: "hi" });
   });
 });
 
 describe("processRetryableSmsMessages", () => {
   beforeEach(() => {
     findManySmsMessage.mockReset();
-    updateSmsMessage.mockReset();
+    findUniqueSmsMessage.mockReset().mockResolvedValue(ROW);
+    updateManySmsMessage.mockReset();
     sendSms.mockReset();
     resolveOrganizationAccess.mockReset().mockResolvedValue(ALLOWED);
+    authorizeSmsSend.mockReset().mockResolvedValue(AUTHORIZED);
+    reserveSmsAllowance.mockReset().mockResolvedValue(RESERVATION);
+    finalizeSmsAttemptSuccess.mockReset().mockResolvedValue(true);
+    finalizeSmsAttemptFailure.mockReset().mockResolvedValue(true);
   });
 
-  it("processes every due RETRYING message", async () => {
+  it("claims and executes due RETRYING rows atomically", async () => {
     findManySmsMessage.mockResolvedValueOnce([
-      { id: "msg-1", organizationId: "org-a", phone: "+15551234567", body: "a" },
-      { id: "msg-2", organizationId: "org-b", phone: "+15559876543", body: "b" },
+      { id: "msg-1", status: "RETRYING" },
+      { id: "msg-2", status: "RETRYING" },
     ]);
-    sendSms.mockResolvedValue({ sent: true, skipped: false, to: "x", providerMessageId: "SM1" });
-    updateSmsMessage.mockResolvedValue({});
+    updateManySmsMessage.mockResolvedValue({ count: 1 });
+    sendSms.mockResolvedValue({ sent: true, skipped: false, outcome: "sent", to: "x", providerMessageId: "SM1" });
 
     const result = await processRetryableSmsMessages();
 
     expect(findManySmsMessage).toHaveBeenCalledWith({
-      where: { status: "RETRYING", nextRetryAt: { lte: expect.any(Date) } },
+      where: { status: { in: ["RETRYING", "SENDING"] }, nextRetryAt: { lte: expect.any(Date) } },
       take: 50,
+      select: { id: true, status: true },
     });
     expect(result.processed).toBe(2);
+    expect(result.parked).toBe(0);
     expect(sendSms).toHaveBeenCalledTimes(2);
   });
 
-  it("returns processed: 0 when nothing is due", async () => {
+  it("NEVER RE-SENDS an expired SENDING lease: the sweep PARKS it as outcome-unknown — no claim, no reservation, no Twilio, no retryCount", async () => {
+    findManySmsMessage.mockResolvedValueOnce([{ id: "msg-1", status: "SENDING" }]);
+    updateManySmsMessage.mockResolvedValueOnce({ count: 1 }); // the park CAS
+
+    const result = await processRetryableSmsMessages();
+
+    expect(result).toEqual({ processed: 0, parked: 1 });
+    // Exactly one updateMany: the park CAS — SENDING kept, lease cleared,
+    // honest reason recorded, retryCount untouched.
+    expect(updateManySmsMessage).toHaveBeenCalledTimes(1);
+    expect(updateManySmsMessage).toHaveBeenCalledWith({
+      where: { id: "msg-1", status: "SENDING", nextRetryAt: { lte: expect.any(Date) } },
+      data: {
+        nextRetryAt: null,
+        errorMessage:
+          "Send attempt was interrupted before its outcome was recorded; delivery outcome is unknown — verify in Twilio before retrying.",
+      },
+    });
+    expect(updateManySmsMessage.mock.calls[0][0].data).not.toHaveProperty("status");
+    expect(updateManySmsMessage.mock.calls[0][0].data).not.toHaveProperty("retryCount");
+    expect(sendSms).not.toHaveBeenCalled();
+    expect(reserveSmsAllowance).not.toHaveBeenCalled();
+    expect(authorizeSmsSend).not.toHaveBeenCalled();
+    expect(finalizeSmsAttemptFailure).not.toHaveBeenCalled(); // never releases the dead worker's possible unit
+  });
+
+  it("OVERLAPPING SWEEPS: losers of the per-row CAS (claim or park) do nothing — zero sends, zero reservations", async () => {
+    findManySmsMessage.mockResolvedValueOnce([
+      { id: "msg-1", status: "RETRYING" },
+      { id: "msg-2", status: "SENDING" },
+    ]);
+    updateManySmsMessage.mockResolvedValue({ count: 0 });
+
+    const result = await processRetryableSmsMessages();
+
+    expect(result).toEqual({ processed: 0, parked: 0 });
+    expect(sendSms).not.toHaveBeenCalled();
+    expect(reserveSmsAllowance).not.toHaveBeenCalled();
+  });
+
+  it("returns zeros when nothing is due", async () => {
     findManySmsMessage.mockResolvedValueOnce([]);
     const result = await processRetryableSmsMessages();
-    expect(result.processed).toBe(0);
+    expect(result).toEqual({ processed: 0, parked: 0 });
     expect(sendSms).not.toHaveBeenCalled();
   });
 });

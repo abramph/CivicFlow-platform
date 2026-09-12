@@ -69,6 +69,15 @@ const serverEnvSchema = z.object({
   // docs/unestra-cloud-pricing-architecture.md) rather than 8 separate ones.
   STRIPE_PRICE_CLOUD_SEAT_MONTHLY: z.string().optional(),
   STRIPE_PRICE_CLOUD_SEAT_YEARLY: z.string().optional(),
+  // SMS add-on (docs/sms-setup.md): the recurring monthly Stripe Price for
+  // the $10/mo SMS add-on. Required ONLY by the paid self-serve purchase
+  // flow (/api/billing/sms-addon POST → lib/stripe.ts smsAddOnPriceId(),
+  // which fails closed with a clear error when unset) and by the Stripe
+  // webhook's add-on line-item detection (isSmsAddOnPriceId, which treats
+  // "unset" as "matches nothing"). Deliberately optional at boot: audited
+  // billing-exempt super-admin enrollment and the rest of the SMS stack
+  // never read it, and its value is never sent to clients.
+  STRIPE_PRICE_SMS_ADDON_MONTHLY: z.string().optional(),
 
   DO_SPACES_ENDPOINT: z.string().url(),
   DO_SPACES_REGION: z.string().min(1),

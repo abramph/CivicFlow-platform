@@ -10,10 +10,21 @@ const createAuditEvent = vi.fn().mockResolvedValue(undefined);
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...args: unknown[]) => createAuditEvent(...args) }));
 
 const upsertOrgSmsSettings = vi.fn();
+const findUniqueOrgSmsSettings = vi.fn();
+const findUniqueOrganization = vi.fn();
 vi.mock("@/lib/prisma", () => ({
-  prisma: { organizationSmsSettings: { upsert: (...args: unknown[]) => upsertOrgSmsSettings(...args) } },
+  prisma: {
+    organizationSmsSettings: {
+      upsert: (...args: unknown[]) => upsertOrgSmsSettings(...args),
+      findUnique: (...args: unknown[]) => findUniqueOrgSmsSettings(...args),
+    },
+    organization: {
+      findUnique: (...args: unknown[]) => findUniqueOrganization(...args),
+    },
+  },
 }));
 
+import { ForbiddenError } from "@/lib/auth-guards";
 import { PUT } from "@/app/api/admin/sms/organizations/[id]/route";
 
 const session = { userId: "user-1", userEmail: "admin@example.com" };
@@ -27,11 +38,222 @@ describe("PUT /api/admin/sms/organizations/[id]", () => {
     requireSuperAdmin.mockReset();
     requireSuperAdmin.mockResolvedValue({ session });
     upsertOrgSmsSettings.mockReset();
-    upsertOrgSmsSettings.mockResolvedValue({ id: "settings-1" });
+    upsertOrgSmsSettings.mockResolvedValue({ id: "settings-1", smsAddOnActive: false, smsMonthlyLimit: 0 });
+    findUniqueOrgSmsSettings.mockReset();
+    findUniqueOrgSmsSettings.mockResolvedValue(null);
+    findUniqueOrganization.mockReset();
+    // Default: existing, NON-exempt organization.
+    findUniqueOrganization.mockResolvedValue({ billingExempt: false });
     createAuditEvent.mockClear();
   });
 
-  it("auto-fills limit/overage/price from the plan tier for STARTER", async () => {
+  it("rejects a caller who is not a platform super admin — an org cannot grant itself an entitlement", async () => {
+    requireSuperAdmin.mockRejectedValueOnce(new ForbiddenError());
+
+    const res = await PUT(makeRequest({ smsAddOnActive: true, reason: "x" }), { params: Promise.resolve({ id: "org-1" }) });
+
+    expect(res.status).toBe(403);
+    expect(upsertOrgSmsSettings).not.toHaveBeenCalled();
+    expect(createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 for a nonexistent organization and writes nothing", async () => {
+    findUniqueOrganization.mockResolvedValueOnce(null);
+
+    const res = await PUT(makeRequest({ smsAddOnActive: true, reason: "x" }), { params: Promise.resolve({ id: "org-missing" }) });
+
+    expect(res.status).toBe(404);
+    const json = await res.json();
+    expect(json.error).toMatch(/not found/i);
+    expect(upsertOrgSmsSettings).not.toHaveBeenCalled();
+    expect(createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("STRIPE BYPASS GUARD: refuses to newly activate the add-on for a NON-exempt organization — paid orgs must use the Stripe flow", async () => {
+    findUniqueOrganization.mockResolvedValueOnce({ billingExempt: false });
+    findUniqueOrgSmsSettings.mockResolvedValueOnce(null); // not currently active
+
+    const res = await PUT(
+      makeRequest({ smsAddOnActive: true, reason: "trying to skip billing" }),
+      { params: Promise.resolve({ id: "org-1" }) }
+    );
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toMatch(/billing-exempt/i);
+    expect(json.error).toMatch(/Stripe/);
+    expect(upsertOrgSmsSettings).not.toHaveBeenCalled();
+    expect(createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("rejects activation with a MISSING reason", async () => {
+    findUniqueOrganization.mockResolvedValueOnce({ billingExempt: true });
+
+    const res = await PUT(makeRequest({ smsAddOnActive: true }), { params: Promise.resolve({ id: "org-1" }) });
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/reason is required/i);
+    expect(upsertOrgSmsSettings).not.toHaveBeenCalled();
+  });
+
+  it("rejects activation with a BLANK (whitespace-only) reason", async () => {
+    findUniqueOrganization.mockResolvedValueOnce({ billingExempt: true });
+
+    const res = await PUT(
+      makeRequest({ smsAddOnActive: true, reason: "   " }),
+      { params: Promise.resolve({ id: "org-1" }) }
+    );
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/reason is required/i);
+    expect(upsertOrgSmsSettings).not.toHaveBeenCalled();
+  });
+
+  it("rejects deactivation without a reason", async () => {
+    findUniqueOrgSmsSettings.mockResolvedValueOnce({ id: "settings-1", smsAddOnActive: true, smsMonthlyLimit: 1000 });
+
+    const res = await PUT(makeRequest({ smsAddOnActive: false }), { params: Promise.resolve({ id: "org-1" }) });
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/reason is required/i);
+    expect(upsertOrgSmsSettings).not.toHaveBeenCalled();
+  });
+
+  it("activates a BILLING-EXEMPT org with a reason, initializes a fresh monthly period, audits the trimmed reason + quota, and never touches Stripe", async () => {
+    findUniqueOrganization.mockResolvedValueOnce({ billingExempt: true });
+    findUniqueOrgSmsSettings.mockResolvedValueOnce(null);
+    upsertOrgSmsSettings.mockResolvedValueOnce({ id: "settings-1", smsAddOnActive: true, smsMonthlyLimit: 1000 });
+
+    const res = await PUT(
+      makeRequest({ smsAddOnActive: true, plan: "STARTER", reason: "  Controlled demo enrollment  " }),
+      { params: Promise.resolve({ id: "org-1" }) }
+    );
+
+    expect(res.status).toBe(200);
+    const upsert = upsertOrgSmsSettings.mock.calls[0][0];
+    expect(upsert.create).toEqual(
+      expect.objectContaining({
+        smsAddOnActive: true,
+        smsMonthlyLimit: 1000,
+        smsUsedThisPeriod: 0,
+        lastUsageThresholdNotified: 0,
+        smsBillingPeriodStart: expect.any(Date),
+        smsBillingPeriodEnd: expect.any(Date),
+      })
+    );
+    // A genuinely monthly window: end ≈ one month after start.
+    const spanDays = (upsert.create.smsBillingPeriodEnd.getTime() - upsert.create.smsBillingPeriodStart.getTime()) / 86_400_000;
+    expect(spanDays).toBeGreaterThanOrEqual(28);
+    expect(spanDays).toBeLessThanOrEqual(31);
+    expect(createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: "org-1",
+        actorUserId: "user-1",
+        action: "sms_admin.addon_activated",
+        metadata: expect.objectContaining({
+          reason: "Controlled demo enrollment",
+          billingExempt: true,
+          previousAddOnActive: false,
+          newAddOnActive: true,
+          quota: 1000,
+        }),
+      })
+    );
+    // No Stripe dependency: "@/lib/stripe" is deliberately NOT mocked in this
+    // suite — any Stripe call from the route would hit the real module and
+    // throw on a missing key, failing this test.
+  });
+
+  it("REACTIVATION of a previously deactivated exempt org begins a clean period (usage + thresholds reset)", async () => {
+    findUniqueOrganization.mockResolvedValueOnce({ billingExempt: true });
+    findUniqueOrgSmsSettings.mockResolvedValueOnce({
+      id: "settings-1",
+      smsAddOnActive: false, // was deactivated
+      smsMonthlyLimit: 1000,
+      smsUsedThisPeriod: 700, // historical usage preserved through deactivation
+      lastUsageThresholdNotified: 80,
+    });
+    upsertOrgSmsSettings.mockResolvedValueOnce({ id: "settings-1", smsAddOnActive: true, smsMonthlyLimit: 1000 });
+
+    const res = await PUT(
+      makeRequest({ smsAddOnActive: true, reason: "Second demo round" }),
+      { params: Promise.resolve({ id: "org-1" }) }
+    );
+
+    expect(res.status).toBe(200);
+    expect(upsertOrgSmsSettings.mock.calls[0][0].update).toEqual(
+      expect.objectContaining({
+        smsAddOnActive: true,
+        smsUsedThisPeriod: 0,
+        lastUsageThresholdNotified: 0,
+        smsBillingPeriodStart: expect.any(Date),
+        smsBillingPeriodEnd: expect.any(Date),
+      })
+    );
+  });
+
+  it("IDEMPOTENCY: re-sending smsAddOnActive:true for an already-active org does NOT reset its live period or usage", async () => {
+    findUniqueOrganization.mockResolvedValueOnce({ billingExempt: true });
+    findUniqueOrgSmsSettings.mockResolvedValueOnce({ id: "settings-1", smsAddOnActive: true, smsMonthlyLimit: 1000 });
+    upsertOrgSmsSettings.mockResolvedValueOnce({ id: "settings-1", smsAddOnActive: true, smsMonthlyLimit: 1000 });
+
+    const res = await PUT(makeRequest({ smsAddOnActive: true }), { params: Promise.resolve({ id: "org-1" }) });
+
+    expect(res.status).toBe(200);
+    const update = upsertOrgSmsSettings.mock.calls[0][0].update;
+    expect(update).not.toHaveProperty("smsUsedThisPeriod");
+    expect(update).not.toHaveProperty("smsBillingPeriodStart");
+    expect(update).not.toHaveProperty("smsBillingPeriodEnd");
+    expect(update).not.toHaveProperty("lastUsageThresholdNotified");
+  });
+
+  it("rejects an activation that would produce a zero monthly allowance (no plan, no explicit limit, no existing limit)", async () => {
+    findUniqueOrganization.mockResolvedValueOnce({ billingExempt: true });
+    findUniqueOrgSmsSettings.mockResolvedValueOnce(null);
+
+    const res = await PUT(
+      makeRequest({ smsAddOnActive: true, reason: "forgot the quota" }),
+      { params: Promise.resolve({ id: "org-1" }) }
+    );
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/positive monthly quota/);
+    expect(upsertOrgSmsSettings).not.toHaveBeenCalled();
+    expect(createAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("re-sending smsAddOnActive:true for an ALREADY-active non-exempt org is an idempotent update, not a fresh activation — and is not blocked", async () => {
+    findUniqueOrganization.mockResolvedValueOnce({ billingExempt: false });
+    findUniqueOrgSmsSettings.mockResolvedValueOnce({ id: "settings-1", smsAddOnActive: true, smsMonthlyLimit: 1000 });
+    upsertOrgSmsSettings.mockResolvedValueOnce({ id: "settings-1", smsAddOnActive: true, smsMonthlyLimit: 1000 });
+
+    const res = await PUT(makeRequest({ smsAddOnActive: true }), { params: Promise.resolve({ id: "org-1" }) });
+
+    expect(res.status).toBe(200);
+    expect(createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "sms_admin.org_settings_updated" })
+    );
+  });
+
+  it("deactivation with a reason succeeds and writes the distinct audit action", async () => {
+    findUniqueOrgSmsSettings.mockResolvedValueOnce({ id: "settings-1", smsAddOnActive: true, smsMonthlyLimit: 1000 });
+    upsertOrgSmsSettings.mockResolvedValueOnce({ id: "settings-1", smsAddOnActive: false, smsMonthlyLimit: 1000 });
+
+    const res = await PUT(
+      makeRequest({ smsAddOnActive: false, reason: "Demo wrap-up" }),
+      { params: Promise.resolve({ id: "org-1" }) }
+    );
+
+    expect(res.status).toBe(200);
+    expect(createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "sms_admin.addon_deactivated",
+        metadata: expect.objectContaining({ reason: "Demo wrap-up", previousAddOnActive: true, newAddOnActive: false }),
+      })
+    );
+  });
+
+  it("auto-fills limit/overage/price from the plan tier for STARTER (ordinary edit, no reason needed)", async () => {
     await PUT(makeRequest({ plan: "STARTER" }), { params: Promise.resolve({ id: "org-1" }) });
 
     expect(upsertOrgSmsSettings).toHaveBeenCalledWith({
@@ -72,8 +294,8 @@ describe("PUT /api/admin/sms/organizations/[id]", () => {
     expect(upsertOrgSmsSettings.mock.calls[0][0].update.suspendedAt).toBeNull();
   });
 
-  it("writes an org-scoped audit event", async () => {
-    await PUT(makeRequest({ smsAddOnActive: true }), { params: Promise.resolve({ id: "org-1" }) });
+  it("writes an org-scoped audit event for non-transition settings updates", async () => {
+    await PUT(makeRequest({ smsMonthlyLimit: 2000 }), { params: Promise.resolve({ id: "org-1" }) });
     expect(createAuditEvent).toHaveBeenCalledWith(
       expect.objectContaining({ organizationId: "org-1", action: "sms_admin.org_settings_updated" })
     );

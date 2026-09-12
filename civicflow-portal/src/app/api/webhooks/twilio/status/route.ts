@@ -61,7 +61,17 @@ export async function POST(request: Request) {
   const costCents = parsePriceCents(params.Price);
 
   await prisma.smsMessage.updateMany({
-    where: { providerMessageId: messageSid },
+    where: {
+      providerMessageId: messageSid,
+      // DELIVERED is MONOTONIC (Round 6): once a message has provably
+      // reached the handset, no later or out-of-order callback — delayed
+      // queued/sending/sent, or even a subsequent failed/undelivered
+      // event — may replace it with a lesser status. A repeated
+      // "delivered" callback still matches and may update legitimate cost
+      // metadata. Request-side finalization never conflicts here: it is
+      // fenced on status SENDING + the attempt's exact lease value.
+      ...(mappedStatus === "DELIVERED" ? {} : { status: { not: "DELIVERED" } }),
+    },
     data: {
       status: mappedStatus,
       ...(costCents !== null ? { actualCostCents: costCents } : {}),

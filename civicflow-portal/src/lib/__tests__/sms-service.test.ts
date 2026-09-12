@@ -1,17 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const createSmsMessage = vi.fn();
-const updateSmsMessage = vi.fn();
-const findUniqueOrgMember = vi.fn();
+const findUniqueSmsMessage = vi.fn();
+const findFirstSmsMessage = vi.fn();
+const findFirstOrgMember = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     smsMessage: {
       create: (...args: unknown[]) => createSmsMessage(...args),
-      update: (...args: unknown[]) => updateSmsMessage(...args),
+      findUnique: (...args: unknown[]) => findUniqueSmsMessage(...args),
+      findFirst: (...args: unknown[]) => findFirstSmsMessage(...args),
     },
     orgMember: {
-      findUnique: (...args: unknown[]) => findUniqueOrgMember(...args),
+      // authorizeSmsSend (REAL in this suite, running post-claim) uses a
+      // tenant-scoped findFirst({ id, organizationId }) — never findUnique.
+      findFirst: (...args: unknown[]) => findFirstOrgMember(...args),
     },
   },
 }));
@@ -24,13 +28,35 @@ vi.mock("@/lib/sms", () => ({
 }));
 
 const getSmsEntitlement = vi.fn();
-const recordSmsUsage = vi.fn().mockResolvedValue(undefined);
+const reserveSmsAllowance = vi.fn();
 vi.mock("@/lib/sms-entitlement", () => ({
   getSmsEntitlement: (...args: unknown[]) => getSmsEntitlement(...args),
-  recordSmsUsage: (...args: unknown[]) => recordSmsUsage(...args),
+  reserveSmsAllowance: (...args: unknown[]) => reserveSmsAllowance(...args),
+}));
+
+const claimInitialSmsAttempt = vi.fn();
+const finalizeSmsAttemptSuccess = vi.fn();
+const finalizeSmsAttemptFailure = vi.fn();
+const finalizeSmsAttemptUnknown = vi.fn();
+vi.mock("@/lib/sms-attempt-finalization", () => ({
+  claimInitialSmsAttempt: (...args: unknown[]) => claimInitialSmsAttempt(...args),
+  finalizeSmsAttemptSuccess: (...args: unknown[]) => finalizeSmsAttemptSuccess(...args),
+  finalizeSmsAttemptFailure: (...args: unknown[]) => finalizeSmsAttemptFailure(...args),
+  finalizeSmsAttemptUnknown: (...args: unknown[]) => finalizeSmsAttemptUnknown(...args),
 }));
 
 import { applySmsTemplateTokens, sendMemberSms } from "@/lib/sms-service";
+
+// Period-bound reservation token as returned by reserveSmsAllowance — the
+// failure finalizer must receive this exact token, never a bare org id.
+const RESERVATION = {
+  organizationId: "org-a",
+  periodStart: new Date("2026-09-01T00:00:00.000Z"),
+  periodEnd: new Date("2026-10-01T00:00:00.000Z"),
+} as const;
+
+const CLAIM = { messageId: "sms-1", leaseExpiry: new Date("2026-09-10T00:02:00.000Z") } as const;
+const CONSENTED = { smsOptIn: true, commsSmsEnabled: true, smsOptedOutAt: null };
 
 function baseParams(overrides: Partial<Parameters<typeof sendMemberSms>[0]> = {}) {
   return {
@@ -42,95 +68,111 @@ function baseParams(overrides: Partial<Parameters<typeof sendMemberSms>[0]> = {}
   };
 }
 
+/**
+ * Round-6 ordering: EVERY attempt (including ones that will be denied)
+ * first creates the canonical QUEUED row and wins the initial claim; the
+ * full canonical authorization runs AFTER ownership, immediately before
+ * quota and the provider. Denials therefore finalize as truthful FAILED
+ * rows under the fence, with zero reservations and zero Twilio calls.
+ */
 describe("sendMemberSms", () => {
   beforeEach(() => {
     createSmsMessage.mockReset();
-    updateSmsMessage.mockReset();
-    findUniqueOrgMember.mockReset();
-    isSmsConfigured.mockReset();
+    findUniqueSmsMessage.mockReset();
+    findFirstSmsMessage.mockReset();
+    findFirstOrgMember.mockReset();
+    isSmsConfigured.mockReset().mockReturnValue(true);
     sendSms.mockReset();
-    getSmsEntitlement.mockReset();
-    recordSmsUsage.mockClear();
-    createSmsMessage.mockResolvedValue({ id: "sms-1", status: "FAILED" });
+    getSmsEntitlement.mockReset().mockResolvedValue({ allowed: true, remaining: 500, limit: 1000 });
+    reserveSmsAllowance.mockReset().mockResolvedValue(RESERVATION);
+    claimInitialSmsAttempt.mockReset().mockResolvedValue(CLAIM);
+    finalizeSmsAttemptSuccess.mockReset().mockResolvedValue(true);
+    finalizeSmsAttemptFailure.mockReset().mockResolvedValue(true);
+    finalizeSmsAttemptUnknown.mockReset().mockResolvedValue(true);
+    createSmsMessage.mockResolvedValue({ id: "sms-1", status: "QUEUED" });
+    findUniqueSmsMessage.mockResolvedValue({ id: "sms-1", status: "FAILED" });
+    findFirstOrgMember.mockResolvedValue(CONSENTED);
   });
 
-  it("fails gracefully with a clear message when SMS is not configured, never calling Twilio", async () => {
+  function expectDeniedWithoutSideEffects(reason: string) {
+    expect(finalizeSmsAttemptFailure).toHaveBeenCalledWith(CLAIM, null, reason);
+    expect(reserveSmsAllowance).not.toHaveBeenCalled();
+    expect(sendSms).not.toHaveBeenCalled();
+    expect(finalizeSmsAttemptSuccess).not.toHaveBeenCalled();
+  }
+
+  it("POST-CLAIM authorization: 'SMS not configured' finalizes the claimed attempt FAILED — zero reservation, zero Twilio", async () => {
     isSmsConfigured.mockReturnValueOnce(false);
-    createSmsMessage.mockResolvedValueOnce({ id: "sms-1", status: "FAILED", errorMessage: "SMS delivery is not configured." });
 
     const result = await sendMemberSms(baseParams());
 
     expect(result.status).toBe("FAILED");
+    // The canonical row is created QUEUED and claimed BEFORE authorization.
     expect(createSmsMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ status: "FAILED", errorMessage: "SMS delivery is not configured." }) })
+      expect.objectContaining({ data: expect.objectContaining({ status: "QUEUED" }) })
     );
-    expect(sendSms).not.toHaveBeenCalled();
-    expect(getSmsEntitlement).not.toHaveBeenCalled();
+    expect(claimInitialSmsAttempt.mock.invocationCallOrder[0]).toBeLessThan(isSmsConfigured.mock.invocationCallOrder[0]);
+    expectDeniedWithoutSideEffects("SMS delivery is not configured.");
   });
 
-  it("fails gracefully when the organization has no SMS entitlement, never calling Twilio", async () => {
-    isSmsConfigured.mockReturnValueOnce(true);
+  it("POST-CLAIM authorization: an org that lost the add-on moments earlier is denied after ownership — truthful FAILED attempt", async () => {
     getSmsEntitlement.mockResolvedValueOnce({ allowed: false, reason: "Your organization does not have the SMS add-on enabled.", remaining: 0, limit: 0 });
 
     const result = await sendMemberSms(baseParams());
 
     expect(result.status).toBe("FAILED");
-    expect(sendSms).not.toHaveBeenCalled();
+    expectDeniedWithoutSideEffects("Your organization does not have the SMS add-on enabled.");
   });
 
-  it("does not call Twilio when the member has never opted in to SMS", async () => {
-    isSmsConfigured.mockReturnValueOnce(true);
-    getSmsEntitlement.mockResolvedValueOnce({ allowed: true, remaining: 500, limit: 1000 });
-    findUniqueOrgMember.mockResolvedValueOnce({ smsOptIn: false, commsSmsEnabled: false, smsOptedOutAt: null });
+  it("POST-CLAIM authorization: a member who opted out (STOP) before the post-claim check is denied — zero reservation, zero Twilio", async () => {
+    findFirstOrgMember.mockResolvedValueOnce({ ...CONSENTED, smsOptedOutAt: new Date() });
 
     const result = await sendMemberSms(baseParams());
 
     expect(result.status).toBe("FAILED");
-    expect(sendSms).not.toHaveBeenCalled();
+    expectDeniedWithoutSideEffects("Member opted out of SMS.");
   });
 
-  it("does not call Twilio when the member has SMS notifications toggled off, even though they've opted in", async () => {
-    isSmsConfigured.mockReturnValueOnce(true);
-    getSmsEntitlement.mockResolvedValueOnce({ allowed: true, remaining: 500, limit: 1000 });
-    findUniqueOrgMember.mockResolvedValueOnce({ smsOptIn: true, commsSmsEnabled: false, smsOptedOutAt: null });
+  it("POST-CLAIM authorization: a member deleted/transferred before the post-claim check is denied", async () => {
+    findFirstOrgMember.mockResolvedValueOnce(null);
 
     const result = await sendMemberSms(baseParams());
 
     expect(result.status).toBe("FAILED");
-    expect(sendSms).not.toHaveBeenCalled();
+    expectDeniedWithoutSideEffects("Recipient is no longer a member of this organization.");
   });
 
-  it("does not call Twilio when the member has a hard STOP opt-out, even if opted in and commsSmsEnabled is true", async () => {
-    isSmsConfigured.mockReturnValueOnce(true);
-    getSmsEntitlement.mockResolvedValueOnce({ allowed: true, remaining: 500, limit: 1000 });
-    findUniqueOrgMember.mockResolvedValueOnce({ smsOptIn: true, commsSmsEnabled: true, smsOptedOutAt: new Date() });
+  it("does not call Twilio when the member has never opted in", async () => {
+    findFirstOrgMember.mockResolvedValueOnce({ ...CONSENTED, smsOptIn: false });
 
     const result = await sendMemberSms(baseParams());
 
     expect(result.status).toBe("FAILED");
-    expect(sendSms).not.toHaveBeenCalled();
+    expectDeniedWithoutSideEffects("Member has not opted in to SMS.");
   });
 
-  it("required=true bypasses the commsSmsEnabled preference toggle but still requires real opt-in", async () => {
-    isSmsConfigured.mockReturnValueOnce(true);
-    getSmsEntitlement.mockResolvedValueOnce({ allowed: true, remaining: 500, limit: 1000 });
-    findUniqueOrgMember.mockResolvedValueOnce({ smsOptIn: true, commsSmsEnabled: false, smsOptedOutAt: null });
-    createSmsMessage.mockResolvedValueOnce({ id: "sms-1", status: "QUEUED" });
-    sendSms.mockResolvedValueOnce({ sent: true, skipped: false, to: "+15551234567", providerMessageId: "SM1" });
-    updateSmsMessage.mockResolvedValueOnce({ id: "sms-1", status: "SENT" });
+  it("does not call Twilio when the preference toggle is off (non-required send)", async () => {
+    findFirstOrgMember.mockResolvedValueOnce({ ...CONSENTED, commsSmsEnabled: false });
+
+    const result = await sendMemberSms(baseParams());
+
+    expect(result.status).toBe("FAILED");
+    expectDeniedWithoutSideEffects("Member has SMS notifications turned off.");
+  });
+
+  it("required=true bypasses the preference toggle but still requires real opt-in, and reserves before Twilio", async () => {
+    findFirstOrgMember.mockResolvedValueOnce({ ...CONSENTED, commsSmsEnabled: false });
+    sendSms.mockResolvedValueOnce({ sent: true, skipped: false, outcome: "sent", to: "+15551234567", providerMessageId: "SM1" });
+    findUniqueSmsMessage.mockResolvedValueOnce({ id: "sms-1", status: "SENT" });
 
     const result = await sendMemberSms(baseParams({ required: true }));
 
-    expect(findUniqueOrgMember).toHaveBeenCalled();
-    expect(sendSms).toHaveBeenCalled();
     expect(result.status).toBe("SENT");
-    expect(recordSmsUsage).toHaveBeenCalledWith("org-a");
+    expect(reserveSmsAllowance).toHaveBeenCalledWith("org-a");
   });
 
-  it("required=true does NOT bypass a hard STOP opt-out or missing consent", async () => {
-    isSmsConfigured.mockReturnValueOnce(true);
-    getSmsEntitlement.mockResolvedValueOnce({ allowed: true, remaining: 500, limit: 1000 });
-    findUniqueOrgMember.mockResolvedValueOnce({ smsOptIn: true, commsSmsEnabled: true, smsOptedOutAt: new Date() });
+  it("required=true does NOT bypass a hard STOP opt-out", async () => {
+    findFirstOrgMember.mockResolvedValueOnce({ ...CONSENTED, smsOptedOutAt: new Date() });
 
     const result = await sendMemberSms(baseParams({ required: true }));
 
@@ -138,69 +180,132 @@ describe("sendMemberSms", () => {
     expect(sendSms).not.toHaveBeenCalled();
   });
 
-  it("rejects an invalid phone number before calling Twilio", async () => {
-    isSmsConfigured.mockReturnValueOnce(true);
-    getSmsEntitlement.mockResolvedValueOnce({ allowed: true, remaining: 500, limit: 1000 });
-
+  it("rejects an invalid phone number before calling Twilio (post-claim, truthful FAILED)", async () => {
     const result = await sendMemberSms(baseParams({ phone: "not-a-phone", memberId: null }));
 
     expect(result.status).toBe("FAILED");
     expect(sendSms).not.toHaveBeenCalled();
+    expect(reserveSmsAllowance).not.toHaveBeenCalled();
   });
 
-  it("normalizes a typical US-formatted member phone number (e.g. from CSV import) before sending", async () => {
-    isSmsConfigured.mockReturnValueOnce(true);
-    getSmsEntitlement.mockResolvedValueOnce({ allowed: true, remaining: 500, limit: 1000 });
-    findUniqueOrgMember.mockResolvedValueOnce({ smsOptIn: true, commsSmsEnabled: true, smsOptedOutAt: null });
-    createSmsMessage.mockResolvedValueOnce({ id: "sms-1", status: "QUEUED" });
-    sendSms.mockResolvedValueOnce({ sent: true, skipped: false, to: "+12159174391" });
-    updateSmsMessage.mockResolvedValueOnce({ id: "sms-1", status: "SENT" });
+  it("CONSENT BYPASS regression: a valid phone with memberId: null never reaches Twilio and reserves nothing", async () => {
+    const result = await sendMemberSms(baseParams({ memberId: null }));
+
+    expect(result.status).toBe("FAILED");
+    expectDeniedWithoutSideEffects("Recipient consent cannot be verified for this message.");
+    expect(findFirstOrgMember).not.toHaveBeenCalled();
+  });
+
+  it("stores the normalized number on the row (pure precheck) and sends to the post-claim authorization's normalized phone", async () => {
+    sendSms.mockResolvedValueOnce({ sent: true, skipped: false, outcome: "sent", to: "+12159174391" });
+    findUniqueSmsMessage.mockResolvedValueOnce({ id: "sms-1", status: "SENT" });
 
     const result = await sendMemberSms(baseParams({ phone: "215-917-4391" }));
 
     expect(result.status).toBe("SENT");
-    expect(sendSms).toHaveBeenCalledWith(expect.objectContaining({ to: "+12159174391" }));
     expect(createSmsMessage).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ phone: "+12159174391" }) })
     );
+    expect(sendSms).toHaveBeenCalledWith(expect.objectContaining({ to: "+12159174391" }));
   });
 
-  it("records usage and marks SENT on a successful Twilio send, and allows overage (soft cap)", async () => {
-    isSmsConfigured.mockReturnValueOnce(true);
-    // remaining is negative — already over the limit — but still allowed (soft cap).
-    getSmsEntitlement.mockResolvedValueOnce({ allowed: true, remaining: -10, limit: 1000 });
-    findUniqueOrgMember.mockResolvedValueOnce({ smsOptIn: true, commsSmsEnabled: true, smsOptedOutAt: null });
-    createSmsMessage.mockResolvedValueOnce({ id: "sms-1", status: "QUEUED" });
-    sendSms.mockResolvedValueOnce({ sent: true, skipped: false, to: "+15551234567", providerMessageId: "SM1" });
-    updateSmsMessage.mockResolvedValueOnce({ id: "sms-1", status: "SENT" });
+  it("CAMPAIGN IDEMPOTENCY: a unique-violation loser returns the existing canonical row and performs NO claim, authorization, reservation, or Twilio call", async () => {
+    createSmsMessage.mockRejectedValueOnce({ code: "P2002" });
+    findFirstSmsMessage.mockResolvedValueOnce({ id: "sms-existing", status: "SENT", providerMessageId: "SMwinner" });
+
+    const result = await sendMemberSms(baseParams({ campaignId: "campaign-1" }));
+
+    expect(result.id).toBe("sms-existing");
+    expect(findFirstSmsMessage).toHaveBeenCalledWith({
+      where: { organizationId: "org-a", campaignId: "campaign-1", memberId: "member-1" },
+    });
+    expect(claimInitialSmsAttempt).not.toHaveBeenCalled();
+    expect(findFirstOrgMember).not.toHaveBeenCalled();
+    expect(reserveSmsAllowance).not.toHaveBeenCalled();
+    expect(sendSms).not.toHaveBeenCalled();
+  });
+
+  it("CANCEL RACE: losing the QUEUED→SENDING claim (cancellation won) authorizes nothing, reserves nothing, and never calls Twilio", async () => {
+    claimInitialSmsAttempt.mockResolvedValueOnce(null);
+    findUniqueSmsMessage.mockResolvedValueOnce({ id: "sms-1", status: "FAILED", errorMessage: "Cancelled by admin." });
+
+    const result = await sendMemberSms(baseParams());
+
+    expect(result.errorMessage).toBe("Cancelled by admin.");
+    expect(findFirstOrgMember).not.toHaveBeenCalled(); // authorization never ran
+    expect(reserveSmsAllowance).not.toHaveBeenCalled();
+    expect(sendSms).not.toHaveBeenCalled();
+  });
+
+  it("ORDER: claim → post-claim authorization → reservation → Twilio → one fenced success commit", async () => {
+    sendSms.mockResolvedValueOnce({ sent: true, skipped: false, outcome: "sent", to: "+15551234567", providerMessageId: "SM1" });
+    findUniqueSmsMessage.mockResolvedValueOnce({ id: "sms-1", status: "SENT" });
 
     const result = await sendMemberSms(baseParams());
 
     expect(result.status).toBe("SENT");
-    expect(recordSmsUsage).toHaveBeenCalledWith("org-a");
+    expect(claimInitialSmsAttempt.mock.invocationCallOrder[0]).toBeLessThan(findFirstOrgMember.mock.invocationCallOrder[0]);
+    expect(findFirstOrgMember.mock.invocationCallOrder[0]).toBeLessThan(reserveSmsAllowance.mock.invocationCallOrder[0]);
+    expect(reserveSmsAllowance.mock.invocationCallOrder[0]).toBeLessThan(sendSms.mock.invocationCallOrder[0]);
+    expect(finalizeSmsAttemptSuccess).toHaveBeenCalledWith(CLAIM, {
+      providerMessageId: "SM1",
+      costEstimateCents: 2,
+    });
+    expect(finalizeSmsAttemptFailure).not.toHaveBeenCalled();
   });
 
-  it("marks FAILED and does not record usage when Twilio itself errors", async () => {
-    isSmsConfigured.mockReturnValueOnce(true);
-    getSmsEntitlement.mockResolvedValueOnce({ allowed: true, remaining: 500, limit: 1000 });
-    findUniqueOrgMember.mockResolvedValueOnce({ smsOptIn: true, commsSmsEnabled: true, smsOptedOutAt: null });
-    createSmsMessage.mockResolvedValueOnce({ id: "sms-1", status: "QUEUED" });
-    sendSms.mockResolvedValueOnce({ sent: false, skipped: false, to: "+15551234567", reason: "Twilio request failed (500)" });
-    updateSmsMessage.mockResolvedValueOnce({ id: "sms-1", status: "FAILED", errorMessage: "Twilio request failed (500)" });
+  it("HARD STOP: a refused reservation finalizes FAILED with the allowance reason and never calls Twilio", async () => {
+    reserveSmsAllowance.mockResolvedValueOnce(null);
 
     const result = await sendMemberSms(baseParams());
 
     expect(result.status).toBe("FAILED");
-    expect(recordSmsUsage).not.toHaveBeenCalled();
+    expect(sendSms).not.toHaveBeenCalled();
+    expect(finalizeSmsAttemptFailure).toHaveBeenCalledWith(
+      CLAIM,
+      null,
+      "Your organization has used its full monthly SMS allowance."
+    );
+  });
+
+  it("commits a DEFINITIVE Twilio failure exactly once, handing the reservation token to the failure finalizer (the only place that may release)", async () => {
+    sendSms.mockResolvedValueOnce({ sent: false, skipped: false, outcome: "definitive_failure", to: "+15551234567", reason: "Twilio request failed (500)" });
+    findUniqueSmsMessage.mockResolvedValueOnce({ id: "sms-1", status: "FAILED", errorMessage: "Twilio request failed (500)" });
+
+    const result = await sendMemberSms(baseParams());
+
+    expect(result.status).toBe("FAILED");
+    expect(finalizeSmsAttemptFailure).toHaveBeenCalledTimes(1);
+    expect(finalizeSmsAttemptFailure).toHaveBeenCalledWith(CLAIM, RESERVATION, "Twilio request failed (500)");
+    expect(finalizeSmsAttemptSuccess).not.toHaveBeenCalled();
+  });
+
+  it("AMBIGUOUS OUTCOME: a timeout/transport/no-valid-SID 'unknown' parks the attempt with the honest reason — no failure finalize, quota not released", async () => {
+    sendSms.mockResolvedValueOnce({
+      sent: false,
+      skipped: false,
+      outcome: "unknown",
+      to: "+15551234567",
+      reason: "Delivery outcome is unknown; verify in Twilio before retrying.",
+    });
+    findUniqueSmsMessage.mockResolvedValueOnce({
+      id: "sms-1",
+      status: "SENDING",
+      nextRetryAt: null,
+      errorMessage: "Delivery outcome is unknown; verify in Twilio before retrying.",
+    });
+
+    const result = await sendMemberSms(baseParams());
+
+    expect(result.status).toBe("SENDING");
+    expect(finalizeSmsAttemptUnknown).toHaveBeenCalledWith(CLAIM, "Delivery outcome is unknown; verify in Twilio before retrying.");
+    expect(finalizeSmsAttemptFailure).not.toHaveBeenCalled();
+    expect(finalizeSmsAttemptSuccess).not.toHaveBeenCalled();
   });
 
   it("appends the opt-out compliance suffix to the message body", async () => {
-    isSmsConfigured.mockReturnValueOnce(true);
-    getSmsEntitlement.mockResolvedValueOnce({ allowed: true, remaining: 500, limit: 1000 });
-    findUniqueOrgMember.mockResolvedValueOnce({ smsOptIn: true, commsSmsEnabled: true, smsOptedOutAt: null });
-    createSmsMessage.mockResolvedValueOnce({ id: "sms-1", status: "QUEUED" });
-    sendSms.mockResolvedValueOnce({ sent: true, skipped: false, to: "+15551234567" });
-    updateSmsMessage.mockResolvedValueOnce({ id: "sms-1", status: "SENT" });
+    sendSms.mockResolvedValueOnce({ sent: true, skipped: false, outcome: "sent", to: "+15551234567" });
+    findUniqueSmsMessage.mockResolvedValueOnce({ id: "sms-1", status: "SENT" });
 
     await sendMemberSms(baseParams({ body: "Hello there" }));
 
