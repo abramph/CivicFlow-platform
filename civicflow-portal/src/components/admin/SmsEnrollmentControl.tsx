@@ -5,11 +5,10 @@ import { useRouter } from "next/navigation";
 import {
   DEFAULT_SMS_ENROLLMENT_QUOTA,
   SMS_ENROLLMENT_REASON_MAX_LENGTH,
-  buildEnrollmentPayload,
-  canSubmitEnrollment,
+  createEnrollmentSubmitter,
   resolveEnrollmentMode,
-  validateEnrollmentForm,
   type EnrollmentActionMode,
+  type EnrollmentSubmitter,
 } from "@/lib/sms-admin-enrollment";
 
 export interface EnrollmentControlOrg {
@@ -60,6 +59,11 @@ function EnrollmentDialog({
   const [formError, setFormError] = useState<string | null>(null);
 
   const dialogRef = useRef<HTMLDivElement>(null);
+  // One coordinator per open dialog. It owns the SYNCHRONOUS in-flight lock
+  // that actually prevents a double-submit (the `submitting` state below is
+  // async and only drives the visible disabled/loading UI).
+  const submitterRef = useRef<EnrollmentSubmitter | null>(null);
+  if (submitterRef.current === null) submitterRef.current = createEnrollmentSubmitter(mode);
 
   useEffect(() => {
     // Focus the first field when the dialog opens (quota in enable mode, the
@@ -94,46 +98,49 @@ function EnrollmentDialog({
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    // Guard: a double-click / repeat submit while a request is in flight is a no-op.
-    if (!canSubmitEnrollment({ submitting })) return;
-
+    // Clear prior errors for this attempt; the coordinator re-populates field
+    // errors via onValidationError if the input is still invalid.
     setReasonError(null);
     setQuotaError(null);
     setFormError(null);
 
-    const validated = validateEnrollmentForm(mode, { reason, quota });
-    if (!validated.ok) {
-      // Client-side block — keep every entered value, surface each field error.
-      setReasonError(validated.reasonError ?? null);
-      setQuotaError(validated.quotaError ?? null);
-      return;
-    }
-
-    const payload = buildEnrollmentPayload(mode, { reason: validated.reason!, quota: validated.quota });
-
-    setSubmitting(true);
-    try {
-      const res = await fetch(`/api/admin/sms/organizations/${org.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.ok) {
-        // Server rejected — show the message, leave the dialog open with the
-        // reason/quota intact so the admin can correct and resubmit. Never
-        // reads `data.data` (which could carry a Stripe subscription-item id).
-        setFormError(data?.error || "Unable to save changes. Please try again.");
-        setSubmitting(false);
-        return;
+    // The coordinator owns the synchronous in-flight lock: a second call in
+    // the same tick returns "skipped" before issuing any request. On error it
+    // releases the lock (leaving the dialog open with the entered reason/quota
+    // intact) so the admin can correct and retry. Never reads the response
+    // body (which could carry a Stripe subscription-item id) — success just
+    // refreshes and closes.
+    await submitterRef.current!.submit(
+      { reason, quota },
+      {
+        request: async (payload) => {
+          const res = await fetch(`/api/admin/sms/organizations/${org.id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const data = await res.json().catch(() => null);
+          return { ok: Boolean(res.ok && data?.ok), error: data?.error };
+        },
+        onStart: () => setSubmitting(true),
+        onSuccess: () => {
+          router.refresh();
+          onClose();
+        },
+        onServerError: (message) => {
+          setFormError(message);
+          setSubmitting(false);
+        },
+        onNetworkError: (message) => {
+          setFormError(message);
+          setSubmitting(false);
+        },
+        onValidationError: (validation) => {
+          setReasonError(validation.reasonError ?? null);
+          setQuotaError(validation.quotaError ?? null);
+        },
       }
-      // Success — pull fresh server truth into the table, then close.
-      router.refresh();
-      onClose();
-    } catch {
-      setFormError("Unable to connect. Please try again.");
-      setSubmitting(false);
-    }
+    );
   }
 
   const isEnable = mode === "enable";
