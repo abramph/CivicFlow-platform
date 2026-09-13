@@ -1529,6 +1529,33 @@ export function getAdminCampaignTargetingOptions(organizationId: string) {
   );
 }
 
+export type SmsEntitlementReasonCode =
+  | 'PLATFORM_MESSAGING_DISABLED'
+  | 'ADD_ON_REQUIRED'
+  | 'SUSPENDED'
+  | 'BILLING_REQUIRED'
+  | 'ALLOWANCE_REACHED';
+
+/**
+ * Whether SMS may be offered as a channel for this org right now — the narrow,
+ * non-sensitive projection of the server's live SMS entitlement (never any
+ * Stripe/Twilio/phone identifier). The composer switches on `available` only
+ * and never re-derives billing rules client-side.
+ */
+export interface MobileSmsCapability {
+  available: boolean;
+  reasonCode: SmsEntitlementReasonCode | null;
+  message: string | null;
+  remaining: number | null;
+  billingManagementRequired: boolean;
+}
+
+export function getAdminSmsCapability(organizationId: string) {
+  return apiFetch<MobileSmsCapability>(
+    `/api/mobile/admin/sms-capability?organizationId=${encodeURIComponent(organizationId)}`
+  );
+}
+
 export function createAdminCampaign(input: CreateAdminCampaignInput) {
   return apiFetch<AdminCampaignDetail>('/api/mobile/admin/campaigns', { method: 'POST', body: JSON.stringify(input) });
 }

@@ -10,9 +10,11 @@ import { useAuth } from '@/lib/auth-context';
 import {
   createAdminCampaign,
   getAdminCampaignTargetingOptions,
+  getAdminSmsCapability,
   previewAdminCampaignRecipients,
   type CampaignChannel,
   type CampaignCommunicationType,
+  type MobileSmsCapability,
 } from '@/lib/mobile-api';
 import { requireAdminCapability } from '@/components/require-admin-capability';
 
@@ -23,12 +25,14 @@ const TYPE_OPTIONS: { value: CampaignCommunicationType; label: string }[] = [
   { value: 'GENERAL', label: 'General' },
 ];
 
-const CHANNEL_OPTIONS: { value: CampaignChannel; label: string }[] = [
+const CHANNEL_OPTIONS: { value: CampaignChannel; label: string; requiresSms?: boolean }[] = [
   { value: 'EMAIL', label: 'Email' },
-  { value: 'SMS', label: 'SMS' },
-  { value: 'EMAIL_AND_SMS', label: 'Email + SMS' },
+  { value: 'SMS', label: 'SMS', requiresSms: true },
+  { value: 'EMAIL_AND_SMS', label: 'Email + SMS', requiresSms: true },
   { value: 'INTERNAL_LOG_ONLY', label: 'Log Only' },
 ];
+
+type SmsCheckState = 'loading' | 'loaded' | 'error';
 
 type AudienceKey = 'active_with_email' | 'outstanding_dues' | 'delinquent' | 'pta_all' | 'pta_unpaid';
 
@@ -68,6 +72,8 @@ function AdminCampaignCreateScreen() {
   const [previewing, setPreviewing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [smsCapability, setSmsCapability] = useState<MobileSmsCapability | null>(null);
+  const [smsCheckState, setSmsCheckState] = useState<SmsCheckState>('loading');
 
   useEffect(() => {
     (async () => {
@@ -82,6 +88,53 @@ function AdminCampaignCreateScreen() {
       }
     })();
   }, [selectedOrganizationId]);
+
+  // SMS entitlement is server-authoritative and refreshed on every org switch
+  // (the effect re-runs on selectedOrganizationId). Fail CLOSED: SMS is
+  // offerable only once the server confirms `available` — while loading or on
+  // any error, the SMS channels stay disabled and Email remains available.
+  useEffect(() => {
+    let active = true;
+    if (!selectedOrganizationId) return;
+    setSmsCapability(null);
+    setSmsCheckState('loading');
+    (async () => {
+      try {
+        const capability = await getAdminSmsCapability(selectedOrganizationId);
+        if (!active) return;
+        setSmsCapability(capability);
+        setSmsCheckState('loaded');
+      } catch {
+        if (!active) return;
+        setSmsCapability(null);
+        setSmsCheckState('error');
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [selectedOrganizationId]);
+
+  const smsAvailable = smsCapability?.available === true;
+
+  // If entitlement is lost (org switch, revocation) while an SMS channel is
+  // selected, fall back to Email so a disallowed channel can never be sent.
+  useEffect(() => {
+    if (!smsAvailable && (channel === 'SMS' || channel === 'EMAIL_AND_SMS')) {
+      setChannel('EMAIL');
+    }
+  }, [smsAvailable, channel]);
+
+  // Truthful, non-sensitive one-liner shown under the channel selector.
+  const smsChannelHint: string | null = smsAvailable
+    ? smsCapability?.remaining != null
+      ? `SMS is available — ${smsCapability.remaining} message${smsCapability.remaining === 1 ? '' : 's'} left this month.`
+      : null
+    : smsCheckState === 'loading'
+      ? 'Checking SMS availability…'
+      : smsCheckState === 'error'
+        ? "SMS availability couldn't be checked right now. Email is still available."
+        : (smsCapability?.message ?? null);
 
   const audienceOptions: AudienceOption[] = isPta
     ? [
@@ -215,21 +268,33 @@ function AdminCampaignCreateScreen() {
 
         <ThemedText type="smallBold">Channel</ThemedText>
         <ThemedView style={styles.chipRow} accessibilityRole="radiogroup" accessibilityLabel="Channel">
-          {CHANNEL_OPTIONS.map((option) => (
-            <Pressable
-              key={option.value}
-              style={[styles.chip, option.value === channel && styles.chipSelected]}
-              onPress={() => setChannel(option.value)}
-              accessibilityRole="radio"
-              accessibilityLabel={option.label}
-              accessibilityState={{ selected: option.value === channel }}
-            >
-              <ThemedText type="small" style={option.value === channel ? styles.chipTextSelected : undefined}>
-                {option.label}
-              </ThemedText>
-            </Pressable>
-          ))}
+          {CHANNEL_OPTIONS.map((option) => {
+            const disabled = Boolean(option.requiresSms) && !smsAvailable;
+            return (
+              <Pressable
+                key={option.value}
+                style={[styles.chip, option.value === channel && styles.chipSelected, disabled && styles.chipDisabled]}
+                onPress={() => {
+                  if (disabled) return;
+                  setChannel(option.value);
+                }}
+                disabled={disabled}
+                accessibilityRole="radio"
+                accessibilityLabel={disabled ? `${option.label} (unavailable)` : option.label}
+                accessibilityState={{ selected: option.value === channel, disabled }}
+              >
+                <ThemedText type="small" style={option.value === channel ? styles.chipTextSelected : undefined}>
+                  {option.label}
+                </ThemedText>
+              </Pressable>
+            );
+          })}
         </ThemedView>
+        {smsChannelHint ? (
+          <ThemedText type="small" themeColor="textSecondary" accessibilityLiveRegion="polite">
+            {smsChannelHint}
+          </ThemedText>
+        ) : null}
 
         <ThemedText type="smallBold">Audience</ThemedText>
         <ThemedView style={styles.chipRow} accessibilityRole="radiogroup" accessibilityLabel="Audience">
@@ -347,6 +412,9 @@ const styles = StyleSheet.create({
   },
   chipTextSelected: {
     color: WorkspaceColors.adminHeaderText,
+  },
+  chipDisabled: {
+    opacity: 0.4,
   },
   error: {
     color: '#B42318',

@@ -1,45 +1,76 @@
 import * as Notifications from 'expo-notifications';
-import { useRootNavigationState } from 'expo-router';
+import { router, useRootNavigationState } from 'expo-router';
 import { useEffect, useRef } from 'react';
 
 import { useAuth } from '@/lib/auth-context';
 import { navigateToDeepLink } from '@/lib/deep-links';
+import { resolveNotificationTapAction } from '@/lib/notification-tap';
 
 /**
- * Notification-tap deep links, gated on the app actually being ready to
- * navigate.
+ * Notification-tap navigation, gated on the app being ready AND resolved
+ * against multi-organization isolation rules.
  *
- * The previous implementation pushed the deep link the moment the tap event
- * arrived. On a cold start that raced the auth flow: the detail screen was
- * pushed on top of the still-loading `index` screen, whose `<Redirect>` then
- * fired a replace across the in-flight transition — leaving the navigation
- * stack in a corrupted state where the header back arrow rendered but no
- * longer popped anything (the "back button dead until app restart" bug,
- * reported on event/announcement screens — exactly the push-notification
- * destinations).
+ * The link is HELD until the root navigator is mounted, auth is `signedIn`,
+ * and an organization is selected (so index's redirect chain has finished and
+ * the tabs are the base of the stack), then dispatched one frame later so the
+ * redirect commit settles first — preventing the "back button dead until
+ * restart" corruption a mid-transition push caused.
  *
- * Now the link is HELD until three things are all true — the root navigator
- * has a state key (mounted), auth is `signedIn`, and an organization is
- * selected (i.e. index's redirect chain has finished and the tabs are the
- * base of the stack) — and only then pushed, one frame later so the redirect
- * commit settles first. A tap that arrives while signed out is held: the
- * user goes through login normally and lands on the notification's target
- * right after the dashboard mounts.
- *
- * Cold-start taps are ALSO picked up via getLastNotificationResponseAsync(),
- * which the listener-only implementation missed entirely, and de-duplicated
- * by notification identifier so a response is never navigated twice.
+ * Tenant isolation (resolveNotificationTapAction): a tap now carries the
+ * originating `organizationId`. If the signed-in user cannot access it
+ * (removed membership, cross-tenant, stale/malformed id), the protected
+ * resource is never opened — the user lands on the neutral inbox. If it is a
+ * different org than the one selected, the org context is switched FIRST (which
+ * re-scopes org-specific screens), then the target is opened one frame later so
+ * no other organization's content flashes during the transition. A signed-out
+ * tap is held and RE-VALIDATED after login. Payloads without an organizationId
+ * (older server build) navigate as before.
  */
 export function useNotificationDeepLinks() {
-  const { status, selectedOrganizationId } = useAuth();
+  const { status, selectedOrganizationId, organizations, selectOrganization } = useAuth();
   const rootNavigationState = useRootNavigationState();
 
-  const pendingRef = useRef<string | null>(null);
+  const pendingRef = useRef<unknown>(null);
   const handledIdentifiersRef = useRef<Set<string>>(new Set());
 
   const ready = Boolean(rootNavigationState?.key) && status === 'signedIn' && Boolean(selectedOrganizationId);
   const readyRef = useRef(ready);
   readyRef.current = ready;
+
+  // The response listener is mounted once; keep the latest auth values in refs
+  // so it always resolves against current access (e.g. a membership removed
+  // between mint and tap).
+  const orgsRef = useRef(organizations);
+  orgsRef.current = organizations;
+  const selectedOrgRef = useRef(selectedOrganizationId);
+  selectedOrgRef.current = selectedOrganizationId;
+  const selectOrgRef = useRef(selectOrganization);
+  selectOrgRef.current = selectOrganization;
+
+  async function dispatch(data: unknown) {
+    const action = resolveNotificationTapAction(data, {
+      accessibleOrganizationIds: (orgsRef.current ?? []).map((org) => org.organizationId),
+      selectedOrganizationId: selectedOrgRef.current ?? null,
+    });
+
+    switch (action.type) {
+      case 'ignore':
+        return;
+      case 'navigate':
+        navigateToDeepLink(action.deepLink);
+        return;
+      case 'switchThenNavigate':
+        await selectOrgRef.current(action.organizationId);
+        // Let the org switch re-scope screens before the target push commits.
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        navigateToDeepLink(action.deepLink);
+        return;
+      case 'unavailable':
+        // Neutral Unestra screen — never the protected resource.
+        router.replace({ pathname: '/inbox', params: { unavailable: '1' } });
+        return;
+    }
+  }
 
   useEffect(() => {
     const acceptResponse = (response: Notifications.NotificationResponse | null) => {
@@ -48,31 +79,27 @@ export function useNotificationDeepLinks() {
       if (identifier && handledIdentifiersRef.current.has(identifier)) return;
       if (identifier) handledIdentifiersRef.current.add(identifier);
 
-      const deepLink = response.notification.request.content.data?.deepLink;
-      if (typeof deepLink !== 'string') return;
+      const data = response.notification.request.content.data ?? {};
+      if (typeof (data as Record<string, unknown>).deepLink !== 'string') return;
 
       if (readyRef.current) {
-        navigateToDeepLink(deepLink);
+        void dispatch(data);
       } else {
-        pendingRef.current = deepLink;
+        // Hold the RAW payload so it is re-validated against access after login.
+        pendingRef.current = data;
       }
     };
 
-    // Cold start: the tap that launched the app is delivered as the "last"
-    // response, not through the listener.
     Notifications.getLastNotificationResponseAsync().then(acceptResponse);
-
     const subscription = Notifications.addNotificationResponseReceivedListener(acceptResponse);
     return () => subscription.remove();
   }, []);
 
   useEffect(() => {
-    if (!ready || !pendingRef.current) return;
-    const deepLink = pendingRef.current;
+    if (!ready || pendingRef.current == null) return;
+    const data = pendingRef.current;
     pendingRef.current = null;
-    // One frame so the index→tabs redirect that just made us "ready" commits
-    // before the detail push starts — never two navigations in one commit.
-    const frame = requestAnimationFrame(() => navigateToDeepLink(deepLink));
+    const frame = requestAnimationFrame(() => void dispatch(data));
     return () => cancelAnimationFrame(frame);
   }, [ready]);
 }
