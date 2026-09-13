@@ -49,6 +49,7 @@ describe("getSmsEntitlement", () => {
     const result = await getSmsEntitlement("org-a");
     expect(result.allowed).toBe(false);
     expect(result.reason).toMatch(/disabled platform-wide/);
+    expect(result.code).toBe("PLATFORM_MESSAGING_DISABLED");
   });
 
   it("denies an org suspended by a platform administrator, even with an active subscription", async () => {
@@ -63,6 +64,7 @@ describe("getSmsEntitlement", () => {
     const result = await getSmsEntitlement("org-a");
     expect(result.allowed).toBe(false);
     expect(result.reason).toMatch(/suspended/);
+    expect(result.code).toBe("SUSPENDED");
   });
 
   it("denies an organization with no SMS settings row at all", async () => {
@@ -70,6 +72,7 @@ describe("getSmsEntitlement", () => {
     const result = await getSmsEntitlement("org-a");
     expect(result.allowed).toBe(false);
     expect(result.reason).toMatch(/does not have the SMS add-on/);
+    expect(result.code).toBe("ADD_ON_REQUIRED");
   });
 
   it("denies an organization whose add-on is inactive", async () => {
@@ -109,6 +112,8 @@ describe("getSmsEntitlement", () => {
     const result = await getSmsEntitlement("org-a");
     expect(result.allowed).toBe(true);
     expect(result.remaining).toBe(990);
+    // A successful entitlement carries no denial code.
+    expect(result.code).toBeUndefined();
   });
 
   it("denies an org with the add-on active but a cancelled subscription", async () => {
@@ -122,6 +127,7 @@ describe("getSmsEntitlement", () => {
     const result = await getSmsEntitlement("org-a");
     expect(result.allowed).toBe(false);
     expect(result.reason).toMatch(/not active/);
+    expect(result.code).toBe("BILLING_REQUIRED");
   });
 
   it("allows an org with the add-on active and a past_due subscription", async () => {
@@ -217,6 +223,7 @@ describe("getSmsEntitlement", () => {
       expect(result.allowed).toBe(false);
       expect(result.reason).toMatch(/monthly SMS allowance/);
       expect(result.remaining).toBe(0);
+      expect(result.code).toBe("ALLOWANCE_REACHED");
     });
 
     it("blocks exactly at the limit boundary (used === limit)", async () => {

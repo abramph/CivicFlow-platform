@@ -8,6 +8,9 @@ const createMeetingMinutes = vi.fn();
 const updateMeetingMinutes = vi.fn();
 const updateManyMeetingMinutes = vi.fn();
 const findManyOrgMember = vi.fn();
+// Org display name is resolved server-side by the notification-identity
+// formatter (notifications/identity.ts) that the push wrappers now call.
+const findUniqueOrganization = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -24,6 +27,9 @@ vi.mock("@/lib/prisma", () => ({
     },
     orgMember: {
       findMany: (...args: unknown[]) => findManyOrgMember(...args),
+    },
+    organization: {
+      findUnique: (...args: unknown[]) => findUniqueOrganization(...args),
     },
     $transaction: (fn: (tx: unknown) => unknown) =>
       fn({
@@ -209,6 +215,7 @@ describe("approveMeetingMinutes", () => {
     updateMeetingMinutes.mockReset();
     updateManyMeetingMinutes.mockReset().mockResolvedValue({ count: 0 });
     findManyOrgMember.mockReset().mockResolvedValue([]);
+    findUniqueOrganization.mockReset().mockResolvedValue({ name: "Riverside Community" });
     sendPushToMember.mockReset();
     sendEmail.mockReset();
   });
@@ -252,6 +259,10 @@ describe("approveMeetingMinutes", () => {
     await approveMeetingMinutes({ organizationId: "org-a", minutesId: "minutes-1", actorUserId: "user-3" });
 
     expect(sendPushToMember).toHaveBeenCalledTimes(2);
+    // Org name is the notification title; the category is the subtitle.
+    expect(sendPushToMember).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Riverside Community", subtitle: "Meeting update" })
+    );
     expect(sendEmail).toHaveBeenCalledTimes(1);
     expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: "a@example.com" }));
   });

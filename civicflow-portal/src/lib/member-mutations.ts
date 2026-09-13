@@ -2,7 +2,7 @@ import type { OrgMember } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { createAuditEvent } from "@/lib/audit";
 import { createMemberTimelineEvent } from "@/lib/member-timeline";
-import { sendPushToMember } from "@/lib/push";
+import { sendOrganizationMemberPush } from "@/lib/notifications/send";
 import { formatEnumLabel } from "@/lib/formatting";
 import { requireMemberSlot } from "@/lib/plan-gate";
 import { z } from "@/lib/validation";
@@ -331,10 +331,10 @@ export async function updateMember(
       createdByUserId: actor.userId,
     });
 
-    await sendPushToMember({
+    await sendOrganizationMemberPush({
       organizationId,
       memberId: updated.id,
-      title: "Membership Status Update",
+      category: "MEMBERSHIP_UPDATE",
       body: `Your membership status is now: ${formatEnumLabel(updated.membershipStatus)}.`,
       deepLink: "/dues",
       required: true,

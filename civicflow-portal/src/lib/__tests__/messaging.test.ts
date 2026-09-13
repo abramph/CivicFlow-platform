@@ -4,6 +4,11 @@ const findManyParticipant = vi.fn();
 const findFirstOrgMember = vi.fn();
 const findFirstPtaHouseholdAdult = vi.fn();
 const findManyMobileDeviceToken = vi.fn();
+// The centralized notification-identity formatter resolves the org display
+// name server-side (see notifications/identity.ts). These tests exercise the
+// real send.ts→identity.ts path (only @/lib/push is mocked), so the org lookup
+// must be stubbed.
+const findUniqueOrganization = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -18,6 +23,9 @@ vi.mock("@/lib/prisma", () => ({
     },
     mobileDeviceToken: {
       findMany: (...args: unknown[]) => findManyMobileDeviceToken(...args),
+    },
+    organization: {
+      findUnique: (...args: unknown[]) => findUniqueOrganization(...args),
     },
   },
 }));
@@ -40,6 +48,7 @@ describe("notifyNewMessageParticipants", () => {
     findFirstOrgMember.mockReset();
     findFirstPtaHouseholdAdult.mockReset();
     findManyMobileDeviceToken.mockReset();
+    findUniqueOrganization.mockReset().mockResolvedValue({ name: "Riverside PTA" });
     sendEmail.mockClear();
     sendPushToMember.mockReset();
     sendPushToTokens.mockReset().mockResolvedValue({ sent: 0, failed: 0 });
@@ -61,7 +70,14 @@ describe("notifyNewMessageParticipants", () => {
     });
 
     expect(sendPushToMember).toHaveBeenCalledWith(
-      expect.objectContaining({ organizationId: "org-a", memberId: "member-1", deepLink: "/messages/conv-1" })
+      expect.objectContaining({
+        organizationId: "org-a",
+        memberId: "member-1",
+        deepLink: "/messages/conv-1",
+        // Direct-message identity: sender name, then the server-resolved org.
+        title: "Officer Jane · Riverside PTA",
+        subtitle: "Message",
+      })
     );
     expect(sendEmail).not.toHaveBeenCalled();
   });

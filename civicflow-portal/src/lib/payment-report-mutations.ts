@@ -5,7 +5,7 @@ import { recordDuesPayment } from "@/lib/dues-payments";
 import { sendEmail } from "@/lib/mail";
 import { createMemberTimelineEvent } from "@/lib/member-timeline";
 import { PAYMENT_REPORT_CATEGORY_LABELS } from "@/lib/payment-report-categories";
-import { sendPushToMember } from "@/lib/push";
+import { sendOrganizationMemberPush } from "@/lib/notifications/send";
 
 /**
  * Shared member-submitted PaymentReport approve/reject logic — used by the
@@ -135,10 +135,10 @@ export async function approvePaymentReport(
     }).catch(() => null);
   }
 
-  await sendPushToMember({
+  await sendOrganizationMemberPush({
     organizationId,
     memberId: report.memberId,
-    title: "Payment Confirmed",
+    category: "PAYMENT_UPDATE",
     body: `Your ${categoryLabel.toLowerCase()} payment of $${Number(report.amount).toFixed(2)} has been approved. Thank you!`,
     deepLink: "/payment-history",
     required: true,
@@ -187,10 +187,10 @@ export async function rejectPaymentReport(
     }).catch(() => null);
   }
 
-  await sendPushToMember({
+  await sendOrganizationMemberPush({
     organizationId,
     memberId: report.memberId,
-    title: "Payment Not Confirmed",
+    category: "PAYMENT_UPDATE",
     body: `Your reported payment of $${Number(report.amount).toFixed(2)} could not be confirmed: ${rejectionReason}`,
     deepLink: "/report-payment",
     required: true,

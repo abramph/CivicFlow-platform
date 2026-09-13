@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { createAuditEvent } from "@/lib/audit";
-import { sendPushToMember } from "@/lib/push";
+import { sendOrganizationMemberPush } from "@/lib/notifications/send";
 import { sendEmail } from "@/lib/mail";
 import type { MeetingMinutes, MeetingMinutesStatus } from "@prisma/client";
 
@@ -225,11 +225,11 @@ async function notifyMembersOfApprovedMinutes(params: { organizationId: string; 
           text: `The minutes for "${params.meetingTitle}" have been approved and are now available to view.`,
         }).catch(() => null);
       }
-      await sendPushToMember({
+      await sendOrganizationMemberPush({
         organizationId: params.organizationId,
         memberId: member.id,
-        title: "Meeting minutes approved",
-        body: params.meetingTitle,
+        category: "MEETING_UPDATE",
+        body: `Minutes approved: ${params.meetingTitle}`,
         deepLink: "/m/minutes",
       }).catch(() => null);
     })

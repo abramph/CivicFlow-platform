@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/mail";
-import { sendPushToMember, sendPushToTokens } from "@/lib/push";
+import { sendOrganizationMemberPush, sendOrganizationTokensPush } from "@/lib/notifications/send";
 
 function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 3)}...` : text;
@@ -43,10 +43,11 @@ export async function notifyNewMessageParticipants(params: {
         select: { id: true, commsEmailEnabled: true },
       });
       if (member) {
-        const result = await sendPushToMember({
+        const result = await sendOrganizationMemberPush({
           organizationId: params.organizationId,
           memberId: member.id,
-          title: subject,
+          category: "DIRECT_MESSAGE",
+          senderName: params.senderDisplayName,
           body: preview,
           deepLink,
         });
@@ -74,7 +75,14 @@ export async function notifyNewMessageParticipants(params: {
           where: { userId: participant.userId },
           select: { token: true },
         });
-        const result = await sendPushToTokens(tokens.map((t) => t.token), { title: subject, body: preview, deepLink });
+        const result = await sendOrganizationTokensPush({
+          organizationId: params.organizationId,
+          tokens: tokens.map((t) => t.token),
+          category: "DIRECT_MESSAGE",
+          senderName: params.senderDisplayName,
+          body: preview,
+          deepLink,
+        });
         if (result.sent > 0) continue;
       }
     }

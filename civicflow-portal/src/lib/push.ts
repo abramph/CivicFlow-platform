@@ -7,6 +7,10 @@ const expo = new Expo();
 
 export interface PushNotificationInput {
   title: string;
+  /** iOS subtitle line under the title (the notification category, e.g.
+   *  "Event reminder"). Ignored by Android natively — it is also carried in
+   *  `data.category` so both platforms can present it. */
+  subtitle?: string | null;
   body: string;
   deepLink?: string | null;
   data?: Record<string, unknown>;
@@ -25,6 +29,7 @@ export async function sendPushToTokens(tokens: string[], notification: PushNotif
   const messages: ExpoPushMessage[] = validTokens.map((token) => ({
     to: token,
     title: notification.title,
+    subtitle: notification.subtitle ?? undefined,
     body: notification.body,
     sound: "default",
     data: { deepLink, ...notification.data },
@@ -89,8 +94,10 @@ export async function sendPushToMember(params: {
   organizationId: string;
   memberId: string;
   title: string;
+  subtitle?: string | null;
   body: string;
   deepLink?: string | null;
+  data?: Record<string, unknown>;
   required?: boolean;
 }) {
   const member = await prisma.orgMember.findFirst({
@@ -116,10 +123,13 @@ export async function sendPushToMember(params: {
     select: { token: true },
   });
 
-  const result = await sendPushToTokens(
-    tokens.map((t) => t.token),
-    { title: params.title, body: params.body, deepLink: params.deepLink }
-  );
+  const result = await sendPushToTokens(tokens.map((t) => t.token), {
+    title: params.title,
+    subtitle: params.subtitle,
+    body: params.body,
+    deepLink: params.deepLink,
+    data: params.data,
+  });
 
   await prisma.communicationLog.create({
     data: {
