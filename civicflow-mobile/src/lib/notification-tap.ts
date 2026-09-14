@@ -22,8 +22,11 @@
  */
 
 /** Global routes a platform-scoped notification is allowed to open. Mirrors the
- *  server's PLATFORM_DEEP_LINK_ALLOWLIST (civicflow-portal notifications/send.ts). */
-export const PLATFORM_DEEP_LINK_ALLOWLIST = ["/inbox", "/settings/security", "/settings/billing"];
+ *  server's PLATFORM_DEEP_LINK_ALLOWLIST (civicflow-portal notifications/send.ts)
+ *  and must stay a subset of resolveAllowedDeepLinkPath's allow-list — only
+ *  routes accepted end-to-end. /settings/* are intentionally absent (no such
+ *  mobile route exists yet). */
+export const PLATFORM_DEEP_LINK_ALLOWLIST = ["/inbox"];
 
 export type NotificationTapAction =
   | { type: "ignore" }

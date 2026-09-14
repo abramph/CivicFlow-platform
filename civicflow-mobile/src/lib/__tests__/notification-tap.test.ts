@@ -1,9 +1,35 @@
-import { resolveNotificationTapAction, type NotificationTapContext } from '../notification-tap';
+import { PLATFORM_DEEP_LINK_ALLOWLIST, resolveNotificationTapAction, type NotificationTapContext } from '../notification-tap';
+import { resolveAllowedDeepLinkPath } from '@/lib/deep-links';
 
 const ctx: NotificationTapContext = {
   accessibleOrganizationIds: ['org-1', 'org-2'],
   selectedOrganizationId: 'org-1',
 };
+
+describe('platform deep-link contract (mobile)', () => {
+  const noOrgCtx: NotificationTapContext = { accessibleOrganizationIds: [], selectedOrganizationId: null };
+
+  it('mirrors the server allow-list (only /inbox today)', () => {
+    expect(PLATFORM_DEEP_LINK_ALLOWLIST).toEqual(['/inbox']);
+  });
+
+  // Every advertised platform route must survive BOTH the mobile deep-link
+  // allow-list AND the platform-scoped resolver.
+  it.each(PLATFORM_DEEP_LINK_ALLOWLIST)('route %s resolves and navigates under platform scope', (route) => {
+    expect(resolveAllowedDeepLinkPath(route)).toBe(route);
+    expect(resolveNotificationTapAction({ deepLink: route, notificationScope: 'platform' }, noOrgCtx)).toEqual({
+      type: 'navigate',
+      deepLink: route,
+    });
+  });
+
+  it('an unapproved platform route fails closed at both gates', () => {
+    expect(resolveAllowedDeepLinkPath('/settings/billing')).toBeNull();
+    expect(resolveNotificationTapAction({ deepLink: '/settings/billing', notificationScope: 'platform' }, noOrgCtx)).toEqual({
+      type: 'unavailable',
+    });
+  });
+});
 
 describe('resolveNotificationTapAction', () => {
   it('ignores a payload with no (or blank) deep link', () => {

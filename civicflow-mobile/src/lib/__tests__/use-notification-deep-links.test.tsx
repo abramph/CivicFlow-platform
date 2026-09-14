@@ -26,6 +26,12 @@ const mockSelectOrganization = jest.fn().mockResolvedValue(undefined);
 const mockRefreshOrganizations = jest.fn();
 const ORGS = [{ organizationId: 'org-1' }, { organizationId: 'org-2' }];
 
+/** refreshOrganizations now returns the fresh list AND the reconciled selection. */
+const refreshResult = (organizations: { organizationId: string }[], selectedOrganizationId: string | null) => ({
+  organizations,
+  selectedOrganizationId,
+});
+
 function auth(overrides: Record<string, unknown>) {
   return {
     status: 'signedIn',
@@ -47,6 +53,7 @@ function response(identifier: string, deepLink: string, extra?: Record<string, u
 }
 
 const INBOX = { pathname: '/inbox', params: { unavailable: '1' } };
+const SWITCHER = { pathname: '/org-switcher', params: { unavailable: '1' } };
 
 describe('useNotificationDeepLinks — live-validated, fail-closed isolation', () => {
   let listener: ((r: unknown) => void) | null = null;
@@ -63,7 +70,7 @@ describe('useNotificationDeepLinks — live-validated, fail-closed isolation', (
     mockNavigateToDeepLink.mockReset();
     mockRouterReplace.mockReset();
     mockSelectOrganization.mockReset().mockResolvedValue(undefined);
-    mockRefreshOrganizations.mockReset().mockResolvedValue(ORGS);
+    mockRefreshOrganizations.mockReset().mockResolvedValue(refreshResult(ORGS, 'org-1'));
   });
 
   it('navigates directly when the tap targets the already-selected org (after a live access refresh)', async () => {
@@ -79,10 +86,11 @@ describe('useNotificationDeepLinks — live-validated, fail-closed isolation', (
     utils.unmount();
   });
 
-  it('opens the neutral inbox when the live refresh shows the org is no longer accessible', async () => {
+  it('opens the neutral inbox (under the still-valid current org) when the tapped org is no longer accessible', async () => {
     mockUseAuth.mockReturnValue(auth({ selectedOrganizationId: 'org-1' }));
-    // Server now returns only org-1 — access to org-2 was removed after the push was minted.
-    mockRefreshOrganizations.mockResolvedValue([{ organizationId: 'org-1' }]);
+    // Server now returns only org-1 — access to org-2 was removed. The user's
+    // OWN org (org-1) is still valid, so the neutral landing is their inbox.
+    mockRefreshOrganizations.mockResolvedValue(refreshResult([{ organizationId: 'org-1' }], 'org-1'));
 
     const utils = await render(<Harness />);
     await waitFor(() => expect(listener).not.toBeNull());
@@ -93,7 +101,7 @@ describe('useNotificationDeepLinks — live-validated, fail-closed isolation', (
     utils.unmount();
   });
 
-  it('fails closed to the neutral inbox when the live access refresh itself fails', async () => {
+  it('fails closed to the org switcher when the live access refresh itself fails (no confirmed tenant)', async () => {
     mockUseAuth.mockReturnValue(auth({ selectedOrganizationId: 'org-1' }));
     mockRefreshOrganizations.mockRejectedValue(new Error('offline'));
 
@@ -101,8 +109,44 @@ describe('useNotificationDeepLinks — live-validated, fail-closed isolation', (
     await waitFor(() => expect(listener).not.toBeNull());
     listener?.(response('n3', '/event/e2', { organizationId: 'org-2' }));
 
-    await waitFor(() => expect(mockRouterReplace).toHaveBeenCalledWith(INBOX));
+    await waitFor(() => expect(mockRouterReplace).toHaveBeenCalledWith(SWITCHER));
     expect(mockNavigateToDeepLink).not.toHaveBeenCalled();
+    utils.unmount();
+  });
+
+  it('routes to the org switcher (never /inbox) when the selected org was revoked and reconciled to none', async () => {
+    mockUseAuth.mockReturnValue(auth({ selectedOrganizationId: 'org-1' }));
+    // org-1 revoked; multiple others remain → reconciled to null (no tenant).
+    mockRefreshOrganizations.mockResolvedValue(refreshResult([{ organizationId: 'org-2' }, { organizationId: 'org-3' }], null));
+
+    const utils = await render(<Harness />);
+    await waitFor(() => expect(listener).not.toBeNull());
+    // Tap for the now-revoked org-1.
+    listener?.(response('n-revoked', '/event/e-old', { organizationId: 'org-1' }));
+
+    await waitFor(() => expect(mockRouterReplace).toHaveBeenCalledWith(SWITCHER));
+    expect(mockRouterReplace).not.toHaveBeenCalledWith(INBOX);
+    expect(mockNavigateToDeepLink).not.toHaveBeenCalled();
+    utils.unmount();
+  });
+
+  it('an accessible target can still be selected and acknowledged after reconciliation', async () => {
+    mockUseAuth.mockReturnValue(auth({ selectedOrganizationId: 'org-1' }));
+    // org-1 revoked; two remain → reconciled to null, but org-2 is accessible.
+    mockRefreshOrganizations.mockResolvedValue(refreshResult([{ organizationId: 'org-2' }, { organizationId: 'org-3' }], null));
+
+    const utils = await render(<Harness />);
+    await waitFor(() => expect(listener).not.toBeNull());
+    listener?.(response('n-target', '/announce/a2', { organizationId: 'org-2' }));
+
+    // A switch to the accessible target is requested…
+    await waitFor(() => expect(mockSelectOrganization).toHaveBeenCalledWith('org-2'));
+    expect(mockNavigateToDeepLink).not.toHaveBeenCalled();
+
+    // …and only after it commits does navigation happen (acknowledged).
+    mockUseAuth.mockReturnValue(auth({ selectedOrganizationId: 'org-2', organizations: [{ organizationId: 'org-2' }, { organizationId: 'org-3' }] }));
+    await utils.rerender(<Harness />);
+    await waitFor(() => expect(mockNavigateToDeepLink).toHaveBeenCalledWith('/announce/a2'));
     utils.unmount();
   });
 

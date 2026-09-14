@@ -102,7 +102,7 @@ interface AuthContextValue {
   acceptInvite: (token: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   selectOrganization: (organizationId: string) => Promise<void>;
-  refreshOrganizations: () => Promise<MobileOrganization[]>;
+  refreshOrganizations: () => Promise<{ organizations: MobileOrganization[]; selectedOrganizationId: string | null }>;
 }
 
 /**
@@ -125,6 +125,23 @@ async function rawPost<T>(path: string, body: unknown): Promise<T> {
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+/**
+ * Reconcile the selected organization against a freshly-fetched access list.
+ * The current selection is kept ONLY if it still exists in the fresh list
+ * (access wasn't revoked). Otherwise: auto-select the sole remaining org if
+ * exactly one exists, or clear the selection when zero or multiple remain (the
+ * user must consciously re-choose). Pure so it can be unit-tested directly, and
+ * the single source of truth the refresh flow and its tests share.
+ */
+export function reconcileSelectedOrganization(
+  organizations: MobileOrganization[],
+  current: string | null
+): string | null {
+  if (current && organizations.some((org) => org.organizationId === current)) return current;
+  if (organizations.length === 1) return organizations[0].organizationId;
+  return null;
+}
 
 async function loadOrganizationsAndRestoreSelection(): Promise<{
   organizations: MobileOrganization[];
@@ -153,10 +170,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // setOrganizations so selectOrganization() can validate against the latest
   // (e.g. just-refreshed) access list without waiting for a re-render.
   const organizationsRef = useRef<MobileOrganization[]>([]);
+  // Always-current mirror of the selected org id, so the async refresh flow can
+  // reconcile against the latest committed selection.
+  const selectedOrganizationIdRef = useRef<string | null>(null);
+  selectedOrganizationIdRef.current = selectedOrganizationId;
 
   function commitOrganizations(orgs: MobileOrganization[]) {
     organizationsRef.current = orgs;
     setOrganizations(orgs);
+  }
+
+  /** Set the selection consistently across state, the ref, and secure storage. */
+  async function commitSelectedOrganization(id: string | null) {
+    selectedOrganizationIdRef.current = id;
+    setSelectedOrganizationId(id);
+    if (id) await secureStorage.setSelectedOrganizationId(id);
+    else await secureStorage.clearSelectedOrganizationId();
   }
 
   async function resetToSignedOut() {
@@ -269,15 +298,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void registerDeviceToken(organizationId);
   }
 
-  /** Re-fetches the caller's live organization access from the server and
-   *  returns it. Callers that must act on current access (e.g. validating a
-   *  notification tap) use the returned list rather than the possibly-stale
-   *  context array. Throws on failure so callers can fail closed. */
-  async function refreshOrganizations(): Promise<MobileOrganization[]> {
-    const { organizations: orgs, selectedOrganizationId: selected } = await loadOrganizationsAndRestoreSelection();
+  /**
+   * Re-fetches the caller's live organization access from the server and
+   * RECONCILES the selected organization against it: the current selection is
+   * kept only if it still exists in the fresh list; a revoked selection is
+   * replaced by the sole remaining org (if exactly one) or cleared (if zero or
+   * multiple). State AND secure storage are updated consistently, so the app is
+   * never left mounted under a revoked tenant. Returns both the fresh list and
+   * the reconciled selection so a caller (the notification tap handler) can act
+   * on the post-reconciliation truth without waiting for a re-render. Throws on
+   * fetch failure so callers can fail closed.
+   */
+  async function refreshOrganizations(): Promise<{
+    organizations: MobileOrganization[];
+    selectedOrganizationId: string | null;
+  }> {
+    const orgs = await apiFetch<MobileOrganization[]>('/api/mobile/organizations');
     commitOrganizations(orgs);
-    setSelectedOrganizationId((current) => current ?? selected);
-    return orgs;
+    const previous = selectedOrganizationIdRef.current;
+    const resolved = reconcileSelectedOrganization(orgs, previous);
+    await commitSelectedOrganization(resolved);
+    // Keep the device-token association correct when the selection actually
+    // changed (revocation → sole-org reselect); never a notification send.
+    if (resolved && resolved !== previous) void registerDeviceToken(resolved);
+    return { organizations: orgs, selectedOrganizationId: resolved };
   }
 
   const selectedOrganization = useMemo(

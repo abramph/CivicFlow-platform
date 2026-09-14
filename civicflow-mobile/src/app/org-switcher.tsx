@@ -1,4 +1,4 @@
-import { Redirect, router } from 'expo-router';
+import { Redirect, router, useLocalSearchParams } from 'expo-router';
 import { FlatList, Pressable, StyleSheet } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -8,6 +8,10 @@ import { useAuth } from '@/lib/auth-context';
 
 export default function OrgSwitcherScreen() {
   const { status, organizations, selectedOrganizationId, selectOrganization, logout } = useAuth();
+  // Set when a notification tap could not open its target because access was
+  // revoked / no longer valid and no organization could be reconciled — show a
+  // truthful, non-revealing message rather than a protected screen.
+  const { unavailable } = useLocalSearchParams<{ unavailable?: string }>();
 
   async function handleSelect(organizationId: string) {
     await selectOrganization(organizationId);
@@ -23,6 +27,11 @@ export default function OrgSwitcherScreen() {
       <ThemedText type="title" style={styles.title}>
         Choose an Organization
       </ThemedText>
+      {unavailable === '1' ? (
+        <ThemedText type="small" style={styles.unavailable} accessibilityRole="alert" accessibilityLiveRegion="polite">
+          That notification is no longer available for your account. Choose an organization to continue.
+        </ThemedText>
+      ) : null}
       <ThemedText type="subtitle" themeColor="textSecondary" style={styles.subtitle}>
         {organizations.length > 1
           ? 'You belong to more than one organization on Unestra.'
@@ -82,6 +91,9 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     marginBottom: Spacing.three,
+  },
+  unavailable: {
+    color: '#B42318',
   },
   list: {
     gap: Spacing.two,

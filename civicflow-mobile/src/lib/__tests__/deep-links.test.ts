@@ -63,4 +63,25 @@ describe('resolveAllowedDeepLinkPath', () => {
     expect(resolveAllowedDeepLinkPath('unestra://attendance-history')).toBe('/attendance-history');
     expect(resolveAllowedDeepLinkPath('https://app.civicflowapp.com/attendance-scan')).toBe('/attendance-scan');
   });
+
+  describe('direct-message push deep link (regression)', () => {
+    // MUST mirror civicflow-portal's notifyNewMessageParticipants(), which now
+    // emits this exact shape for the DM PUSH. If the server format changes,
+    // this constant must change with it — that is the point of the regression.
+    const serverDmDeepLink = (conversationId: string) => `/conversation/${conversationId}`;
+
+    it('a real DM notification resolves to the member conversation screen (not discarded)', () => {
+      const link = serverDmDeepLink('conv-1');
+      expect(link).toBe('/conversation/conv-1');
+      // Through the REAL mobile allow-list (not mocked): resolves to the screen.
+      expect(resolveAllowedDeepLinkPath(link)).toBe('/conversation/conv-1');
+      // And as a universal link off either domain.
+      expect(resolveAllowedDeepLinkPath('https://app.getunestra.com/conversation/conv-1')).toBe('/conversation/conv-1');
+    });
+
+    it('the old staff-web /messages/{id} path is NOT a member deep link (why the bug discarded it)', () => {
+      expect(resolveAllowedDeepLinkPath('/messages/conv-1')).toBeNull();
+      expect(resolveAllowedDeepLinkPath('unestra://messages/conv-1')).toBeNull();
+    });
+  });
 });

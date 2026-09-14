@@ -244,5 +244,27 @@ describe('Announcement composer (Build 27)', () => {
       await waitFor(() => expect(screen.getByText(/organization owner or billing administrator must enable SMS/)).toBeTruthy());
       expect(screen.queryByLabelText('Manage billing to enable SMS')).toBeNull();
     });
+
+    it('for a billing-EXEMPT org shows contact-support and NO billing link — even for a billing admin', async () => {
+      // A manageOrganization admin — yet billing is not the remedy for an exempt org.
+      mockUseAuth.mockReturnValue({
+        selectedOrganizationId: 'org-a',
+        selectedOrganization: { capability: { adminCapabilities: ['manageCommunications', 'manageOrganization'] } },
+      });
+      mockGetSmsCapability.mockResolvedValue({
+        available: false,
+        restricted: false,
+        reasonCode: 'ADD_ON_REQUIRED_EXEMPT',
+        message: "SMS isn't enabled for your organization yet. Contact Unestra support to have it turned on.",
+        remaining: null,
+        billingManagementRequired: false,
+      });
+
+      await render(<AdminCampaignCreateScreen />);
+      await waitFor(() => expect(screen.getByText(/Contact Unestra support/)).toBeTruthy());
+      // No billing link and no "ask an owner (billing)" hint — billing is irrelevant here.
+      expect(screen.queryByLabelText('Manage billing to enable SMS')).toBeNull();
+      expect(screen.queryByText(/organization owner or billing administrator must enable SMS/)).toBeNull();
+    });
   });
 });

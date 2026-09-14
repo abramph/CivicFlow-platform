@@ -1538,6 +1538,7 @@ export type SmsCapabilityReasonCode =
   // per-org entitlement
   | 'PLATFORM_MESSAGING_DISABLED'
   | 'ADD_ON_REQUIRED'
+  | 'ADD_ON_REQUIRED_EXEMPT'
   | 'SUSPENDED'
   | 'BILLING_REQUIRED'
   | 'ALLOWANCE_REACHED'

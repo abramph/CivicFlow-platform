@@ -58,8 +58,20 @@ export function useNotificationDeepLinks() {
   const refreshOrgsRef = useRef(refreshOrganizations);
   refreshOrgsRef.current = refreshOrganizations;
 
-  function goNeutralInbox() {
-    router.replace({ pathname: '/inbox', params: { unavailable: '1' } });
+  /**
+   * Neutral, non-protected destination for an unavailable/failed tap. If the
+   * user still has a VALID selected organization, their own inbox (under that
+   * valid tenant) is a safe neutral landing. If there is NO valid selected
+   * organization (revoked and reconciled to none, or a refresh we couldn't
+   * confirm), we must NOT render /inbox under a stale/revoked tenant — route to
+   * the organization switcher with neutral unavailable messaging instead.
+   */
+  function goNeutral(validSelectedOrganizationId: string | null) {
+    if (validSelectedOrganizationId) {
+      router.replace({ pathname: '/inbox', params: { unavailable: '1' } });
+    } else {
+      router.replace({ pathname: '/org-switcher', params: { unavailable: '1' } });
+    }
   }
 
   async function dispatch(data: unknown) {
@@ -74,23 +86,28 @@ export function useNotificationDeepLinks() {
         selectedOrganizationId: selectedOrgRef.current ?? null,
       });
       if (action.type === 'navigate') navigateToDeepLink(action.deepLink);
-      else if (action.type === 'unavailable') goNeutralInbox();
+      else if (action.type === 'unavailable') goNeutral(selectedOrgRef.current ?? null);
       return;
     }
 
-    // Organization-scoped: LIVE-revalidate access from the server; fail closed.
+    // Organization-scoped: LIVE-revalidate access from the server, which also
+    // RECONCILES the selected org (a revoked selection is dropped). Fail closed
+    // — a refresh we can't complete routes to the neutral switcher, never a
+    // protected screen under an unconfirmed tenant.
     let accessibleOrganizationIds: string[];
+    let reconciledSelection: string | null;
     try {
-      const freshOrgs = await refreshOrgsRef.current();
-      accessibleOrganizationIds = freshOrgs.map((org) => org.organizationId);
+      const fresh = await refreshOrgsRef.current();
+      accessibleOrganizationIds = fresh.organizations.map((org) => org.organizationId);
+      reconciledSelection = fresh.selectedOrganizationId;
     } catch {
-      goNeutralInbox();
+      goNeutral(null);
       return;
     }
 
     const action = resolveNotificationTapAction(data, {
       accessibleOrganizationIds,
-      selectedOrganizationId: selectedOrgRef.current ?? null,
+      selectedOrganizationId: reconciledSelection,
     });
 
     switch (action.type) {
@@ -100,7 +117,7 @@ export function useNotificationDeepLinks() {
         navigateToDeepLink(action.deepLink);
         return;
       case 'unavailable':
-        goNeutralInbox();
+        goNeutral(reconciledSelection);
         return;
       case 'switchThenNavigate': {
         // Begin an acknowledged switch: request the org change and wait for it
@@ -125,7 +142,7 @@ export function useNotificationDeepLinks() {
       pendingSwitchRef.current = null;
       setPendingSwitch(null);
       if (stillAccessible) navigateToDeepLink(pendingSwitch.deepLink);
-      else goNeutralInbox();
+      else goNeutral(null); // committed selection isn't accessible → no valid tenant
       return;
     }
 
@@ -133,7 +150,8 @@ export function useNotificationDeepLinks() {
       if (pendingSwitchRef.current) {
         pendingSwitchRef.current = null;
         setPendingSwitch(null);
-        goNeutralInbox();
+        // The switch never committed — don't assume a valid tenant.
+        goNeutral(null);
       }
     }, ORG_SWITCH_COMMIT_TIMEOUT_MS);
     return () => clearTimeout(timer);
