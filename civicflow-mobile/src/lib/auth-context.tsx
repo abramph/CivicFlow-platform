@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import { API_BASE_URL, apiFetch, ApiError, fetchOrThrow, registerSessionExpiredHandler, setAccessToken } from '@/lib/api-client';
 import type { RsvpCapability } from '@/lib/mobile-api';
@@ -102,7 +102,7 @@ interface AuthContextValue {
   acceptInvite: (token: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   selectOrganization: (organizationId: string) => Promise<void>;
-  refreshOrganizations: () => Promise<void>;
+  refreshOrganizations: () => Promise<MobileOrganization[]>;
 }
 
 /**
@@ -149,6 +149,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<MobileUser | null>(null);
   const [organizations, setOrganizations] = useState<MobileOrganization[]>([]);
   const [selectedOrganizationId, setSelectedOrganizationId] = useState<string | null>(null);
+  // Always-current mirror of `organizations`, updated synchronously alongside
+  // setOrganizations so selectOrganization() can validate against the latest
+  // (e.g. just-refreshed) access list without waiting for a re-render.
+  const organizationsRef = useRef<MobileOrganization[]>([]);
+
+  function commitOrganizations(orgs: MobileOrganization[]) {
+    organizationsRef.current = orgs;
+    setOrganizations(orgs);
+  }
 
   async function resetToSignedOut() {
     setAccessToken(null);
@@ -156,7 +165,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await secureStorage.clearSelectedOrganizationId();
     await secureStorage.clearUser();
     setUser(null);
-    setOrganizations([]);
+    commitOrganizations([]);
     setSelectedOrganizationId(null);
     setStatus('signedOut');
   }
@@ -176,7 +185,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const cachedUser = await secureStorage.getUser<MobileUser>();
         if (cachedUser) setUser(cachedUser);
         const { organizations: orgs, selectedOrganizationId: selected } = await loadOrganizationsAndRestoreSelection();
-        setOrganizations(orgs);
+        commitOrganizations(orgs);
         setSelectedOrganizationId(selected);
         setStatus('signedIn');
         void registerDeviceToken(selected ?? undefined);
@@ -186,6 +195,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })();
 
     return () => registerSessionExpiredHandler(null);
+    // Mount-once bootstrap; the helpers it calls are stable for the provider's life.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function applyTokensAndUser(tokens: TokenPair, signedInUser: MobileUser) {
@@ -194,7 +205,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await secureStorage.setUser(signedInUser);
     setUser(signedInUser);
     const { organizations: orgs, selectedOrganizationId: selected } = await loadOrganizationsAndRestoreSelection();
-    setOrganizations(orgs);
+    commitOrganizations(orgs);
     setSelectedOrganizationId(selected);
     setStatus('signedIn');
     void registerDeviceToken(selected ?? undefined);
@@ -249,16 +260,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function selectOrganization(organizationId: string) {
-    if (!organizations.some((org) => org.organizationId === organizationId)) return;
+    // Validate against the always-current ref (not the render-closure array), so
+    // a switch initiated right after a refreshOrganizations() sees the fresh
+    // access list rather than a stale one.
+    if (!organizationsRef.current.some((org) => org.organizationId === organizationId)) return;
     await secureStorage.setSelectedOrganizationId(organizationId);
     setSelectedOrganizationId(organizationId);
     void registerDeviceToken(organizationId);
   }
 
-  async function refreshOrganizations() {
+  /** Re-fetches the caller's live organization access from the server and
+   *  returns it. Callers that must act on current access (e.g. validating a
+   *  notification tap) use the returned list rather than the possibly-stale
+   *  context array. Throws on failure so callers can fail closed. */
+  async function refreshOrganizations(): Promise<MobileOrganization[]> {
     const { organizations: orgs, selectedOrganizationId: selected } = await loadOrganizationsAndRestoreSelection();
-    setOrganizations(orgs);
+    commitOrganizations(orgs);
     setSelectedOrganizationId((current) => current ?? selected);
+    return orgs;
   }
 
   const selectedOrganization = useMemo(

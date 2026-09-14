@@ -1,11 +1,11 @@
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MinTouchTarget, Spacing, WorkspaceColors } from '@/constants/theme';
-import { ApiError } from '@/lib/api-client';
+import { ApiError, API_BASE_URL } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import {
   createAdminCampaign,
@@ -58,7 +58,10 @@ interface AudienceOption {
  * conflict, so a retry after a timeout can't fan out twice.
  */
 function AdminCampaignCreateScreen() {
-  const { selectedOrganizationId } = useAuth();
+  const { selectedOrganizationId, selectedOrganization } = useAuth();
+  // Billing management is an org-owner/admin function (no dedicated mobile
+  // billing screen exists) — `manageOrganization` is its capability proxy.
+  const canManageBilling = Boolean(selectedOrganization?.capability?.adminCapabilities?.includes('manageOrganization'));
 
   const [title, setTitle] = useState('');
   const [communicationType, setCommunicationType] = useState<CampaignCommunicationType>('ANNOUNCEMENT');
@@ -127,14 +130,22 @@ function AdminCampaignCreateScreen() {
 
   // Truthful, non-sensitive one-liner shown under the channel selector.
   const smsChannelHint: string | null = smsAvailable
-    ? smsCapability?.remaining != null
-      ? `SMS is available — ${smsCapability.remaining} message${smsCapability.remaining === 1 ? '' : 's'} left this month.`
-      : null
+    ? smsCapability?.restricted
+      ? (smsCapability.message ?? null) // Safe Launch: selectable but delivery-restricted
+      : smsCapability?.remaining != null
+        ? `SMS is available — ${smsCapability.remaining} message${smsCapability.remaining === 1 ? '' : 's'} left this month.`
+        : null
     : smsCheckState === 'loading'
       ? 'Checking SMS availability…'
       : smsCheckState === 'error'
         ? "SMS availability couldn't be checked right now. Email is still available."
         : (smsCapability?.message ?? null);
+
+  // A self-serve billing denial (add-on/subscription) gets an actionable route
+  // to the web billing surface — but ONLY for an admin who can manage billing;
+  // no checkout is ever initiated, and no Stripe identifier is exposed.
+  const showBillingAction = smsCapability?.billingManagementRequired === true && canManageBilling;
+  const showBillingHint = smsCapability?.billingManagementRequired === true && !canManageBilling;
 
   const audienceOptions: AudienceOption[] = isPta
     ? [
@@ -293,6 +304,20 @@ function AdminCampaignCreateScreen() {
         {smsChannelHint ? (
           <ThemedText type="small" themeColor="textSecondary" accessibilityLiveRegion="polite">
             {smsChannelHint}
+          </ThemedText>
+        ) : null}
+        {showBillingAction ? (
+          <Pressable
+            onPress={() => Linking.openURL(`${API_BASE_URL}/settings/billing`)}
+            accessibilityRole="button"
+            accessibilityLabel="Manage billing to enable SMS"
+          >
+            <ThemedText type="link">Manage billing to enable SMS</ThemedText>
+          </Pressable>
+        ) : null}
+        {showBillingHint ? (
+          <ThemedText type="small" themeColor="textSecondary">
+            An organization owner or billing administrator must enable SMS.
           </ThemedText>
         ) : null}
 

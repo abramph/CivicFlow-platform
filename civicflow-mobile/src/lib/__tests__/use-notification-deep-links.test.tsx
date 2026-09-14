@@ -17,40 +17,38 @@ jest.mock('expo-router', () => ({
 }));
 
 const mockUseAuth = jest.fn();
-jest.mock('@/lib/auth-context', () => ({
-  useAuth: () => mockUseAuth(),
-}));
+jest.mock('@/lib/auth-context', () => ({ useAuth: () => mockUseAuth() }));
 
 const mockNavigateToDeepLink = jest.fn();
-jest.mock('@/lib/deep-links', () => ({
-  navigateToDeepLink: (...args: unknown[]) => mockNavigateToDeepLink(...args),
-}));
+jest.mock('@/lib/deep-links', () => ({ navigateToDeepLink: (...args: unknown[]) => mockNavigateToDeepLink(...args) }));
+
+const mockSelectOrganization = jest.fn().mockResolvedValue(undefined);
+const mockRefreshOrganizations = jest.fn();
+const ORGS = [{ organizationId: 'org-1' }, { organizationId: 'org-2' }];
+
+function auth(overrides: Record<string, unknown>) {
+  return {
+    status: 'signedIn',
+    selectedOrganizationId: 'org-1',
+    organizations: ORGS,
+    selectOrganization: mockSelectOrganization,
+    refreshOrganizations: mockRefreshOrganizations,
+    ...overrides,
+  };
+}
 
 function Harness() {
   useNotificationDeepLinks();
   return null;
 }
 
-function response(identifier: string, deepLink: string, organizationId?: string) {
-  return {
-    notification: { request: { identifier, content: { data: { deepLink, ...(organizationId ? { organizationId } : {}) } } } },
-  };
+function response(identifier: string, deepLink: string, extra?: Record<string, unknown>) {
+  return { notification: { request: { identifier, content: { data: { deepLink, ...extra } } } } };
 }
 
-const mockSelectOrganization = jest.fn().mockResolvedValue(undefined);
+const INBOX = { pathname: '/inbox', params: { unavailable: '1' } };
 
-/** Auth context with an accessible-org list, as the real provider supplies. */
-function auth(overrides: Record<string, unknown>) {
-  return {
-    status: 'signedIn',
-    selectedOrganizationId: 'org-1',
-    organizations: [{ organizationId: 'org-1' }, { organizationId: 'org-2' }],
-    selectOrganization: mockSelectOrganization,
-    ...overrides,
-  };
-}
-
-describe('useNotificationDeepLinks — deep links held until the app can navigate', () => {
+describe('useNotificationDeepLinks — live-validated, fail-closed isolation', () => {
   let listener: ((r: unknown) => void) | null = null;
 
   beforeEach(() => {
@@ -65,137 +63,120 @@ describe('useNotificationDeepLinks — deep links held until the app can navigat
     mockNavigateToDeepLink.mockReset();
     mockRouterReplace.mockReset();
     mockSelectOrganization.mockReset().mockResolvedValue(undefined);
+    mockRefreshOrganizations.mockReset().mockResolvedValue(ORGS);
   });
 
-  it('navigates immediately when signed in with an org selected', async () => {
-    mockUseAuth.mockReturnValue({ status: 'signedIn', selectedOrganizationId: 'org-1' });
-
+  it('navigates directly when the tap targets the already-selected org (after a live access refresh)', async () => {
+    mockUseAuth.mockReturnValue(auth({ selectedOrganizationId: 'org-1' }));
     const utils = await render(<Harness />);
     await waitFor(() => expect(listener).not.toBeNull());
 
-    listener?.(response('n1', '/event/evt-1'));
+    listener?.(response('n1', '/event/e1', { organizationId: 'org-1' }));
 
-    await waitFor(() => expect(mockNavigateToDeepLink).toHaveBeenCalledWith('/event/evt-1'));
+    await waitFor(() => expect(mockRefreshOrganizations).toHaveBeenCalled());
+    await waitFor(() => expect(mockNavigateToDeepLink).toHaveBeenCalledWith('/event/e1'));
+    expect(mockSelectOrganization).not.toHaveBeenCalled();
     utils.unmount();
   });
 
-  it('holds a tap that arrives during auth loading and fires it once ready — the dead-back-arrow fix', async () => {
-    mockUseAuth.mockReturnValue({ status: 'loading', selectedOrganizationId: null });
+  it('opens the neutral inbox when the live refresh shows the org is no longer accessible', async () => {
+    mockUseAuth.mockReturnValue(auth({ selectedOrganizationId: 'org-1' }));
+    // Server now returns only org-1 — access to org-2 was removed after the push was minted.
+    mockRefreshOrganizations.mockResolvedValue([{ organizationId: 'org-1' }]);
 
     const utils = await render(<Harness />);
     await waitFor(() => expect(listener).not.toBeNull());
-    listener?.(response('n2', '/announcement/ann-1'));
+    listener?.(response('n2', '/event/secret', { organizationId: 'org-2' }));
 
-    // Nothing navigates while the auth/index redirect chain is unsettled.
+    await waitFor(() => expect(mockRouterReplace).toHaveBeenCalledWith(INBOX));
+    expect(mockNavigateToDeepLink).not.toHaveBeenCalled();
+    utils.unmount();
+  });
+
+  it('fails closed to the neutral inbox when the live access refresh itself fails', async () => {
+    mockUseAuth.mockReturnValue(auth({ selectedOrganizationId: 'org-1' }));
+    mockRefreshOrganizations.mockRejectedValue(new Error('offline'));
+
+    const utils = await render(<Harness />);
+    await waitFor(() => expect(listener).not.toBeNull());
+    listener?.(response('n3', '/event/e2', { organizationId: 'org-2' }));
+
+    await waitFor(() => expect(mockRouterReplace).toHaveBeenCalledWith(INBOX));
+    expect(mockNavigateToDeepLink).not.toHaveBeenCalled();
+    utils.unmount();
+  });
+
+  it('acknowledged switch: requests the org change and navigates ONLY after the selection commits', async () => {
+    mockUseAuth.mockReturnValue(auth({ selectedOrganizationId: 'org-1' }));
+    const utils = await render(<Harness />);
+    await waitFor(() => expect(listener).not.toBeNull());
+
+    listener?.(response('n4', '/announce/a1', { organizationId: 'org-2' }));
+
+    await waitFor(() => expect(mockSelectOrganization).toHaveBeenCalledWith('org-2'));
+    // The switch has NOT committed yet — nothing navigates.
     expect(mockNavigateToDeepLink).not.toHaveBeenCalled();
 
-    mockUseAuth.mockReturnValue({ status: 'signedIn', selectedOrganizationId: 'org-1' });
+    // Simulate the org context actually committing to the target.
+    mockUseAuth.mockReturnValue(auth({ selectedOrganizationId: 'org-2' }));
     await utils.rerender(<Harness />);
 
-    await waitFor(() => expect(mockNavigateToDeepLink).toHaveBeenCalledWith('/announcement/ann-1'));
-    expect(mockNavigateToDeepLink).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(mockNavigateToDeepLink).toHaveBeenCalledWith('/announce/a1'));
     utils.unmount();
   });
 
-  it('picks up the cold-start response getLastNotificationResponseAsync delivers', async () => {
-    mockUseAuth.mockReturnValue({ status: 'signedIn', selectedOrganizationId: 'org-1' });
-    mockGetLastResponse.mockResolvedValue(response('cold-1', '/event/evt-9'));
-
+  it('holds a tap that arrives before ready and re-validates it after login', async () => {
+    mockUseAuth.mockReturnValue({ status: 'loading', selectedOrganizationId: null, organizations: [], selectOrganization: mockSelectOrganization, refreshOrganizations: mockRefreshOrganizations });
     const utils = await render(<Harness />);
+    await waitFor(() => expect(listener).not.toBeNull());
+    listener?.(response('n5', '/event/e3', { organizationId: 'org-1' }));
 
-    await waitFor(() => expect(mockNavigateToDeepLink).toHaveBeenCalledWith('/event/evt-9'));
+    // Nothing happens while not ready — no premature refresh or navigation.
+    expect(mockRefreshOrganizations).not.toHaveBeenCalled();
+    expect(mockNavigateToDeepLink).not.toHaveBeenCalled();
+
+    mockUseAuth.mockReturnValue(auth({ selectedOrganizationId: 'org-1' }));
+    await utils.rerender(<Harness />);
+
+    await waitFor(() => expect(mockRefreshOrganizations).toHaveBeenCalled());
+    await waitFor(() => expect(mockNavigateToDeepLink).toHaveBeenCalledWith('/event/e3'));
     utils.unmount();
   });
 
-  it('never navigates the same notification twice (cold-start response repeated by the listener)', async () => {
-    mockUseAuth.mockReturnValue({ status: 'signedIn', selectedOrganizationId: 'org-1' });
-    mockGetLastResponse.mockResolvedValue(response('dup-1', '/event/evt-1'));
+  it('never handles the same notification twice', async () => {
+    mockUseAuth.mockReturnValue(auth({ selectedOrganizationId: 'org-1' }));
+    mockGetLastResponse.mockResolvedValue(response('dup', '/event/e4', { organizationId: 'org-1' }));
 
     const utils = await render(<Harness />);
     await waitFor(() => expect(mockNavigateToDeepLink).toHaveBeenCalledTimes(1));
-
-    listener?.(response('dup-1', '/event/evt-1'));
-
+    listener?.(response('dup', '/event/e4', { organizationId: 'org-1' }));
     expect(mockNavigateToDeepLink).toHaveBeenCalledTimes(1);
     utils.unmount();
   });
 
-  it('waits for the root navigator to exist even when auth is already settled', async () => {
-    mockUseAuth.mockReturnValue({ status: 'signedIn', selectedOrganizationId: 'org-1' });
-    mockUseRootNavigationState.mockReturnValue(undefined);
+  describe('platform scope', () => {
+    it('navigates an approved platform route without any org refresh', async () => {
+      mockUseAuth.mockReturnValue(auth({ selectedOrganizationId: 'org-1' }));
+      const utils = await render(<Harness />);
+      await waitFor(() => expect(listener).not.toBeNull());
 
-    const utils = await render(<Harness />);
-    await waitFor(() => expect(listener).not.toBeNull());
-    listener?.(response('n3', '/event/evt-2'));
-    expect(mockNavigateToDeepLink).not.toHaveBeenCalled();
+      listener?.(response('p1', '/inbox', { notificationScope: 'platform' }));
 
-    mockUseRootNavigationState.mockReturnValue({ key: 'root' });
-    await utils.rerender(<Harness />);
+      await waitFor(() => expect(mockNavigateToDeepLink).toHaveBeenCalledWith('/inbox'));
+      expect(mockRefreshOrganizations).not.toHaveBeenCalled();
+      utils.unmount();
+    });
 
-    await waitFor(() => expect(mockNavigateToDeepLink).toHaveBeenCalledWith('/event/evt-2'));
-    utils.unmount();
-  });
+    it('opens the neutral inbox for a non-approved platform route', async () => {
+      mockUseAuth.mockReturnValue(auth({ selectedOrganizationId: 'org-1' }));
+      const utils = await render(<Harness />);
+      await waitFor(() => expect(listener).not.toBeNull());
 
-  it('switches organization context before navigating when the tap targets a different accessible org', async () => {
-    mockUseAuth.mockReturnValue(auth({ selectedOrganizationId: 'org-1' }));
+      listener?.(response('p2', '/union-cases/secret', { notificationScope: 'platform' }));
 
-    const utils = await render(<Harness />);
-    await waitFor(() => expect(listener).not.toBeNull());
-
-    listener?.(response('n-switch', '/announcement/ann-2', 'org-2'));
-
-    await waitFor(() => expect(mockSelectOrganization).toHaveBeenCalledWith('org-2'));
-    await waitFor(() => expect(mockNavigateToDeepLink).toHaveBeenCalledWith('/announcement/ann-2'));
-    utils.unmount();
-  });
-
-  it('navigates directly (no org switch) when the payload org is already selected', async () => {
-    mockUseAuth.mockReturnValue(auth({ selectedOrganizationId: 'org-2' }));
-
-    const utils = await render(<Harness />);
-    await waitFor(() => expect(listener).not.toBeNull());
-
-    listener?.(response('n-same', '/event/evt-3', 'org-2'));
-
-    await waitFor(() => expect(mockNavigateToDeepLink).toHaveBeenCalledWith('/event/evt-3'));
-    expect(mockSelectOrganization).not.toHaveBeenCalled();
-    utils.unmount();
-  });
-
-  it('opens the neutral inbox — never the protected resource — when the user cannot access the payload org', async () => {
-    mockUseAuth.mockReturnValue(auth({ selectedOrganizationId: 'org-1' }));
-
-    const utils = await render(<Harness />);
-    await waitFor(() => expect(listener).not.toBeNull());
-
-    // org-x is not in the accessible list (cross-tenant / removed membership).
-    listener?.(response('n-denied', '/event/secret-evt', 'org-x'));
-
-    await waitFor(() =>
-      expect(mockRouterReplace).toHaveBeenCalledWith({ pathname: '/inbox', params: { unavailable: '1' } })
-    );
-    expect(mockNavigateToDeepLink).not.toHaveBeenCalled();
-    expect(mockSelectOrganization).not.toHaveBeenCalled();
-    utils.unmount();
-  });
-
-  it('re-validates a held tap after login and FAILS CLOSED if access was removed in the meantime', async () => {
-    // Signed out when the tap arrives — the destination is held.
-    mockUseAuth.mockReturnValue({ status: 'loading', selectedOrganizationId: null, organizations: [], selectOrganization: mockSelectOrganization });
-
-    const utils = await render(<Harness />);
-    await waitFor(() => expect(listener).not.toBeNull());
-    listener?.(response('n-held', '/event/evt-held', 'org-2'));
-    expect(mockNavigateToDeepLink).not.toHaveBeenCalled();
-
-    // After login the user turns out NOT to have org-2 access anymore.
-    mockUseAuth.mockReturnValue(auth({ organizations: [{ organizationId: 'org-1' }], selectedOrganizationId: 'org-1' }));
-    await utils.rerender(<Harness />);
-
-    await waitFor(() =>
-      expect(mockRouterReplace).toHaveBeenCalledWith({ pathname: '/inbox', params: { unavailable: '1' } })
-    );
-    expect(mockNavigateToDeepLink).not.toHaveBeenCalled();
-    utils.unmount();
+      await waitFor(() => expect(mockRouterReplace).toHaveBeenCalledWith(INBOX));
+      expect(mockNavigateToDeepLink).not.toHaveBeenCalled();
+      utils.unmount();
+    });
   });
 });
