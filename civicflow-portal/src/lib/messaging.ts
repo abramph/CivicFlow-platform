@@ -38,7 +38,12 @@ export async function notifyNewMessageParticipants(params: {
   const senderLabel = resolvedSenderName ?? "A member";
 
   const preview = truncate(params.body, 140);
-  const deepLink = `/messages/${params.conversationId}`;
+  // The PUSH deep link must be the MEMBER-mobile conversation route
+  // (/conversation/{id}) — the mobile allow-list accepts that, not the
+  // staff-only web /messages/{id} inbox path. Emitting /messages/{id} here made
+  // real DM taps resolve to null and get silently discarded on the device. This
+  // is the push target only; staff web URLs and email behavior are unchanged.
+  const deepLink = `/conversation/${params.conversationId}`;
   const subject = `New message from ${senderLabel}`;
   const emailText = `${senderLabel} sent you a message in Unestra:\n\n${params.body}\n\nOpen Unestra to reply.`;
 

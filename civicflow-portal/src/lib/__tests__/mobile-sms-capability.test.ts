@@ -26,10 +26,17 @@ describe("toMobileSmsCapability (pure entitlement projection)", () => {
     });
   });
 
-  it("maps ADD_ON_REQUIRED to a self-serve billing prompt (never leaking the limit)", () => {
+  it("maps a NON-exempt ADD_ON_REQUIRED to a self-serve billing prompt (never leaking the limit)", () => {
     const cap = toMobileSmsCapability({ allowed: false, code: "ADD_ON_REQUIRED", reason: "…", remaining: 0, limit: 0 });
     expect(cap).toMatchObject({ available: false, reasonCode: "ADD_ON_REQUIRED", billingManagementRequired: true, remaining: null });
     expect(cap.message).toMatch(/Settings → Billing/);
+  });
+
+  it("maps a billing-EXEMPT ADD_ON_REQUIRED to contact-support (NO billing link, since billing isn't the remedy)", () => {
+    const cap = toMobileSmsCapability({ allowed: false, code: "ADD_ON_REQUIRED_EXEMPT", remaining: 0, limit: 0 });
+    expect(cap).toMatchObject({ available: false, reasonCode: "ADD_ON_REQUIRED_EXEMPT", billingManagementRequired: false, remaining: null });
+    expect(cap.message).toMatch(/Contact Unestra support/);
+    expect(cap.message).not.toMatch(/Billing/);
   });
 
   it("maps BILLING_REQUIRED to self-serve, SUSPENDED / ALLOWANCE_REACHED to non-self-serve", () => {

@@ -11,6 +11,10 @@ import { SMS_OVERAGE_POLICY } from "@/lib/sms-pricing";
 export type SmsEntitlementReasonCode =
   | "PLATFORM_MESSAGING_DISABLED"
   | "ADD_ON_REQUIRED"
+  // Same missing-add-on state, but for a billing-EXEMPT org, where billing is
+  // NOT the remedy: the add-on must be turned on via the audited platform
+  // super-admin enrollment flow, so the mobile UX must not point at billing.
+  | "ADD_ON_REQUIRED_EXEMPT"
   | "SUSPENDED"
   | "BILLING_REQUIRED"
   | "ALLOWANCE_REACHED";
@@ -55,10 +59,14 @@ export async function getSmsEntitlement(organizationId: string): Promise<SmsEnti
   }
 
   if (!settings || !settings.smsAddOnActive) {
+    // A billing-exempt org can't self-serve enable the add-on through billing —
+    // its enrollment is done by a platform super-admin — so it gets a distinct
+    // code that steers the UX away from a (useless) billing link.
+    const exempt = organization?.billingExempt === true;
     return {
       allowed: false,
       reason: "Your organization does not have the SMS add-on enabled.",
-      code: "ADD_ON_REQUIRED",
+      code: exempt ? "ADD_ON_REQUIRED_EXEMPT" : "ADD_ON_REQUIRED",
       remaining: 0,
       limit: 0,
     };

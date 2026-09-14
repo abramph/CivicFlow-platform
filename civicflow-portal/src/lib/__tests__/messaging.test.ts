@@ -51,6 +51,9 @@ vi.mock("@/lib/notifications/identity", async (importOriginal) => {
 });
 
 import { notifyNewMessageParticipants } from "@/lib/messaging";
+// The REAL portal deep-link validator (not mocked) — proves the emitted DM link
+// survives server-side validation end-to-end.
+import { validateDeepLink } from "@/lib/deep-links";
 
 describe("notifyNewMessageParticipants", () => {
   beforeEach(() => {
@@ -75,19 +78,25 @@ describe("notifyNewMessageParticipants", () => {
     await notifyNewMessageParticipants({
       conversationId: "conv-1",
       organizationId: "org-a",
-      senderUserId: "officer-1",      body: "Hello there",
+      senderUserId: "officer-1",
+      body: "Hello there",
     });
 
-    expect(sendPushToMember).toHaveBeenCalledWith(
-      expect.objectContaining({
-        organizationId: "org-a",
-        memberId: "member-1",
-        deepLink: "/messages/conv-1",
-        // Direct-message identity: sender name, then the server-resolved org.
-        title: "Officer Jane · Riverside PTA",
-        subtitle: "Message",
-      })
-    );
+    const pushArgs = sendPushToMember.mock.calls[0][0] as { deepLink: string; title: string; subtitle: string };
+    expect(pushArgs).toMatchObject({
+      organizationId: "org-a",
+      memberId: "member-1",
+      // MEMBER-mobile conversation route (mobile allow-list), not the staff web
+      // /messages/{id} path that made real DM taps get silently discarded.
+      deepLink: "/conversation/conv-1",
+      // Direct-message identity: sender name, then the server-resolved org.
+      title: "Officer Jane · Riverside PTA",
+      subtitle: "Message",
+    });
+    // Integration: the DM deep link the server emits survives the portal
+    // deep-link validator (the mobile allow-list is asserted in
+    // civicflow-mobile/src/lib/__tests__/deep-links.test.ts).
+    expect(validateDeepLink(pushArgs.deepLink)).toBe("/conversation/conv-1");
     expect(sendEmail).not.toHaveBeenCalled();
   });
 

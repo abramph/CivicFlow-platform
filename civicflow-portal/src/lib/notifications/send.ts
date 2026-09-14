@@ -126,7 +126,14 @@ export async function sendOrganizationTokensPush(params: {
  * canonical layer rather than reaching for push.ts directly. Any deep link
  * outside the allowlist is dropped to null (neutral) rather than trusted.
  */
-export const PLATFORM_DEEP_LINK_ALLOWLIST = ["/inbox", "/settings/security", "/settings/billing"] as const;
+// Smallest truthful contract: only routes that actually exist AND survive both
+// the portal deep-link validator (validateDeepLink) and the mobile allow-list
+// (resolveAllowedDeepLinkPath) end-to-end. /settings/security and
+// /settings/billing are NOT in either allow-list, so advertising them here was
+// misleading — they were nullified downstream. There is no platform-alert
+// caller yet; when a genuine platform destination is added, add the real mobile
+// route and align all three validators before listing it here.
+export const PLATFORM_DEEP_LINK_ALLOWLIST = ["/inbox"] as const;
 
 export async function sendPlatformTokensPush(params: {
   tokens: string[];

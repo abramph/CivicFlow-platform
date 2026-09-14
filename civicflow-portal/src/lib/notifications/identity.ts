@@ -25,8 +25,12 @@ import { prisma } from "@/lib/prisma";
 
 export const PLATFORM_NOTIFICATION_TITLE = "Unestra";
 
-/** Upper bound on a rendered notification title. Long org names are truncated
- *  on a Unicode code-point boundary (never mid-surrogate/grapheme-splitting). */
+/** Upper bound on a rendered notification title, counted in whatever unit
+ *  safeTruncate() uses: on the normal path that is grapheme clusters
+ *  (Intl.Segmenter — combining marks, flags, and ZWJ emoji stay whole); only on
+ *  the fallback path (an environment lacking Intl.Segmenter) is it code points,
+ *  which still never splits a surrogate pair but may split a multi-scalar
+ *  cluster. */
 export const MAX_NOTIFICATION_TITLE_LENGTH = 64;
 
 export type NotificationCategory =

@@ -150,6 +150,17 @@ describe("getSmsEntitlement", () => {
       const result = await getSmsEntitlement("org-exempt");
       expect(result.allowed).toBe(false);
       expect(result.reason).toMatch(/does not have the SMS add-on/);
+      // Exempt orgs get the distinct code so the mobile UX steers away from
+      // billing (their add-on is enabled via super-admin enrollment).
+      expect(result.code).toBe("ADD_ON_REQUIRED_EXEMPT");
+    });
+
+    it("a billing-exempt org with an inactive add-on also gets the exempt code (not the billing one)", async () => {
+      findUniqueOrganization.mockResolvedValue({ billingExempt: true });
+      findUniqueSmsSettings.mockResolvedValueOnce({ smsAddOnActive: false, smsMonthlyLimit: 1000, smsUsedThisPeriod: 0 });
+      const result = await getSmsEntitlement("org-exempt");
+      expect(result.allowed).toBe(false);
+      expect(result.code).toBe("ADD_ON_REQUIRED_EXEMPT");
     });
 
     it("allows a billing-exempt org WITH explicit audited enrollment and no subscription — exemption satisfies only the base-billing prerequisite", async () => {

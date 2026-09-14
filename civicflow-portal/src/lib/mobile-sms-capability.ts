@@ -43,6 +43,9 @@ export interface MobileSmsCapability {
 const ENTITLEMENT_MESSAGE: Record<SmsEntitlementReasonCode, string> = {
   PLATFORM_MESSAGING_DISABLED: "Text messaging is temporarily unavailable. Please try again later.",
   ADD_ON_REQUIRED: "SMS isn't part of your plan yet. Add the SMS add-on in Settings → Billing to text members.",
+  // Billing-exempt org: billing is NOT the remedy — the add-on is enabled by
+  // Unestra platform support, so no billing link is offered.
+  ADD_ON_REQUIRED_EXEMPT: "SMS isn't enabled for your organization yet. Contact Unestra support to have it turned on.",
   SUSPENDED: "SMS messaging is suspended for your organization. Please contact support.",
   BILLING_REQUIRED: "Your subscription isn't active. Update billing in Settings → Billing to send SMS.",
   ALLOWANCE_REACHED: "You've used this month's SMS allowance. It resets at the start of your next billing period.",
