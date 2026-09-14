@@ -139,7 +139,9 @@ export async function approvePaymentReport(
     organizationId,
     memberId: report.memberId,
     category: "PAYMENT_UPDATE",
-    body: `Your ${categoryLabel.toLowerCase()} payment of $${Number(report.amount).toFixed(2)} has been approved. Thank you!`,
+    // Lock-screen-safe: no dollar amount (see the email above for the detail;
+    // the full record is on /payment-history after authenticated navigation).
+    body: "Your reported payment was approved.",
     deepLink: "/payment-history",
     required: true,
   }).catch(() => null);
@@ -191,7 +193,9 @@ export async function rejectPaymentReport(
     organizationId,
     memberId: report.memberId,
     category: "PAYMENT_UPDATE",
-    body: `Your reported payment of $${Number(report.amount).toFixed(2)} could not be confirmed: ${rejectionReason}`,
+    // Lock-screen-safe: no dollar amount and no free-form reason (both are in
+    // the email above and on /report-payment after authenticated navigation).
+    body: "Your reported payment could not be confirmed. Open Unestra for details.",
     deepLink: "/report-payment",
     required: true,
   }).catch(() => null);

@@ -29,7 +29,7 @@ describe("organization-branded push wrappers", () => {
     vi.restoreAllMocks();
   });
 
-  it("sendOrganizationMemberPush titles with the org name and carries org id + category in data", async () => {
+  it("sendOrganizationMemberPush titles with the org name and passes org id + category as reserved fields", async () => {
     await sendOrganizationMemberPush({
       organizationId: "org-1",
       memberId: "member-1",
@@ -39,6 +39,8 @@ describe("organization-branded push wrappers", () => {
       required: true,
     });
 
+    // organizationId/category are explicit reserved fields (push.ts writes them
+    // authoritatively into data); the wrapper carries no extra `data` here.
     expect(sendPushToMember).toHaveBeenCalledWith({
       organizationId: "org-1",
       memberId: "member-1",
@@ -46,12 +48,13 @@ describe("organization-branded push wrappers", () => {
       subtitle: "Payment reminder",
       body: "Your dues are due.",
       deepLink: "/dues",
-      data: { organizationId: "org-1", category: "DUES_REMINDER" },
+      category: "DUES_REMINDER",
+      data: undefined,
       required: true,
     });
   });
 
-  it("sendOrganizationTokensPush merges caller data and adds org id + category", async () => {
+  it("sendOrganizationTokensPush passes reserved fields explicitly and keeps caller data separate", async () => {
     await sendOrganizationTokensPush({
       organizationId: "org-1",
       tokens: ["ExponentPushToken[a]", "ExponentPushToken[b]"],
@@ -68,7 +71,9 @@ describe("organization-branded push wrappers", () => {
         subtitle: "Announcement",
         body: "Meeting tonight.",
         deepLink: "/announcements/c1",
-        data: { campaignId: "c1", organizationId: "org-1", category: "ANNOUNCEMENT" },
+        organizationId: "org-1",
+        category: "ANNOUNCEMENT",
+        data: { campaignId: "c1" },
       }
     );
   });
@@ -82,20 +87,18 @@ describe("organization-branded push wrappers", () => {
       memberId: "member-1",
       category: "ANNOUNCEMENT",
       body: "Sensitive body text that must never be logged.",
-      senderName: "Jane Sender",
     });
 
     expect(sendPushToMember).toHaveBeenCalledWith(
-      expect.objectContaining({ title: "Unestra", data: { organizationId: "ghost-org", category: "ANNOUNCEMENT" } })
+      expect.objectContaining({ title: "Unestra", organizationId: "ghost-org", category: "ANNOUNCEMENT" })
     );
 
     expect(warn).toHaveBeenCalledTimes(1);
     const logged = warn.mock.calls[0][0] as string;
     expect(logged).toContain("notification_org_unresolved");
     expect(logged).toContain("ghost-org");
-    // Privacy: never the body, sender name, tokens, or member emails.
+    // Privacy: never the body, tokens, or member emails.
     expect(logged).not.toContain("Sensitive body text");
-    expect(logged).not.toContain("Jane Sender");
   });
 
   it("does NOT log the unresolved warning when there was no organizationId to resolve", async () => {

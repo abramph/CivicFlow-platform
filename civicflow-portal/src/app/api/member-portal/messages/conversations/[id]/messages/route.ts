@@ -37,8 +37,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       return Response.json({ ok: false, error: "Conversation not found" }, { status: 404 });
     }
 
-    const sender = await prisma.user.findUnique({ where: { id: userId }, select: { email: true, displayName: true } });
-
     const body = input.body.trim();
     const message = await prisma.message.create({
       data: { conversationId: id, organizationId, senderUserId: userId, body },
@@ -53,7 +51,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       conversationId: id,
       organizationId,
       senderUserId: userId,
-      senderDisplayName: sender?.displayName ?? sender?.email ?? "A member",
       body,
     }).catch(() => null);
 

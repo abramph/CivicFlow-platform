@@ -6,7 +6,7 @@ const createUnionCaseDeadlineReminderLog = vi.fn();
 const findFirstOrgMember = vi.fn();
 const findManyMobileDeviceToken = vi.fn();
 const sendEmail = vi.fn().mockResolvedValue({ sent: true, skipped: false });
-const sendPushToTokens = vi.fn().mockResolvedValue({ sent: 0, failed: 0 });
+const sendOrganizationTokensPush = vi.fn().mockResolvedValue({ sent: 0, failed: 0 });
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -18,7 +18,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 vi.mock("@/lib/mail", () => ({ sendEmail: (...a: unknown[]) => sendEmail(...a) }));
-vi.mock("@/lib/push", () => ({ sendPushToTokens: (...a: unknown[]) => sendPushToTokens(...a) }));
+vi.mock("@/lib/notifications/send", () => ({ sendOrganizationTokensPush: (...a: unknown[]) => sendOrganizationTokensPush(...a) }));
 
 const createAuditEvent = vi.fn().mockResolvedValue(undefined);
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...a: unknown[]) => createAuditEvent(...a) }));

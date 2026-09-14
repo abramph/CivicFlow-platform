@@ -131,7 +131,6 @@ export async function POST(request: Request) {
       conversationId: conversation.id,
       organizationId,
       senderUserId: session.userId,
-      senderDisplayName: session.userEmail,
       body: input.body.trim(),
     }).catch(() => null);
 

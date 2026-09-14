@@ -183,7 +183,7 @@ vi.mock("@/lib/prisma", () => ({
 
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...a: unknown[]) => createAuditEvent(...a) }));
 vi.mock("@/lib/mail", () => ({ sendEmail: vi.fn() }));
-vi.mock("@/lib/push", () => ({ sendPushToTokens: vi.fn() }));
+vi.mock("@/lib/notifications/send", () => ({ sendOrganizationTokensPush: vi.fn() }));
 
 beforeEach(() => {
   vi.clearAllMocks();

@@ -40,6 +40,16 @@ vi.mock("@/lib/push", () => ({
   sendPushToTokens: (...args: unknown[]) => sendPushToTokens(...args),
 }));
 
+// The DM sender name is resolved server-side (identity.ts) from the sender's
+// user id + tenant membership. Stub just that resolver (keeping the rest of
+// identity real for send.ts) so it doesn't consume the orgMember.findFirst
+// mock the recipient lookups rely on.
+const resolveDirectMessageSenderName = vi.fn();
+vi.mock("@/lib/notifications/identity", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/notifications/identity")>();
+  return { ...actual, resolveDirectMessageSenderName: (...args: unknown[]) => resolveDirectMessageSenderName(...args) };
+});
+
 import { notifyNewMessageParticipants } from "@/lib/messaging";
 
 describe("notifyNewMessageParticipants", () => {
@@ -49,6 +59,7 @@ describe("notifyNewMessageParticipants", () => {
     findFirstPtaHouseholdAdult.mockReset();
     findManyMobileDeviceToken.mockReset();
     findUniqueOrganization.mockReset().mockResolvedValue({ name: "Riverside PTA" });
+    resolveDirectMessageSenderName.mockReset().mockResolvedValue("Officer Jane");
     sendEmail.mockClear();
     sendPushToMember.mockReset();
     sendPushToTokens.mockReset().mockResolvedValue({ sent: 0, failed: 0 });
@@ -64,9 +75,7 @@ describe("notifyNewMessageParticipants", () => {
     await notifyNewMessageParticipants({
       conversationId: "conv-1",
       organizationId: "org-a",
-      senderUserId: "officer-1",
-      senderDisplayName: "Officer Jane",
-      body: "Hello there",
+      senderUserId: "officer-1",      body: "Hello there",
     });
 
     expect(sendPushToMember).toHaveBeenCalledWith(
@@ -92,9 +101,7 @@ describe("notifyNewMessageParticipants", () => {
     await notifyNewMessageParticipants({
       conversationId: "conv-1",
       organizationId: "org-a",
-      senderUserId: "officer-1",
-      senderDisplayName: "Officer Jane",
-      body: "Hello there",
+      senderUserId: "officer-1",      body: "Hello there",
     });
 
     expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: "member@example.com" }));
@@ -110,9 +117,7 @@ describe("notifyNewMessageParticipants", () => {
     await notifyNewMessageParticipants({
       conversationId: "conv-1",
       organizationId: "org-a",
-      senderUserId: "officer-1",
-      senderDisplayName: "Officer Jane",
-      body: "Hello there",
+      senderUserId: "officer-1",      body: "Hello there",
     });
 
     expect(sendEmail).not.toHaveBeenCalled();
@@ -126,9 +131,7 @@ describe("notifyNewMessageParticipants", () => {
     await notifyNewMessageParticipants({
       conversationId: "conv-1",
       organizationId: "org-a",
-      senderUserId: "member-user-1",
-      senderDisplayName: "Jane Member",
-      body: "Question about dues",
+      senderUserId: "member-user-1",      body: "Question about dues",
     });
 
     expect(sendPushToMember).not.toHaveBeenCalled();
@@ -147,9 +150,7 @@ describe("notifyNewMessageParticipants", () => {
     await notifyNewMessageParticipants({
       conversationId: "conv-1",
       organizationId: "org-a",
-      senderUserId: "officer-1",
-      senderDisplayName: "Officer Jane",
-      body: "Hello there",
+      senderUserId: "officer-1",      body: "Hello there",
     });
 
     expect(findFirstPtaHouseholdAdult).toHaveBeenCalledWith(
@@ -174,9 +175,7 @@ describe("notifyNewMessageParticipants", () => {
     await notifyNewMessageParticipants({
       conversationId: "conv-1",
       organizationId: "org-a",
-      senderUserId: "officer-1",
-      senderDisplayName: "Officer Jane",
-      body: "Hello there",
+      senderUserId: "officer-1",      body: "Hello there",
     });
 
     expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: "parent@example.com" }));
@@ -192,9 +191,7 @@ describe("notifyNewMessageParticipants", () => {
     await notifyNewMessageParticipants({
       conversationId: "conv-1",
       organizationId: "org-a",
-      senderUserId: "officer-1",
-      senderDisplayName: "Officer Jane",
-      body: "Hello there",
+      senderUserId: "officer-1",      body: "Hello there",
     });
 
     expect(sendPushToTokens).not.toHaveBeenCalled();
@@ -207,9 +204,7 @@ describe("notifyNewMessageParticipants", () => {
     await notifyNewMessageParticipants({
       conversationId: "conv-1",
       organizationId: "org-a",
-      senderUserId: "officer-1",
-      senderDisplayName: "Officer Jane",
-      body: "Hello",
+      senderUserId: "officer-1",      body: "Hello",
     });
 
     expect(findManyParticipant).toHaveBeenCalledWith(

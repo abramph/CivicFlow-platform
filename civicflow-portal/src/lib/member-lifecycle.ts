@@ -148,7 +148,7 @@ export async function terminateMember(input: {
     organizationId: input.organizationId,
     memberId: updated.id,
     category: "MEMBERSHIP_UPDATE",
-    body: "Your membership status is now: Terminated.",
+    body: "Your membership status was updated.",
     deepLink: "/dues",
     required: true,
   }).catch(() => null);
@@ -223,7 +223,7 @@ export async function reinstateMember(input: {
     organizationId: input.organizationId,
     memberId: updated.id,
     category: "MEMBERSHIP_UPDATE",
-    body: "Your membership status is now: Active.",
+    body: "Your membership status was updated.",
     deepLink: "/dues",
     required: true,
   }).catch(() => null);

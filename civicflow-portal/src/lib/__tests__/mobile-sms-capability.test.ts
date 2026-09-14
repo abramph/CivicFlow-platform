@@ -1,13 +1,24 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { toMobileSmsCapability } from "@/lib/mobile-sms-capability";
+const getSmsEntitlement = vi.fn();
+vi.mock("@/lib/sms-entitlement", () => ({
+  getSmsEntitlement: (...args: unknown[]) => getSmsEntitlement(...args),
+}));
+
+const getSmsPlatformStatus = vi.fn();
+vi.mock("@/lib/sms-operational-status", () => ({
+  getSmsPlatformStatus: (...args: unknown[]) => getSmsPlatformStatus(...args),
+}));
+
+import { getMobileSmsCapability, toMobileSmsCapability } from "@/lib/mobile-sms-capability";
 import type { SmsEntitlement } from "@/lib/sms-entitlement";
 
-describe("toMobileSmsCapability", () => {
+describe("toMobileSmsCapability (pure entitlement projection)", () => {
   it("maps an allowed entitlement to available with the remaining allowance and no reason", () => {
     const entitlement: SmsEntitlement = { allowed: true, remaining: 42, limit: 1000 };
     expect(toMobileSmsCapability(entitlement)).toEqual({
       available: true,
+      restricted: false,
       reasonCode: null,
       message: null,
       remaining: 42,
@@ -16,54 +27,78 @@ describe("toMobileSmsCapability", () => {
   });
 
   it("maps ADD_ON_REQUIRED to a self-serve billing prompt (never leaking the limit)", () => {
-    const cap = toMobileSmsCapability({
-      allowed: false,
-      code: "ADD_ON_REQUIRED",
-      reason: "…",
-      remaining: 0,
-      limit: 0,
-    });
-    expect(cap.available).toBe(false);
-    expect(cap.reasonCode).toBe("ADD_ON_REQUIRED");
-    expect(cap.billingManagementRequired).toBe(true);
-    expect(cap.remaining).toBeNull();
+    const cap = toMobileSmsCapability({ allowed: false, code: "ADD_ON_REQUIRED", reason: "…", remaining: 0, limit: 0 });
+    expect(cap).toMatchObject({ available: false, reasonCode: "ADD_ON_REQUIRED", billingManagementRequired: true, remaining: null });
     expect(cap.message).toMatch(/Settings → Billing/);
   });
 
-  it("maps BILLING_REQUIRED to a self-serve billing prompt", () => {
-    const cap = toMobileSmsCapability({ allowed: false, code: "BILLING_REQUIRED", remaining: 0, limit: 1000 });
-    expect(cap).toMatchObject({ available: false, reasonCode: "BILLING_REQUIRED", billingManagementRequired: true, remaining: null });
-  });
-
-  it("maps SUSPENDED to NON-self-serve (an admin action, not a checkout)", () => {
-    const cap = toMobileSmsCapability({ allowed: false, code: "SUSPENDED", remaining: 0, limit: 1000 });
-    expect(cap).toMatchObject({ available: false, reasonCode: "SUSPENDED", billingManagementRequired: false });
-  });
-
-  it("maps PLATFORM_MESSAGING_DISABLED to NON-self-serve", () => {
-    const cap = toMobileSmsCapability({ allowed: false, code: "PLATFORM_MESSAGING_DISABLED", remaining: 0, limit: 0 });
-    expect(cap).toMatchObject({ available: false, reasonCode: "PLATFORM_MESSAGING_DISABLED", billingManagementRequired: false });
-  });
-
-  it("maps ALLOWANCE_REACHED to NON-self-serve (resets on rollover) and never leaks remaining", () => {
-    const cap = toMobileSmsCapability({ allowed: false, code: "ALLOWANCE_REACHED", remaining: 0, limit: 1000 });
-    expect(cap).toMatchObject({ available: false, reasonCode: "ALLOWANCE_REACHED", billingManagementRequired: false, remaining: null });
-  });
-
-  it("defends against a code-less denial by defaulting to ADD_ON_REQUIRED", () => {
-    const cap = toMobileSmsCapability({ allowed: false, remaining: 0, limit: 0 });
-    expect(cap.available).toBe(false);
-    expect(cap.reasonCode).toBe("ADD_ON_REQUIRED");
+  it("maps BILLING_REQUIRED to self-serve, SUSPENDED / ALLOWANCE_REACHED to non-self-serve", () => {
+    expect(toMobileSmsCapability({ allowed: false, code: "BILLING_REQUIRED", remaining: 0, limit: 1000 })).toMatchObject({
+      billingManagementRequired: true,
+    });
+    expect(toMobileSmsCapability({ allowed: false, code: "SUSPENDED", remaining: 0, limit: 1000 })).toMatchObject({
+      billingManagementRequired: false,
+    });
+    expect(toMobileSmsCapability({ allowed: false, code: "ALLOWANCE_REACHED", remaining: 0, limit: 1000 })).toMatchObject({
+      billingManagementRequired: false,
+      remaining: null,
+    });
   });
 
   it("exposes ONLY the safe presentation fields — never Stripe/Twilio/phone internals", () => {
     const cap = toMobileSmsCapability({ allowed: false, code: "ADD_ON_REQUIRED", remaining: 0, limit: 500 });
     expect(Object.keys(cap).sort()).toEqual(
-      ["available", "billingManagementRequired", "message", "reasonCode", "remaining"].sort()
+      ["available", "billingManagementRequired", "message", "reasonCode", "remaining", "restricted"].sort()
     );
     const serialized = JSON.stringify(cap).toLowerCase();
     for (const forbidden of ["price", "sub_", "prod_", "item", "twilio", "sid", "phone", "+1", "stripe"]) {
       expect(serialized).not.toContain(forbidden);
     }
+  });
+});
+
+describe("getMobileSmsCapability (platform gate + entitlement + Safe Launch)", () => {
+  beforeEach(() => {
+    getSmsPlatformStatus.mockReset();
+    getSmsEntitlement.mockReset();
+    // Default: platform fully up, org entitled.
+    getSmsPlatformStatus.mockResolvedValue({ configured: true, available: true, testMode: false });
+    getSmsEntitlement.mockResolvedValue({ allowed: true, remaining: 100, limit: 1000 });
+  });
+
+  it("fails closed for each platform-operational block, WITHOUT consulting entitlement", async () => {
+    for (const code of ["NOT_CONFIGURED", "PLATFORM_DISABLED", "MAINTENANCE", "OUTBOUND_PAUSED"] as const) {
+      getSmsPlatformStatus.mockResolvedValueOnce({ configured: code !== "NOT_CONFIGURED", available: false, unavailableCode: code, testMode: false });
+      const cap = await getMobileSmsCapability("org-a");
+      expect(cap).toMatchObject({ available: false, reasonCode: code, billingManagementRequired: false });
+      expect(cap.message).toBeTruthy();
+    }
+    // Platform gate short-circuits before the per-org entitlement query.
+    expect(getSmsEntitlement).not.toHaveBeenCalled();
+  });
+
+  it("surfaces an entitlement denial when the platform is up", async () => {
+    getSmsEntitlement.mockResolvedValueOnce({ allowed: false, code: "ADD_ON_REQUIRED", remaining: 0, limit: 0 });
+    const cap = await getMobileSmsCapability("org-a");
+    expect(cap).toMatchObject({ available: false, reasonCode: "ADD_ON_REQUIRED", billingManagementRequired: true });
+  });
+
+  it("reports a truthful RESTRICTED state when entitled but Safe Launch (test mode) is on", async () => {
+    getSmsPlatformStatus.mockResolvedValueOnce({ configured: true, available: true, testMode: true });
+    const cap = await getMobileSmsCapability("org-a");
+    expect(cap).toMatchObject({ available: true, restricted: true, reasonCode: "RESTRICTED_TEST_MODE", remaining: 100 });
+    expect(cap.message).toMatch(/verified test numbers/i);
+  });
+
+  it("reports fully available (unrestricted) when platform is up, entitled, and not in test mode", async () => {
+    const cap = await getMobileSmsCapability("org-a");
+    expect(cap).toEqual({
+      available: true,
+      restricted: false,
+      reasonCode: null,
+      message: null,
+      remaining: 100,
+      billingManagementRequired: false,
+    });
   });
 });

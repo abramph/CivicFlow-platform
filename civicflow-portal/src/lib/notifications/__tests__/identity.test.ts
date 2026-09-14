@@ -1,10 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const findUniqueOrganization = vi.fn();
+const findFirstOrgMember = vi.fn();
+const findFirstPtaHouseholdAdult = vi.fn();
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     organization: {
       findUnique: (...args: unknown[]) => findUniqueOrganization(...args),
+    },
+    orgMember: {
+      findFirst: (...args: unknown[]) => findFirstOrgMember(...args),
+    },
+    ptaHouseholdAdult: {
+      findFirst: (...args: unknown[]) => findFirstPtaHouseholdAdult(...args),
     },
   },
 }));
@@ -17,6 +25,7 @@ import {
   campaignNotificationCategory,
   isOrganizationTitledCategory,
   normalizeName,
+  resolveDirectMessageSenderName,
   safeTruncate,
 } from "@/lib/notifications/identity";
 
@@ -167,5 +176,71 @@ describe("buildNotificationIdentity", () => {
     const identity = await buildNotificationIdentity({ category: "ANNOUNCEMENT", organizationId: "org-1" });
     expect(Array.from(identity.title).length).toBeLessThanOrEqual(MAX_NOTIFICATION_TITLE_LENGTH);
     expect(identity.title.endsWith("…")).toBe(true);
+  });
+});
+
+describe("safeTruncate — grapheme-cluster aware", () => {
+  // A grapheme cluster the naive code-point (Array.from) truncation could split.
+  const cases: Array<{ name: string; grapheme: string }> = [
+    { name: "combining mark (e + combining acute)", grapheme: "é" },
+    { name: "skin-tone emoji (thumbs up + modifier)", grapheme: "\u{1F44D}\u{1F3FD}" },
+    { name: "regional-indicator flag", grapheme: "\u{1F1FA}\u{1F1F8}" },
+    { name: "ZWJ family emoji", grapheme: "\u{1F468}‍\u{1F469}‍\u{1F467}" },
+  ];
+
+  for (const { name, grapheme } of cases) {
+    it(`never splits a ${name}`, () => {
+      // 8 identical clusters; truncate to 5 → 4 whole clusters + ellipsis.
+      const out = safeTruncate(grapheme.repeat(8), 5);
+      const segmenter = new Intl.Segmenter("und", { granularity: "grapheme" });
+      const outClusters = Array.from(segmenter.segment(out), (s) => s.segment);
+      expect(outClusters.length).toBe(5);
+      expect(out.endsWith("…")).toBe(true);
+      // Every kept cluster is the intact grapheme (never a fragment of it).
+      expect(outClusters.slice(0, -1).every((c) => c === grapheme)).toBe(true);
+    });
+  }
+
+  it("leaves an ordinary long organization name intact below the limit", () => {
+    expect(safeTruncate("Riverside Community Association", 64)).toBe("Riverside Community Association");
+  });
+});
+
+describe("resolveDirectMessageSenderName", () => {
+  beforeEach(() => {
+    findFirstOrgMember.mockReset();
+    findFirstPtaHouseholdAdult.mockReset().mockResolvedValue(null);
+  });
+
+  it("resolves from the sender's tenant-scoped OrgMember first/last name", async () => {
+    findFirstOrgMember.mockResolvedValueOnce({ firstName: "Officer", lastName: "Jane" });
+    expect(await resolveDirectMessageSenderName("org-1", "user-1")).toBe("Officer Jane");
+    // Scoped to BOTH the org and the sender's user id — never cross-tenant.
+    expect(findFirstOrgMember).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { organizationId: "org-1", userId: "user-1" } })
+    );
+  });
+
+  it("falls back to the PTA household-adult name when there is no OrgMember", async () => {
+    findFirstOrgMember.mockResolvedValueOnce(null);
+    findFirstPtaHouseholdAdult.mockResolvedValueOnce({ name: "Parent Pat" });
+    expect(await resolveDirectMessageSenderName("org-1", "user-1")).toBe("Parent Pat");
+  });
+
+  it("returns null (→ org name only) for a cross-tenant sender with no record in this org", async () => {
+    findFirstOrgMember.mockResolvedValueOnce(null);
+    findFirstPtaHouseholdAdult.mockResolvedValueOnce(null);
+    expect(await resolveDirectMessageSenderName("org-1", "outsider")).toBeNull();
+  });
+
+  it("never returns an email address even if a name field somehow contains one", async () => {
+    findFirstOrgMember.mockResolvedValueOnce({ firstName: "jane@example.com", lastName: "" });
+    expect(await resolveDirectMessageSenderName("org-1", "user-1")).toBeNull();
+  });
+
+  it("returns null for empty ids without querying", async () => {
+    expect(await resolveDirectMessageSenderName("", "user-1")).toBeNull();
+    expect(await resolveDirectMessageSenderName("org-1", "")).toBeNull();
+    expect(findFirstOrgMember).not.toHaveBeenCalled();
   });
 });

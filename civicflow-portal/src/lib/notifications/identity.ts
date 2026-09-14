@@ -93,12 +93,32 @@ export function normalizeName(raw: string): string {
   return raw.replace(/\s+/g, " ").trim();
 }
 
-/** Truncate on a Unicode code-point boundary so a multi-byte character is
- *  never split. Appends an ellipsis when shortened. */
+/**
+ * Grapheme segmenter — the unit a human perceives as one character. Unlike
+ * code points (Array.from), grapheme clusters keep combining accents, emoji
+ * skin-tone modifiers, regional-indicator flag pairs, and ZWJ family emoji
+ * intact. Intl.Segmenter is available on the portal's Node runtime; the
+ * code-point fallback is retained only for any environment that lacks it (it
+ * still never splits a surrogate pair — it just can't merge multi-scalar
+ * clusters).
+ */
+const graphemeSegmenter: Intl.Segmenter | null =
+  typeof Intl !== "undefined" && typeof Intl.Segmenter === "function"
+    ? new Intl.Segmenter("und", { granularity: "grapheme" })
+    : null;
+
+function toGraphemes(value: string): string[] {
+  if (graphemeSegmenter) return Array.from(graphemeSegmenter.segment(value), (s) => s.segment);
+  return Array.from(value); // code-point fallback (no grapheme merging, but no split surrogates)
+}
+
+/** Truncate on a grapheme-cluster boundary so a visible character (accented
+ *  letter, flag, skin-toned or ZWJ emoji) is never split. Appends an ellipsis
+ *  when shortened. `max` counts grapheme clusters. */
 export function safeTruncate(value: string, max: number): string {
-  const points = Array.from(value); // iterates by code point, not UTF-16 unit
-  if (points.length <= max) return value;
-  return points.slice(0, Math.max(0, max - 1)).join("").trimEnd() + "…";
+  const graphemes = toGraphemes(value);
+  if (graphemes.length <= max) return value;
+  return graphemes.slice(0, Math.max(0, max - 1)).join("").trimEnd() + "…";
 }
 
 export interface NotificationIdentity {
@@ -127,12 +147,50 @@ export async function resolveOrganizationDisplayName(organizationId: string): Pr
   return safeTruncate(name, MAX_NOTIFICATION_TITLE_LENGTH);
 }
 
+/**
+ * Resolve a direct-message sender's display name SERVER-side, from the
+ * authenticated sender's user id scoped to the tenant — never from a
+ * caller/client-supplied string (which the message routes populate from the
+ * session EMAIL, an inappropriate identity to surface). Order: the sender's
+ * OrgMember first/last name in this org, then their PTA household-adult name in
+ * this org; an email address is never returned. Null → the caller shows the
+ * organization name alone. A cross-tenant sender (no membership/adult row in
+ * THIS org) resolves to null and is never surfaced.
+ */
+export async function resolveDirectMessageSenderName(
+  organizationId: string,
+  senderUserId: string
+): Promise<string | null> {
+  if (!organizationId || !senderUserId) return null;
+
+  const member = await prisma.orgMember.findFirst({
+    where: { organizationId, userId: senderUserId },
+    select: { firstName: true, lastName: true },
+  });
+  if (member) {
+    const full = normalizeName(`${member.firstName ?? ""} ${member.lastName ?? ""}`);
+    if (full && !full.includes("@")) return safeTruncate(full, MAX_NOTIFICATION_TITLE_LENGTH);
+  }
+
+  const adult = await prisma.ptaHouseholdAdult.findFirst({
+    where: { organizationId, userId: senderUserId, household: { status: "ACTIVE" } },
+    select: { name: true },
+  });
+  if (adult?.name) {
+    const name = normalizeName(adult.name);
+    if (name && !name.includes("@")) return safeTruncate(name, MAX_NOTIFICATION_TITLE_LENGTH);
+  }
+
+  return null;
+}
+
 export interface BuildNotificationIdentityInput {
   category: NotificationCategory;
   /** Tenant-scoped organization id; the ONLY trusted source of the org name. */
   organizationId?: string | null;
-  /** Sender's display name, for DIRECT_MESSAGE only. Caller must have already
-   *  authorized surfacing this identity. */
+  /** Sender's display name, for DIRECT_MESSAGE only. MUST already be
+   *  server-resolved (see resolveDirectMessageSenderName) — never a raw
+   *  client/session string. The email guard below is defense-in-depth. */
   senderName?: string | null;
 }
 

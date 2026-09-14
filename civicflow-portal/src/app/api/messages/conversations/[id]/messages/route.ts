@@ -45,7 +45,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       conversationId: id,
       organizationId,
       senderUserId: session.userId,
-      senderDisplayName: session.userEmail,
       body,
     }).catch(() => null);
 

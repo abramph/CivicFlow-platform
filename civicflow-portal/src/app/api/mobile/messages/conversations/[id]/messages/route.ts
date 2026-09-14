@@ -47,7 +47,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       conversationId: id,
       organizationId: verifiedOrgId,
       senderUserId: session.userId,
-      senderDisplayName: session.email,
       body,
     }).catch(() => null);
 

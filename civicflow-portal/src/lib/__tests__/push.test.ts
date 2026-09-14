@@ -41,7 +41,57 @@ vi.mock("expo-server-sdk", () => ({
   },
 }));
 
-import { sendPushToMember, sendPushToTokens } from "@/lib/push";
+import { buildPushData, sendPushToMember, sendPushToTokens } from "@/lib/push";
+import { validateDeepLink } from "@/lib/deep-links";
+
+describe("buildPushData — reserved-field protection", () => {
+  beforeEach(() => {
+    vi.mocked(validateDeepLink).mockReset().mockImplementation((link: unknown) => (link === "/safe" ? "/safe" : null));
+  });
+
+  it("strips reserved keys from caller data and writes authoritative values last (no override)", () => {
+    const data = buildPushData({
+      title: "T",
+      body: "B",
+      deepLink: "/safe",
+      organizationId: "org-1",
+      category: "ANNOUNCEMENT",
+      data: {
+        // Every one of these is a hostile attempt to override a reserved field.
+        deepLink: "/evil",
+        organizationId: "attacker-org",
+        category: "PLATFORM_ALERT",
+        notificationScope: "platform",
+        campaignId: "c1",
+      },
+    });
+    expect(data).toEqual({
+      campaignId: "c1", // non-reserved caller data is preserved
+      deepLink: "/safe", // validated authoritative link, not "/evil"
+      organizationId: "org-1", // authoritative tenant, not "attacker-org"
+      category: "ANNOUNCEMENT", // authoritative category, not the spoofed PLATFORM_ALERT
+      // notificationScope was NOT set authoritatively → the spoofed "platform" is dropped entirely
+    });
+    expect(data.notificationScope).toBeUndefined();
+  });
+
+  it("drops a disallowed deep link to null (neutral), never trusting it", () => {
+    const data = buildPushData({ title: "T", body: "B", deepLink: "/evil", organizationId: "org-1", category: "NOTICE" });
+    expect(data.deepLink).toBeNull();
+  });
+
+  it("writes an authoritative platform scope that caller data cannot forge away", () => {
+    const data = buildPushData({
+      title: "T",
+      body: "B",
+      deepLink: "/safe",
+      notificationScope: "platform",
+      data: { notificationScope: "org-spoof", organizationId: "x" },
+    });
+    expect(data.notificationScope).toBe("platform");
+    expect(data.organizationId).toBeUndefined(); // no authoritative org → spoof stripped
+  });
+});
 
 describe("sendPushToMember opt-out gating", () => {
   beforeEach(() => {

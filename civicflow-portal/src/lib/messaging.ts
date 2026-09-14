@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/mail";
 import { sendOrganizationMemberPush, sendOrganizationTokensPush } from "@/lib/notifications/send";
+import { resolveDirectMessageSenderName } from "@/lib/notifications/identity";
 
 function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 3)}...` : text;
@@ -23,7 +24,6 @@ export async function notifyNewMessageParticipants(params: {
   conversationId: string;
   organizationId: string;
   senderUserId: string;
-  senderDisplayName: string;
   body: string;
 }) {
   const participants = await prisma.conversationParticipant.findMany({
@@ -31,10 +31,16 @@ export async function notifyNewMessageParticipants(params: {
     include: { user: { select: { email: true } } },
   });
 
+  // Sender identity is resolved server-side from the authenticated sender's
+  // tenant-scoped membership — never a caller/session-supplied string (which
+  // was the sender's EMAIL). Falls back to a generic label, never an email.
+  const resolvedSenderName = await resolveDirectMessageSenderName(params.organizationId, params.senderUserId);
+  const senderLabel = resolvedSenderName ?? "A member";
+
   const preview = truncate(params.body, 140);
   const deepLink = `/messages/${params.conversationId}`;
-  const subject = `New message from ${params.senderDisplayName}`;
-  const emailText = `${params.senderDisplayName} sent you a message in Unestra:\n\n${params.body}\n\nOpen Unestra to reply.`;
+  const subject = `New message from ${senderLabel}`;
+  const emailText = `${senderLabel} sent you a message in Unestra:\n\n${params.body}\n\nOpen Unestra to reply.`;
 
   for (const participant of participants) {
     if (participant.role === "MEMBER") {
@@ -47,7 +53,7 @@ export async function notifyNewMessageParticipants(params: {
           organizationId: params.organizationId,
           memberId: member.id,
           category: "DIRECT_MESSAGE",
-          senderName: params.senderDisplayName,
+          senderUserId: params.senderUserId,
           body: preview,
           deepLink,
         });
@@ -79,7 +85,7 @@ export async function notifyNewMessageParticipants(params: {
           organizationId: params.organizationId,
           tokens: tokens.map((t) => t.token),
           category: "DIRECT_MESSAGE",
-          senderName: params.senderDisplayName,
+          senderUserId: params.senderUserId,
           body: preview,
           deepLink,
         });

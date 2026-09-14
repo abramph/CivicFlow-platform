@@ -1,5 +1,6 @@
 import { sendEmail } from "@/lib/mail";
-import { sendPushToTokens, type PushNotificationInput } from "@/lib/push";
+import { sendOrganizationTokensPush } from "@/lib/notifications/send";
+import type { NotificationCategory } from "@/lib/notifications/identity";
 import { sendMemberSms, type SendMemberSmsParams } from "@/lib/sms-service";
 import { sendMemberWhatsApp, type SendMemberWhatsAppParams } from "@/lib/whatsapp/whatsapp-service";
 
@@ -61,18 +62,26 @@ export const SmsChannel: CommunicationChannel<SendMemberSmsParams> = {
   },
 };
 
+/** Org-scoped by construction: the organization-branded title/subtitle are
+ *  resolved server-side from `organizationId` (never a caller-set title), and
+ *  the send is routed through the canonical notification layer — the same
+ *  invariant every other push path holds. */
 export interface PushSendParams {
+  organizationId: string;
   tokens: string[];
-  notification: PushNotificationInput;
+  category: NotificationCategory;
+  body: string;
+  deepLink?: string | null;
+  data?: Record<string, unknown>;
 }
 
 export const PushChannel: CommunicationChannel<PushSendParams> = {
   key: "PUSH",
-  async send({ tokens, notification }) {
+  async send({ organizationId, tokens, category, body, deepLink, data }) {
     if (tokens.length === 0) {
       return { status: "SKIPPED", errorMessage: "No registered devices" };
     }
-    const result = await sendPushToTokens(tokens, notification);
+    const result = await sendOrganizationTokensPush({ organizationId, tokens, category, body, deepLink, data });
     return result.sent > 0
       ? { status: "SENT" }
       : { status: "FAILED", errorMessage: "Delivery failed" };

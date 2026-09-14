@@ -114,46 +114,69 @@ Notes:
 - **Server-only identity formatting** (`src/lib/notifications/identity.ts`,
   `src/lib/notifications/send.ts`, both new) resolves the org name from the
   tenant `organizationId` and sets the title/subtitle. Announcement / event /
-  meeting / dues / volunteer / attendance / payment / membership paths are
-  org-titled; direct messages are `Sender · Org` (email addresses never
-  surfaced as the sender); platform alerts stay `Unestra`. An unresolved org
-  falls back to `Unestra` and logs identifiers only. `push.ts` gained a
-  `subtitle` field; every push payload now carries `data.category` and
-  `data.organizationId`.
-  - **Wired paths:** communication campaigns, attendance check-in, meeting
-    minutes, payment-report approve/reject, member add + terminate/reinstate,
-    and direct/PTA messages.
-  - **Deferred (documented follow-up):** the HOA violation/architectural-request
-    and union-case fan-outs (`hoa/violations.ts`, `hoa/architectural-requests.ts`,
-    `union/cases.ts`) still title with their own descriptive strings and do not
-    yet thread `organizationId` into their token sends — converting them is a
-    separate, presentation-sensitive change. No platform-alert push *sender*
-    exists yet; `PLATFORM_ALERT` is defined for when one is added.
-- **Android small icon:** `expo-notifications` now points at the existing
-  monochrome asset (`android-icon-monochrome.png`) instead of the full-colour
-  launcher icon, so the status-bar/notification glyph renders correctly. The
-  Unestra app icon remains the constant, trusted application identity on both
-  platforms — no per-org app icons.
-- **Tap isolation** (`src/lib/notification-tap.ts`, new pure resolver +
-  rewritten `use-notification-deep-links.ts`): on tap the app reads
-  `data.organizationId`, and — fail closed — opens the neutral inbox for any org
-  the signed-in user cannot access (removed membership, cross-tenant,
-  stale/malformed id), switches org context first when the target is a different
-  accessible org, or navigates directly when it matches. A signed-out tap is
-  held and **re-validated** after login. Payloads without an `organizationId`
-  (older server build) navigate as before.
-- **Mobile SMS UX:** rather than adding N per-org entitlement lookups to the
-  bootstrap org-list, a **new narrow read-only endpoint**
-  `GET /api/mobile/admin/sms-capability` (guarded exactly like campaign create —
-  `manageCommunications` only) returns the safe `MobileSmsCapability`
-  projection (`src/lib/mobile-sms-capability.ts`). `getSmsEntitlement` gained a
-  stable `code` per denial branch; the projection maps it to
-  `{available, reasonCode, message, remaining?, billingManagementRequired}` —
-  never a Stripe/Twilio/phone identifier. The composer fetches it on org change,
-  disables the SMS / Email+SMS chips when not entitled (truthful reason shown,
-  billing denials point to Settings → Billing with no auto-checkout), and shows
-  the remaining allowance when entitled.
+  meeting / dues / volunteer / attendance / payment / membership / HOA / union
+  paths are org-titled; direct messages are `Sender · Org` (the sender name is
+  resolved server-side from the sender's tenant membership — never a
+  caller/session string; email addresses are never surfaced); platform alerts
+  stay `Unestra`. An unresolved org falls back to `Unestra` and logs identifiers
+  only. Titles are truncated on **grapheme-cluster** boundaries (Intl.Segmenter,
+  code-point fallback) so flags / accents / ZWJ emoji never split.
+- **Reserved-field protection:** `push.ts` (`buildPushData`) is the single
+  authoritative assembler of the payload `data`. Caller-supplied `data` has the
+  reserved keys `deepLink` / `organizationId` / `category` / `notificationScope`
+  stripped, and the authoritative values are written last — so no caller can
+  spoof the tenant, forge platform scope, or override the allow-list-validated
+  deep link. A disallowed deep link is written as `null` (neutral).
+- **Every organization push routes through the canonical layer.** The low-level
+  `@/lib/push` transport is now imported by exactly one module,
+  `notifications/send.ts` — enforced by
+  `notifications/__tests__/notifications-layer-boundary.test.ts`. Converted the
+  previously-direct callers: HOA violations + deadline reminders
+  (`hoa/violations.ts`), HOA architectural requests
+  (`hoa/architectural-requests.ts`), union case updates + deadline reminders
+  (`union/cases.ts`), and the `PushChannel` adapter
+  (`communications/channel.ts`) — all now org-titled with `NOTICE` / `CASE_UPDATE`
+  categories. `sendPlatformTokensPush` is the one documented platform-level
+  sender (stamps `notificationScope: "platform"`, allow-listed global routes).
+- **Android small icon:** `expo-notifications` points at the existing monochrome
+  asset (`android-icon-monochrome.png`). The Unestra app icon stays the constant
+  application identity on both platforms — no per-org app icons.
+- **Tap isolation, live-validated and fail-closed** (`src/lib/notification-tap.ts`
+  pure resolver + rewritten `use-notification-deep-links.ts`): on tap the app
+  **re-fetches the caller's current org access from the server**
+  (`refreshOrganizations`) and fails closed to the neutral inbox if that fetch
+  fails. An org-scoped payload with a **missing / empty / malformed
+  `organizationId`, or one the user can no longer access** (removed membership,
+  cross-tenant, stale) opens the neutral inbox — never the protected resource
+  (older payloads without an org id are therefore **not** navigated). A tap for a
+  different accessible org uses an **acknowledged transition**: it requests the
+  org switch and navigates only once `selectedOrganizationId` actually equals the
+  target (re-checking access at that moment), failing closed on a timeout — never
+  after a fixed animation frame. Cross-org cache isolation is reinforced by
+  keying the tab subtree on `selectedOrganizationId`, so a switch remounts
+  screens with fresh state. Global routing requires an explicit server-authored
+  `notificationScope: "platform"` limited to an approved allow-list; the absence
+  of a scope is never treated as platform trust.
+- **Mobile SMS UX:** a narrow read-only endpoint
+  `GET /api/mobile/admin/sms-capability` (guarded like campaign create —
+  `manageCommunications`) returns the safe `MobileSmsCapability` projection. It is
+  derived from the **complete** send-time gate: the platform-operational switches
+  (`src/lib/sms-operational-status.ts`, now shared with `sendSms()` — configured
+  / enabled / maintenance / paused) **and** the per-org `getSmsEntitlement`
+  (add-on / suspension / subscription / allowance). Safe Launch (test mode) is
+  surfaced as a truthful **restricted** state (SMS selectable, delivery limited to
+  the verified allowlist) rather than claimed as unrestricted. The projection
+  carries only `{available, restricted, reasonCode, message, remaining?,
+  billingManagementRequired}` — never a Stripe/Twilio/phone identifier. The
+  composer disables SMS when unavailable (truthful reason), shows the restricted
+  notice when restricted, and offers an actionable **Settings → Billing** link
+  only to an admin who can manage billing (no auto-checkout); other admins are
+  told an owner must enable SMS.
 
-Sensitive-content note: bodies are kept concise; none of the current paths put
-student/health/disciplinary/payment-account detail on the lock screen beyond a
-dollar amount and a category — this is preserved.
+Lock-screen privacy: converted push **bodies** are genericized where they would
+otherwise expose sensitive detail — payment amounts, membership status
+(e.g. "Terminated"), union case titles, HOA violation type/notice text — with the
+full detail kept in the email and behind authenticated in-app navigation.
+Deliberately retained (owner-visible decision, **not** claimed privacy-safe): the
+direct-message push shows a truncated message **preview**, matching standard
+messaging apps and the OS-level lock-screen preview control.

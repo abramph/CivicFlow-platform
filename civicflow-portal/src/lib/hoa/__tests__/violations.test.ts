@@ -17,7 +17,9 @@ const findManyMobileDeviceToken = vi.fn();
 const createViolationReminderLog = vi.fn();
 const createAuditEvent = vi.fn().mockResolvedValue(undefined);
 const sendEmail = vi.fn().mockResolvedValue({ sent: true, skipped: false });
-const sendPushToTokens = vi.fn().mockResolvedValue({ sent: 0, failed: 0 });
+// Push now routes through the canonical organization sender (org-branded title,
+// lock-screen-safe generic body) — not the low-level @/lib/push transport.
+const sendOrganizationTokensPush = vi.fn().mockResolvedValue({ sent: 0, failed: 0 });
 
 // The service layer wraps create/issue/transition in prisma.$transaction —
 // the tx client passed into that callback must support the same calls as
@@ -62,7 +64,7 @@ vi.mock("@/lib/prisma", () => ({
 
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...a: unknown[]) => createAuditEvent(...a) }));
 vi.mock("@/lib/mail", () => ({ sendEmail: (...a: unknown[]) => sendEmail(...a) }));
-vi.mock("@/lib/push", () => ({ sendPushToTokens: (...a: unknown[]) => sendPushToTokens(...a) }));
+vi.mock("@/lib/notifications/send", () => ({ sendOrganizationTokensPush: (...a: unknown[]) => sendOrganizationTokensPush(...a) }));
 
 const resolveOrganizationAccess = vi.fn();
 vi.mock("@/lib/subscription-gate", () => ({
@@ -207,8 +209,18 @@ describe("issueViolation", () => {
     expect(createViolationStatusHistory).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ fromStatus: "DRAFT", toStatus: "ISSUED" }) })
     );
-    expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: "resident@example.com" }));
-    expect(sendPushToTokens).toHaveBeenCalledWith(["ExponentPushToken[abc]"], expect.objectContaining({ title: "New violation notice", deepLink: "/m/violations" }));
+    // Email keeps the detailed notice; push routes through the canonical
+    // org sender with the NOTICE category and a lock-screen-safe generic body.
+    expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: "resident@example.com", text: "Please fix your lawn." }));
+    expect(sendOrganizationTokensPush).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: "org-1",
+        tokens: ["ExponentPushToken[abc]"],
+        category: "NOTICE",
+        body: "You have a new violation notice. Open Unestra for details.",
+        deepLink: "/m/violations",
+      })
+    );
   });
 
   it("skips email for a resident who opted out via commsEmailEnabled", async () => {

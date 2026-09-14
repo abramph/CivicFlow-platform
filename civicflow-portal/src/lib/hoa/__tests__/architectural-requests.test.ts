@@ -14,7 +14,7 @@ const findFirstOrgMember = vi.fn();
 const findManyMobileDeviceToken = vi.fn();
 const createAuditEvent = vi.fn().mockResolvedValue(undefined);
 const sendEmail = vi.fn().mockResolvedValue({ sent: true, skipped: false });
-const sendPushToTokens = vi.fn().mockResolvedValue({ sent: 0, failed: 0 });
+const sendOrganizationTokensPush = vi.fn().mockResolvedValue({ sent: 0, failed: 0 });
 
 // Mirrors violations.test.ts's tx-client wiring: prisma.$transaction's
 // callback must support the same calls as the top-level client, routed
@@ -52,7 +52,7 @@ vi.mock("@/lib/prisma", () => ({
 
 vi.mock("@/lib/audit", () => ({ createAuditEvent: (...a: unknown[]) => createAuditEvent(...a) }));
 vi.mock("@/lib/mail", () => ({ sendEmail: (...a: unknown[]) => sendEmail(...a) }));
-vi.mock("@/lib/push", () => ({ sendPushToTokens: (...a: unknown[]) => sendPushToTokens(...a) }));
+vi.mock("@/lib/notifications/send", () => ({ sendOrganizationTokensPush: (...a: unknown[]) => sendOrganizationTokensPush(...a) }));
 
 beforeEach(() => {
   vi.clearAllMocks();

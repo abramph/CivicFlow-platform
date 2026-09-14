@@ -3,7 +3,6 @@ import { prisma } from "@/lib/prisma";
 import { createAuditEvent } from "@/lib/audit";
 import { createMemberTimelineEvent } from "@/lib/member-timeline";
 import { sendOrganizationMemberPush } from "@/lib/notifications/send";
-import { formatEnumLabel } from "@/lib/formatting";
 import { requireMemberSlot } from "@/lib/plan-gate";
 import { z } from "@/lib/validation";
 
@@ -335,7 +334,9 @@ export async function updateMember(
       organizationId,
       memberId: updated.id,
       category: "MEMBERSHIP_UPDATE",
-      body: `Your membership status is now: ${formatEnumLabel(updated.membershipStatus)}.`,
+      // Lock-screen-safe: the specific status (e.g. "Terminated") is a
+      // disciplinary detail — kept off the lock screen, shown in-app on /dues.
+      body: "Your membership status was updated.",
       deepLink: "/dues",
       required: true,
     }).catch(() => null);
