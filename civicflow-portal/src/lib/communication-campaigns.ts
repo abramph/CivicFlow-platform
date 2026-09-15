@@ -6,7 +6,8 @@ import { sendEmail } from "@/lib/mail";
 import { PlanFeatureError, requirePlanFeature } from "@/lib/plan-gate";
 import { prisma } from "@/lib/prisma";
 import { resolveOrganizationAccess } from "@/lib/subscription-gate";
-import { sendPushToTokens } from "@/lib/push";
+import { sendOrganizationTokensPush } from "@/lib/notifications/send";
+import { campaignNotificationCategory } from "@/lib/notifications/identity";
 import { applySmsTemplateTokens, sendMemberSms } from "@/lib/sms-service";
 import { getSignedObjectUrl } from "@/lib/storage";
 import { getMobileAppWebBaseUrl } from "@/lib/env";
@@ -227,8 +228,10 @@ async function processRecipient(
         // actually opens that announcement instead of just the list.
         const isAnnouncementLike = ctx.campaign.communicationType === "ANNOUNCEMENT" || ctx.campaign.communicationType === "GENERAL";
         const deepLink = ctx.campaign.deepLink ?? (isAnnouncementLike ? `/announcement/${ctx.campaign.id}` : null);
-        const result = await sendPushToTokens(tokens, {
-          title: ctx.campaign.title,
+        const result = await sendOrganizationTokensPush({
+          organizationId: ctx.organizationId,
+          tokens,
+          category: campaignNotificationCategory(ctx.campaign.communicationType),
           body: ctx.campaign.body,
           deepLink,
         });

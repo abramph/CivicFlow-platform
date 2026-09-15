@@ -2,7 +2,7 @@ import type { OrgMember } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { createAuditEvent } from "@/lib/audit";
 import { createMemberTimelineEvent } from "@/lib/member-timeline";
-import { sendPushToMember } from "@/lib/push";
+import { sendOrganizationMemberPush } from "@/lib/notifications/send";
 import { MemberLifecycleError } from "@/lib/member-lifecycle-errors";
 import { TERMINATION_REASONS } from "@/lib/member-lifecycle-reasons";
 
@@ -144,11 +144,11 @@ export async function terminateMember(input: {
     createdByUserId: input.actorUserId,
   });
 
-  await sendPushToMember({
+  await sendOrganizationMemberPush({
     organizationId: input.organizationId,
     memberId: updated.id,
-    title: "Membership Status Update",
-    body: "Your membership status is now: Terminated.",
+    category: "MEMBERSHIP_UPDATE",
+    body: "Your membership status was updated.",
     deepLink: "/dues",
     required: true,
   }).catch(() => null);
@@ -219,11 +219,11 @@ export async function reinstateMember(input: {
     createdByUserId: input.actorUserId,
   });
 
-  await sendPushToMember({
+  await sendOrganizationMemberPush({
     organizationId: input.organizationId,
     memberId: updated.id,
-    title: "Membership Status Update",
-    body: "Your membership status is now: Active.",
+    category: "MEMBERSHIP_UPDATE",
+    body: "Your membership status was updated.",
     deepLink: "/dues",
     required: true,
   }).catch(() => null);

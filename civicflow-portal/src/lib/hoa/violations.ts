@@ -3,7 +3,8 @@ import type { Violation, ViolationStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { createAuditEvent } from "@/lib/audit";
 import { sendEmail } from "@/lib/mail";
-import { sendPushToTokens } from "@/lib/push";
+import { sendOrganizationTokensPush } from "@/lib/notifications/send";
+import type { NotificationCategory } from "@/lib/notifications/identity";
 import { resolveOrganizationAccess } from "@/lib/subscription-gate";
 import { HoaError } from "./errors";
 
@@ -496,21 +497,53 @@ async function resolveActivePropertyResidents(organizationId: string, propertyId
  * requiredNoticesOnly override exists for violations, unlike push's
  * existing bypass for legally-required notices, since this MVP has no
  * validated need for one yet). */
-async function notifyOneResident(resident: ResolvedResident, notification: { title: string; body: string }): Promise<void> {
+/** A resident-facing violation notice is organization-titled (NOTICE for the
+ *  issued/deadline notices, CASE_UPDATE for a status change) so the push shows
+ *  the HOA's name, not "Unestra". */
+function categoryForViolationKind(kind: NotificationKind): NotificationCategory {
+  return kind === "status_changed" || kind === "resolved_dismissed" ? "CASE_UPDATE" : "NOTICE";
+}
+
+/** Lock-screen-safe push body: the violation type and the free-form notice text
+ *  are disciplinary/case detail and stay off the lock screen — the full notice
+ *  is in the email and on /m/violations after authenticated navigation. */
+function pushBodyForViolationKind(kind: NotificationKind): string {
+  switch (kind) {
+    case "resolved_dismissed":
+      return "Your violation notice was closed. Open Unestra for details.";
+    case "status_changed":
+      return "Your violation notice was updated. Open Unestra for details.";
+    case "deadline_reminder":
+      return "A violation deadline is approaching. Open Unestra for details.";
+    case "issued":
+    default:
+      return "You have a new violation notice. Open Unestra for details.";
+  }
+}
+
+async function notifyOneResident(
+  organizationId: string,
+  resident: ResolvedResident,
+  // `body` is the detailed email body; `pushBody` is the lock-screen-safe line.
+  notification: { title: string; body: string; pushBody: string; category: NotificationCategory }
+): Promise<void> {
   const { orgMember, tokens } = resident;
   if (orgMember.email && orgMember.commsEmailEnabled) {
     await sendEmail({ to: orgMember.email, subject: notification.title, text: notification.body });
   }
   if (orgMember.userId && orgMember.commsPushEnabled && tokens.length > 0) {
-    await sendPushToTokens(tokens, {
-      title: notification.title,
-      body: notification.body,
-      // /hoa/violations/[id] is the OFFICER-only detail page (gated by
-      // hoa:violations:read) -- a resident tapping this push must never
-      // land there. There is no resident-facing per-violation detail
-      // page yet, only the list at /m/violations (see
-      // docs/hoa-violations-mvp.md's "deliberately not built" mobile
-      // scope note), so that's the correct, actually-reachable target.
+    // Routed through the canonical organization sender so the title is the
+    // HOA's name (server-resolved from organizationId) with the "Notice"/"Case
+    // update" subtitle — never a caller-set title. /hoa/violations/[id] is the
+    // OFFICER-only detail page (gated by hoa:violations:read); a resident
+    // tapping this must never land there. There is no resident-facing
+    // per-violation detail page yet (see docs/hoa-violations-mvp.md), so the
+    // reachable list at /m/violations is the correct target.
+    await sendOrganizationTokensPush({
+      organizationId,
+      tokens,
+      category: notification.category,
+      body: notification.pushBody,
       deepLink: "/m/violations",
     });
   }
@@ -522,8 +555,10 @@ async function notifyPropertyResidents(
   notification: { kind: NotificationKind; title: string; body: string; violationId: string }
 ): Promise<void> {
   const residents = await resolveActivePropertyResidents(organizationId, propertyId);
+  const category = categoryForViolationKind(notification.kind);
+  const pushBody = pushBodyForViolationKind(notification.kind);
   for (const resident of residents) {
-    await notifyOneResident(resident, notification);
+    await notifyOneResident(organizationId, resident, { title: notification.title, body: notification.body, pushBody, category });
   }
 }
 
@@ -659,7 +694,12 @@ export async function sendDeadlineReminders(reminderWindowDays = 3): Promise<{ r
 
       sentToAnyRecipient = true;
       try {
-        await notifyOneResident(resident, { title: "Violation deadline approaching", body });
+        await notifyOneResident(violation.organizationId, resident, {
+          title: "Violation deadline approaching",
+          body,
+          pushBody: pushBodyForViolationKind("deadline_reminder"),
+          category: "NOTICE",
+        });
       } catch (error) {
         // The claim row already committed -- see the function doc for why
         // that's the correct order (a transient failure gets a fresh

@@ -3,7 +3,7 @@ import type { ArchitecturalRequest, ArchitecturalRequestStatus } from "@prisma/c
 import { prisma } from "@/lib/prisma";
 import { createAuditEvent } from "@/lib/audit";
 import { sendEmail } from "@/lib/mail";
-import { sendPushToTokens } from "@/lib/push";
+import { sendOrganizationTokensPush } from "@/lib/notifications/send";
 import { HoaError } from "./errors";
 
 type TxClient = Prisma.TransactionClient;
@@ -180,6 +180,30 @@ async function recordTransitionTx(
 
 type NotificationKind = "submitted" | "review_started" | "changes_requested" | "resubmitted" | "decided" | "withdrawn" | "expired";
 
+/** Lock-screen-safe push body: keeps the user-authored request title (case
+ *  detail) off the lock screen — the full detail is in the email and on
+ *  /m/architectural-requests after authenticated navigation. */
+function pushBodyForArchitecturalKind(kind: NotificationKind): string {
+  const tail = "Open Unestra for details.";
+  switch (kind) {
+    case "review_started":
+      return `Your architectural request is under review. ${tail}`;
+    case "changes_requested":
+      return `Changes were requested on your architectural request. ${tail}`;
+    case "decided":
+      return `A decision was made on your architectural request. ${tail}`;
+    case "resubmitted":
+      return `Your architectural request resubmission was received. ${tail}`;
+    case "withdrawn":
+      return `Your architectural request was withdrawn. ${tail}`;
+    case "expired":
+      return `Your architectural request has expired. ${tail}`;
+    case "submitted":
+    default:
+      return `Your architectural request was submitted. ${tail}`;
+  }
+}
+
 /** Unlike Violations (which fans a notification out to every ACTIVE
  * resident of a property), an architectural request has exactly one
  * interested resident -- its submitter -- so there's no
@@ -204,18 +228,18 @@ async function notifySubmitterSafely(
     if (submitter.userId && submitter.commsPushEnabled) {
       const tokens = await prisma.mobileDeviceToken.findMany({ where: { userId: submitter.userId }, select: { token: true } });
       if (tokens.length > 0) {
-        await sendPushToTokens(
-          tokens.map((t) => t.token),
-          {
-            title: notification.title,
-            body: notification.body,
-            // No resident-facing per-request detail page ships in this MVP
-            // (see docs/hoa-architectural-requests.md) -- /m/architectural-requests
-            // is the only actually-reachable target, same reasoning as
-            // violations.ts's equivalent deep-link comment.
-            deepLink: "/m/architectural-requests",
-          }
-        );
+        // Routed through the canonical organization sender: the title is the
+        // HOA's name (server-resolved) with the "Case update" subtitle, never a
+        // caller-set title. No resident-facing per-request detail page ships in
+        // this MVP (see docs/hoa-architectural-requests.md) --
+        // /m/architectural-requests is the only reachable target.
+        await sendOrganizationTokensPush({
+          organizationId,
+          tokens: tokens.map((t) => t.token),
+          category: "CASE_UPDATE",
+          body: pushBodyForArchitecturalKind(notification.kind),
+          deepLink: "/m/architectural-requests",
+        });
       }
     }
   } catch (error) {

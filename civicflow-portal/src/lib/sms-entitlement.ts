@@ -2,9 +2,28 @@ import { prisma } from "@/lib/prisma";
 import { getPlatformSmsSettings } from "@/lib/sms-credentials";
 import { SMS_OVERAGE_POLICY } from "@/lib/sms-pricing";
 
+/**
+ * Stable machine codes for each denial branch. Unlike `reason` (a full English
+ * sentence that may be reworded), a code is a contract other layers — notably
+ * the mobile SMS-entitlement UX — can switch on without re-deriving billing
+ * rules or scraping prose. Additive: success omits it.
+ */
+export type SmsEntitlementReasonCode =
+  | "PLATFORM_MESSAGING_DISABLED"
+  | "ADD_ON_REQUIRED"
+  // Same missing-add-on state, but for a billing-EXEMPT org, where billing is
+  // NOT the remedy: the add-on must be turned on via the audited platform
+  // super-admin enrollment flow, so the mobile UX must not point at billing.
+  | "ADD_ON_REQUIRED_EXEMPT"
+  | "SUSPENDED"
+  | "BILLING_REQUIRED"
+  | "ALLOWANCE_REACHED";
+
 export interface SmsEntitlement {
   allowed: boolean;
   reason?: string;
+  /** Present iff allowed === false. */
+  code?: SmsEntitlementReasonCode;
   remaining: number;
   limit: number;
 }
@@ -33,15 +52,21 @@ export async function getSmsEntitlement(organizationId: string): Promise<SmsEnti
     return {
       allowed: false,
       reason: "Organization SMS messaging is currently disabled platform-wide.",
+      code: "PLATFORM_MESSAGING_DISABLED",
       remaining: 0,
       limit: 0,
     };
   }
 
   if (!settings || !settings.smsAddOnActive) {
+    // A billing-exempt org can't self-serve enable the add-on through billing —
+    // its enrollment is done by a platform super-admin — so it gets a distinct
+    // code that steers the UX away from a (useless) billing link.
+    const exempt = organization?.billingExempt === true;
     return {
       allowed: false,
       reason: "Your organization does not have the SMS add-on enabled.",
+      code: exempt ? "ADD_ON_REQUIRED_EXEMPT" : "ADD_ON_REQUIRED",
       remaining: 0,
       limit: 0,
     };
@@ -51,6 +76,7 @@ export async function getSmsEntitlement(organizationId: string): Promise<SmsEnti
     return {
       allowed: false,
       reason: "SMS messaging has been suspended for your organization by a platform administrator.",
+      code: "SUSPENDED",
       remaining: 0,
       limit: settings.smsMonthlyLimit,
     };
@@ -70,6 +96,7 @@ export async function getSmsEntitlement(organizationId: string): Promise<SmsEnti
     return {
       allowed: false,
       reason: "Your organization's subscription is not active.",
+      code: "BILLING_REQUIRED",
       remaining: 0,
       limit: settings.smsMonthlyLimit,
     };
@@ -117,6 +144,7 @@ export async function getSmsEntitlement(organizationId: string): Promise<SmsEnti
     return {
       allowed: false,
       reason: "Your organization has used its full monthly SMS allowance.",
+      code: "ALLOWANCE_REACHED",
       remaining: 0,
       limit: settings.smsMonthlyLimit,
     };

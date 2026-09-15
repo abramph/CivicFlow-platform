@@ -16,7 +16,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { createAuditEvent } from "@/lib/audit";
-import { sendPushToMember } from "@/lib/push";
+import { sendOrganizationMemberPush } from "@/lib/notifications/send";
 import { unsafeDecodeSessionId, verifyAttendanceToken, type AttendanceTokenRejection } from "@/lib/attendance-token";
 
 export type CheckInRejectionReason =
@@ -158,10 +158,10 @@ export async function recordAttendanceCheckIn(params: {
     });
 
     // Best-effort — a notification failure must never fail the check-in itself.
-    sendPushToMember({
+    sendOrganizationMemberPush({
       organizationId: session.organizationId,
       memberId,
-      title: "Checked in",
+      category: "ATTENDANCE",
       body: `You're checked in to ${session.meetingTitle}${status === "LATE" ? " (marked late)" : ""}.`,
     }).catch(() => null);
 

@@ -3,7 +3,7 @@ import type { UnionCase, UnionCaseStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { createAuditEvent } from "@/lib/audit";
 import { sendEmail } from "@/lib/mail";
-import { sendPushToTokens } from "@/lib/push";
+import { sendOrganizationTokensPush } from "@/lib/notifications/send";
 import { resolveOrganizationAccess } from "@/lib/subscription-gate";
 import { UnionError } from "./errors";
 
@@ -166,6 +166,7 @@ export async function assignUnionCase(input: {
   await notifyMemberSafely(input.organizationId, updated.memberOrgMemberId, {
     title: "A representative has been assigned to your case",
     body: `A steward or representative has been assigned to your case "${updated.title}".`,
+    pushBody: "A representative has been assigned to your case. Open Unestra for details.",
     caseId: updated.id,
   });
 
@@ -238,6 +239,7 @@ export async function transitionUnionCaseStatus(input: {
   await notifyMemberSafely(input.organizationId, updated.memberOrgMemberId, {
     title: "Your case status changed",
     body: `Your case "${updated.title}" status changed to "${formatStatusForMember(input.toStatus)}".`,
+    pushBody: "Your case status was updated. Open Unestra for details.",
     caseId: updated.id,
   });
 
@@ -288,7 +290,9 @@ export async function withdrawUnionCase(input: { organizationId: string; caseId:
 async function notifyMemberSafely(
   organizationId: string,
   memberOrgMemberId: string,
-  notification: { title: string; body: string; caseId: string }
+  // `body` is the detailed email body; `pushBody` is a lock-screen-safe generic
+  // line (a case title is sensitive case detail — kept off the lock screen).
+  notification: { title: string; body: string; pushBody: string; caseId: string }
 ): Promise<void> {
   try {
     const member = await prisma.orgMember.findFirst({
@@ -303,10 +307,15 @@ async function notifyMemberSafely(
     if (member.userId && member.commsPushEnabled) {
       const tokens = await prisma.mobileDeviceToken.findMany({ where: { userId: member.userId }, select: { token: true } });
       if (tokens.length > 0) {
-        await sendPushToTokens(
-          tokens.map((t) => t.token),
-          { title: notification.title, body: notification.body, deepLink: `/union-cases/${notification.caseId}` }
-        );
+        // Canonical organization sender: title is the union's name
+        // (server-resolved) with the "Case update" subtitle.
+        await sendOrganizationTokensPush({
+          organizationId,
+          tokens: tokens.map((t) => t.token),
+          category: "CASE_UPDATE",
+          body: notification.pushBody,
+          deepLink: `/union-cases/${notification.caseId}`,
+        });
       }
     }
   } catch (error) {
@@ -750,7 +759,7 @@ function isUniqueConstraintViolation(error: unknown): boolean {
 async function notifyResponsibleOrgMember(
   organizationId: string,
   orgMemberId: string,
-  notification: { title: string; body: string; caseId: string }
+  notification: { title: string; body: string; pushBody: string; caseId: string }
 ): Promise<void> {
   try {
     const recipient = await prisma.orgMember.findFirst({
@@ -765,10 +774,15 @@ async function notifyResponsibleOrgMember(
     if (recipient.userId && recipient.commsPushEnabled) {
       const tokens = await prisma.mobileDeviceToken.findMany({ where: { userId: recipient.userId }, select: { token: true } });
       if (tokens.length > 0) {
-        await sendPushToTokens(
-          tokens.map((t) => t.token),
-          { title: notification.title, body: notification.body, deepLink: `/union/cases/${notification.caseId}` }
-        );
+        // Canonical organization sender. Deep-links to the STAFF detail page —
+        // the recipient here is always the responsible steward/rep.
+        await sendOrganizationTokensPush({
+          organizationId,
+          tokens: tokens.map((t) => t.token),
+          category: "CASE_UPDATE",
+          body: notification.pushBody,
+          deepLink: `/union/cases/${notification.caseId}`,
+        });
       }
     }
   } catch (error) {
@@ -869,7 +883,10 @@ export async function sendUnionCaseDeadlineReminders(reminderWindowDays = 3): Pr
       ? `${deadline.deadlineType} for ${caseLabel} was due ${deadline.dueAt.toLocaleDateString()} and is now overdue.`
       : `${deadline.deadlineType} for ${caseLabel} is due ${deadline.dueAt.toLocaleDateString()}.`;
 
-    await notifyResponsibleOrgMember(deadline.organizationId, recipientOrgMemberId, { title, body, caseId: deadline.caseId });
+    const pushBody = overdue
+      ? "A union case deadline is now overdue. Open Unestra for details."
+      : "A union case deadline is approaching. Open Unestra for details.";
+    await notifyResponsibleOrgMember(deadline.organizationId, recipientOrgMemberId, { title, body, pushBody, caseId: deadline.caseId });
   }
 
   return { remindersSent };

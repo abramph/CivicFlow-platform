@@ -3,8 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const sendEmail = vi.fn();
 vi.mock("@/lib/mail", () => ({ sendEmail: (...args: unknown[]) => sendEmail(...args) }));
 
-const sendPushToTokens = vi.fn();
-vi.mock("@/lib/push", () => ({ sendPushToTokens: (...args: unknown[]) => sendPushToTokens(...args) }));
+const sendOrganizationTokensPush = vi.fn();
+vi.mock("@/lib/notifications/send", () => ({
+  sendOrganizationTokensPush: (...args: unknown[]) => sendOrganizationTokensPush(...args),
+}));
 
 const sendMemberSms = vi.fn();
 vi.mock("@/lib/sms-service", () => ({ sendMemberSms: (...args: unknown[]) => sendMemberSms(...args) }));
@@ -73,23 +75,37 @@ describe("WhatsAppChannel", () => {
 });
 
 describe("PushChannel", () => {
-  beforeEach(() => sendPushToTokens.mockReset());
+  beforeEach(() => sendOrganizationTokensPush.mockReset());
 
-  it("skips without calling Expo when there are no device tokens", async () => {
-    const result = await PushChannel.send({ tokens: [], notification: { title: "Hi", body: "Body" } });
-    expect(sendPushToTokens).not.toHaveBeenCalled();
+  it("skips without calling the sender when there are no device tokens", async () => {
+    const result = await PushChannel.send({ organizationId: "org-a", tokens: [], category: "ANNOUNCEMENT", body: "Body" });
+    expect(sendOrganizationTokensPush).not.toHaveBeenCalled();
     expect(result).toEqual({ status: "SKIPPED", errorMessage: "No registered devices" });
   });
 
-  it("normalizes at least one successful delivery to SENT", async () => {
-    sendPushToTokens.mockResolvedValueOnce({ sent: 1, failed: 0 });
-    const result = await PushChannel.send({ tokens: ["ExponentPushToken[a]"], notification: { title: "Hi", body: "Body" } });
+  it("routes through the canonical organization sender (org-branded, never a caller title)", async () => {
+    sendOrganizationTokensPush.mockResolvedValueOnce({ sent: 1, failed: 0 });
+    const result = await PushChannel.send({
+      organizationId: "org-a",
+      tokens: ["ExponentPushToken[a]"],
+      category: "ANNOUNCEMENT",
+      body: "Body",
+      deepLink: "/announcements/c1",
+    });
+    expect(sendOrganizationTokensPush).toHaveBeenCalledWith({
+      organizationId: "org-a",
+      tokens: ["ExponentPushToken[a]"],
+      category: "ANNOUNCEMENT",
+      body: "Body",
+      deepLink: "/announcements/c1",
+      data: undefined,
+    });
     expect(result).toEqual({ status: "SENT" });
   });
 
   it("normalizes zero successful deliveries (all failed) to FAILED", async () => {
-    sendPushToTokens.mockResolvedValueOnce({ sent: 0, failed: 1 });
-    const result = await PushChannel.send({ tokens: ["ExponentPushToken[a]"], notification: { title: "Hi", body: "Body" } });
+    sendOrganizationTokensPush.mockResolvedValueOnce({ sent: 0, failed: 1 });
+    const result = await PushChannel.send({ organizationId: "org-a", tokens: ["ExponentPushToken[a]"], category: "ANNOUNCEMENT", body: "Body" });
     expect(result).toEqual({ status: "FAILED", errorMessage: "Delivery failed" });
   });
 });

@@ -1,4 +1,5 @@
 import { getEffectiveTwilioCredentials, getPlatformSmsSettings } from "@/lib/sms-credentials";
+import { evaluateSmsPlatformStatus } from "@/lib/sms-operational-status";
 import { getServerEnv } from "@/lib/env";
 
 /**
@@ -66,19 +67,16 @@ function buildStatusCallbackUrl(): string {
 export async function sendSms(input: { to: string; body: string }): Promise<SendSmsResult> {
   const [settings, credentials] = await Promise.all([getPlatformSmsSettings(), getEffectiveTwilioCredentials()]);
 
-  if (!credentials || (!credentials.fromNumber && !credentials.messagingServiceSid)) {
-    return { sent: false, skipped: true, outcome: "definitive_failure", reason: "SMS delivery is not configured", to: input.to };
+  // Platform-wide switches (configured / enabled / maintenance / paused) —
+  // evaluated by the SINGLE canonical gate shared with the mobile capability so
+  // the two can never diverge. Reason strings/outcomes are unchanged.
+  const platform = evaluateSmsPlatformStatus(settings, credentials);
+  if (!platform.available || !credentials) {
+    // `!credentials` is only ever true in the NOT_CONFIGURED branch above; the
+    // extra check also narrows the type for sendViaTwilio below.
+    return { sent: false, skipped: true, outcome: "definitive_failure", reason: platform.reason ?? "SMS delivery is not configured", to: input.to };
   }
-
-  if (!settings.platformEnabled) {
-    return { sent: false, skipped: true, outcome: "definitive_failure", reason: "SMS platform is currently disabled", to: input.to };
-  }
-  if (settings.maintenanceMode) {
-    return { sent: false, skipped: true, outcome: "definitive_failure", reason: "SMS is in maintenance mode", to: input.to };
-  }
-  if (settings.outboundPaused) {
-    return { sent: false, skipped: true, outcome: "definitive_failure", reason: "Outbound SMS is currently paused", to: input.to };
-  }
+  // Per-recipient Safe Launch allowlist — recipient-specific, stays here.
   if (settings.testMode && !settings.testPhoneNumbers.includes(input.to)) {
     return {
       sent: false,

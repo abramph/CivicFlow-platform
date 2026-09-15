@@ -7,9 +7,54 @@ const expo = new Expo();
 
 export interface PushNotificationInput {
   title: string;
+  /** iOS subtitle line under the title (the notification category, e.g.
+   *  "Event reminder"). Ignored by Android natively — it is also carried in
+   *  `data.category` so both platforms can present it. */
+  subtitle?: string | null;
   body: string;
   deepLink?: string | null;
+  /** Tenant that generated this notification. Written into the payload as the
+   *  authoritative `data.organizationId` the mobile client keys its
+   *  tenant-isolation check off. */
+  organizationId?: string | null;
+  /** Notification category label (see notifications/identity.ts). */
+  category?: string | null;
+  /** Server-authored routing scope. `"platform"` marks a global (non-tenant)
+   *  notification; its ABSENCE means org-scoped (the mobile client fails closed
+   *  when an org-scoped payload has no accessible organization). Callers may not
+   *  set this via `data` — only through this explicit field. */
+  notificationScope?: "platform" | null;
   data?: Record<string, unknown>;
+}
+
+/**
+ * Payload keys that are security-sensitive routing/identity fields. They are
+ * ALWAYS written by this module from validated/explicit values, and are
+ * stripped from any caller-supplied `data` first, so a caller (or a compromised
+ * upstream) can never smuggle a conflicting value in through `data` — e.g. to
+ * override the allow-list-validated deep link, spoof the originating
+ * organization, or claim platform scope on an org-scoped notification.
+ */
+export const RESERVED_PUSH_DATA_KEYS = ["deepLink", "organizationId", "category", "notificationScope"] as const;
+
+/**
+ * Assemble the final `data` payload: caller data first (with every reserved key
+ * stripped), then the authoritative reserved fields written LAST so they can
+ * never be overridden. The deep link is allow-list validated here; a disallowed
+ * link becomes `null` (neutral) rather than being trusted.
+ */
+export function buildPushData(notification: PushNotificationInput): Record<string, unknown> {
+  const reserved = new Set<string>(RESERVED_PUSH_DATA_KEYS);
+  const safe: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(notification.data ?? {})) {
+    if (!reserved.has(key)) safe[key] = value;
+  }
+  // Authoritative fields, written last.
+  safe.deepLink = validateDeepLink(notification.deepLink);
+  if (notification.organizationId != null) safe.organizationId = notification.organizationId;
+  if (notification.category != null) safe.category = notification.category;
+  if (notification.notificationScope != null) safe.notificationScope = notification.notificationScope;
+  return safe;
 }
 
 /**
@@ -21,13 +66,14 @@ export async function sendPushToTokens(tokens: string[], notification: PushNotif
   const validTokens = tokens.filter((token) => Expo.isExpoPushToken(token));
   if (validTokens.length === 0) return { sent: 0, failed: 0 };
 
-  const deepLink = validateDeepLink(notification.deepLink);
+  const data = buildPushData(notification);
   const messages: ExpoPushMessage[] = validTokens.map((token) => ({
     to: token,
     title: notification.title,
+    subtitle: notification.subtitle ?? undefined,
     body: notification.body,
     sound: "default",
-    data: { deepLink, ...notification.data },
+    data,
   }));
 
   let sent = 0;
@@ -89,8 +135,11 @@ export async function sendPushToMember(params: {
   organizationId: string;
   memberId: string;
   title: string;
+  subtitle?: string | null;
   body: string;
   deepLink?: string | null;
+  category?: string | null;
+  data?: Record<string, unknown>;
   required?: boolean;
 }) {
   const member = await prisma.orgMember.findFirst({
@@ -116,10 +165,17 @@ export async function sendPushToMember(params: {
     select: { token: true },
   });
 
-  const result = await sendPushToTokens(
-    tokens.map((t) => t.token),
-    { title: params.title, body: params.body, deepLink: params.deepLink }
-  );
+  const result = await sendPushToTokens(tokens.map((t) => t.token), {
+    title: params.title,
+    subtitle: params.subtitle,
+    body: params.body,
+    deepLink: params.deepLink,
+    // The member lookup above is tenant-scoped, so this organizationId is the
+    // authoritative originating tenant — written into the payload as such.
+    organizationId: params.organizationId,
+    category: params.category,
+    data: params.data,
+  });
 
   await prisma.communicationLog.create({
     data: {

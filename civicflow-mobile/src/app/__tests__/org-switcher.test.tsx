@@ -4,8 +4,11 @@ import OrgSwitcherScreen from '../org-switcher';
 
 const mockPush = jest.fn();
 const mockReplace = jest.fn();
+const mockSearchParams = jest.fn(() => ({}));
 jest.mock('expo-router', () => ({
   router: { push: (...args: unknown[]) => mockPush(...args), replace: (...args: unknown[]) => mockReplace(...args) },
+  Redirect: () => null,
+  useLocalSearchParams: () => mockSearchParams(),
 }));
 
 const mockSelectOrganization = jest.fn();
@@ -26,6 +29,7 @@ describe('Organization switching', () => {
   beforeEach(() => {
     mockPush.mockReset();
     mockReplace.mockReset();
+    mockSearchParams.mockReset().mockReturnValue({});
     mockSelectOrganization.mockReset().mockResolvedValue(undefined);
     mockLogout.mockReset().mockResolvedValue(undefined);
     mockUseAuth.mockReturnValue({
@@ -34,6 +38,18 @@ describe('Organization switching', () => {
       selectOrganization: mockSelectOrganization,
       logout: mockLogout,
     });
+  });
+
+  it('shows a neutral unavailable banner when routed here from a revoked/unavailable notification tap', async () => {
+    mockSearchParams.mockReturnValue({ unavailable: '1' });
+    await render(<OrgSwitcherScreen />);
+    await waitFor(() => expect(screen.getByText(/That notification is no longer available/)).toBeTruthy());
+  });
+
+  it('shows NO unavailable banner on a normal visit', async () => {
+    await render(<OrgSwitcherScreen />);
+    await waitFor(() => expect(screen.getByText('Riverdale Community Association')).toBeTruthy());
+    expect(screen.queryByText(/That notification is no longer available/)).toBeNull();
   });
 
   it('marks the currently selected organization as selected and the other as not', async () => {

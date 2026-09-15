@@ -5,7 +5,7 @@ import { recordDuesPayment } from "@/lib/dues-payments";
 import { sendEmail } from "@/lib/mail";
 import { createMemberTimelineEvent } from "@/lib/member-timeline";
 import { PAYMENT_REPORT_CATEGORY_LABELS } from "@/lib/payment-report-categories";
-import { sendPushToMember } from "@/lib/push";
+import { sendOrganizationMemberPush } from "@/lib/notifications/send";
 
 /**
  * Shared member-submitted PaymentReport approve/reject logic — used by the
@@ -135,11 +135,13 @@ export async function approvePaymentReport(
     }).catch(() => null);
   }
 
-  await sendPushToMember({
+  await sendOrganizationMemberPush({
     organizationId,
     memberId: report.memberId,
-    title: "Payment Confirmed",
-    body: `Your ${categoryLabel.toLowerCase()} payment of $${Number(report.amount).toFixed(2)} has been approved. Thank you!`,
+    category: "PAYMENT_UPDATE",
+    // Lock-screen-safe: no dollar amount (see the email above for the detail;
+    // the full record is on /payment-history after authenticated navigation).
+    body: "Your reported payment was approved.",
     deepLink: "/payment-history",
     required: true,
   }).catch(() => null);
@@ -187,11 +189,13 @@ export async function rejectPaymentReport(
     }).catch(() => null);
   }
 
-  await sendPushToMember({
+  await sendOrganizationMemberPush({
     organizationId,
     memberId: report.memberId,
-    title: "Payment Not Confirmed",
-    body: `Your reported payment of $${Number(report.amount).toFixed(2)} could not be confirmed: ${rejectionReason}`,
+    category: "PAYMENT_UPDATE",
+    // Lock-screen-safe: no dollar amount and no free-form reason (both are in
+    // the email above and on /report-payment after authenticated navigation).
+    body: "Your reported payment could not be confirmed. Open Unestra for details.",
     deepLink: "/report-payment",
     required: true,
   }).catch(() => null);

@@ -1529,6 +1529,45 @@ export function getAdminCampaignTargetingOptions(organizationId: string) {
   );
 }
 
+export type SmsCapabilityReasonCode =
+  // platform-operational (shared with the server send-time gate)
+  | 'NOT_CONFIGURED'
+  | 'PLATFORM_DISABLED'
+  | 'MAINTENANCE'
+  | 'OUTBOUND_PAUSED'
+  // per-org entitlement
+  | 'PLATFORM_MESSAGING_DISABLED'
+  | 'ADD_ON_REQUIRED'
+  | 'ADD_ON_REQUIRED_EXEMPT'
+  | 'SUSPENDED'
+  | 'BILLING_REQUIRED'
+  | 'ALLOWANCE_REACHED'
+  // available but delivery-restricted (Safe Launch)
+  | 'RESTRICTED_TEST_MODE';
+
+/**
+ * Whether SMS may be offered as a channel for this org right now — the narrow,
+ * non-sensitive projection of the server's COMPLETE send-time gate (platform
+ * operational switches + per-org entitlement; never any Stripe/Twilio/phone
+ * identifier). The composer switches on `available`/`restricted` only and never
+ * re-derives rules client-side.
+ */
+export interface MobileSmsCapability {
+  available: boolean;
+  /** Available, but delivery is limited to a verified allowlist (Safe Launch). */
+  restricted: boolean;
+  reasonCode: SmsCapabilityReasonCode | null;
+  message: string | null;
+  remaining: number | null;
+  billingManagementRequired: boolean;
+}
+
+export function getAdminSmsCapability(organizationId: string) {
+  return apiFetch<MobileSmsCapability>(
+    `/api/mobile/admin/sms-capability?organizationId=${encodeURIComponent(organizationId)}`
+  );
+}
+
 export function createAdminCampaign(input: CreateAdminCampaignInput) {
   return apiFetch<AdminCampaignDetail>('/api/mobile/admin/campaigns', { method: 'POST', body: JSON.stringify(input) });
 }

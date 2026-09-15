@@ -48,7 +48,11 @@ export default function TabsLayout() {
   }
 
   return (
-    <Tabs screenOptions={{ headerShown: false }}>
+    // Keyed by organization: switching orgs remounts the whole tab subtree with
+    // fresh state, so no screen can render a previous organization's cached
+    // content (names, photos, RSVP counts, balances) after a switch — the
+    // tenant-isolation guarantee the notification-tap flow relies on.
+    <Tabs key={selectedOrganizationId} screenOptions={{ headerShown: false }}>
       <Tabs.Screen
         name="dashboard"
         options={{ title: 'Home', tabBarAccessibilityLabel: 'Home', tabBarIcon: ({ color, focused }) => <TabIcon name="home" color={color} focused={focused} /> }}

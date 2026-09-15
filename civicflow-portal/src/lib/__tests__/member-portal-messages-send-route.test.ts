@@ -66,7 +66,7 @@ describe("POST /api/member-portal/messages/conversations/[id]/messages", () => {
     expect(createMessage).not.toHaveBeenCalled();
   });
 
-  it("sends the reply and notifies the officer using the member's display name", async () => {
+  it("sends the reply and notifies participants (sender identity resolved server-side, not passed by the route)", async () => {
     requireMemberWebSession.mockResolvedValueOnce({ userId: "member-user-1", organizationId: "org-a", memberId: "member-1" });
     findFirstConversation.mockResolvedValueOnce({ id: "conv-1" });
     createMessage.mockResolvedValueOnce({ id: "msg-1", createdAt: new Date("2026-07-05T12:00:00Z") });
@@ -76,8 +76,11 @@ describe("POST /api/member-portal/messages/conversations/[id]/messages", () => {
     });
 
     expect(response.status).toBe(201);
-    expect(notifyNewMessageParticipants).toHaveBeenCalledWith(
-      expect.objectContaining({ conversationId: "conv-1", senderUserId: "member-user-1", senderDisplayName: "Jane Member" })
-    );
+    // The route passes only ids; notifyNewMessageParticipants resolves the
+    // sender's display name from the tenant membership itself (never a
+    // caller/session-supplied string, which used to be the email).
+    const call = notifyNewMessageParticipants.mock.calls[0][0];
+    expect(call).toMatchObject({ conversationId: "conv-1", organizationId: "org-a", senderUserId: "member-user-1", body: "Reply" });
+    expect(call).not.toHaveProperty("senderDisplayName");
   });
 });
