@@ -18,6 +18,13 @@ expo-env.d.ts
 *.key
 *.mobileprovision
 
+# Firebase / FCM — client config and service-account keys are delivered via EAS
+# environment variables/credentials and must never be committed. See
+# docs/android-fcm-setup.md.
+google-services.json
+**/google-services.json
+GoogleService-Info.plist
+
 # Metro
 .metro-health-check*
 
