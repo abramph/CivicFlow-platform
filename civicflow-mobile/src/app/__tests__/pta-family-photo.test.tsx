@@ -113,39 +113,11 @@ describe('PtaFamilyPhotoScreen', () => {
     expect(screen.getByLabelText('Use this photo')).toBeTruthy();
   });
 
-  it('shows the neutral priming screen (not the system prompt directly) when camera permission has never been asked', async () => {
-    mockGetCameraPermissionsAsync.mockResolvedValue(undetermined());
-    render(<PtaFamilyPhotoScreen />);
-    await openTakePhoto();
-
-    expect(screen.getByText('Use Your Camera')).toBeTruthy();
-    expect(screen.getByLabelText('Continue')).toBeTruthy();
-    expect(screen.getByLabelText('Not now')).toBeTruthy();
-    // The OS permission dialog itself must not fire until the user taps Continue.
-    expect(mockRequestCameraPermissionsAsync).not.toHaveBeenCalled();
-
-    // Regression guard for the Apple 5.1.1(iv) correction: none of this
-    // screen's copy may use directive wording that tries to influence the
-    // system permission decision.
-    const banned = ['Grant', 'Allow Access', 'Enable Camera', 'You Must Allow'];
-    const tree = JSON.stringify(screen.toJSON());
-    for (const phrase of banned) {
-      expect(tree).not.toContain(phrase);
-    }
-  });
-
-  it('Not Now dismisses without ever calling the system permission request', async () => {
-    mockGetCameraPermissionsAsync.mockResolvedValue(undetermined());
-    render(<PtaFamilyPhotoScreen />);
-    await openTakePhoto();
-
-    await press('Not now');
-    expect(mockRequestCameraPermissionsAsync).not.toHaveBeenCalled();
-    expect(screen.queryByText('Use Your Camera')).toBeNull();
-    expect(screen.getByLabelText('Add photo')).toBeTruthy();
-  });
-
-  it('Continue on the priming screen requests permission, then launches the camera on grant', async () => {
+  // Apple Guideline 5.1.1(iv) remediation: the custom "Use Your Camera"
+  // priming card (Continue / Not Now) that used to sit in front of the
+  // system dialog is gone. Tapping "Take Photo" with an undetermined status
+  // now fires the native request directly.
+  it('undetermined: tapping Take Photo fires the native system request immediately -- no custom interstitial -- then opens the camera on grant', async () => {
     mockGetCameraPermissionsAsync.mockResolvedValue(undetermined());
     mockRequestCameraPermissionsAsync.mockResolvedValue(granted());
     mockLaunchCameraAsync.mockResolvedValue({
@@ -155,13 +127,39 @@ describe('PtaFamilyPhotoScreen', () => {
     render(<PtaFamilyPhotoScreen />);
     await openTakePhoto();
 
-    await press('Continue');
     expect(mockRequestCameraPermissionsAsync).toHaveBeenCalledTimes(1);
     expect(mockLaunchCameraAsync).toHaveBeenCalledTimes(1);
     expect(screen.getByLabelText('Use this photo')).toBeTruthy();
+    // The removed interstitial must never reappear in any form.
+    expect(screen.queryByText('Use Your Camera')).toBeNull();
+    expect(screen.queryByLabelText('Continue')).toBeNull();
   });
 
-  it('skips the priming screen entirely when permission is already granted', async () => {
+  it('undetermined -> user denies at the native prompt (iOS: canAskAgain false): shows the Settings screen, camera never launches', async () => {
+    mockGetCameraPermissionsAsync.mockResolvedValue(undetermined());
+    mockRequestCameraPermissionsAsync.mockResolvedValue(blocked());
+    render(<PtaFamilyPhotoScreen />);
+    await openTakePhoto();
+
+    expect(mockRequestCameraPermissionsAsync).toHaveBeenCalledTimes(1);
+    expect(mockLaunchCameraAsync).not.toHaveBeenCalled();
+    expect(screen.getByText('Camera Access Is Off')).toBeTruthy();
+    expect(screen.getByLabelText('Open Settings')).toBeTruthy();
+  });
+
+  it('undetermined -> denied but still re-askable (Android): returns to the source chooser so Library stays one tap away', async () => {
+    mockGetCameraPermissionsAsync.mockResolvedValue(undetermined());
+    mockRequestCameraPermissionsAsync.mockResolvedValue({ granted: false, status: 'denied', expires: 'never', canAskAgain: true });
+    render(<PtaFamilyPhotoScreen />);
+    await openTakePhoto();
+
+    expect(mockLaunchCameraAsync).not.toHaveBeenCalled();
+    expect(screen.queryByText('Camera Access Is Off')).toBeNull();
+    expect(screen.getByLabelText('Take photo')).toBeTruthy();
+    expect(screen.getByLabelText('Choose from library')).toBeTruthy();
+  });
+
+  it('authorized: launches the camera directly with no permission request and no permission UI', async () => {
     mockGetCameraPermissionsAsync.mockResolvedValue(granted());
     mockLaunchCameraAsync.mockResolvedValue({ canceled: true, assets: null });
     render(<PtaFamilyPhotoScreen />);
@@ -170,6 +168,25 @@ describe('PtaFamilyPhotoScreen', () => {
     expect(mockRequestCameraPermissionsAsync).not.toHaveBeenCalled();
     expect(mockLaunchCameraAsync).toHaveBeenCalledTimes(1);
     expect(screen.queryByText('Use Your Camera')).toBeNull();
+  });
+
+  it('restricted (parental controls / MDM -- surfaced by expo-image-picker as denied + canAskAgain:false): Settings screen, no system prompt', async () => {
+    mockGetCameraPermissionsAsync.mockResolvedValue(blocked());
+    render(<PtaFamilyPhotoScreen />);
+    await openTakePhoto();
+
+    expect(mockRequestCameraPermissionsAsync).not.toHaveBeenCalled();
+    expect(mockLaunchCameraAsync).not.toHaveBeenCalled();
+    expect(screen.getByText('Camera Access Is Off')).toBeTruthy();
+
+    // Regression guard: the denied-state copy must stay informational --
+    // no directive wording, and none of the removed interstitial's
+    // dismiss-before-prompt actions.
+    const banned = ['Grant', 'Allow Access', 'Enable Camera', 'You Must Allow', 'Continue'];
+    const tree = JSON.stringify(screen.toJSON());
+    for (const phrase of banned) {
+      expect(tree).not.toContain(phrase);
+    }
   });
 
   it('shows a visible error instead of silently hanging when the native camera call itself throws', async () => {

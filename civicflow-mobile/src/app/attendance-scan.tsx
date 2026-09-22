@@ -1,6 +1,6 @@
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 import { Redirect, router } from 'expo-router';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Linking, Pressable, StyleSheet } from 'react-native';
 
 import { PrimaryActionButton, SecondaryLinkButton } from '@/components/action-buttons';
@@ -32,6 +32,22 @@ export default function AttendanceScanScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const [state, setState] = useState<ScreenState>({ kind: 'scanning' });
   const processingRef = useRef(false);
+  // Apple Guideline 5.1.1(iv) remediation: navigating here IS the user's
+  // intentional "Scan QR" tap, so the native iOS permission dialog is
+  // requested immediately — there is no custom pre-permission interstitial
+  // that could be dismissed without ever reaching the system prompt.
+  // `nativePromptSettled` exists for Android, where a denial can leave
+  // canAskAgain true; without it the screen would spin forever instead of
+  // moving to the denied state.
+  const autoRequestedRef = useRef(false);
+  const [nativePromptSettled, setNativePromptSettled] = useState(false);
+
+  useEffect(() => {
+    if (!permission || permission.granted || !permission.canAskAgain) return;
+    if (autoRequestedRef.current) return;
+    autoRequestedRef.current = true;
+    requestPermission().finally(() => setNativePromptSettled(true));
+  }, [permission, requestPermission]);
 
   const handleScan = useCallback(async (result: BarcodeScanningResult) => {
     // A CameraView fires onBarcodeScanned repeatedly for the same code while
@@ -88,40 +104,28 @@ export default function AttendanceScanScreen() {
   }
 
   if (!permission.granted) {
-    // Apple Guideline 5.1.1(iv) correction: this screen is only ever shown
-    // in-context (the user already navigated here specifically to scan a
-    // code), and its copy is neutral -- "Continue" only advances to the
-    // system's own permission dialog; it does not itself claim to grant,
-    // allow, or enable anything. This mirrors pta-family-photo.tsx's
-    // priming/blocked pattern (Phase F of the same program). The previous
-    // version's "Grant Camera Access" / "Open Settings to Grant Access"
-    // wording tried to influence the system decision, and — separately — its
-    // "Open Settings" label was misleading: the button's onPress was always
-    // requestPermission, which is a no-op once canAskAgain is false, so it
-    // never actually opened Settings. Both are corrected here.
-    if (!permission.canAskAgain) {
+    // While the automatic native prompt is pending (or about to fire), show
+    // only a spinner — the system dialog is the first and only permission UI
+    // the user sees. The informational screen below is reserved for a real
+    // "no": iOS denied and restricted both surface here as granted:false +
+    // canAskAgain:false, and an Android denial that leaves canAskAgain true
+    // arrives via nativePromptSettled.
+    if (permission.canAskAgain && !nativePromptSettled) {
       return (
         <ThemedView style={styles.centered}>
-          <ThemedText type="title" style={styles.title}>Camera Access Is Off</ThemedText>
-          <ThemedText type="default" themeColor="textSecondary" style={styles.explainer}>
-            Camera access for Unestra is currently off. You can turn it back on in Settings if you want to scan a
-            meeting QR code.
-          </ThemedText>
-          <PrimaryActionButton label="Open Settings" onPress={() => Linking.openSettings()} />
-          <SecondaryLinkButton label="Back to Dashboard" onPress={() => router.replace('/dashboard')} />
+          <ActivityIndicator />
         </ThemedView>
       );
     }
     return (
       <ThemedView style={styles.centered}>
-        <ThemedText type="title" style={styles.title}>Use Your Camera</ThemedText>
+        <ThemedText type="title" style={styles.title}>Camera Access Is Off</ThemedText>
         <ThemedText type="default" themeColor="textSecondary" style={styles.explainer}>
-          To scan the meeting QR code and check in to attendance, Unestra needs to use your camera. You&apos;ll be
-          asked to confirm on the next screen. Nothing is recorded or stored from your camera — it&apos;s only used
-          to read the code.
+          Camera access for Unestra is currently off. You can turn it back on in Settings if you want to scan a
+          meeting QR code.
         </ThemedText>
-        <PrimaryActionButton label="Continue" onPress={requestPermission} />
-        <SecondaryLinkButton label="Not Now" onPress={() => router.replace('/dashboard')} />
+        <PrimaryActionButton label="Open Settings" onPress={() => Linking.openSettings()} />
+        <SecondaryLinkButton label="Back to Dashboard" onPress={() => router.replace('/dashboard')} />
       </ThemedView>
     );
   }

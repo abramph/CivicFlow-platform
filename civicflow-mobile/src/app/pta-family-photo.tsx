@@ -63,7 +63,6 @@ export default function PtaFamilyPhotoScreen() {
         removeErrorMessage: 'Unable to remove your photo. Check your connection and try again.',
         removeConfirmTitle: 'Remove Family Photo?',
         removeConfirmBody: 'This removes the photo for everyone in your household. You can add a new one anytime.',
-        cameraPrimingBody: "To take a new family photo, Unestra needs to use your camera. You'll be asked to confirm on the next screen.",
       }}
       loadPhoto={loadPhoto}
       uploadPhoto={uploadPhoto}
