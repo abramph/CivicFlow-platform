@@ -65,7 +65,6 @@ export default function PtaStudentPhotoScreen() {
         removeErrorMessage: 'Unable to remove the photo. Check your connection and try again.',
         removeConfirmTitle: 'Remove Student Photo?',
         removeConfirmBody: 'This removes the photo. You can add a new one anytime.',
-        cameraPrimingBody: "To take a new student photo, Unestra needs to use your camera. You'll be asked to confirm on the next screen.",
       }}
       loadPhoto={loadPhoto}
       uploadPhoto={uploadPhoto}

@@ -16,7 +16,6 @@ type PhotoSource = 'camera' | 'library';
 type Stage =
   | { kind: 'idle' }
   | { kind: 'choosingSource' }
-  | { kind: 'primingPermission'; source: 'camera' }
   | { kind: 'permissionBlocked'; source: 'camera' }
   | { kind: 'previewing'; asset: ImagePicker.ImagePickerAsset }
   | { kind: 'uploading' }
@@ -36,7 +35,6 @@ export interface PtaPhotoManagerLabels {
   removeErrorMessage: string;
   removeConfirmTitle: string;
   removeConfirmBody: string;
-  cameraPrimingBody: string;
 }
 
 export interface PtaPhotoManagerProps {
@@ -52,14 +50,21 @@ export interface PtaPhotoManagerProps {
 
 /**
  * Build 27 extraction of pta-family-photo.tsx's entire photo-management flow
- * (permission state machine, in-context camera priming, preview/confirm,
- * bytes-only load, org-switch staleness guard) so the student photo reuses
- * the SAME review-hardened UI rather than a second copy that drifts. All
- * behavioral properties documented on the original screen hold here:
- * the library path requests no permission at all (Apple 5.1.1(iv)), camera
- * priming copy is neutral and in-context only, native picker throws are
- * distinguished from cancellations, and upload/removal progress is a live
- * region, not just a spinner.
+ * (permission state machine, preview/confirm, bytes-only load, org-switch
+ * staleness guard) so the student photo reuses the SAME review-hardened UI
+ * rather than a second copy that drifts.
+ *
+ * Apple Guideline 5.1.1(iv) remediation: tapping "Take Photo" IS the user's
+ * intentional camera action, so it goes straight to the native system
+ * permission dialog when the status is still undetermined — the custom
+ * "Use Your Camera" priming card that used to sit in front of it (with a
+ * dismissible Continue / Not Now) is removed. The only custom permission UI
+ * left is the blocked card, shown solely when the answer is already a real
+ * "no" (iOS denied and restricted both surface as granted:false +
+ * canAskAgain:false), where a Settings redirect plus a dismiss action is
+ * the sanctioned pattern. The library path still requests no permission at
+ * all, native picker throws are distinguished from cancellations, and
+ * upload/removal progress is a live region, not just a spinner.
  */
 export function PtaPhotoManager({ photoKey, labels, loadPhoto, uploadPhoto, removePhoto }: PtaPhotoManagerProps) {
   const [photo, setPhoto] = useState<{ key: string; data: PtaHouseholdPhoto } | null>(null);
@@ -113,19 +118,20 @@ export function PtaPhotoManager({ photoKey, labels, loadPhoto, uploadPhoto, remo
         setStage({ kind: 'permissionBlocked', source: 'camera' });
         return;
       }
-      setStage({ kind: 'primingPermission', source: 'camera' });
+      // Undetermined (or an Android re-askable denial): the tap on "Take
+      // Photo" goes straight to the native system dialog — no custom
+      // interstitial in between. A denial that can still be re-asked (only
+      // possible on Android) just returns to the source chooser so Library
+      // remains one tap away.
+      const result = await ImagePicker.requestCameraPermissionsAsync();
+      if (!result.granted) {
+        setStage(result.canAskAgain ? { kind: 'choosingSource' } : { kind: 'permissionBlocked', source: 'camera' });
+        return;
+      }
+      await launchPicker('camera');
     },
     []
   );
-
-  async function confirmPriming() {
-    const result = await ImagePicker.requestCameraPermissionsAsync();
-    if (!result.granted) {
-      setStage(result.canAskAgain ? { kind: 'idle' } : { kind: 'permissionBlocked', source: 'camera' });
-      return;
-    }
-    await launchPicker('camera');
-  }
 
   async function launchPicker(source: PhotoSource) {
     const options: ImagePicker.ImagePickerOptions = { mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.8 };
@@ -245,15 +251,6 @@ export function PtaPhotoManager({ photoKey, labels, loadPhoto, uploadPhoto, remo
               <PrimaryActionButton label="Take Photo" onPress={() => beginSource('camera')} accessibilityLabel="Take photo" />
               <PrimaryActionButton label="Choose from Library" onPress={() => beginSource('library')} accessibilityLabel="Choose from library" />
               <SecondaryLinkButton label="Cancel" onPress={() => setStage({ kind: 'idle' })} />
-            </ThemedView>
-          ) : null}
-
-          {stage.kind === 'primingPermission' ? (
-            <ThemedView type="backgroundElement" style={styles.actionCard}>
-              <ThemedText type="smallBold" accessibilityRole="header">Use Your Camera</ThemedText>
-              <ThemedText type="small" themeColor="textSecondary">{labels.cameraPrimingBody}</ThemedText>
-              <PrimaryActionButton label="Continue" onPress={() => confirmPriming()} />
-              <SecondaryLinkButton label="Not Now" onPress={() => setStage({ kind: 'idle' })} accessibilityLabel="Not now" />
             </ThemedView>
           ) : null}
 
