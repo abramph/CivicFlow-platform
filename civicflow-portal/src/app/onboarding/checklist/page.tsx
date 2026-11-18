@@ -71,6 +71,7 @@ export default async function OnboardingChecklistPage() {
     COMMUNITY: [
       { title: "Complete your organization profile", description: "Add contact details and address.", href: "/settings/organization", linkLabel: "Go to Profile", done: profileComplete },
       { title: "Invite members", description: "Add your first members to the roster.", href: "/members/new", linkLabel: "Add a Member", done: memberCount > 0 },
+      { title: "Configure dues (optional)", description: "If your organization collects membership dues, set up a dues category. Organizations without dues can skip this step.", href: "/settings/dues", linkLabel: "Go to Dues Setup", done: duesCategoryCount > 0 },
       { title: "Create your first event", description: "Schedule an event members can attend.", href: "/events/new", linkLabel: "Create Event", done: eventCount > 0 },
       { title: "Send your first announcement", description: "Reach your members by email.", href: "/communications/campaigns", linkLabel: "Go to Communications", done: campaignCount > 0 },
     ],
