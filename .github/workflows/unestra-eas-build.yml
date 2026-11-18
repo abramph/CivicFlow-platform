@@ -27,6 +27,7 @@ jobs:
             echo "configured=false" >> "$GITHUB_OUTPUT"
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "Expo authentication token detected; proceeding with cloud build."
           fi
       - uses: actions/setup-node@v4
         if: steps.auth.outputs.configured == 'true'
