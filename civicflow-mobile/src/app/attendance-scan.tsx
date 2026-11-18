@@ -32,12 +32,14 @@ export default function AttendanceScanScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const [state, setState] = useState<ScreenState>({ kind: 'scanning' });
   const processingRef = useRef(false);
+  const permissionRequestedRef = useRef(false);
 
   // The user has already selected Scan Attendance Code; request the native
   // camera permission without an intermediate, dismissible permission screen.
   useEffect(() => {
-    if (status === 'signedIn' && permission && !permission.granted && permission.canAskAgain &&
+    if (!permissionRequestedRef.current && status === 'signedIn' && permission && !permission.granted && permission.canAskAgain &&
         (!selectedOrganization || deriveOrgCapabilities(selectedOrganization).canScanAttendance)) {
+      permissionRequestedRef.current = true;
       void requestPermission();
     }
   }, [status, permission, requestPermission, selectedOrganization]);
@@ -110,7 +112,16 @@ export default function AttendanceScanScreen() {
         </ThemedView>
       );
     }
-    return <ThemedView style={styles.centered}><ActivityIndicator /></ThemedView>;
+    return (
+      <ThemedView style={styles.centered}>
+        <ThemedText type="title" style={styles.title}>Camera Permission Needed</ThemedText>
+        <ThemedText type="default" themeColor="textSecondary" style={styles.explainer}>
+          Camera access is needed to scan a meeting QR code. You can try again or return to the dashboard.
+        </ThemedText>
+        <PrimaryActionButton label="Try Again" onPress={requestPermission} />
+        <SecondaryLinkButton label="Back to Dashboard" onPress={() => router.replace('/dashboard')} />
+      </ThemedView>
+    );
   }
 
   if (state.kind === 'success') {
