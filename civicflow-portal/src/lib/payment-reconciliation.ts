@@ -170,6 +170,13 @@ export async function postPaymentImportItem(input: {
       : null;
     const method = (methodBySource[item.sourceType] ?? "OTHER") as "ZELLE" | "CASH_APP" | "VENMO" | "PAYPAL" | "STRIPE" | "ACH" | "PAYROLL_CHECKOFF" | "OTHER";
     const payment = await prisma.$transaction(async (tx) => {
+      // Claim the verified import item before creating any financial record.
+      // A concurrent request must not post the same item twice.
+      const claim = await tx.paymentImportItem.updateMany({
+        where: { id: item.id, organizationId: input.organizationId, verificationStatus: "VERIFIED", postedAs: null },
+        data: { verificationStatus: "POSTED", postedAs: "DUES_PAYMENT" },
+      });
+      if (claim.count !== 1) throw new Error("Import item has already been posted or is no longer verified");
       const row = await tx.duesPayment.create({
         data: {
           organizationId: input.organizationId,
@@ -184,10 +191,15 @@ export async function postPaymentImportItem(input: {
         },
       });
       if (charge) {
-        const nextAmountPaid = Number(charge.amountPaid) + Number(item.amount);
+        // Atomic increment avoids lost payments when separate import items
+        // are posted to the same charge concurrently.
+        const updatedCharge = await tx.duesCharge.update({
+          where: { id: charge.id },
+          data: { amountPaid: { increment: item.amount } },
+        });
         await tx.duesCharge.update({
           where: { id: charge.id },
-          data: { amountPaid: nextAmountPaid, status: nextAmountPaid >= Number(charge.amountDue) ? "PAID" : "PARTIAL" },
+          data: { status: Number(updatedCharge.amountPaid) >= Number(updatedCharge.amountDue) ? "PAID" : "PARTIAL" },
         });
       }
       await tx.paymentImportItem.update({
@@ -201,13 +213,30 @@ export async function postPaymentImportItem(input: {
     return { duesPayment: payment };
   }
 
+  const campaignId = input.campaignId || item.matchedCampaignId;
+  const eventId = input.eventId || item.matchedEventId;
+  // Foreign-key constraints alone do not enforce tenant ownership.
+  if (campaignId) {
+    const campaign = await prisma.campaign.findFirst({ where: { id: campaignId, organizationId: input.organizationId }, select: { id: true } });
+    if (!campaign) throw new Error("Campaign not found in organization");
+  }
+  if (eventId) {
+    const event = await prisma.event.findFirst({ where: { id: eventId, organizationId: input.organizationId }, select: { id: true } });
+    if (!event) throw new Error("Event not found in organization");
+  }
+
   const contribution = await prisma.$transaction(async (tx) => {
+    const claim = await tx.paymentImportItem.updateMany({
+      where: { id: item.id, organizationId: input.organizationId, verificationStatus: "VERIFIED", postedAs: null },
+      data: { verificationStatus: "POSTED", postedAs: "CONTRIBUTION" },
+    });
+    if (claim.count !== 1) throw new Error("Import item has already been posted or is no longer verified");
     const row = await tx.contribution.create({
       data: {
         organizationId: input.organizationId,
         memberId,
-        campaignId: input.campaignId || item.matchedCampaignId,
-        eventId: input.eventId || item.matchedEventId,
+        campaignId,
+        eventId,
         amount: item.amount,
         contributionDate: item.transactionDate,
         paymentMethod: (methodBySource[item.sourceType] ?? "OTHER") as "ZELLE" | "CASH_APP" | "VENMO" | "PAYPAL" | "STRIPE" | "ACH" | "PAYROLL_CHECKOFF" | "OTHER",
@@ -219,7 +248,7 @@ export async function postPaymentImportItem(input: {
     });
     await tx.paymentImportItem.update({
       where: { id: item.id },
-      data: { verificationStatus: "POSTED", postedAs: "CONTRIBUTION", postedContributionId: row.id, matchedMemberId: memberId, matchedCampaignId: input.campaignId || item.matchedCampaignId, matchedEventId: input.eventId || item.matchedEventId, reviewedByUserId: input.actorUserId ?? null, reviewedAt: new Date() },
+      data: { verificationStatus: "POSTED", postedAs: "CONTRIBUTION", postedContributionId: row.id, matchedMemberId: memberId, matchedCampaignId: campaignId, matchedEventId: eventId, reviewedByUserId: input.actorUserId ?? null, reviewedAt: new Date() },
     });
     return row;
   });
