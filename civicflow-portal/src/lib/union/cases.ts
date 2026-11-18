@@ -165,7 +165,7 @@ export async function assignUnionCase(input: {
 
   await notifyMemberSafely(input.organizationId, updated.memberOrgMemberId, {
     title: "A representative has been assigned to your case",
-    body: `A steward or representative has been assigned to your case "${updated.title}".`,
+    body: "A steward or representative has been assigned to your case. Sign in to Unestra to view the details.",
     pushBody: "A representative has been assigned to your case. Open Unestra for details.",
     caseId: updated.id,
   });
@@ -238,7 +238,7 @@ export async function transitionUnionCaseStatus(input: {
 
   await notifyMemberSafely(input.organizationId, updated.memberOrgMemberId, {
     title: "Your case status changed",
-    body: `Your case "${updated.title}" status changed to "${formatStatusForMember(input.toStatus)}".`,
+    body: `Your union case status changed to "${formatStatusForMember(input.toStatus)}". Sign in to Unestra to view the details.`,
     pushBody: "Your case status was updated. Open Unestra for details.",
     caseId: updated.id,
   });
@@ -877,7 +877,7 @@ export async function sendUnionCaseDeadlineReminders(reminderWindowDays = 3): Pr
     }
     remindersSent++;
 
-    const caseLabel = `UC-${deadline.case.caseNumber} ("${deadline.case.title}")`;
+    const caseLabel = `UC-${deadline.case.caseNumber}`;
     const title = overdue ? "Overdue: Union case deadline" : "Union case deadline approaching";
     const body = overdue
       ? `${deadline.deadlineType} for ${caseLabel} was due ${deadline.dueAt.toLocaleDateString()} and is now overdue.`
