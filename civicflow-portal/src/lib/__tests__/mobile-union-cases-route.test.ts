@@ -135,6 +135,21 @@ describe("GET /api/mobile/union/cases", () => {
     );
   });
 
+  it("queries only member-visible comments before limiting the list", async () => {
+    primeIdentity({ orgMember: { id: "member-1" } });
+    findManyUnionCase.mockResolvedValue([baseCase()]);
+
+    await getCases(await authedRequest("https://portal.test/api/mobile/union/cases?organizationId=org-1"));
+
+    expect(findManyUnionCase).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({
+          comments: { where: { isPrivate: false }, orderBy: { createdAt: "desc" }, take: 10 },
+        }),
+      })
+    );
+  });
+
   it("rejects a caller with no active tie to the organization", async () => {
     primeIdentity({ hasActiveTie: false });
 
