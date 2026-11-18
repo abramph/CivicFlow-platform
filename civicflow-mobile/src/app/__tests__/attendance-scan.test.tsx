@@ -3,16 +3,7 @@ import { Linking } from 'react-native';
 
 import AttendanceScanScreen from '../attendance-scan';
 
-/**
- * build-26 Phase I -- Apple Guideline 5.1.1(iv) correction. This screen had
- * no test coverage before this pass. Covers: neutral pre-permission copy
- * (a standing regression guard against directive wording like "Grant
- * Camera Access" ever creeping back in), the real bug where the
- * "Open Settings" label previously did nothing (button's onPress was
- * always requestPermission, a no-op once canAskAgain is false) --
- * now fixed to call Linking.openSettings() -- and that requestPermission
- * is never called until the user actively taps Continue.
- */
+/** Regression coverage for direct native camera permission requests and recovery. */
 
 const mockUseAuth = jest.fn();
 jest.mock('@/lib/auth-context', () => ({ useAuth: () => mockUseAuth() }));
@@ -51,8 +42,8 @@ describe('AttendanceScanScreen -- identity gate (Build 27)', () => {
       selectedOrganization: { memberId: null, pta: { householdAdultId: 'adult-1', isOfficer: false, canCheckIn: false, canApproveHours: false } },
     });
     await render(<AttendanceScanScreen />);
-    // The permission priming renders — i.e. we made it past the gate.
-    expect(screen.getByText('Use Your Camera')).toBeTruthy();
+    // The permission recovery UI renders — i.e. we made it past the gate.
+    expect(screen.getByText('Camera Permission Needed')).toBeTruthy();
   });
 
   it('an admin/officer-only login gets a clear unauthorized state, never a doomed scanner', async () => {
@@ -65,45 +56,42 @@ describe('AttendanceScanScreen -- identity gate (Build 27)', () => {
       },
     });
     await render(<AttendanceScanScreen />);
-    expect(screen.queryByText('Use Your Camera')).toBeNull();
+    expect(screen.queryByText('Camera Permission Needed')).toBeNull();
     expect(screen.getByText("Check-in records attendance for a member or family record, and your login doesn't have one in this organization.")).toBeTruthy();
   });
 
   it('a constituent member still reaches the scanner exactly as before', async () => {
     await render(<AttendanceScanScreen />);
-    expect(screen.getByText('Use Your Camera')).toBeTruthy();
+    expect(screen.getByText('Camera Permission Needed')).toBeTruthy();
   });
 });
 
-describe('AttendanceScanScreen -- camera permission priming', () => {
-  it('shows neutral copy, not a directive command, before permission is granted', async () => {
-    await render(<AttendanceScanScreen />);
-    expect(screen.getByText('Use Your Camera')).toBeTruthy();
-    expect(screen.getByLabelText('Continue')).toBeTruthy();
-    expect(screen.getByLabelText('Not Now')).toBeTruthy();
-
-    const banned = ['Grant', 'Allow Access', 'Enable Camera', 'You Must Allow'];
-    const tree = JSON.stringify(screen.toJSON());
-    for (const phrase of banned) {
-      expect(tree).not.toContain(phrase);
-    }
-  });
-
-  it('does not call requestPermission until Continue is tapped', async () => {
-    await render(<AttendanceScanScreen />);
-    expect(mockRequestPermission).not.toHaveBeenCalled();
+describe('AttendanceScanScreen -- native camera permission', () => {
+  it('requests the native permission on entering the scanner', async () => {
     await act(async () => {
-      fireEvent.press(screen.getByLabelText('Continue'));
+      render(<AttendanceScanScreen />);
     });
     expect(mockRequestPermission).toHaveBeenCalledTimes(1);
+    expect(screen.queryByLabelText('Continue')).toBeNull();
+    expect(screen.queryByLabelText('Not Now')).toBeNull();
   });
 
-  it('Not Now leaves without requesting permission', async () => {
-    await render(<AttendanceScanScreen />);
+  it('allows retry after permission is denied', async () => {
     await act(async () => {
-      fireEvent.press(screen.getByLabelText('Not Now'));
+      render(<AttendanceScanScreen />);
     });
-    expect(mockRequestPermission).not.toHaveBeenCalled();
+    expect(screen.getByText('Camera Permission Needed')).toBeTruthy();
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText('Try Again'));
+    });
+    expect(mockRequestPermission).toHaveBeenCalledTimes(2);
+  });
+
+  it('can return to the dashboard after denial', async () => {
+    await act(async () => {
+      render(<AttendanceScanScreen />);
+    });
+    fireEvent.press(screen.getByLabelText('Back to Dashboard'));
     expect(mockRouterReplace).toHaveBeenCalledWith('/dashboard');
   });
 
@@ -126,10 +114,10 @@ describe('AttendanceScanScreen -- camera permission priming', () => {
     expect(mockRequestPermission).not.toHaveBeenCalled();
   });
 
-  it('skips the priming screen entirely once permission is granted', async () => {
+  it('skips permission recovery UI once permission is granted', async () => {
     mockUseCameraPermissions.mockReturnValue([permission({ granted: true }), mockRequestPermission]);
     await render(<AttendanceScanScreen />);
-    expect(screen.queryByText('Use Your Camera')).toBeNull();
+    expect(screen.queryByText('Camera Permission Needed')).toBeNull();
     expect(screen.getByText('Point your camera at the meeting QR code')).toBeTruthy();
   });
 });
