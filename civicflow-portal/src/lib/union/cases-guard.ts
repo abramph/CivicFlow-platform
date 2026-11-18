@@ -199,13 +199,9 @@ export async function listMyUnionCasesForMobileMember(organizationId: string, me
     where: { organizationId, memberOrgMemberId: memberId },
     orderBy: { createdAt: "desc" },
     include: {
-      // Cases tab list cards show "most recent update" and "next
-      // deadline" per card (UNION-CASES-UX). Take 10 raw comments, not 1
-      // -- toMemberSafeUnionCase's isPrivate filter runs after this, and
-      // falling back to an older public comment when the newest one is
-      // internal is correct; silently showing no update at all when a
-      // public one actually exists further back would not be.
-      comments: { orderBy: { createdAt: "desc" }, take: 10 },
+      // Filter confidential notes in the database before limiting results.
+      // More than 10 newer private notes must not hide the latest public update.
+      comments: { where: { isPrivate: false }, orderBy: { createdAt: "desc" }, take: 10 },
       deadlines: { orderBy: { dueAt: "asc" } },
     },
   });
