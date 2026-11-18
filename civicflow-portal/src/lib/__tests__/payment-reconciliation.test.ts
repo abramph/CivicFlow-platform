@@ -4,10 +4,13 @@ const orgMemberFindFirst = vi.fn();
 const orgMemberFindMany = vi.fn().mockResolvedValue([]);
 const paymentImportItemFindFirst = vi.fn();
 const paymentImportItemUpdate = vi.fn();
+const paymentImportItemUpdateMany = vi.fn();
 const duesChargeFindFirst = vi.fn();
 const duesChargeUpdate = vi.fn();
 const duesPaymentCreate = vi.fn();
 const contributionCreate = vi.fn();
+const campaignFindFirst = vi.fn();
+const eventFindFirst = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -18,6 +21,7 @@ vi.mock("@/lib/prisma", () => ({
     paymentImportItem: {
       findFirst: (...args: unknown[]) => paymentImportItemFindFirst(...args),
       update: (...args: unknown[]) => paymentImportItemUpdate(...args),
+      updateMany: (...args: unknown[]) => paymentImportItemUpdateMany(...args),
     },
     duesCharge: {
       findFirst: (...args: unknown[]) => duesChargeFindFirst(...args),
@@ -25,11 +29,13 @@ vi.mock("@/lib/prisma", () => ({
     },
     duesPayment: { create: (...args: unknown[]) => duesPaymentCreate(...args) },
     contribution: { create: (...args: unknown[]) => contributionCreate(...args) },
+    campaign: { findFirst: (...args: unknown[]) => campaignFindFirst(...args) },
+    event: { findFirst: (...args: unknown[]) => eventFindFirst(...args) },
     $transaction: (fn: (tx: unknown) => unknown) =>
       fn({
         duesPayment: { create: (...args: unknown[]) => duesPaymentCreate(...args) },
         duesCharge: { update: (...args: unknown[]) => duesChargeUpdate(...args) },
-        paymentImportItem: { update: (...args: unknown[]) => paymentImportItemUpdate(...args) },
+        paymentImportItem: { update: (...args: unknown[]) => paymentImportItemUpdate(...args), updateMany: (...args: unknown[]) => paymentImportItemUpdateMany(...args) },
         contribution: { create: (...args: unknown[]) => contributionCreate(...args) },
       }),
   },
@@ -45,8 +51,11 @@ describe("payment-reconciliation — PAYROLL_CHECKOFF (Union thin-vertical finan
     orgMemberFindFirst.mockReset();
     paymentImportItemFindFirst.mockReset();
     paymentImportItemUpdate.mockReset();
+    paymentImportItemUpdateMany.mockReset().mockResolvedValue({ count: 1 });
+    campaignFindFirst.mockReset();
+    eventFindFirst.mockReset();
     duesChargeFindFirst.mockReset();
-    duesChargeUpdate.mockReset();
+    duesChargeUpdate.mockReset().mockResolvedValue({ amountPaid: 45, amountDue: 45 });
     duesPaymentCreate.mockReset();
     contributionCreate.mockReset();
   });
@@ -122,7 +131,7 @@ describe("payment-reconciliation — PAYROLL_CHECKOFF (Union thin-vertical finan
 
       expect(duesChargeUpdate).toHaveBeenCalledWith({
         where: { id: "charge-1" },
-        data: { amountPaid: 45, status: "PAID" },
+        data: { amountPaid: { increment: 45 } },
       });
     });
 
@@ -134,12 +143,13 @@ describe("payment-reconciliation — PAYROLL_CHECKOFF (Union thin-vertical finan
       orgMemberFindFirst.mockResolvedValueOnce({ id: "member-1", organizationId: "org-1" });
       duesChargeFindFirst.mockResolvedValueOnce({ id: "charge-1", duesAccountId: "account-1", amountPaid: 0, amountDue: 45 });
       duesPaymentCreate.mockResolvedValueOnce({ id: "payment-1", amount: 20, paymentDate: new Date() });
+      duesChargeUpdate.mockResolvedValueOnce({ amountPaid: 20, amountDue: 45 });
 
       await postPaymentImportItem({ organizationId: "org-1", itemId: "item-1", postedAs: "DUES_PAYMENT", duesChargeId: "charge-1" });
 
       expect(duesChargeUpdate).toHaveBeenCalledWith({
         where: { id: "charge-1" },
-        data: { amountPaid: 20, status: "PARTIAL" },
+        data: { amountPaid: { increment: 20 } },
       });
     });
 
