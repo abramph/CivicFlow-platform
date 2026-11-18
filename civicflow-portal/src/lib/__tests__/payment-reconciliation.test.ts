@@ -165,6 +165,31 @@ describe("payment-reconciliation — PAYROLL_CHECKOFF (Union thin-vertical finan
     });
   });
 
+  describe("atomic posting and tenant checks", () => {
+    const item = {
+      id: "item-1", organizationId: "org-1", sourceType: "PAYROLL_CHECKOFF",
+      verificationStatus: "VERIFIED", postedAs: null, amount: 45,
+      transactionDate: new Date("2026-07-15"), matchedMemberId: "member-1",
+    };
+    it("refuses duplicate posting before creating a payment", async () => {
+      paymentImportItemFindFirst.mockResolvedValueOnce(item);
+      orgMemberFindFirst.mockResolvedValueOnce({ id: "member-1", organizationId: "org-1" });
+      paymentImportItemUpdateMany.mockResolvedValueOnce({ count: 0 });
+      await expect(postPaymentImportItem({ organizationId: "org-1", itemId: "item-1", postedAs: "DUES_PAYMENT" }))
+        .rejects.toThrow("already been posted");
+      expect(duesPaymentCreate).not.toHaveBeenCalled();
+    });
+    it("rejects a foreign-organization campaign before creating a contribution", async () => {
+      paymentImportItemFindFirst.mockResolvedValueOnce(item);
+      orgMemberFindFirst.mockResolvedValueOnce({ id: "member-1", organizationId: "org-1" });
+      campaignFindFirst.mockResolvedValueOnce(null);
+      await expect(postPaymentImportItem({ organizationId: "org-1", itemId: "item-1", postedAs: "CONTRIBUTION", campaignId: "foreign-campaign" }))
+        .rejects.toThrow("Campaign not found in organization");
+      expect(campaignFindFirst).toHaveBeenCalledWith({ where: { id: "foreign-campaign", organizationId: "org-1" }, select: { id: true } });
+      expect(contributionCreate).not.toHaveBeenCalled();
+    });
+  });
+
   describe("parsePaymentCsv — fictional payroll-checkoff remittance file", () => {
     it("parses a realistic multi-row employer checkoff CSV into matchable rows", () => {
       const csv = [
