@@ -10,11 +10,12 @@
  * repeatable form of that check.
  *
  *   node scripts/verify-android-permissions.mjs
+ *   node scripts/verify-android-permissions.mjs --require-merged
  *
  * `android/` is a prebuild artifact and is gitignored, so on a clean checkout
  * there is nothing to inspect. That is reported and skipped rather than
- * failing, so the check is meaningful where it can run and silent where it
- * cannot. Run `npx expo prebuild --platform android` first to make it real.
+ * failing by default. For release validation, pass `--require-merged` to
+ * fail closed unless the actual merged release manifest exists.
  */
 import { existsSync, readFileSync } from "node:fs";
 
@@ -28,6 +29,13 @@ const MERGED = "android/app/build/intermediates/merged_manifests/release/process
 const SOURCE = "android/app/src/main/AndroidManifest.xml";
 const MANIFEST = existsSync(MERGED) ? MERGED : SOURCE;
 const IS_MERGED = MANIFEST === MERGED;
+const REQUIRE_MERGED = process.argv.includes("--require-merged");
+
+if (REQUIRE_MERGED && !IS_MERGED) {
+  console.error(`  FAIL  Release merged manifest missing: ${MERGED}`);
+  console.error("  Run an Android release build before validating shipped permissions.");
+  process.exit(1);
+}
 
 /** Must be present -- the app genuinely needs these. */
 const REQUIRED = ["android.permission.CAMERA", "android.permission.INTERNET"];
