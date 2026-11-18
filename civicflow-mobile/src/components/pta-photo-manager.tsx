@@ -16,7 +16,6 @@ type PhotoSource = 'camera' | 'library';
 type Stage =
   | { kind: 'idle' }
   | { kind: 'choosingSource' }
-  | { kind: 'primingPermission'; source: 'camera' }
   | { kind: 'permissionBlocked'; source: 'camera' }
   | { kind: 'previewing'; asset: ImagePicker.ImagePickerAsset }
   | { kind: 'uploading' }
@@ -113,12 +112,12 @@ export function PtaPhotoManager({ photoKey, labels, loadPhoto, uploadPhoto, remo
         setStage({ kind: 'permissionBlocked', source: 'camera' });
         return;
       }
-      setStage({ kind: 'primingPermission', source: 'camera' });
+      await requestAndLaunchCamera();
     },
     []
   );
 
-  async function confirmPriming() {
+  async function requestAndLaunchCamera() {
     const result = await ImagePicker.requestCameraPermissionsAsync();
     if (!result.granted) {
       setStage(result.canAskAgain ? { kind: 'idle' } : { kind: 'permissionBlocked', source: 'camera' });
@@ -245,15 +244,6 @@ export function PtaPhotoManager({ photoKey, labels, loadPhoto, uploadPhoto, remo
               <PrimaryActionButton label="Take Photo" onPress={() => beginSource('camera')} accessibilityLabel="Take photo" />
               <PrimaryActionButton label="Choose from Library" onPress={() => beginSource('library')} accessibilityLabel="Choose from library" />
               <SecondaryLinkButton label="Cancel" onPress={() => setStage({ kind: 'idle' })} />
-            </ThemedView>
-          ) : null}
-
-          {stage.kind === 'primingPermission' ? (
-            <ThemedView type="backgroundElement" style={styles.actionCard}>
-              <ThemedText type="smallBold" accessibilityRole="header">Use Your Camera</ThemedText>
-              <ThemedText type="small" themeColor="textSecondary">{labels.cameraPrimingBody}</ThemedText>
-              <PrimaryActionButton label="Continue" onPress={() => confirmPriming()} />
-              <SecondaryLinkButton label="Not Now" onPress={() => setStage({ kind: 'idle' })} accessibilityLabel="Not now" />
             </ThemedView>
           ) : null}
 
