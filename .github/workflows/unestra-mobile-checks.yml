@@ -1,0 +1,42 @@
+name: Unestra mobile checks
+
+on:
+  pull_request:
+    paths:
+      - 'civicflow-mobile/**'
+      - '.github/workflows/unestra-mobile-checks.yml'
+  push:
+    branches:
+      - 'fix/unestra-app-store-resubmission'
+      - 'fix/android-release-readiness-2026'
+    paths:
+      - 'civicflow-mobile/**'
+      - '.github/workflows/unestra-mobile-checks.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mobile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: civicflow-mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: civicflow-mobile/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: TypeScript check
+        run: npx tsc --noEmit
+      - name: Lint
+        run: npm run lint
+      - name: Unit tests
+        run: npm test -- --runInBand --watch=false
+      - name: Android permissions script syntax
+        run: node --check scripts/verify-android-permissions.mjs
