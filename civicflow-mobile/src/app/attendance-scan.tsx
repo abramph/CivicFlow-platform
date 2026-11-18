@@ -1,6 +1,6 @@
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 import { Redirect, router } from 'expo-router';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Linking, Pressable, StyleSheet } from 'react-native';
 
 import { PrimaryActionButton, SecondaryLinkButton } from '@/components/action-buttons';
@@ -32,6 +32,17 @@ export default function AttendanceScanScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const [state, setState] = useState<ScreenState>({ kind: 'scanning' });
   const processingRef = useRef(false);
+  const permissionRequestedRef = useRef(false);
+
+  // The user has already selected Scan Attendance Code; request the native
+  // camera permission without an intermediate, dismissible permission screen.
+  useEffect(() => {
+    if (!permissionRequestedRef.current && status === 'signedIn' && permission && !permission.granted && permission.canAskAgain &&
+        (!selectedOrganization || deriveOrgCapabilities(selectedOrganization).canScanAttendance)) {
+      permissionRequestedRef.current = true;
+      void requestPermission();
+    }
+  }, [status, permission, requestPermission, selectedOrganization]);
 
   const handleScan = useCallback(async (result: BarcodeScanningResult) => {
     // A CameraView fires onBarcodeScanned repeatedly for the same code while
@@ -88,17 +99,6 @@ export default function AttendanceScanScreen() {
   }
 
   if (!permission.granted) {
-    // Apple Guideline 5.1.1(iv) correction: this screen is only ever shown
-    // in-context (the user already navigated here specifically to scan a
-    // code), and its copy is neutral -- "Continue" only advances to the
-    // system's own permission dialog; it does not itself claim to grant,
-    // allow, or enable anything. This mirrors pta-family-photo.tsx's
-    // priming/blocked pattern (Phase F of the same program). The previous
-    // version's "Grant Camera Access" / "Open Settings to Grant Access"
-    // wording tried to influence the system decision, and — separately — its
-    // "Open Settings" label was misleading: the button's onPress was always
-    // requestPermission, which is a no-op once canAskAgain is false, so it
-    // never actually opened Settings. Both are corrected here.
     if (!permission.canAskAgain) {
       return (
         <ThemedView style={styles.centered}>
@@ -114,14 +114,12 @@ export default function AttendanceScanScreen() {
     }
     return (
       <ThemedView style={styles.centered}>
-        <ThemedText type="title" style={styles.title}>Use Your Camera</ThemedText>
+        <ThemedText type="title" style={styles.title}>Camera Permission Needed</ThemedText>
         <ThemedText type="default" themeColor="textSecondary" style={styles.explainer}>
-          To scan the meeting QR code and check in to attendance, Unestra needs to use your camera. You&apos;ll be
-          asked to confirm on the next screen. Nothing is recorded or stored from your camera — it&apos;s only used
-          to read the code.
+          Camera access is needed to scan a meeting QR code. You can try again or return to the dashboard.
         </ThemedText>
-        <PrimaryActionButton label="Continue" onPress={requestPermission} />
-        <SecondaryLinkButton label="Not Now" onPress={() => router.replace('/dashboard')} />
+        <PrimaryActionButton label="Try Again" onPress={requestPermission} />
+        <SecondaryLinkButton label="Back to Dashboard" onPress={() => router.replace('/dashboard')} />
       </ThemedView>
     );
   }

@@ -1,0 +1,56 @@
+name: Unestra EAS cloud build
+
+on:
+  push:
+    branches:
+      - fix/unestra-app-store-resubmission
+      - fix/android-release-readiness-2026
+    paths:
+      - '.github/workflows/unestra-eas-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  eas-build:
+    runs-on: ubuntu-latest
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Expo authentication
+        id: auth
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "Expo token is not configured; cloud build was not started."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "Expo authentication token detected; proceeding with cloud build."
+          fi
+      - uses: actions/setup-node@v4
+        if: steps.auth.outputs.configured == 'true'
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: civicflow-mobile/package-lock.json
+      - name: Install dependencies
+        if: steps.auth.outputs.configured == 'true'
+        working-directory: civicflow-mobile
+        run: npm ci
+      - name: Install EAS CLI
+        if: steps.auth.outputs.configured == 'true'
+        run: npm install --global eas-cli
+      - name: Confirm Expo account
+        if: steps.auth.outputs.configured == 'true'
+        working-directory: civicflow-mobile
+        run: eas whoami --non-interactive
+      - name: Queue iOS internal preview build
+        if: steps.auth.outputs.configured == 'true' && github.ref_name == 'fix/unestra-app-store-resubmission'
+        working-directory: civicflow-mobile
+        run: eas build --platform ios --profile preview --non-interactive --no-wait
+      - name: Queue Android release audit AAB
+        if: steps.auth.outputs.configured == 'true' && github.ref_name == 'fix/android-release-readiness-2026'
+        working-directory: civicflow-mobile
+        run: eas build --platform android --profile release-audit --non-interactive --no-wait
