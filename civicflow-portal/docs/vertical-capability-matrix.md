@@ -29,9 +29,9 @@ vertical (e.g. Meeting Intelligence, Labs Framework Preview) — see
 | `/settings/users` label | Users & Roles | (own officer model) | Officers | Board |
 | `/communications` label | Communications | (own page) | Communications | Announcements |
 | Standalone document library | No | Yes (`/labs/pta` namespace only) | No | No |
-| Onboarding | Generic "finish setup" banner | Dedicated PTA setup checklist (`/labs/pta/onboarding`) | Generic banner | Generic banner |
+| Onboarding | Vertical-aware checklist (`/onboarding/checklist`) | Dedicated PTA setup checklist (`/labs/pta/onboarding`) | Union-specific checklist (`/onboarding/checklist`) | HOA-specific checklist (`/onboarding/checklist`) |
 | Mobile capability | `supportedModules` generic set | Generic set + Volunteer tab | Generic set | Generic set |
-| Real dedicated business logic | Yes (existing product) | Yes | **None yet** — relabel of Community | **None yet** — relabel of Community |
+| Real dedicated business logic | Yes (existing product) | Yes | **Yes — Union Case Center** (member intake, staff workflow, deadlines, notifications; shared modules remain) | Yes — HOA property and request modules (see current implementation) |
 
 ## Signup
 
@@ -54,3 +54,6 @@ column (`Organization.primaryVertical`) and nothing else — no household,
 membership, dues, subscription, or Labs-enrollment row is touched. Moving a
 PTA organization's classification away and back is fully reversible; its
 underlying data is dormant, never deleted.
+
+
+> Audit note (2026-11-18): The older snapshot above predates several shipped vertical features. Check live routes and current tests before relying on it for release decisions. Union Case Center is implemented in `src/lib/union/` and `/union/cases`; its presence does not establish production test completion.
