@@ -13,6 +13,13 @@
     },
     "production": {
       "autoIncrement": true
+    },
+    "release-audit": {
+      "distribution": "store",
+      "autoIncrement": false,
+      "android": {
+        "buildType": "app-bundle"
+      }
     }
   },
   "submit": {
