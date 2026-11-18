@@ -15,11 +15,11 @@
       "autoIncrement": true
     },
     "release-audit": {
-      "distribution": "internal",
+      "distribution": "store",
+      "autoIncrement": false,
       "android": {
         "buildType": "app-bundle"
-      },
-      "autoIncrement": false
+      }
     }
   },
   "submit": {
