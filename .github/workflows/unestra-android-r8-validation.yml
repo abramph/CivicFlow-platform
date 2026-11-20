@@ -1,0 +1,51 @@
+name: Unestra Android R8 validation build
+
+on:
+  push:
+    branches:
+      - fix/android-r8-obfuscation-release-2026-11
+    paths:
+      - civicflow-mobile/**
+      - .github/workflows/unestra-android-r8-validation.yml
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: unestra-r8-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify-and-queue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: civicflow-mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: civicflow-mobile/package-lock.json
+      - run: npm ci
+      - name: Verify generated Android release R8 configuration
+        run: |
+          npx expo prebuild --platform android --clean --no-install
+          grep -Eq '^android.enableProguardInReleaseBuilds=true$' android/gradle.properties
+          grep -Eq 'enableProguardInReleaseBuilds|minifyEnabled' android/app/build.gradle
+      - name: Check Expo token is configured
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::error::EXPO_TOKEN GitHub Actions secret is missing"
+            exit 1
+          fi
+      - name: Queue Android production-profile EAS build (no submission)
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          CI: "1"
+        run: npx --yes eas-cli@latest build --platform android --profile production --non-interactive --no-wait
