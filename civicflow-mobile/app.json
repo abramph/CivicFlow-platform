@@ -11,7 +11,10 @@
       "icon": "./assets/images/icon.png",
       "bundleIdentifier": "com.aphtechnologies.unestra",
       "supportsTablet": true,
-      "associatedDomains": ["applinks:app.getunestra.com", "applinks:app.civicflowapp.com"],
+      "associatedDomains": [
+        "applinks:app.getunestra.com",
+        "applinks:app.civicflowapp.com"
+      ],
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -34,10 +37,19 @@
           "action": "VIEW",
           "autoVerify": true,
           "data": [
-            { "scheme": "https", "host": "app.getunestra.com" },
-            { "scheme": "https", "host": "app.civicflowapp.com" }
+            {
+              "scheme": "https",
+              "host": "app.getunestra.com"
+            },
+            {
+              "scheme": "https",
+              "host": "app.civicflowapp.com"
+            }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ]
     },
@@ -78,7 +90,8 @@
           "microphonePermission": false,
           "recordAudioAndroid": false
         }
-      ]
+      ],
+      "./plugins/with-android-r8"
     ],
     "experiments": {
       "typedRoutes": true,
